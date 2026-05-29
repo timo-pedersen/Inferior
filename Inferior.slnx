@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Inferior.Core/Inferior.Core.csproj" />
+  <Project Path="Inferior.Galaxy/Inferior.Galaxy.csproj" />
+  <Project Path="Inferior.Game/Inferior.Game.csproj" />
+  <Project Path="Inferior.Rendering/Inferior.Rendering.csproj" />
+</Solution>
