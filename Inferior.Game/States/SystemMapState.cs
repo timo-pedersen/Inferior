@@ -48,8 +48,9 @@ public sealed class SystemMapState : GameState
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
 
     // ── Selection / hover ─────────────────────────────────────────────────────
-    private OrbitalBody? _selectedBody;
-    private OrbitalBody? _hoveredBody;
+    private OrbitalBody?     _selectedBody;
+    private OrbitalBody?     _hoveredBody;
+    private StateTransition? _pendingTransition;
 
     // ── Input ─────────────────────────────────────────────────────────────────
     private MouseState    _prevMouse;
@@ -160,7 +161,9 @@ public sealed class SystemMapState : GameState
         _prevMouse = mouse;
         _prevKeys  = keys;
 
-        return null;
+        var transition     = _pendingTransition;
+        _pendingTransition = null;
+        return transition;
     }
 
     // ── Draw ──────────────────────────────────────────────────────────────────
@@ -258,12 +261,7 @@ public sealed class SystemMapState : GameState
                         && _backButtonRect.Contains(mouse.X, mouse.Y);
 
         if (escPressed || backClicked)
-        {
-            // Return to galaxy map
-            // We'd fire a transition here — for now deselect and note the hook
-            _selectedBody = null;
-            // TODO: return StateTransition.To(GameStateId.GalaxyMap, _star);
-        }
+            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap, _star);
 
         // Time compression keys
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
@@ -336,16 +334,20 @@ public sealed class SystemMapState : GameState
     {
         Vector2 screen = SystemToScreen(Vector2.Zero);
 
+        // Star scales with zoom — clamped between sensible min/max
+        const double refMPP = 5e8;
+        float scale    = MathF.Log((float)(refMPP / _metersPerPixel) + 1f, 2f);
+        float starR    = System.Math.Clamp(StarVisualRadius * scale, 12f, 60f);
+
         // Outer glow
-        Color glowColor = _star.GlowColor * 0.3f;
-        DrawDot(sb, screen, StarVisualRadius * 1.8f, glowColor);
-        DrawDot(sb, screen, StarVisualRadius * 1.3f, _star.GlowColor * 0.5f);
+        DrawDot(sb, screen, starR * 1.8f, _star.GlowColor * 0.3f);
+        DrawDot(sb, screen, starR * 1.3f, _star.GlowColor * 0.5f);
 
         // Star body
-        DrawDot(sb, screen, StarVisualRadius, _star.GlowColor);
+        DrawDot(sb, screen, starR, _star.GlowColor);
 
         // Bright centre
-        DrawDot(sb, screen, StarVisualRadius * 0.4f, Color.White);
+        DrawDot(sb, screen, starR * 0.4f, Color.White);
     }
 
     private void DrawBodies(SpriteBatch sb)
@@ -578,20 +580,43 @@ public sealed class SystemMapState : GameState
         => screenPos.X >= -margin && screenPos.X <= _gd.Viewport.Width  + margin
         && screenPos.Y >= -margin && screenPos.Y <= _gd.Viewport.Height + margin;
 
-    private static float VisualRadius(OrbitalBody body) => body.BodyType switch
+    /// <summary>
+    /// Visual radius in pixels, scaled with zoom level.
+    /// Base sizes define relative planet sizes — zoom scales them within a clamped range
+    /// so planets are always clickable but never absurdly large.
+    /// </summary>
+    private float VisualRadius(OrbitalBody body)
     {
-        BodyType.GasGiant    => 18f,
-        BodyType.IceGiant    => 14f,
-        BodyType.EarthLike   => 10f,
-        BodyType.OceanPlanet => 10f,
-        BodyType.Desert      => 8f,
-        BodyType.Volcanic    => 8f,
-        BodyType.RockyPlanet => 7f,
-        BodyType.IcePlanet   => 7f,
-        BodyType.Moon        => 4f,
-        BodyType.Asteroid    => 2f,
-        _                    => 6f,
-    };
+        float baseSize = body.BodyType switch
+        {
+            BodyType.GasGiant    => 18f,
+            BodyType.IceGiant    => 14f,
+            BodyType.EarthLike   => 10f,
+            BodyType.OceanPlanet => 10f,
+            BodyType.Desert      => 8f,
+            BodyType.Volcanic    => 8f,
+            BodyType.RockyPlanet => 7f,
+            BodyType.IcePlanet   => 7f,
+            BodyType.Moon        => 4f,
+            BodyType.Asteroid    => 2f,
+            _                    => 6f,
+        };
+
+        // Reference zoom — sizes feel right at this scale
+        const double referenceMetersPerPixel = 5e8;
+
+        // Scale factor — larger when zoomed in, smaller when zoomed out
+        float scale = (float)(referenceMetersPerPixel / _metersPerPixel);
+
+        // Logarithmic scaling feels more natural than linear
+        scale = MathF.Log(scale + 1f, 2f);
+
+        // Clamp: min keeps them clickable, max prevents them swallowing the screen
+        float minRadius = body.BodyType == BodyType.Moon ? 2f : 4f;
+        float maxRadius = body.BodyType == BodyType.GasGiant ? 40f : 25f;
+
+        return System.Math.Clamp(baseSize * scale, minRadius, maxRadius);
+    }
 
     private static Color BodyColor(OrbitalBody body) => body.BodyType switch
     {
