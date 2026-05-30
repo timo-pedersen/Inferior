@@ -1,3 +1,3 @@
 # Inferior
-Not Elite
+Inferior is better
 
