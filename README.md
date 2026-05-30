@@ -1,0 +1,3 @@
+# Inferior
+Inferior is better
+
