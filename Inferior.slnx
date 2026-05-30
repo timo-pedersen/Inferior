@@ -3,4 +3,5 @@
   <Project Path="Inferior.Galaxy/Inferior.Galaxy.csproj" />
   <Project Path="Inferior.Game/Inferior.Game.csproj" />
   <Project Path="Inferior.Rendering/Inferior.Rendering.csproj" />
+  <Project Path="Inferior.UI/Inferior.UI.csproj" />
 </Solution>

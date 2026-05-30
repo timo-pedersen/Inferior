@@ -262,7 +262,8 @@ public sealed class GalaxyMapState : GameState
             return;
         }
 
-        _jumpTarget   = hit;
+        _jumpTarget = hit;
+        // deliberately not changing _selectedStar — right-click only sets jump target
     }
 
     private void HandleKeyboard(KeyboardState keys)

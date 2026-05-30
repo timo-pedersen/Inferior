@@ -30,6 +30,7 @@
     <ProjectReference Include="..\Inferior.Core\Inferior.Core.csproj" />
     <ProjectReference Include="..\Inferior.Galaxy\Inferior.Galaxy.csproj" />
     <ProjectReference Include="..\Inferior.Rendering\Inferior.Rendering.csproj" />
+    <ProjectReference Include="..\Inferior.UI\Inferior.UI.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="States\" />
