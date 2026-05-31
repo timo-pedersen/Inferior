@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="CLAUDE.md" />
+    <File Path="README.md" />
+  </Folder>
   <Project Path="Inferior.Core/Inferior.Core.csproj" />
   <Project Path="Inferior.Galaxy/Inferior.Galaxy.csproj" />
   <Project Path="Inferior.Game/Inferior.Game.csproj" />

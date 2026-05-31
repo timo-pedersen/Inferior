@@ -1,0 +1,40 @@
+Hyperspace band,Sub band,Common Name,Rough dymamic range,Uses,Notes
+A,,,"(inf, inf, inf)","Mass wave Engines
+Alpha Red energy","Very common, nearly all space engines use this."
+B,,,,,
+C,,,,,
+D,,,,,"D1 and D5 cannot be used for communication, only noise comes out."
+,2,Secure radio,"(10000, 10000, 1000)",(More) Secure Communication,"3-vector, used by military"
+,3,Hidden D-band,,Unknown,"Much noise and hard to tune. Speculated to be used by the Bolon, based on vague hints."
+,4,Radio,"(1000, 1000)","Communication, radio",2-vector. What everyone uses.
+E,,,,,
+F,,Hendar,Compute layer,Computation.,Used to create computations. The backbone of all modern computers. Arranged as micro services. Using the Hendar coding protocol.
+G,,X-Power,-,X-Power source,"Most common generators. The first so called ""power band"" discovered. Silly name stuck, XP for short."
+H,,Artificial Gravity,,,
+,sw,Artificial Gravity,,Artificial gravity.,"Used to create artificial gravity force fields. This force attracts all matter, does not cause relativistic effects e.g. light bending. Since it falls off linerarly with distance and has a fixed range after which it falls off quickly, it is very suitable for this purpose."
+,,,,,"Other H bands, there are 100s of them, are not commonly used, but have similar effects. Some act as ionizing radiation."
+I,,,,,
+J,,,,,
+,b,,,Anti shield weapons.,Can be used to create stable donut vortices that propagate through space. Effective against shields.
+,g,,,,
+,t,,,,
+K,,,,,
+L,,Y-Power,,Y power source,"Common generators, discovered soon after X-Power. YP for short."
+M,,,,,
+N,,,,,
+O,,Grey power,,,Named for the erie greyish glow when leaks occur.
+P,,Graham-Williams,,Source of interesting exotic particles.,Used to fabricate exotic materials and Hyperspace crystals.
+Q,,Graham-Sunders,,Source of interesting exotic particles.,No practical use found yet.
+R,,Graham,,Source of interesting exotic particles.,"Used to create special exotic materials, like Hyperspace Crystals. Expensive."
+S,,,,,
+T,,,,,
+U,,Lenz power,,Power source,
+V,,,,"Alpha and theta are used for shields, with Theta being the superior for this purpose.",
+,Alpha,,"(5, 5)","Momentum dampening
+Shields
+Anti shield weapons.",
+,Theta,,"(5, 5)","Momentum dampening
+Shields",
+X,,,,,
+Y,,,,,
+Z,,,,,
