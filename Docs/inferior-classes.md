@@ -330,47 +330,178 @@ public class Commander
 ```csharp
 public static class DataBus
 {
-    public static readonly Bus<double>      Instruments = new();
-    public static readonly Bus<RadarFrame>  Radar       = new();
-    public static readonly Bus<CommMessage> Comms       = new();
-    public static readonly Bus<ScanResult>  Sensors     = new();
-    public static readonly Bus<NavData>     Navigation  = new();
-    // Add buses as needed — cost is near zero
+    // System messages — device status, cold start sequence, state changes
+    public static readonly Bus<string>       System           = new();
+
+    // Live numeric instrument values — published every sim tick or on change
+    // Topic convention: ComponentName.ValueName  (e.g. "PowerCore.PowerLoad")
+    // Multiple components of same type: ComponentName_N.ValueName (e.g. "PowerCore_2.PowerLoad")
+    public static readonly Bus<double>       Instruments      = new();
+
+    // Dynamic instrument state — damage percent, efficiency — published on change
+    public static readonly Bus<double>       InstrumentState  = new();
+
+    // Instrument ranges — published at startup and when ranges change (e.g. on damage)
+    public static readonly Bus<RangeValue>   InstrumentRanges = new();
+
+    // Radar contact updates — published when a contact appears or changes
+    public static readonly Bus<RadarContact> Radar            = new();
+
+    // Radar contact lost — published when a contact disappears; subscribers handle cleanup
+    public static readonly Bus<string>       RadarLost        = new();
+
+    // Deferred — design pending:
+    // public static readonly Bus<CommMessage>  Comms      = new();
+    // public static readonly Bus<ScanResult>   Sensors    = new();
+    // public static readonly Bus<NavData>      Navigation = new();
+
+    // Called once per frame from Game.Update() on main thread
+    // Drains all queued messages and dispatches handlers on main thread
+    public static void Drain()
+    {
+        System.Drain();
+        Instruments.Drain();
+        InstrumentState.Drain();
+        InstrumentRanges.Drain();
+        Radar.Drain();
+        RadarLost.Drain();
+    }
 }
 ```
 
-### `Bus<T>` (~20 lines)
+### `Bus<T>`
+
+Thread-safe: `Publish` may be called from any thread (simulation thread). `Drain` and
+`Subscribe`/`Unsubscribe` must be called from the main thread only. Handlers always
+execute on the main thread during `Drain`.
 
 ```csharp
 public sealed class Bus<T>
 {
-    public void Subscribe(string topic, Action<T> handler)   { ... }
-    public void Unsubscribe(string topic, Action<T> handler) { ... }
-    public void Publish(string topic, T value)               { ... }
+    private readonly ConcurrentQueue<(string topic, T value)> _queue    = new();
+    private readonly Dictionary<string, List<Action<T>>>      _handlers = new();
+
+    // Called from any thread — enqueues only, never blocks
+    public void Publish(string topic, T value)
+        => _queue.Enqueue((topic, value));
+
+    // Called from main thread once per frame — dispatches all pending messages
+    public void Drain()
+    {
+        while (_queue.TryDequeue(out var msg))
+            if (_handlers.TryGetValue(msg.topic, out var handlers))
+                foreach (var h in handlers)
+                    h(msg.value);
+    }
+
+    // Main thread only
+    public void Subscribe(string topic, Action<T> handler)
+    {
+        if (!_handlers.TryGetValue(topic, out var list))
+            _handlers[topic] = list = new();
+        list.Add(handler);
+    }
+
+    public void Unsubscribe(string topic, Action<T> handler)
+    {
+        if (_handlers.TryGetValue(topic, out var list))
+            list.Remove(handler);
+    }
 }
 ```
 
-### `CommMessage` (record)
+### `RangeValue` (readonly record struct)
 
 ```csharp
-public record CommMessage(
-    string   SenderId,   // station ID, ship ID, or "SYSTEM"
-    string   Channel,    // "radio.local", "hyperspace.band1"
-    string   Text,
-    double   GameTime,   // when sent — for hyperspace delay simulation
-    CommType Type);
+// Used on InstrumentRanges bus — describes the operating envelope of a value
+public readonly record struct RangeValue(double Low, double High);
 
-public enum CommType { Hail, Response, Broadcast, Emergency, Automated }
+// Example startup publications from PowerCore:
+// InstrumentRanges.Publish("PowerCore.PowerLoad", new RangeValue(0, 500));    // min/max MW
+// InstrumentRanges.Publish("PowerCore.SafeRange",  new RangeValue(0, 300));   // safe operating range
+// Re-published when ranges change, e.g. when component is damaged
 ```
 
-### `RadarFrame`
+### `RadarContact` (readonly record struct)
+
+Radar publishes individual contact updates rather than full frame snapshots — low
+allocation, no GC pressure. The radar display maintains its own current picture as a
+`Dictionary<string, RadarContact>` keyed by `Id`, updating as messages arrive.
 
 ```csharp
-public class RadarFrame
+public readonly record struct RadarContact(
+    string      Id,               // unique stable object ID
+    string      DisplayName,      // "Commander Olle", "Asteroid", "Unknown"
+    Vector3     RelativePosition, // relative to player ship
+    Vector3     RelativeVelocity, // relative to player ship
+    ContactType Type);
+
+public enum ContactType { Ship, Station, Asteroid, Missile, Debris, Unknown }
+```
+
+When a contact disappears, `DataBus.RadarLost.Publish("radar", contact.Id)` is called.
+Subscribers (radar display, threat assessment, captain's log) handle cleanup independently.
+
+### Simulation thread
+
+The simulation runs as a background thread at a fixed timestep, independent of frame rate.
+It publishes freely to `DataBus` buses. The main thread drains all pending messages once
+per `Game.Update()`.
+
+```csharp
+// Startup — e.g. in Game.Initialize()
+_simThread = new Thread(SimulationLoop) { IsBackground = true, Name = "SimThread" };
+_simThread.Start();
+
+void SimulationLoop()
 {
-    public List<RadarContact> Contacts { get; }
-    // Each contact: Position, Velocity, ContactType, IFF
+    const double TickRate    = 1.0 / 60.0; // 60 Hz
+    var          timer       = Stopwatch.StartNew();
+    double       accumulated = 0;
+
+    while (_running)
+    {
+        accumulated += timer.Elapsed.TotalSeconds;
+        timer.Restart();
+
+        while (accumulated >= TickRate)
+        {
+            SimulateTick(TickRate); // publishes to DataBus from sim thread
+            accumulated -= TickRate;
+        }
+
+        Thread.Sleep(1); // yield — don't spin
+    }
 }
+
+// In Game.Update() — main thread
+protected override void Update(GameTime gameTime)
+{
+    DataBus.Drain(); // dispatch all queued messages on main thread
+    // ... rest of update
+}
+```
+
+**Threading guarantees:**
+- `Publish` — safe from any thread, non-blocking
+- `Drain` — main thread only, dispatches handlers synchronously
+- `Subscribe` / `Unsubscribe` — main thread only
+- If main thread is slow, messages queue up and drain next frame — no data lost
+- Simulation thread never waits on main thread
+
+### Deferred message types (design pending)
+
+```csharp
+// CommMessage — inter-ship and station communication, hyperspace delay simulation
+// public record CommMessage(string SenderId, string Channel, string Text,
+//                           double GameTime, CommType Type);
+// public enum CommType { Hail, Response, Broadcast, Emergency, Automated }
+
+// ScanResult — realistic instrument data from physics simulation
+// spectral analysis, radiation measurements, planetary mineral scans, hyperspace scans
+// Design note: values should come from actual in-game physics, not scripted data
+
+// NavData — hyperspace travel data, destination, coordinates, ETA
 ```
 
 ---
@@ -446,6 +577,236 @@ Controls: `Button`, `Label`, `TextBox`, `Panel`, `Window` (draggable container).
 
 ---
 
+## Simulation loop
+
+The simulation is the authoritative source of all game state. It runs on its own thread
+at 60 Hz and owns the tick order. The main thread only reads — it never writes game state
+directly. Player input is the one exception: it crosses from main thread to sim thread via
+a shared immutable snapshot (see below).
+
+### Tick order
+
+Each simulation tick runs subsystems in a fixed order. Later subsystems depend on results
+from earlier ones within the same tick.
+
+```
+1. Input      — consume latest PlayerInput snapshot
+2. Physics    — apply thrust, update positions and velocities
+3. Power      — distribute power, generate heat
+4. Damage     — apply heat/impact damage, update component states
+5. Radar      — scan nearby objects, diff against last frame
+6. Publish    — push all values to DataBus buses
+```
+
+### `Simulation` class
+
+```csharp
+public class Simulation
+{
+    private readonly Ship         _ship;
+    private readonly World        _world;    // all game objects
+    private volatile PlayerInput  _input;    // written by main thread, read by sim
+
+    private Thread  _thread;
+    private bool    _running;
+
+    public void Start()
+    {
+        _running = true;
+        _thread  = new Thread(Loop) { IsBackground = true, Name = "SimThread" };
+        _thread.Start();
+    }
+
+    public void Stop()
+        => _running = false;
+
+    // Called from main thread — atomically replaces the input snapshot
+    public void SetInput(PlayerInput input)
+        => _input = input;
+
+    private void Loop()
+    {
+        const double TickRate    = 1.0 / 60.0;
+        var          timer       = Stopwatch.StartNew();
+        double       accumulated = 0;
+
+        while (_running)
+        {
+            accumulated += timer.Elapsed.TotalSeconds;
+            timer.Restart();
+
+            while (accumulated >= TickRate)
+            {
+                Tick(TickRate);
+                accumulated -= TickRate;
+            }
+
+            Thread.Sleep(1); // yield — don't spin
+        }
+    }
+
+    private void Tick(double dt)
+    {
+        var input = _input; // read snapshot once — consistent across tick
+
+        TickPhysics(input, dt);
+        TickPower(dt);
+        TickDamage(dt);
+        TickRadar();
+        Publish();
+    }
+}
+```
+
+### `PlayerInput` (immutable snapshot)
+
+Written by the main thread from keyboard/gamepad state. The sim thread reads it once at
+the start of each tick. Using an immutable record means no partial reads — the reference
+swap is atomic on 64-bit .NET.
+
+```csharp
+public record PlayerInput(
+    double ThrustForward,   // −1.0 to 1.0
+    double ThrustLateral,   // −1.0 to 1.0 (strafing, if supported)
+    double ThrustVertical,  // −1.0 to 1.0
+    double RollInput,       // −1.0 to 1.0
+    double PitchInput,      // −1.0 to 1.0
+    double YawInput,        // −1.0 to 1.0
+    bool   JumpRequested,
+    bool   FlightAssist);   // flight assist on/off toggle state
+
+public static readonly PlayerInput Zero = new(0,0,0,0,0,0,false,true);
+```
+
+### `TickPhysics`
+
+Applies player input to drive offset, updates velocity and position. Gravitational field
+alignment is applied here — the ship's reference frame is updated to match the nearest
+large body.
+
+```csharp
+void TickPhysics(PlayerInput input, double dt)
+{
+    // 1. Map thrust input to drive wave offset
+    _ship.Drive.SetOffset(input.ThrustForward, input.ThrustLateral, input.ThrustVertical);
+
+    // 2. Apply rotational input
+    _ship.Drive.SetRotation(input.PitchInput, input.YawInput, input.RollInput);
+
+    // 3. Flight assist — damp lateral and rotational velocity toward zero
+    if (input.FlightAssist)
+        _ship.Velocity = ApplyFlightAssist(_ship.Velocity, dt);
+
+    // 4. Gravitational field alignment — inherit reference frame of nearest body
+    var nearestBody = _world.NearestMassiveBody(_ship.Position);
+    _ship.ReferenceFrame = nearestBody?.ReferenceFrame ?? GalacticFrame.Zero;
+
+    // 5. Integrate position
+    _ship.Position += _ship.Velocity * dt;
+
+    // 6. Mass lock — flag but don't enforce here; jump system checks it
+    _ship.MassLocked = MassLocked(_ship, _world.NearbyObjects(_ship.Position));
+}
+```
+
+### `TickPower`
+
+Already documented in the Power system section. Called here in sequence.
+
+```csharp
+void TickPower(double dt)
+    => _ship.PowerSystem.Simulate(dt); // publishes to DataBus internally
+```
+
+### `TickDamage`
+
+Checks thermal thresholds on all components. Propagates damage where heat has exceeded
+local capacity. Updates component states.
+
+```csharp
+void TickDamage(double dt)
+{
+    foreach (var component in _ship.Components)
+    {
+        if (component.ThermalNode.IsFailure)
+            component.AccumulateDamage(component.ThermalNode.ExcessHeat, dt);
+
+        // State change — publish to InstrumentState
+        if (component.StateChanged)
+            DataBus.InstrumentState.Publish(
+                $"{component.TopicPrefix}.DamagePercent",
+                component.DamageLevel);
+    }
+}
+```
+
+### `TickRadar`
+
+Scans nearby objects, diffs against the previous frame's contact list. Publishes new or
+updated contacts to `DataBus.Radar`. Publishes lost contacts to `DataBus.RadarLost`.
+
+```csharp
+void TickRadar()
+{
+    var currentIds = new HashSet<string>();
+
+    foreach (var obj in _world.NearbyObjects(_ship.Position, radarRange))
+    {
+        var contact = new RadarContact(
+            Id:               obj.Id,
+            DisplayName:      obj.DisplayName,
+            RelativePosition: obj.Position - _ship.Position,
+            RelativeVelocity: obj.Velocity - _ship.Velocity,
+            Type:             obj.ContactType);
+
+        DataBus.Radar.Publish("radar", contact);
+        currentIds.Add(obj.Id);
+    }
+
+    // Contacts in last frame but not this one — lost
+    foreach (var id in _lastRadarIds)
+        if (!currentIds.Contains(id))
+            DataBus.RadarLost.Publish("radar", id);
+
+    _lastRadarIds = currentIds;
+}
+```
+
+### `Publish`
+
+Pushes live instrument values to `DataBus.Instruments` every tick. Components that have
+already published state changes in their own tick methods don't need to repeat here —
+this pass covers continuous live values.
+
+```csharp
+void Publish()
+{
+    // Power
+    DataBus.Instruments.Publish("PowerCore.PowerLoad",    _ship.PowerSystem.CurrentLoad);
+    DataBus.Instruments.Publish("PowerCore.PowerOutput",  _ship.PowerSystem.CurrentOutput);
+    DataBus.Instruments.Publish("Thermal.Load",           _ship.ThermalSystem.NormalisedLoad);
+    DataBus.Instruments.Publish("Shield.Capacitor",       _ship.Shield.Capacitor);
+    DataBus.Instruments.Publish("Drive.Offset",           _ship.Drive.CurrentOffset);
+    DataBus.Instruments.Publish("Drive.FuelRemaining",    _ship.Drive.FuelRemaining);
+    // Add as systems are implemented
+}
+```
+
+### Startup publications
+
+On cold start, each component publishes its ranges to `DataBus.InstrumentRanges` and its
+initial state to `DataBus.System`. These fire once when the component initialises, before
+the simulation loop begins.
+
+```csharp
+// Example — PowerCore.Initialise():
+DataBus.System.Publish("system", "PowerCore online");
+DataBus.InstrumentRanges.Publish("PowerCore.PowerLoad", new RangeValue(0, MaxOutput));
+DataBus.InstrumentRanges.Publish("PowerCore.SafeRange",  new RangeValue(0, MaxOutput * 0.6));
+```
+
+---
+
 ## Project structure (planned)
 
 ```
@@ -466,3 +827,5 @@ Inferior/
 |------|--------|
 | 2026-05-27 | Initial design session — flight, power, heat, hull, commander, DataBus, UI |
 | 2026-05-31 | Compiled into this document from chat history |
+| 2026-06-01 | DataBus major update: threading model, Bus<T> with ConcurrentQueue, RangeValue, RadarContact, RadarLost, simulation thread pattern. Deferred: Comms, Sensors, NavData. |
+| 2026-06-01 | Added Simulation loop section: Simulation class, tick order, PlayerInput snapshot, TickPhysics/Power/Damage/Radar/Publish stubs, startup publications pattern. |
