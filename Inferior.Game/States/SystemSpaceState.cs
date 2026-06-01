@@ -98,16 +98,34 @@ public sealed class SystemSpaceState : GameState
 
     public override void OnEnter(object? payload)
     {
-        if (payload is Star star)
+        if (payload is SystemSpacePayload p)
         {
-            _star   = star;
-            _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
-        }
+            _star            = p.Star;
+            _system          = StarSystem.Generate(p.Star, GalaxyGenerator.SystemSeed(p.Star));
+            _gameTimeSeconds = p.GameTime;
 
-        // Camera starts 300 render units from star, looking at it
-        // 300 render units = 300 / 1e-9 = 3e11 m ≈ 2 AU
-        var startPos = new DVec3(0, 0.5e11, 3e11); // slightly above ecliptic
-        _camera = new Camera3D(startPos, AspectRatio);
+            DVec3 startPos;
+            if (p.TargetBody != null)
+            {
+                // Spawn above and behind the target body — 5× its physical radius away
+                DVec3  bodyPos = p.TargetBody.GetPosition(p.GameTime, DVec3.Zero);
+                double dist    = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
+                startPos = bodyPos + new DVec3(0, dist * 0.4, dist);
+            }
+            else
+            {
+                // Spawned from star double-click — start 2 AU from origin
+                startPos = new DVec3(0, 0.5e11, 3e11);
+            }
+            _camera = new Camera3D(startPos, AspectRatio);
+        }
+        else if (payload is Star star)
+        {
+            // Fallback: entered directly with just a star (shouldn't happen in normal flow)
+            _star    = star;
+            _system  = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            _camera  = new Camera3D(new DVec3(0, 0.5e11, 3e11), AspectRatio);
+        }
 
         // BasicEffect — our shader
         _effect = new BasicEffect(_gd)
@@ -148,7 +166,7 @@ public sealed class SystemSpaceState : GameState
 
     public override void OnResize(int width, int height)
     {
-        _camera?.SetProjection(MathHelper.ToRadians(70f), AspectRatio, 0.1f, 50_000f);
+        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
         UpdateUI();
     }
 
@@ -164,7 +182,7 @@ public sealed class SystemSpaceState : GameState
 
         // Camera input (mouse look only when right button held)
         _camera.Update(dt, mouse, keys);
-        _camera.SetProjection(MathHelper.ToRadians(70f), AspectRatio, 0.1f, 50_000f);
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
 
         // Rebuild body positions
         _bodyPositions.Clear();
@@ -209,17 +227,22 @@ public sealed class SystemSpaceState : GameState
         _effect.DirectionalLight0.DiffuseColor = _star.LightColor.ToVector3();
         _effect.AmbientLightColor              = _star.GlowColor.ToVector3() * _star.AmbientIntensity;
 
-        // Draw orbit rings (behind planets)
-        gd.BlendState = BlendState.AlphaBlend;
+        // Pass 1 — opaque geometry (depth writes on)
+        gd.BlendState        = BlendState.AlphaBlend;
+        gd.DepthStencilState = DepthStencilState.Default;
         DrawOrbitRings();
+
         gd.BlendState = BlendState.Opaque;
-
-        // Draw star
-        DrawStar();
-
-        // Draw planets and moons
+        DrawStarBody();
         foreach (var (body, pos) in _bodyPositions)
-            DrawBody(body, pos);
+            DrawPlanetBody(body, pos);
+
+        // Pass 2 — transparent glows (depth test but no depth writes, so they don't occlude)
+        gd.BlendState        = BlendState.AlphaBlend;
+        gd.DepthStencilState = DepthStencilState.DepthRead;
+        DrawStarGlows();
+        foreach (var (body, pos) in _bodyPositions)
+            DrawAtmosphere(body, pos);
 
         // ── 2D overlay ────────────────────────────────────────────────────────
         gd.DepthStencilState = DepthStencilState.None;
@@ -233,48 +256,48 @@ public sealed class SystemSpaceState : GameState
 
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
-    private void DrawStar()
+    // ── Opaque pass ───────────────────────────────────────────────────────────
+
+    private void DrawStarBody()
     {
         Vector3 renderPos = _camera.ToRenderSpace(DVec3.Zero);
-
-        // Star is self-luminous — disable lighting, use emissive colour
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = false;
-        _effect.DiffuseColor       = _star.GlowColor.ToVector3();
-
-        // Outer glow — slightly transparent larger sphere
-        DrawSphere(renderPos, StarVisualRadius * 1.6f, _star.GlowColor * 0.35f, false);
-        DrawSphere(renderPos, StarVisualRadius * 1.2f, _star.GlowColor * 0.6f,  false);
-
-        // Star body
-        DrawSphere(renderPos, StarVisualRadius, _star.GlowColor, false);
-
-        // Bright white core
-        DrawSphere(renderPos, StarVisualRadius * 0.35f, Color.White, false);
-
+        DrawSphere(renderPos, StarVisualRadius,         _star.GlowColor, false);
+        DrawSphere(renderPos, StarVisualRadius * 0.35f, Color.White,     false);
         _effect.LightingEnabled = true;
     }
 
-    private void DrawBody(OrbitalBody body, DVec3 universePos)
+    private void DrawPlanetBody(OrbitalBody body, DVec3 universePos)
     {
         Vector3 renderPos = _camera.ToRenderSpace(universePos);
+        if (renderPos.Length() > 30_000f) return;
 
-        // Cull bodies far offscreen (rough distance check in render units)
-        float dist = renderPos.Length();
-        if (dist > 30_000f) return;
+        DrawSphere(renderPos, VisualRadius(body), BodyColor(body), lit: true);
+    }
 
-        float  radius = VisualRadius(body);
-        Color  color  = BodyColor(body);
+    // ── Transparent pass (AlphaBlend + DepthRead) ─────────────────────────────
 
-        DrawSphere(renderPos, radius, color, lit: true);
+    private void DrawStarGlows()
+    {
+        Vector3 renderPos = _camera.ToRenderSpace(DVec3.Zero);
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = false;
+        DrawSphere(renderPos, StarVisualRadius * 1.6f, _star.GlowColor * 0.25f, false);
+        DrawSphere(renderPos, StarVisualRadius * 1.2f, _star.GlowColor * 0.50f, false);
+        _effect.LightingEnabled = true;
+    }
 
-        // Atmosphere glow — slightly larger, semi-transparent
-        if (body.AtmosphereType != AtmosphereType.None)
-        {
-            _effect.LightingEnabled = false;
-            DrawSphere(renderPos, radius * 1.15f, body.AtmosphereColor * 0.25f, lit: false);
-            _effect.LightingEnabled = true;
-        }
+    private void DrawAtmosphere(OrbitalBody body, DVec3 universePos)
+    {
+        if (body.AtmosphereType == AtmosphereType.None) return;
+
+        Vector3 renderPos = _camera.ToRenderSpace(universePos);
+        if (renderPos.Length() > 30_000f) return;
+
+        _effect.LightingEnabled = false;
+        DrawSphere(renderPos, VisualRadius(body) * 1.18f, body.AtmosphereColor * 0.35f, lit: false);
+        _effect.LightingEnabled = true;
     }
 
     private void DrawSphere(Vector3 renderPos, float radius, Color color, bool lit)
@@ -389,7 +412,7 @@ public sealed class SystemSpaceState : GameState
         bool hov = _backButtonRect.Contains(mouse.X, mouse.Y);
         DrawRect(sb, _backButtonRect, hov ? new Color(35, 55, 85) : ColPanel);
         DrawRectBorder(sb, _backButtonRect, ColBorder);
-        DrawText(sb, "< SYSTEM MAP",
+        DrawText(sb, "< SYSTEM MAP",  // ← back to 2D orbital view
             new Vector2(_backButtonRect.X + 10, _backButtonRect.Y + 8),
             hov ? Color.White : ColHUD, 0.85f);
     }
@@ -418,10 +441,7 @@ public sealed class SystemSpaceState : GameState
                         && _timeButtonRect.Contains(mouse.X, mouse.Y);
 
         if (escPressed || backClicked)
-            _pendingTransition = StateTransition.To(GameStateId.SystemSpace, _star);
-        // Note: returning to SystemMapState (2D map) — GameStateId.SystemSpace
-        // is shared. When you have separate IDs for 2D map vs 3D flight,
-        // use the correct one here.
+            _pendingTransition = StateTransition.To(GameStateId.SystemMap, (_star, _gameTimeSeconds));
 
         if (timeClicked)
             _timeCompIndex = (_timeCompIndex + 1) % TimeCompressions.Length;

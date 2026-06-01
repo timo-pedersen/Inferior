@@ -11,7 +11,13 @@ namespace Inferior.Game.States;
 /// Star system view.
 /// Star at centre, planets and moons orbiting in real time.
 /// Zoom from full system to individual planet.
-/// Escape or back button returns to galaxy map.
+///
+/// Left-click        — select body
+/// Double-click body — enter system flight near that body
+/// Double-click star — enter system flight near star
+/// Escape / back     — return to galaxy map
+/// [ / ]             — time compression
+/// Home              — recentre on star
 /// </summary>
 public sealed class SystemMapState : GameState
 {
@@ -27,20 +33,18 @@ public sealed class SystemMapState : GameState
     private Vector2 _cameraPos     = Vector2.Zero;
     private double  _metersPerPixel = 1e10;
 
-    private const double MinMetersPerPixel = 1e6;   // very close — planet surface scale
-    private const double MaxMetersPerPixel = 1e13;  // full system view
+    private const double MinMetersPerPixel = 1e6;
+    private const double MaxMetersPerPixel = 1e13;
     private const double ZoomFactor        = 1.15;
 
     // ── Time ──────────────────────────────────────────────────────────────────
-    // Continuous game clock — advances even when not in system view
-    // so planets are in the correct position relative to elapsed play time.
     private double _gameTimeSeconds;
 
     private static readonly double[] TimeCompressions =
         [1, 100, 10_000, 1_000_000];
     private static readonly string[] TimeCompressionLabels =
         ["1x", "100x", "10,000x", "1,000,000x"];
-    private int _timeCompIndex = 0; // start at real time
+    private int _timeCompIndex = 0;
 
     private double TimeCompression => TimeCompressions[_timeCompIndex];
 
@@ -56,11 +60,16 @@ public sealed class SystemMapState : GameState
     private MouseState    _prevMouse;
     private KeyboardState _prevKeys;
 
-    // Left-button drag to pan
     private bool    _isDragging;
     private Vector2 _dragStartScreen;
     private Vector2 _cameraAtDragStart;
     private const float DragThreshold = 5f;
+
+    // Double-click detection
+    private double       _lastClickTime  = -1.0;
+    private OrbitalBody? _lastClickBody;          // null means star was clicked
+    private bool         _lastClickWasStar;
+    private const double DoubleClickSeconds = 0.35;
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private Rectangle _backButtonRect;
@@ -71,7 +80,7 @@ public sealed class SystemMapState : GameState
 
     // ── Visual constants ──────────────────────────────────────────────────────
     private const float StarVisualRadius    = 28f;
-    private const float MinOrbitRingPixels  = 6f;   // don't draw orbit rings smaller than this
+    private const float MinOrbitRingPixels  = 6f;
     private const float NameAlphaDimmed     = 0.35f;
     private const float NameAlphaHovered    = 1.0f;
     private const float AsteroidDotSize     = 1.5f;
@@ -93,16 +102,11 @@ public sealed class SystemMapState : GameState
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public SystemMapState(GraphicsDevice gd, SpriteFont font)
-        : base(GameStateId.SystemSpace)
+        : base(GameStateId.SystemMap)
     {
         _gd   = gd;
         _font = font;
     }
-
-    // ── Game time accessor (called by InferiorGame to advance the clock) ──────
-
-    public void AdvanceTime(double realDeltaSeconds)
-        => _gameTimeSeconds += realDeltaSeconds * TimeCompression;
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -110,21 +114,30 @@ public sealed class SystemMapState : GameState
     {
         if (payload is Star star)
         {
-            _star   = star;
-            _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            _star           = star;
+            _system         = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            _gameTimeSeconds = 0;
+        }
+        else if (payload is (Star returnStar, double returnTime))
+        {
+            // Returning from SystemSpace — restore star and game time
+            _star            = returnStar;
+            _system          = StarSystem.Generate(returnStar, GalaxyGenerator.SystemSeed(returnStar));
+            _gameTimeSeconds = returnTime;
         }
 
         _selectedBody = null;
         _hoveredBody  = null;
-        _cameraPos    = Vector2.Zero; // centre on star
+        _cameraPos    = Vector2.Zero;
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
-        _circle = CreateCircleTexture(64); // larger — planets are bigger dots
+        _circle = CreateCircleTexture(64);
 
         UpdateScreenCentre();
         FitSystemToView();
         UpdateUI();
+        _pendingTransition = null;
     }
 
     public override void OnExit()
@@ -146,15 +159,14 @@ public sealed class SystemMapState : GameState
         var mouse   = Mouse.GetState();
         var keys    = Keyboard.GetState();
         double real = gameTime.ElapsedGameTime.TotalSeconds;
+        double now  = gameTime.TotalGameTime.TotalSeconds;
 
-        // Advance simulation clock
         _gameTimeSeconds += real * TimeCompression;
 
-        // Rebuild body positions for this frame
         RebuildBodyPositions();
 
         HandleZoom(mouse);
-        HandleLeftButton(mouse);
+        HandleLeftButton(mouse, now);
         HandleHover(mouse);
         HandleKeyboard(keys, mouse);
 
@@ -182,6 +194,7 @@ public sealed class SystemMapState : GameState
         DrawInfoPanel(sb);
         DrawBackButton(sb, Mouse.GetState());
         DrawTimeControls(sb, Mouse.GetState());
+        DrawHints(sb);
 
         sb.End();
     }
@@ -203,7 +216,7 @@ public sealed class SystemMapState : GameState
         _cameraPos -= mouseWorldAfter - mouseWorld;
     }
 
-    private void HandleLeftButton(MouseState mouse)
+    private void HandleLeftButton(MouseState mouse, double now)
     {
         bool justPressed  = mouse.LeftButton == ButtonState.Pressed
                          && _prevMouse.LeftButton == ButtonState.Released;
@@ -240,7 +253,27 @@ public sealed class SystemMapState : GameState
                 return;
             }
 
-            _selectedBody = HitTestBody(mousePos);
+            // Hit test: body first, then star
+            OrbitalBody? hitBody = HitTestBody(mousePos);
+            bool         hitStar = hitBody == null && HitTestStarDot(mousePos);
+
+            bool isDouble = (now - _lastClickTime) < DoubleClickSeconds
+                         && hitBody == _lastClickBody
+                         && hitStar == _lastClickWasStar;
+
+            if (isDouble && (hitBody != null || hitStar))
+            {
+                // Launch into system flight near this body (or star)
+                _pendingTransition = StateTransition.To(
+                    GameStateId.SystemSpace,
+                    new SystemSpacePayload(_star, hitBody, _gameTimeSeconds));
+                return;
+            }
+
+            _selectedBody      = hitBody;
+            _lastClickTime     = now;
+            _lastClickBody     = hitBody;
+            _lastClickWasStar  = hitStar;
         }
 
         if (justReleased)
@@ -248,10 +281,7 @@ public sealed class SystemMapState : GameState
     }
 
     private void HandleHover(MouseState mouse)
-    {
-        Vector2 mouseScreen = new(mouse.X, mouse.Y);
-        _hoveredBody = HitTestBody(mouseScreen);
-    }
+        => _hoveredBody = HitTestBody(new Vector2(mouse.X, mouse.Y));
 
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
@@ -263,14 +293,12 @@ public sealed class SystemMapState : GameState
         if (escPressed || backClicked)
             _pendingTransition = StateTransition.To(GameStateId.GalaxyMap, _star);
 
-        // Time compression keys
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
             _timeCompIndex = System.Math.Min(_timeCompIndex + 1, TimeCompressions.Length - 1);
 
         if (keys.IsKeyDown(Keys.OemOpenBrackets) && !_prevKeys.IsKeyDown(Keys.OemOpenBrackets))
             _timeCompIndex = System.Math.Max(_timeCompIndex - 1, 0);
 
-        // Home key — recentre on star
         if (keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home))
         {
             _cameraPos = Vector2.Zero;
@@ -282,29 +310,23 @@ public sealed class SystemMapState : GameState
 
     private void DrawOrbitRings(SpriteBatch sb)
     {
-        // Planet orbit rings around star
         foreach (var planet in _system.Planets)
         {
             float radiusPx = (float)(planet.OrbitalRadius / _metersPerPixel);
             if (radiusPx < MinOrbitRingPixels) continue;
 
-            Vector2 centre = SystemToScreen(Vector2.Zero); // star at origin
+            Vector2 centre = SystemToScreen(Vector2.Zero);
             DrawCircle(sb, centre, radiusPx, ColOrbitRing, CircleSegments(radiusPx));
         }
 
-        // Moon orbit rings around their parent planet
         foreach (var (body, pos) in _bodyPositions)
         {
             if (body.BodyType != BodyType.Moon) continue;
 
-            // Find parent planet position — moons are children of planets
-            // We need parent's screen pos — approximate by finding the planet
-            // whose child list contains this moon
             foreach (var planet in _system.Planets)
             {
                 if (!planet.Children.Contains(body)) continue;
 
-                // Get planet's current position
                 DVec3 planetPos = planet.GetPosition(_gameTimeSeconds, DVec3.Zero);
                 Vector2 parentScreen = SystemToScreen(
                     new Vector2((float)planetPos.X, (float)planetPos.Z));
@@ -334,20 +356,18 @@ public sealed class SystemMapState : GameState
     {
         Vector2 screen = SystemToScreen(Vector2.Zero);
 
-        // Star scales with zoom — clamped between sensible min/max
         const double refMPP = 5e8;
-        float scale    = MathF.Log((float)(refMPP / _metersPerPixel) + 1f, 2f);
-        float starR    = System.Math.Clamp(StarVisualRadius * scale, 12f, 60f);
+        float scale = MathF.Log((float)(refMPP / _metersPerPixel) + 1f, 2f);
+        float starR = System.Math.Clamp(StarVisualRadius * scale, 12f, 60f);
 
-        // Outer glow
         DrawDot(sb, screen, starR * 1.8f, _star.GlowColor * 0.3f);
         DrawDot(sb, screen, starR * 1.3f, _star.GlowColor * 0.5f);
-
-        // Star body
-        DrawDot(sb, screen, starR, _star.GlowColor);
-
-        // Bright centre
+        DrawDot(sb, screen, starR,        _star.GlowColor);
         DrawDot(sb, screen, starR * 0.4f, Color.White);
+
+        DrawText(sb, _star.Name,
+            screen + new Vector2(starR + 4f, -8f),
+            _star.GlowColor * 0.8f, 0.75f);
     }
 
     private void DrawBodies(SpriteBatch sb)
@@ -357,22 +377,16 @@ public sealed class SystemMapState : GameState
             Vector2 screen = SystemToScreen(new Vector2((float)pos.X, (float)pos.Z));
             if (!IsOnScreen(screen, 30f)) continue;
 
-            float   radius   = VisualRadius(body);
-            Color   color    = BodyColor(body);
-            bool    selected = _selectedBody == body;
-            bool    hovered  = _hoveredBody  == body;
+            float radius   = VisualRadius(body);
+            Color color    = BodyColor(body);
+            bool  selected = _selectedBody == body;
+            bool  hovered  = _hoveredBody  == body;
 
-            // Atmosphere halo
             if (body.AtmosphereType != AtmosphereType.None)
-            {
-                Color atmo = body.AtmosphereColor * 0.3f;
-                DrawDot(sb, screen, radius * 1.5f, atmo);
-            }
+                DrawDot(sb, screen, radius * 1.5f, body.AtmosphereColor * 0.3f);
 
-            // Body
             DrawDot(sb, screen, radius, color);
 
-            // Highlight rings
             if (selected)
                 DrawCircle(sb, screen, radius + 5f, ColSelected, 24);
             else if (hovered)
@@ -389,16 +403,13 @@ public sealed class SystemMapState : GameState
             Vector2 screen = SystemToScreen(new Vector2((float)pos.X, (float)pos.Z));
             if (!IsOnScreen(screen, 60f)) continue;
 
-            float   radius = VisualRadius(body);
-            bool    hovered = _hoveredBody == body || _selectedBody == body;
-            float   alpha   = hovered ? NameAlphaHovered : NameAlphaDimmed;
-            float   scale   = body.BodyType == BodyType.Moon ? 0.65f : 0.8f;
+            float  radius  = VisualRadius(body);
+            bool   hovered = _hoveredBody == body || _selectedBody == body;
+            float  alpha   = hovered ? NameAlphaHovered : NameAlphaDimmed;
+            float  scale   = body.BodyType == BodyType.Moon ? 0.65f : 0.8f;
 
-            Color nameColor = ColText * alpha;
-            Vector2 namePos = screen + new Vector2(radius + 4f, -8f);
-
-            sb.DrawString(_font, body.Name, namePos, nameColor,
-                0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            sb.DrawString(_font, body.Name, screen + new Vector2(radius + 4f, -8f),
+                ColText * alpha, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
         }
     }
 
@@ -409,13 +420,10 @@ public sealed class SystemMapState : GameState
 
         int panelW = 290;
         int margin = 16;
-        int x = _gd.Viewport.Width - panelW - margin;
-        int y = margin;
-
-        // Measure content height dynamically
+        int x      = _gd.Viewport.Width - panelW - margin;
+        int y      = margin;
         int lineH  = 22;
-        int lines  = 10 + display.Children.Count;
-        int panelH = lines * lineH + 24;
+        int panelH = (10 + display.Children.Count) * lineH + 24;
 
         DrawRect(sb, new Rectangle(x, y, panelW, panelH), ColPanel);
         DrawRectBorder(sb, new Rectangle(x, y, panelW, panelH), ColPanelBorder, 1);
@@ -423,34 +431,26 @@ public sealed class SystemMapState : GameState
         int tx = x + 12;
         int ty = y + 12;
 
-        // Name and type
         DrawText(sb, display.Name, new Vector2(tx, ty), Color.White, 1.05f);
         ty += (int)(lineH * 1.3f);
 
         DrawText(sb, $"{display.BodyType}", new Vector2(tx, ty), BodyColor(display));
         ty += lineH;
 
-        // Atmosphere
         if (display.AtmosphereType != AtmosphereType.None)
         {
-            DrawText(sb, $"Atmosphere: {display.AtmosphereType}",
-                new Vector2(tx, ty), ColText);
+            DrawText(sb, $"Atmosphere: {display.AtmosphereType}", new Vector2(tx, ty), ColText);
             ty += lineH;
         }
 
-        // Physical
         double radiusKm = Units.MetersToKM(display.RadiusMeters);
         double gravG    = display.SurfaceGravity / 9.81;
-        DrawText(sb, $"Radius: {radiusKm:F0} km", new Vector2(tx, ty), ColTextDim);
-        ty += lineH;
-        DrawText(sb, $"Gravity: {gravG:F2} g", new Vector2(tx, ty), ColTextDim);
-        ty += lineH;
+        DrawText(sb, $"Radius: {radiusKm:F0} km",  new Vector2(tx, ty), ColTextDim); ty += lineH;
+        DrawText(sb, $"Gravity: {gravG:F2} g",      new Vector2(tx, ty), ColTextDim); ty += lineH;
 
-        // Orbital
         double periodDays = display.Period / Units.DayInSeconds;
         double orbitAU    = Units.MetersToAU(display.OrbitalRadius);
-        DrawText(sb, $"Orbit: {orbitAU:F3} AU", new Vector2(tx, ty), ColTextDim);
-        ty += lineH;
+        DrawText(sb, $"Orbit: {orbitAU:F3} AU", new Vector2(tx, ty), ColTextDim); ty += lineH;
 
         if (periodDays < 1.0)
             DrawText(sb, $"Period: {display.Period / Units.HourInSeconds:F1} h",
@@ -458,16 +458,12 @@ public sealed class SystemMapState : GameState
         else if (periodDays < 365)
             DrawText(sb, $"Period: {periodDays:F1} days", new Vector2(tx, ty), ColTextDim);
         else
-            DrawText(sb, $"Period: {periodDays / 365.25:F2} years",
-                new Vector2(tx, ty), ColTextDim);
+            DrawText(sb, $"Period: {periodDays / 365.25:F2} years", new Vector2(tx, ty), ColTextDim);
         ty += lineH;
 
-        // Hill sphere
         double hillKm = Units.MetersToKM(display.HillSphereRadius);
-        DrawText(sb, $"Hill sphere: {hillKm:F0} km", new Vector2(tx, ty), ColTextDim);
-        ty += lineH;
+        DrawText(sb, $"Hill sphere: {hillKm:F0} km", new Vector2(tx, ty), ColTextDim); ty += lineH;
 
-        // Moons
         if (display.Children.Count > 0)
         {
             ty += 4;
@@ -479,35 +475,40 @@ public sealed class SystemMapState : GameState
                 ty += (int)(lineH * 0.9f);
             }
         }
+
+        DrawText(sb, "Double-click to approach", new Vector2(tx, ty + 4), ColHovered * 0.7f, 0.75f);
     }
 
     private void DrawBackButton(SpriteBatch sb, MouseState mouse)
     {
         bool hovered = _backButtonRect.Contains(mouse.X, mouse.Y);
-        Color bg = hovered ? ColButtonHover : ColButton;
-
-        DrawRect(sb, _backButtonRect, bg);
+        DrawRect(sb, _backButtonRect, hovered ? ColButtonHover : ColButton);
         DrawRectBorder(sb, _backButtonRect, ColPanelBorder, 1);
-        DrawText(sb, "< GALAXY MAP", new Vector2(_backButtonRect.X + 10, _backButtonRect.Y + 8),
+        DrawText(sb, "< GALAXY MAP",
+            new Vector2(_backButtonRect.X + 10, _backButtonRect.Y + 8),
             hovered ? Color.White : ColText, 0.85f);
     }
 
     private void DrawTimeControls(SpriteBatch sb, MouseState mouse)
     {
         bool hovered = _timeButtonRect.Contains(mouse.X, mouse.Y);
-        Color bg = hovered ? ColButtonHover : ColButton;
-
-        DrawRect(sb, _timeButtonRect, bg);
+        DrawRect(sb, _timeButtonRect, hovered ? ColButtonHover : ColButton);
         DrawRectBorder(sb, _timeButtonRect, ColPanelBorder, 1);
 
-        string label = $"TIME: {TimeCompressionLabels[_timeCompIndex]}";
-        DrawText(sb, label,
+        DrawText(sb, $"TIME: {TimeCompressionLabels[_timeCompIndex]}",
             new Vector2(_timeButtonRect.X + 10, _timeButtonRect.Y + 8),
             hovered ? Color.White : ColText, 0.85f);
-
         DrawText(sb, "[ / ]",
             new Vector2(_timeButtonRect.Right - 40, _timeButtonRect.Y + 8),
             ColTextDim, 0.75f);
+    }
+
+    private void DrawHints(SpriteBatch sb)
+    {
+        int x = 16;
+        int y = _gd.Viewport.Height - 50;
+        DrawText(sb, "Double-click body/star - approach   Scroll - zoom   Home - recentre",
+            new Vector2(x, y), ColTextDim, 0.72f);
     }
 
     // ── Coordinate transforms ─────────────────────────────────────────────────
@@ -527,11 +528,11 @@ public sealed class SystemMapState : GameState
 
         foreach (var (body, pos) in _bodyPositions)
         {
-            Vector2 screen  = SystemToScreen(new Vector2((float)pos.X, (float)pos.Z));
-            float   hitR    = System.Math.Max(VisualRadius(body) + 4f, 8f);
-            float   dx      = screenPos.X - screen.X;
-            float   dy      = screenPos.Y - screen.Y;
-            float   dist    = MathF.Sqrt(dx*dx + dy*dy);
+            Vector2 screen = SystemToScreen(new Vector2((float)pos.X, (float)pos.Z));
+            float   hitR   = System.Math.Max(VisualRadius(body) + 4f, 8f);
+            float   dx     = screenPos.X - screen.X;
+            float   dy     = screenPos.Y - screen.Y;
+            float   dist   = MathF.Sqrt(dx*dx + dy*dy);
 
             if (dist < hitR && dist < bestDist)
             {
@@ -541,6 +542,15 @@ public sealed class SystemMapState : GameState
         }
 
         return best;
+    }
+
+    private bool HitTestStarDot(Vector2 screenPos)
+    {
+        Vector2 starScreen = SystemToScreen(Vector2.Zero);
+        float   dx         = screenPos.X - starScreen.X;
+        float   dy         = screenPos.Y - starScreen.Y;
+        float   dist       = MathF.Sqrt(dx*dx + dy*dy);
+        return dist <= StarVisualRadius + 8f;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -556,12 +566,10 @@ public sealed class SystemMapState : GameState
 
     private void FitSystemToView()
     {
-        // Find outermost planet orbit radius
-        double outermost = Units.AU * 2.0; // minimum
+        double outermost = Units.AU * 2.0;
         foreach (var planet in _system.Planets)
             outermost = System.Math.Max(outermost, planet.OrbitalRadius);
 
-        // Set zoom so outermost orbit fills ~80% of the shorter screen dimension
         float screenMin = System.Math.Min(_gd.Viewport.Width, _gd.Viewport.Height);
         _metersPerPixel = outermost / (screenMin * 0.40);
         _metersPerPixel = System.Math.Clamp(_metersPerPixel, MinMetersPerPixel, MaxMetersPerPixel);
@@ -580,11 +588,6 @@ public sealed class SystemMapState : GameState
         => screenPos.X >= -margin && screenPos.X <= _gd.Viewport.Width  + margin
         && screenPos.Y >= -margin && screenPos.Y <= _gd.Viewport.Height + margin;
 
-    /// <summary>
-    /// Visual radius in pixels, scaled with zoom level.
-    /// Base sizes define relative planet sizes — zoom scales them within a clamped range
-    /// so planets are always clickable but never absurdly large.
-    /// </summary>
     private float VisualRadius(OrbitalBody body)
     {
         float baseSize = body.BodyType switch
@@ -602,16 +605,9 @@ public sealed class SystemMapState : GameState
             _                    => 6f,
         };
 
-        // Reference zoom — sizes feel right at this scale
         const double referenceMetersPerPixel = 5e8;
+        float scale = MathF.Log((float)(referenceMetersPerPixel / _metersPerPixel) + 1f, 2f);
 
-        // Scale factor — larger when zoomed in, smaller when zoomed out
-        float scale = (float)(referenceMetersPerPixel / _metersPerPixel);
-
-        // Logarithmic scaling feels more natural than linear
-        scale = MathF.Log(scale + 1f, 2f);
-
-        // Clamp: min keeps them clickable, max prevents them swallowing the screen
         float minRadius = body.BodyType == BodyType.Moon ? 2f : 4f;
         float maxRadius = body.BodyType == BodyType.GasGiant ? 40f : 25f;
 
@@ -659,15 +655,11 @@ public sealed class SystemMapState : GameState
         for (int y = 0; y < diameter; y++)
         for (int x = 0; x < diameter; x++)
         {
-            float dist  = MathF.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+            float dist  = MathF.Sqrt((x - cx)*(x - cx) + (y - cy)*(y - cy));
             float alpha;
-            if (dist <= inner)
-                alpha = 1f;
-            else if (dist <= r)
-                alpha = 1f - (dist - inner) / (r - inner);
-            else
-                alpha = 0f;
-
+            if (dist <= inner)       alpha = 1f;
+            else if (dist <= r)      alpha = 1f - (dist - inner) / (r - inner);
+            else                     alpha = 0f;
             data[y * diameter + x] = Color.White * alpha;
         }
 
@@ -692,8 +684,8 @@ public sealed class SystemMapState : GameState
         float step = MathF.PI * 2f / segments;
         for (int i = 0; i < segments; i++)
         {
-            float a0 = i       * step;
-            float a1 = (i + 1) * step;
+            float   a0 = i       * step;
+            float   a1 = (i + 1) * step;
             Vector2 p0 = centre + new Vector2(MathF.Cos(a0), MathF.Sin(a0)) * radius;
             Vector2 p1 = centre + new Vector2(MathF.Cos(a1), MathF.Sin(a1)) * radius;
             DrawLine(sb, p0, p1, color);

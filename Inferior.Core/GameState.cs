@@ -19,6 +19,9 @@ public enum GameStateId
     /// <summary>Dropping out of hyperspace into a system.</summary>
     HyperspaceExit,
 
+    /// <summary>2D orbital map of a star system — select a body to approach.</summary>
+    SystemMap,
+
     /// <summary>Flying freely within a star system.</summary>
     SystemSpace,
 

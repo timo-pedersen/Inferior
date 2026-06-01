@@ -234,7 +234,7 @@ public sealed class GalaxyMapState : GameState
 
             if (isDouble)
             {
-                _pendingTransition = StateTransition.To(GameStateId.SystemSpace, hit);
+                _pendingTransition = StateTransition.To(GameStateId.SystemMap, hit);
                 return;
             }
 
@@ -463,7 +463,7 @@ public sealed class GalaxyMapState : GameState
         int y = _gd.Viewport.Height - 80;
 
         DrawText(sb, "Left-click    select",        new Vector2(x, y), ColTextDim, 0.72f); y += 18;
-        DrawText(sb, "Double-click  enter system",  new Vector2(x, y), ColTextDim, 0.72f); y += 18;
+        DrawText(sb, "Double-click  system map",    new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Right-click   jump target",   new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Scroll        zoom",           new Vector2(x, y), ColTextDim, 0.72f);
     }

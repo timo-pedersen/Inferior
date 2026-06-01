@@ -8,15 +8,19 @@ namespace Inferior.Game;
 /// <summary>
 /// Free-look 3D camera for system space flight.
 ///
-/// Position is stored as DVec3 in universe coordinates (meters).
-/// The View matrix always places the camera at render-space origin —
-/// this is origin shifting. Everything else is rendered relative to
-/// the camera's universe position, so float precision is always safe.
+/// Orientation is a quaternion — no pitch clamp, no gimbal lock, no preferred up.
+/// Mouse drag rotates around the camera's own local axes:
+///   mouse X → yaw  around local Up
+///   mouse Y → pitch around local Right
+/// This gives true 6DOF look with no world-Y preference.
+///
+/// Position is a DVec3 in universe metres. The view matrix places the camera at
+/// render-space origin; everything else is rendered relative to it (origin shifting).
 ///
 /// Controls:
-///   WASD       — move forward/back/strafe
-///   Q / E      — move up / down
-///   Right drag  — look (yaw + pitch)
+///   Right drag  — look
+///   WASD        — move forward/back/strafe
+///   Q / E       — move up / down (local)
 ///   Shift       — 10× speed
 ///   Ctrl        — 0.1× speed
 /// </summary>
@@ -25,14 +29,12 @@ public sealed class Camera3D
     // ── Universe position (double precision) ──────────────────────────────────
     public DVec3 UniversePosition { get; private set; }
 
-    // ── Look direction ────────────────────────────────────────────────────────
-    private float _yaw   = 0f;       // horizontal angle, radians
-    private float _pitch = -0.2f;    // vertical angle, radians (slight downward look)
+    // ── Orientation ───────────────────────────────────────────────────────────
+    private Quaternion _orientation;
 
-    private const float MaxPitch   =  MathF.PI * 0.48f;
-    private const float MouseSens  =  0.003f;
+    private const float MouseSens = 0.003f;
 
-    // ── Derived orientation vectors ───────────────────────────────────────────
+    // ── Derived orientation vectors (updated each frame) ──────────────────────
     public Vector3 Forward { get; private set; } = -Vector3.UnitZ;
     public Vector3 Right   { get; private set; } =  Vector3.UnitX;
     public Vector3 Up      { get; private set; } =  Vector3.UnitY;
@@ -42,20 +44,28 @@ public sealed class Camera3D
     public Matrix ProjectionMatrix { get; private set; }
 
     // ── Speed ─────────────────────────────────────────────────────────────────
-    /// <summary>Base movement speed in meters per second.</summary>
-    public double MoveSpeedMs { get; set; } = 5e9; // 5 billion m/s default — cross AU in ~30 sec
+    public double MoveSpeedMs { get; set; } = 5e9;
 
     // ── Mouse look state ──────────────────────────────────────────────────────
     private Point _prevMousePos;
     private bool  _wasRightHeld;
+
+    // ── Scale ─────────────────────────────────────────────────────────────────
+    /// <summary>1 AU ≈ 150 render units.</summary>
+    public const double RenderScale = 1e-9;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public Camera3D(DVec3 startPosition, float aspectRatio)
     {
         UniversePosition = startPosition;
-        SetProjection(MathHelper.ToRadians(70f), aspectRatio, 0.1f, 50_000f);
-        UpdateOrientation();
+
+        // Start with a slight downward pitch so the ecliptic plane is visible
+        _orientation = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+
+        SetProjection(MathHelper.ToRadians(60f), aspectRatio, 0.1f, 50_000f);
+        RefreshAxes();
+        UpdateViewMatrix();
     }
 
     // ── Per-frame update ──────────────────────────────────────────────────────
@@ -64,24 +74,20 @@ public sealed class Camera3D
     {
         HandleMouseLook(mouse);
         HandleMovement(dt, keys);
-        UpdateOrientation();
+        RefreshAxes();
         UpdateViewMatrix();
     }
 
     // ── Projection ────────────────────────────────────────────────────────────
 
     public void SetProjection(float fovRadians, float aspectRatio, float near, float far)
-    {
-        ProjectionMatrix = Matrix.CreatePerspectiveFieldOfView(
-            fovRadians, aspectRatio, near, far);
-    }
+        => ProjectionMatrix = Matrix.CreatePerspectiveFieldOfView(fovRadians, aspectRatio, near, far);
 
     // ── Coordinate conversion ─────────────────────────────────────────────────
 
     /// <summary>
-    /// Convert a universe-space position to render-space Vector3.
-    /// ALWAYS use this before passing positions to BasicEffect.World.
-    /// The result is near zero since it's relative to camera — float is safe.
+    /// Universe-space position → render-space Vector3 (relative to camera, safe for float).
+    /// Always use this before passing positions to BasicEffect.World.
     /// </summary>
     public Vector3 ToRenderSpace(DVec3 universePos)
     {
@@ -92,9 +98,6 @@ public sealed class Camera3D
             (float)(rel.Z * RenderScale));
     }
 
-    /// <summary>Scale factor: 1 render unit = 1 / RenderScale meters.</summary>
-    public const double RenderScale = 1e-9; // 1 AU ≈ 150 render units
-
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private void HandleMouseLook(MouseState mouse)
@@ -103,20 +106,18 @@ public sealed class Camera3D
 
         if (rightHeld)
         {
-            if (!_wasRightHeld)
+            if (_wasRightHeld)
             {
-                // First frame of right-hold — capture start position
-                _prevMousePos = mouse.Position;
-            }
-            else
-            {
-                // Look delta
                 int dx = mouse.X - _prevMousePos.X;
                 int dy = mouse.Y - _prevMousePos.Y;
 
-                _yaw   -= dx * MouseSens;
-                _pitch -= dy * MouseSens;
-                _pitch  = System.Math.Clamp(_pitch, -MaxPitch, MaxPitch);
+                if (dx != 0 || dy != 0)
+                {
+                    // Rotate around camera's own local axes — no world-up preference
+                    var yawQ   = Quaternion.CreateFromAxisAngle(Up,    -dx * MouseSens);
+                    var pitchQ = Quaternion.CreateFromAxisAngle(Right, -dy * MouseSens);
+                    _orientation = Quaternion.Normalize(pitchQ * yawQ * _orientation);
+                }
             }
             _prevMousePos = mouse.Position;
         }
@@ -130,38 +131,30 @@ public sealed class Camera3D
         if (keys.IsKeyDown(Keys.LeftShift)   || keys.IsKeyDown(Keys.RightShift))   speed *= 10.0;
         if (keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl)) speed *= 0.1;
 
-        var moveMeters = DVec3.Zero;
+        var move = DVec3.Zero;
 
-        if (keys.IsKeyDown(Keys.W)) moveMeters += new DVec3(Forward.X, Forward.Y, Forward.Z);
-        if (keys.IsKeyDown(Keys.S)) moveMeters -= new DVec3(Forward.X, Forward.Y, Forward.Z);
-        if (keys.IsKeyDown(Keys.D)) moveMeters += new DVec3(Right.X,   Right.Y,   Right.Z);
-        if (keys.IsKeyDown(Keys.A)) moveMeters -= new DVec3(Right.X,   Right.Y,   Right.Z);
-        if (keys.IsKeyDown(Keys.E)) moveMeters += new DVec3(Up.X,      Up.Y,      Up.Z);
-        if (keys.IsKeyDown(Keys.Q)) moveMeters -= new DVec3(Up.X,      Up.Y,      Up.Z);
+        if (keys.IsKeyDown(Keys.W)) move += ToDVec3(Forward);
+        if (keys.IsKeyDown(Keys.S)) move -= ToDVec3(Forward);
+        if (keys.IsKeyDown(Keys.D)) move += ToDVec3(Right);
+        if (keys.IsKeyDown(Keys.A)) move -= ToDVec3(Right);
+        if (keys.IsKeyDown(Keys.E)) move += ToDVec3(Up);
+        if (keys.IsKeyDown(Keys.Q)) move -= ToDVec3(Up);
 
-        double len = moveMeters.Length;
+        double len = move.Length;
         if (len > 0.001)
-            UniversePosition += (moveMeters / len) * speed * dt;
+            UniversePosition += (move / len) * speed * dt;
     }
 
-    private void UpdateOrientation()
+    private void RefreshAxes()
     {
-        // Yaw around world Y, then pitch around local X
-        var rot = Matrix.CreateRotationX(_pitch) * Matrix.CreateRotationY(_yaw);
-
-        Forward = Vector3.Transform(-Vector3.UnitZ, rot);
-        Right   = Vector3.Transform( Vector3.UnitX, rot);
-        Up      = Vector3.Transform( Vector3.UnitY, rot);
-
-        Forward.Normalize();
-        Right.Normalize();
-        Up.Normalize();
+        var rot = Matrix.CreateFromQuaternion(_orientation);
+        Forward = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, rot));
+        Right   = Vector3.Normalize(Vector3.Transform( Vector3.UnitX, rot));
+        Up      = Vector3.Normalize(Vector3.Transform( Vector3.UnitY, rot));
     }
 
     private void UpdateViewMatrix()
-    {
-        // Camera is always at origin in render space.
-        // The whole universe moves relative to it.
-        ViewMatrix = Matrix.CreateLookAt(Vector3.Zero, Forward, Up);
-    }
+        => ViewMatrix = Matrix.CreateLookAt(Vector3.Zero, Forward, Up);
+
+    private static DVec3 ToDVec3(Vector3 v) => new(v.X, v.Y, v.Z);
 }

@@ -1,4 +1,5 @@
 ﻿using Inferior.Core;
+using Inferior.Core.Simulation;
 using Inferior.Game.States;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -13,6 +14,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     private GameStateMachine _stateMachine = new();
     private SpriteFont _font = null!;
+    private readonly Simulation _simulation = new();
 
     public InferiorGame()
     {
@@ -23,8 +25,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     protected override void Initialize()
     {
-        // TODO: Add your initialization logic here
-
+        _simulation.Start();
         base.Initialize();
     }
 
@@ -41,12 +42,18 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     protected override void Update(GameTime gameTime)
     {
-        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
+        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed)
             Exit();
 
-        // TODO: Add your update logic here
+        Core.DataBus.DataBus.Drain();
         _stateMachine.Update(gameTime);
         base.Update(gameTime);
+    }
+
+    protected override void OnExiting(object sender, ExitingEventArgs args)
+    {
+        _simulation.Stop();
+        base.OnExiting(sender, args);
     }
 
     protected override void Draw(GameTime gameTime)
