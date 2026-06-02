@@ -90,7 +90,10 @@ public sealed class SystemSpaceState : GameState
     // Visual radii in render units (NOT true physical radius — inflated for visibility)
     private const float StarVisualRadius = 8f;
     // Minimum apparent star size in screen pixels — keeps the star visible at any distance
-    private const float StarMinPixels    = 1f;
+    private const float StarMinPixels         = 1f;
+    // Planets: minimum pixel size within boost range, then allowed to shrink and vanish
+    private const float PlanetMinPixels       = 1f;
+    private const float PlanetMaxBoostDist    = 4500f; // ~30 AU — no boost beyond this
 
     // Colours
     private static readonly Color ColBackground = new(4, 4, 12);
@@ -351,7 +354,7 @@ public sealed class SystemSpaceState : GameState
         Vector3 renderPos = _camera.ToRenderSpace(universePos);
         if (renderPos.Length() > 30_000f) return;
 
-        DrawSphere(renderPos, VisualRadius(body), BodyColor(body), lit: true);
+        DrawSphere(renderPos, PlanetApparentRadius(body, renderPos), BodyColor(body), lit: true);
     }
 
     // ── Transparent pass (AlphaBlend + DepthRead) ─────────────────────────────
@@ -365,6 +368,22 @@ public sealed class SystemSpaceState : GameState
         DrawSphere(renderPos, radius * 1.6f, _star.GlowColor * 0.25f, false);
         DrawSphere(renderPos, radius * 1.2f, _star.GlowColor * 0.50f, false);
         _effect.LightingEnabled = true;
+    }
+
+    /// <summary>
+    /// Minimum render-space radius for a planet within boost range.
+    /// Beyond PlanetMaxBoostDist the planet is left to shrink and vanish naturally.
+    /// </summary>
+    private float PlanetApparentRadius(OrbitalBody body, Vector3 renderPos)
+    {
+        float dist       = renderPos.Length();
+        float baseRadius = VisualRadius(body);
+        if (dist > PlanetMaxBoostDist) return baseRadius;
+
+        float projScale      = _gd.Viewport.Height
+                             / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
+        float minRenderRadius = PlanetMinPixels * dist / projScale;
+        return System.Math.Max(baseRadius, minRenderRadius);
     }
 
     /// <summary>
@@ -394,7 +413,7 @@ public sealed class SystemSpaceState : GameState
         if (renderPos.Length() > 30_000f) return;
 
         _effect.LightingEnabled = false;
-        DrawSphere(renderPos, VisualRadius(body) * 1.18f, body.AtmosphereColor * 0.35f, lit: false);
+        DrawSphere(renderPos, PlanetApparentRadius(body, renderPos) * 1.18f, body.AtmosphereColor * 0.35f, lit: false);
         _effect.LightingEnabled = true;
     }
 

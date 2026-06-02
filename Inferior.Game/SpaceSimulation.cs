@@ -30,7 +30,7 @@ public sealed class SpaceSimulation : Simulation
         // ── Live instrument values ────────────────────────────────────────────
 
         // Heartbeat — oscillates 0–100, period ~20 s
-        double heartbeat = System.Math.Sin(t * 0.314) * 50.0 + 50.0;
+        double heartbeat = System.Math.Sin(t * 0.614) * 50.0 + 50.0;
         DataBus.Instruments.Publish($"Debug.{Topics.Debug.Heartbeat}", heartbeat);
 
         // Sim clock
