@@ -79,7 +79,7 @@ public sealed class SystemMapState : GameState
     private Texture2D _circle = null!;
 
     // ── Visual constants ──────────────────────────────────────────────────────
-    private const float StarVisualRadius    = 28f;
+    private const float StarVisualRadius    = 28f; // Clamp min size for visibility, then scale up with zoom
     private const float MinOrbitRingPixels  = 6f;
     private const float NameAlphaDimmed     = 0.35f;
     private const float NameAlphaHovered    = 1.0f;

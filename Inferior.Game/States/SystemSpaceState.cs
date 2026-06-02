@@ -89,6 +89,8 @@ public sealed class SystemSpaceState : GameState
     // ── Visual constants ──────────────────────────────────────────────────────
     // Visual radii in render units (NOT true physical radius — inflated for visibility)
     private const float StarVisualRadius = 8f;
+    // Minimum apparent star size in screen pixels — keeps the star visible at any distance
+    private const float StarMinPixels    = 1f;
 
     // Colours
     private static readonly Color ColBackground = new(4, 4, 12);
@@ -191,9 +193,10 @@ public sealed class SystemSpaceState : GameState
 
         _console = new SystemConsole
         {
-            Header   = "SYSTEM LOG",
-            MaxLines = 7,
-            Bounds   = new Rectangle(16, 216, 205, 145),
+            Header    = "SYSTEM LOG",
+            MaxLines  = 7,
+            LineBreak = LineBreakMode.Wrap,
+            Bounds    = new Rectangle(16, 216, 205, 145),
         };
 
         _ui.Add(_heartbeatMeter);
@@ -335,10 +338,11 @@ public sealed class SystemSpaceState : GameState
     private void DrawStarBody()
     {
         Vector3 renderPos = _camera.ToRenderSpace(DVec3.Zero);
+        float   radius    = StarApparentRadius(renderPos);
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = false;
-        DrawSphere(renderPos, StarVisualRadius,         _star.GlowColor, false);
-        DrawSphere(renderPos, StarVisualRadius * 0.35f, Color.White,     false);
+        DrawSphere(renderPos, radius,         _star.GlowColor, false);
+        DrawSphere(renderPos, radius * 0.35f, Color.White,     false);
         _effect.LightingEnabled = true;
     }
 
@@ -355,11 +359,31 @@ public sealed class SystemSpaceState : GameState
     private void DrawStarGlows()
     {
         Vector3 renderPos = _camera.ToRenderSpace(DVec3.Zero);
+        float   radius    = StarApparentRadius(renderPos);
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = false;
-        DrawSphere(renderPos, StarVisualRadius * 1.6f, _star.GlowColor * 0.25f, false);
-        DrawSphere(renderPos, StarVisualRadius * 1.2f, _star.GlowColor * 0.50f, false);
+        DrawSphere(renderPos, radius * 1.6f, _star.GlowColor * 0.25f, false);
+        DrawSphere(renderPos, radius * 1.2f, _star.GlowColor * 0.50f, false);
         _effect.LightingEnabled = true;
+    }
+
+    /// <summary>
+    /// Minimum render-space radius that keeps the star at least <see cref="StarMinPixels"/>
+    /// pixels across at any distance. Grows with distance so the star is always visible;
+    /// never shrinks below StarVisualRadius when close.
+    /// </summary>
+    private float StarApparentRadius(Vector3 renderPos)
+    {
+        float dist = renderPos.Length();
+        if (dist < 0.001f) return StarVisualRadius;
+
+        // projScale converts render-space size at unit distance to screen pixels.
+        // For a symmetric frustum: projScale = screenHeight / (2 * tan(halfFov))
+        float projScale = _gd.Viewport.Height
+                        / (2f * MathF.Tan(MathHelper.ToRadians(30f))); // half of 60°
+
+        float minRenderRadius = StarMinPixels * dist / projScale;
+        return System.Math.Max(StarVisualRadius, minRenderRadius);
     }
 
     private void DrawAtmosphere(OrbitalBody body, DVec3 universePos)
