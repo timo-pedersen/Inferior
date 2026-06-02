@@ -807,7 +807,270 @@ DataBus.InstrumentRanges.Publish("PowerCore.SafeRange",  new RangeValue(0, MaxOu
 
 ---
 
-## Project structure (planned)
+## GameClock
+
+Central time authority for the simulation. Two distinct time concepts:
+- **SimTime** — accumulated simulation seconds since session start. Drives physics, noise
+  functions, and anything that needs a continuous monotonic clock. Never paused.
+- **PlayTime** — total real-world seconds played across all sessions. Persists to save file.
+  Lives on the `Commander` record.
+- **InGameDate** — fictional universe date shown to the player. Derived from SimTime plus
+  a fixed lore epoch and a time scale factor. Open question: scale factor and epoch date.
+
+```csharp
+public static class GameClock
+{
+    // Accumulated sim seconds this session — advances every sim tick
+    // Primary input for noise functions and physics
+    // Note: written by sim thread, read by main thread for display.
+    // On 64-bit .NET a double read is not guaranteed atomic — mark volatile
+    // or use Interlocked.Read on a backing long if this ever causes issues.
+    // Low priority: worst case is a stale timestamp on a HUD display for one frame.
+    public static double SimTime { get; private set; }
+
+    // Fictional in-universe date — derived, never stored
+    // Epoch and scale are placeholders — to be decided
+    private static readonly DateTime LoreEpoch     = new DateTime(3200, 1, 1);
+    private static readonly double   TimeScale     = 1.0; // 1.0 = real time, 24.0 = 1 day per hour
+    public  static DateTime           InGameDate
+        => LoreEpoch.AddSeconds(SimTime * TimeScale);
+
+    // Called by simulation thread every tick
+    internal static void Advance(double dt)
+        => SimTime += dt;
+}
+```
+
+> *Design note: Time scale is an open question. ED uses roughly real time + offset, which
+> players appreciate. Multiplayer compatibility favours real time. No time compression planned.*
+
+---
+
+## Environment
+
+Static query class for world state relevant to sensors and noise sources. Acts as the
+ship's local computer view of the surrounding environment — distances, field vectors,
+stellar properties. All values derived from the simulation's `World` object.
+
+The sim thread updates `World` each tick. `Environment` reads from it. Sensors and noise
+functions call into `Environment` rather than taking direct references to world objects —
+keeping the noise/sensor layer decoupled from the world representation.
+
+```csharp
+public static class Environment
+{
+    // Set once per tick by the simulation — main reference to world state
+    internal static World   World        { get; set; }
+    internal static DVec3   ShipPosition { get; set; }  // DVec3 for galaxy-scale precision
+    internal static DVec3   ShipVelocity { get; set; }  // DVec3 — consistent with physics layer
+
+    // ── Nearest star ──────────────────────────────────────────────────────────
+
+    public static CelestialBody NearestStar
+        => World.NearestStar(ShipPosition);
+
+    public static double DistanceToNearestStar
+        => (NearestStar.Position - ShipPosition).Length();
+
+    public static double NearestStarRadius
+        => NearestStar.Radius;
+
+    // Direction from ship to nearest star (unit vector)
+    public static DVec3 DirectionToNearestStar
+        => DVec3.Normalize(NearestStar.Position - ShipPosition);
+
+    // Angle between ship forward vector and nearest star (radians)
+    public static double AngleToNearestStar(DVec3 shipForward)
+        => Math.Acos(DVec3.Dot(shipForward, DirectionToNearestStar));
+
+    // Axial tilt of nearest star (for periodic noise sources)
+    public static double NearestStarAxialTilt
+        => NearestStar.AxialTilt;
+
+    public static double NearestStarRotationPeriod
+        => NearestStar.RotationPeriod; // seconds
+
+    // ── Nearest planet / body ─────────────────────────────────────────────────
+
+    public static CelestialBody NearestBody
+        => World.NearestMassiveBody(ShipPosition);
+
+    public static double DistanceToNearestBody
+        => (NearestBody.Position - ShipPosition).Length();
+
+    public static double DistanceToSurface
+        => DistanceToNearestBody - NearestBody.Radius;
+
+    // ── Field vectors ─────────────────────────────────────────────────────────
+
+    // Current gravitational acceleration vector at ship position
+    public static DVec3 GravitationalVector
+        => World.GravityAt(ShipPosition);
+
+    public static double GravitationalStrength
+        => GravitationalVector.Length();
+
+    // Magnetic field at ship position — significant near neutron stars
+    public static DVec3 MagneticFieldVector
+        => World.MagneticFieldAt(ShipPosition);
+
+    public static double MagneticFieldStrength
+        => MagneticFieldVector.Length();
+
+    // Radiation flux at ship position (from all stellar sources)
+    public static double RadiationFlux
+        => World.RadiationAt(ShipPosition);
+
+    // ── Stellar properties (calculated, not stored) ───────────────────────────
+
+    // Core pressure and temperature — used by Star Siphon depth mechanic
+    // Derived from star mass and class; not stored on the star object
+    public static double NearestStarCorePressure
+        => StarPhysics.CorePressure(NearestStar.Mass, NearestStar.Class);
+
+    public static double NearestStarCoreTemperature
+        => StarPhysics.CoreTemperature(NearestStar.Mass, NearestStar.Class);
+}
+```
+
+> *Note: `World.GravityAt()`, `World.MagneticFieldAt()`, `World.RadiationAt()` are
+> stubs — implementation follows from the physics simulation. The query interface is
+> stable regardless of how the underlying calculation is done.*
+
+---
+
+## Noise
+
+Pure static functions for sensor noise generation. All functions are stateless —
+they take `GameClock.SimTime` as their time input and return a value in roughly −1..1
+(or 0..1 for non-bipolar sources). New noise sources are added here as the sensor
+system is tuned.
+
+The `Seed` parameter decorrelates multiple sensors using the same noise type —
+each sensor instance gets a unique seed (e.g. derived from its topic name hash)
+so they don't drift in lockstep.
+
+```csharp
+public static class Noise
+{
+    // ── 1D Simplex noise — the foundation ────────────────────────────────────
+    //
+    // Simplex noise is a smooth, aperiodic, deterministic function.
+    // Given a continuous input t, it returns a smooth value in −1..1.
+    // Unlike Perlin noise, it has no visible grid artefacts and is faster
+    // to compute. For 1D use (time-varying noise), it's the natural choice.
+    //
+    // Two implementations provided:
+    //   Simplex1()  — standard, good general purpose
+    //   Simplex1Fast() — lower quality, cheaper, suitable for low-priority noise
+
+    public static double Simplex1(double t)
+    {
+        // Standard 1D simplex noise
+        int   i  = (int)Math.Floor(t);
+        double f = t - i;
+        double u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0); // smoothstep
+
+        return Lerp(Grad(Hash(i), f), Grad(Hash(i + 1), f - 1.0), u);
+    }
+
+    public static double Simplex1Fast(double t)
+    {
+        // Cheaper version — cubic smoothstep only, one octave
+        int    i = (int)Math.Floor(t);
+        double f = t - i;
+        double u = f * f * (3.0 - 2.0 * f);
+        return Lerp(Grad(Hash(i), f), Grad(Hash(i + 1), f - 1.0), u);
+    }
+
+    // ── Noise types ───────────────────────────────────────────────────────────
+
+    // White noise — fast, uncorrelated jitter
+    // Frequency controls how quickly it changes
+    public static double White(double seed, double frequency = 500.0)
+        => Simplex1(seed + GameClock.SimTime * frequency);
+
+    // Pink (1/f) noise — slow drift with texture
+    // Sum of octaves at decreasing amplitude — natural-feeling wander
+    public static double Pink(double seed)
+        => Simplex1(seed + GameClock.SimTime * 0.05) * 0.50   // very slow drift
+         + Simplex1(seed + GameClock.SimTime * 0.20) * 0.25   // medium
+         + Simplex1(seed + GameClock.SimTime * 0.80) * 0.125  // faster
+         + Simplex1(seed + GameClock.SimTime * 3.00) * 0.063; // texture
+
+    // Periodic — deterministic sine wave tied to a physical period
+    // Use for neutron star precession, binary orbital period, etc.
+    // period in seconds, phase in radians
+    public static double Periodic(double period, double phase = 0.0)
+        => Math.Sin((GameClock.SimTime / period) * Math.Tau + phase);
+
+    // Spike — occasional sharp transient glitch
+    // Returns near 0.0 most of the time, rare sharp positive burst
+    // frequency: roughly how many spikes per second (fractional OK, e.g. 0.02)
+    // sharpness: higher = narrower spike (try 8.0–20.0)
+    public static double Spike(double seed, double frequency = 0.05, double sharpness = 12.0)
+    {
+        double t = (Simplex1(seed + GameClock.SimTime * frequency) + 1.0) * 0.5; // 0..1
+        return t > 0.92 ? Math.Pow((t - 0.92) / 0.08, sharpness) : 0.0;
+    }
+
+    // ── Scaling helpers ───────────────────────────────────────────────────────
+
+    // Scale noise to sensor range — apply after combining noise sources
+    // noiseFraction: how much of sensor max range the noise can span (e.g. 0.05 = 5%)
+    public static double Scale(double noise, double sensorMax, double noiseFraction)
+        => noise * sensorMax * noiseFraction;
+
+    // Distance falloff — linear then sharp drop
+    // Use to scale external noise sources by proximity
+    // Returns 1.0 at distance=0, 0.0 at distance >= maxRange
+    public static double DistanceFalloff(double distance, double maxRange)
+        => Math.Max(0.0, 1.0 - (distance / maxRange));
+
+    // ── Internals ─────────────────────────────────────────────────────────────
+
+    private static double Lerp(double a, double b, double t)
+        => a + t * (b - a);
+
+    private static double Grad(int hash, double x)
+        => (hash & 1) == 0 ? x : -x;
+
+    private static int Hash(int i)
+    {
+        // Fast integer hash — decorrelates octaves and seeds
+        i = ((i >> 16) ^ i) * 0x45d9f3b;
+        i = ((i >> 16) ^ i) * 0x45d9f3b;
+        i = (i >> 16) ^ i;
+        return i & 0xFF;
+    }
+}
+```
+
+### Usage example — gravity sensor with neutron star interference
+
+```csharp
+// Sensor setup (at ship initialisation):
+var gravitySensor = new PassiveSensor
+{
+    TopicPrefix = "GravitySensor",
+    MaxValue    = 100.0,   // m/s² — chosen to cover all plausible gravity values
+    Seed        = HashCode.Combine("GravitySensor").ToDouble(), // unique seed
+    NoiseWhite  = 0.005,   // 0.5% white noise baseline
+    NoisePink   = 0.010,   // 1.0% slow drift baseline
+};
+
+// Attach neutron star interference (when near one):
+double starPrecessionPeriod = Environment.NearestStar.RotationPeriod * 1000.0; // axial precession >> rotation
+gravitySensor.ExternalNoiseSources.Add(() =>
+    Noise.Periodic(starPrecessionPeriod, phase: 0.3)
+    * Noise.Scale(1.0, gravitySensor.MaxValue, 0.15)          // up to 15% of max
+    * Noise.DistanceFalloff(Environment.DistanceToNearestStar, dangerRadius)
+);
+
+// Each sim tick:
+double rawGravity  = Environment.GravitationalStrength;
+gravitySensor.Publish(rawGravity); // applies noise internally, publishes to bus
+```
 
 ```
 Inferior/
@@ -829,3 +1092,5 @@ Inferior/
 | 2026-05-31 | Compiled into this document from chat history |
 | 2026-06-01 | DataBus major update: threading model, Bus<T> with ConcurrentQueue, RangeValue, RadarContact, RadarLost, simulation thread pattern. Deferred: Comms, Sensors, NavData. |
 | 2026-06-01 | Added Simulation loop section: Simulation class, tick order, PlayerInput snapshot, TickPhysics/Power/Damage/Radar/Publish stubs, startup publications pattern. |
+| 2026-06-02 | Added GameClock, Environment query class, Noise static class with 1D simplex implementations, usage example. |
+| 2026-06-02 | Fixed DVec3 consistency in Environment (was Vector3), added SimTime atomicity note per Code review. |

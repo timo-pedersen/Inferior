@@ -55,12 +55,21 @@ public class Simulation
     {
         var input = _input; // read snapshot once — consistent across tick
 
+        // Advance the central clock before any subsystem reads it
+        GameClock.Advance(dt);
+
+        // Sync Environment so sensors and noise have current ship state
+        UpdateEnvironment();
+
         TickPhysics(input, dt);
         TickPower(dt);
         TickDamage(dt);
         TickRadar();
         Publish();
     }
+
+    /// <summary>Push current ship state into Environment before sensor/noise reads.</summary>
+    protected virtual void UpdateEnvironment() { }
 
     // ── Subsystems ────────────────────────────────────────────────────────────
 

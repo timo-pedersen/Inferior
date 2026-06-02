@@ -45,6 +45,9 @@ public readonly struct DVec3
         return len > 0 ? this / len : Zero;
     }
 
+    /// <summary>Static form — same as v.Normalized(). Matches XNA/Unity naming convention.</summary>
+    public static DVec3 Normalize(DVec3 v) => v.Normalized();
+
     // ── Products ──────────────────────────────────────────────────────────────
 
     public static double Dot(DVec3 a, DVec3 b)
