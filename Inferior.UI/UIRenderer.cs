@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using System.Linq;
 
 namespace Inferior.UI;
 
@@ -65,7 +66,21 @@ public sealed class UIRenderer : IDisposable
 
     public void DrawText(SpriteBatch sb, string text, Vector2 pos,
         SpriteFont font, float scale, Color color)
-        => sb.DrawString(font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+    {
+        // Strip characters outside the font's glyph range to prevent crashes.
+        // SpriteFont.DefaultCharacter handles unknowns only if set; stripping is safer.
+        var safe = font.DefaultCharacter.HasValue
+            ? text
+            : new string(text.Where(c => IsInFont(font, c)).ToArray());
+        if (safe.Length > 0)
+            sb.DrawString(font, safe, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+    }
+
+    private static bool IsInFont(SpriteFont font, char c)
+    {
+        try { font.MeasureString(c.ToString()); return true; }
+        catch { return false; }
+    }
 
     public void DrawTextCentred(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color)

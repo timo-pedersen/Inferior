@@ -14,7 +14,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     private GameStateMachine _stateMachine = new();
     private SpriteFont _font = null!;
-    private readonly Simulation _simulation = new();
+    private readonly SpaceSimulation _simulation = new();
 
     public InferiorGame()
     {

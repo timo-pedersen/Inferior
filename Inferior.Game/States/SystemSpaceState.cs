@@ -2,8 +2,11 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
+using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using Inferior.UI;
+using Inferior.UI.Controls;
 
 namespace Inferior.Game.States;
 
@@ -72,6 +75,16 @@ public sealed class SystemSpaceState : GameState
     private KeyboardState    _prevKeys;
     private Rectangle        _backButtonRect;
     private Rectangle        _timeButtonRect;
+
+    // ── DataBus UI ────────────────────────────────────────────────────────────
+    private UIManager?       _ui;
+    private InstrumentMeter? _heartbeatMeter;
+    private InstrumentMeter? _simTimeMeter;
+    private SystemConsole?   _console;
+    // Stored so we can unsubscribe on OnExit
+    private Action<double>?  _heartbeatHandler;
+    private Action<double>?  _simTimeHandler;
+    private Action<string>?  _systemHandler;
 
     // ── Visual constants ──────────────────────────────────────────────────────
     // Visual radii in render units (NOT true physical radius — inflated for visibility)
@@ -154,10 +167,65 @@ public sealed class SystemSpaceState : GameState
 
         _pendingTransition = null;
         UpdateUI();
+
+        // ── DataBus UI setup ──────────────────────────────────────────────────
+        var theme = Theme.InferiorDark(_font);
+        _ui = new UIManager(_gd, theme);
+
+        _heartbeatMeter = new InstrumentMeter
+        {
+            Label    = "HEARTBEAT",
+            MinValue = 0,
+            MaxValue = 100,
+            Bounds   = new Rectangle(16, 108, 205, 46),
+        };
+
+        _simTimeMeter = new InstrumentMeter
+        {
+            Label    = "SIM TIME",
+            MinValue = 0,
+            MaxValue = 300,   // auto-scrolls past max — value still shows correctly
+            Format   = "F0",
+            Bounds   = new Rectangle(16, 162, 205, 46),
+        };
+
+        _console = new SystemConsole
+        {
+            Header   = "SYSTEM LOG",
+            MaxLines = 7,
+            Bounds   = new Rectangle(16, 216, 205, 145),
+        };
+
+        _ui.Add(_heartbeatMeter);
+        _ui.Add(_simTimeMeter);
+        _ui.Add(_console);
+
+        // Subscribe — handlers run on main thread during DataBus.Drain()
+        _heartbeatHandler = v => _heartbeatMeter.SetValue(v);
+        _simTimeHandler   = v => _simTimeMeter.SetValue(v);
+        _systemHandler    = msg => _console.AddMessage(msg);
+
+        DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
+        DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.SimTime}",   _simTimeHandler);
+        DataBus.System.Subscribe(Topics.System.All, _systemHandler);
+
+        // First system message — confirms state entry
+        DataBus.System.Publish(Topics.System.All, $"Entered {_star.Name}");
     }
 
     public override void OnExit()
     {
+        // Unsubscribe before disposing controls
+        if (_heartbeatHandler != null)
+            DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
+        if (_simTimeHandler != null)
+            DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.SimTime}", _simTimeHandler);
+        if (_systemHandler != null)
+            DataBus.System.Unsubscribe(Topics.System.All, _systemHandler);
+
+        _ui?.Dispose();
+        _ui = null;
+
         _effect?.Dispose();
         _sphereVb?.Dispose();
         _sphereIb?.Dispose();
@@ -177,6 +245,9 @@ public sealed class SystemSpaceState : GameState
         var mouse = Mouse.GetState();
         var keys  = Keyboard.GetState();
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
+
+        // Feed input to UI before updating _prevMouse/_prevKeys
+        _ui?.Update(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
 
         _gameTimeSeconds += dt * TimeCompression;
 
@@ -252,6 +323,9 @@ public sealed class SystemSpaceState : GameState
         DrawBackButton(sb, Mouse.GetState());
         DrawTimeButton(sb, Mouse.GetState());
         sb.End();
+
+        // UI library draws on top — owns its own SpriteBatch
+        _ui?.Draw();
     }
 
     // ── 3D drawing ────────────────────────────────────────────────────────────

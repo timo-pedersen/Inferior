@@ -50,4 +50,11 @@ public static class Topics
     {
         public const string Sanity = "Sanity";
     }
+
+    /// <summary>Debug / development sensors — not present in release builds.</summary>
+    public static class Debug
+    {
+        public const string Heartbeat = "Heartbeat";  // sine-wave 0–100, for meter demo
+        public const string SimTime   = "SimTime";    // growing clock, for meter demo
+    }
 }
