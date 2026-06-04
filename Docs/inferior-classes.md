@@ -508,19 +508,17 @@ protected override void Update(GameTime gameTime)
 
 ## Physics
 
-### Mass lock check
+### Hyperspace interference check
+
+> *Design note: the original mass lock mechanic has been superseded. Mass-based
+> lock breaks lore near small bodies (asteroids, small moons). The replacement is
+> **hyperspace interference** — a radius based on the ship's own power output and
+> size rather than on nearby object mass. Implementation pending.*
 
 ```csharp
-bool MassLocked(Ship ship, List<GameObject> nearbyObjects)
-{
-    foreach (var obj in nearbyObjects)
-    {
-        double distance      = (obj.Position - ship.Position).Length();
-        double massLockRadius = Math.Sqrt(obj.Mass) * massLockConstant;
-        if (distance < massLockRadius) return true;
-    }
-    return false;
-}
+// Placeholder — final formula TBD; likely based on power core output
+bool HyperspaceInterferenceLock(Ship ship)
+    => ship.PowerSystem.CurrentOutput > hyperspaceInterferenceThreshold;
 ```
 
 ### Galaxy seed (deterministic)
@@ -573,7 +571,11 @@ public abstract class Control
 }
 ```
 
-Controls: `Button`, `Label`, `TextBox`, `Panel`, `Window` (draggable container).
+Controls: `Button`, `Label`, `TextBox`, `Panel`, `Window` (draggable container),
+`InstrumentMeter` (bar + value readout, subscribes to a DataBus topic),
+`SystemConsole` (scrolling message log, supports Clip/Wrap/Bleed line-break modes),
+`DirectionBall` (projects 3D direction vectors onto a 2D sphere — filled dot = front
+hemisphere, hollow rim dot = rear hemisphere, central crosshair for alignment).
 
 ---
 
@@ -590,71 +592,89 @@ Each simulation tick runs subsystems in a fixed order. Later subsystems depend o
 from earlier ones within the same tick.
 
 ```
-1. Input      — consume latest PlayerInput snapshot
-2. Physics    — apply thrust, update positions and velocities
-3. Power      — distribute power, generate heat
-4. Damage     — apply heat/impact damage, update component states
-5. Radar      — scan nearby objects, diff against last frame
-6. Publish    — push all values to DataBus buses
+1. Input       — consume latest PlayerInput snapshot
+2. GameClock   — advance SimTime for this tick
+3. Environment — sync world state so sensors have current positions
+4. Physics     — apply thrust, update positions and velocities
+5. Power       — distribute power, generate heat
+6. Damage      — apply heat/impact damage, update component states
+7. Radar       — scan nearby objects, diff against last frame
+8. Publish     — push all values to DataBus buses (sensors tick here)
 ```
 
 ### `Simulation` class
 
+Lives in `Inferior.Gameplay`. Concrete subclasses (e.g. `SpaceSimulation` in
+`Inferior.Game`) override the protected virtual tick methods.
+
+World state crosses from the main thread to the sim thread via a `volatile` immutable
+snapshot record — same pattern as `PlayerInput`. The sim thread never blocks on the
+main thread.
+
 ```csharp
+// Inferior.Gameplay namespace
 public class Simulation
 {
-    private readonly Ship         _ship;
-    private readonly World        _world;    // all game objects
-    private volatile PlayerInput  _input;    // written by main thread, read by sim
+    private volatile PlayerInput _input   = PlayerInput.Zero;
+    private volatile bool        _running = false;
+    private Thread?              _thread;
 
-    private Thread  _thread;
-    private bool    _running;
+    public void Start() { ... }
+    public void Stop()  { ... }
 
-    public void Start()
-    {
-        _running = true;
-        _thread  = new Thread(Loop) { IsBackground = true, Name = "SimThread" };
-        _thread.Start();
-    }
-
-    public void Stop()
-        => _running = false;
-
-    // Called from main thread — atomically replaces the input snapshot
-    public void SetInput(PlayerInput input)
-        => _input = input;
-
-    private void Loop()
-    {
-        const double TickRate    = 1.0 / 60.0;
-        var          timer       = Stopwatch.StartNew();
-        double       accumulated = 0;
-
-        while (_running)
-        {
-            accumulated += timer.Elapsed.TotalSeconds;
-            timer.Restart();
-
-            while (accumulated >= TickRate)
-            {
-                Tick(TickRate);
-                accumulated -= TickRate;
-            }
-
-            Thread.Sleep(1); // yield — don't spin
-        }
-    }
+    // Called from main thread each frame — atomic reference swap
+    public void SetInput(PlayerInput input) => _input = input;
 
     private void Tick(double dt)
     {
-        var input = _input; // read snapshot once — consistent across tick
+        var input = _input;         // read snapshot once
+
+        GameClock.Advance(dt);      // advance central clock first
+        UpdateEnvironment();        // sync world state for sensors
 
         TickPhysics(input, dt);
         TickPower(dt);
         TickDamage(dt);
         TickRadar();
-        Publish();
+        Publish();                  // sensors tick inside Publish()
     }
+
+    // Override in subclass — all are no-ops in base
+    protected virtual void UpdateEnvironment() { }
+    protected virtual void TickPhysics(PlayerInput input, double dt) { }
+    protected virtual void TickPower(double dt) { }
+    protected virtual void TickDamage(double dt) { }
+    protected virtual void TickRadar() { }
+    protected virtual void Publish() { }
+}
+```
+
+#### World state handoff — `WorldSnapshot` pattern
+
+The concrete `SpaceSimulation` class maintains a `volatile WorldSnapshot?` record
+written by the main thread via `SetWorldState(...)` and read atomically by
+`UpdateEnvironment()` on the sim thread. The record is immutable, so no partial
+reads are possible.
+
+```csharp
+// In SpaceSimulation (Inferior.Game):
+private sealed record WorldSnapshot(Star Star, StarSystem System,
+                                    DVec3 ShipPos, double GameTime);
+private volatile WorldSnapshot? _worldSnapshot;
+
+public void SetWorldState(Star star, StarSystem system,
+                          DVec3 shipPos, double gameTime)
+    => _worldSnapshot = new WorldSnapshot(star, system, shipPos, gameTime);
+
+protected override void UpdateEnvironment()
+{
+    var snap = _worldSnapshot;
+    if (snap == null) return;       // retain previous state until main thread provides one
+
+    var world = SensorEnvironment.World;
+    world.MassiveBodies.Clear();
+    // ... populate from snap.System ...
+    SensorEnvironment.UpdateFromSimThread(world, snap.ShipPos, DVec3.Zero);
 }
 ```
 
@@ -836,7 +856,8 @@ public static class GameClock
         => LoreEpoch.AddSeconds(SimTime * TimeScale);
 
     // Called by simulation thread every tick
-    internal static void Advance(double dt)
+    // public so Inferior.Gameplay (a different assembly) can call it
+    public static void Advance(double dt)
         => SimTime += dt;
 }
 ```
@@ -857,85 +878,56 @@ functions call into `Environment` rather than taking direct references to world 
 keeping the noise/sensor layer decoupled from the world representation.
 
 ```csharp
+// Inferior.Gameplay.SensorData namespace
 public static class Environment
 {
-    // Set once per tick by the simulation — main reference to world state
-    internal static World   World        { get; set; }
-    internal static DVec3   ShipPosition { get; set; }  // DVec3 for galaxy-scale precision
-    internal static DVec3   ShipVelocity { get; set; }  // DVec3 — consistent with physics layer
+    // Private setters — updated exclusively via UpdateFromSimThread()
+    public static SimWorld World        { get; private set; } = new();
+    public static DVec3    ShipPosition { get; private set; }
+    public static DVec3    ShipVelocity { get; private set; }
+
+    // Single entry point for sim-thread state updates — explicit, no accidental writes
+    public static void UpdateFromSimThread(SimWorld world, DVec3 shipPos, DVec3 shipVel)
+    {
+        World        = world;
+        ShipPosition = shipPos;
+        ShipVelocity = shipVel;
+    }
 
     // ── Nearest star ──────────────────────────────────────────────────────────
 
-    public static CelestialBody NearestStar
-        => World.NearestStar(ShipPosition);
-
-    public static double DistanceToNearestStar
-        => (NearestStar.Position - ShipPosition).Length();
-
-    public static double NearestStarRadius
-        => NearestStar.Radius;
-
-    // Direction from ship to nearest star (unit vector)
-    public static DVec3 DirectionToNearestStar
+    public static CelestialBody NearestStar          => World.NearestStar(ShipPosition);
+    public static double        DistanceToNearestStar => (NearestStar.Position - ShipPosition).Length;
+    public static DVec3         DirectionToNearestStar
         => DVec3.Normalize(NearestStar.Position - ShipPosition);
 
-    // Angle between ship forward vector and nearest star (radians)
-    public static double AngleToNearestStar(DVec3 shipForward)
-        => Math.Acos(DVec3.Dot(shipForward, DirectionToNearestStar));
+    // ── Nearest body ─────────────────────────────────────────────────────────
 
-    // Axial tilt of nearest star (for periodic noise sources)
-    public static double NearestStarAxialTilt
-        => NearestStar.AxialTilt;
-
-    public static double NearestStarRotationPeriod
-        => NearestStar.RotationPeriod; // seconds
-
-    // ── Nearest planet / body ─────────────────────────────────────────────────
-
-    public static CelestialBody NearestBody
-        => World.NearestMassiveBody(ShipPosition);
-
-    public static double DistanceToNearestBody
-        => (NearestBody.Position - ShipPosition).Length();
-
-    public static double DistanceToSurface
-        => DistanceToNearestBody - NearestBody.Radius;
+    public static CelestialBody NearestBody           => World.NearestMassiveBody(ShipPosition);
+    public static double        DistanceToNearestBody => (NearestBody.Position - ShipPosition).Length;
+    public static double        DistanceToSurface     => DistanceToNearestBody - NearestBody.Radius;
 
     // ── Field vectors ─────────────────────────────────────────────────────────
 
-    // Current gravitational acceleration vector at ship position
-    public static DVec3 GravitationalVector
-        => World.GravityAt(ShipPosition);
+    // Gravity bypasses SimWorld — calls GravityCalculations directly to avoid
+    // a circular dependency (Physics ↔ SensorData)
+    public static DVec3  GravitationalVector
+        => GravityCalculations.GravityAt(ShipPosition, World.MassiveBodies);
+    public static double GravitationalStrength => GravitationalVector.Length;
 
-    public static double GravitationalStrength
-        => GravitationalVector.Length();
+    public static DVec3  MagneticFieldVector   => World.MagneticFieldAt(ShipPosition); // stub
+    public static double RadiationFlux         => World.RadiationAt(ShipPosition);     // stub
 
-    // Magnetic field at ship position — significant near neutron stars
-    public static DVec3 MagneticFieldVector
-        => World.MagneticFieldAt(ShipPosition);
+    // ── Stellar properties ────────────────────────────────────────────────────
 
-    public static double MagneticFieldStrength
-        => MagneticFieldVector.Length();
-
-    // Radiation flux at ship position (from all stellar sources)
-    public static double RadiationFlux
-        => World.RadiationAt(ShipPosition);
-
-    // ── Stellar properties (calculated, not stored) ───────────────────────────
-
-    // Core pressure and temperature — used by Star Siphon depth mechanic
-    // Derived from star mass and class; not stored on the star object
+    // StarPhysics lives in Inferior.Galaxy; Gameplay → Galaxy dep is intentional
     public static double NearestStarCorePressure
-        => StarPhysics.CorePressure(NearestStar.Mass, NearestStar.Class);
-
-    public static double NearestStarCoreTemperature
-        => StarPhysics.CoreTemperature(NearestStar.Mass, NearestStar.Class);
+        => Galaxy.StarPhysics.CorePressure(NearestStar.Class, NearestStar.Mass);
 }
 ```
 
-> *Note: `World.GravityAt()`, `World.MagneticFieldAt()`, `World.RadiationAt()` are
-> stubs — implementation follows from the physics simulation. The query interface is
-> stable regardless of how the underlying calculation is done.*
+> *Note: `SimWorld.MagneticFieldAt()` and `RadiationAt()` are stubs pending physics
+> implementation. `GravityAt` is handled by `GravityCalculations` (see below).*
 
 ---
 
@@ -1046,40 +1038,95 @@ public static class Noise
 }
 ```
 
-### Usage example — gravity sensor with neutron star interference
+---
+
+## Sensors
+
+Lives in `Inferior.Gameplay/Sensors/`. Called from the sim thread in `Publish()`.
+
+### `PassiveSensor`
+
+Reusable base class. Reads a raw physical value, layers noise, publishes to
+`DataBus.Instruments`. The caller supplies the raw value; the sensor handles noise
+and publishing.
 
 ```csharp
-// Sensor setup (at ship initialisation):
-var gravitySensor = new PassiveSensor
+// Inferior.Gameplay.Sensors namespace
+public sealed class PassiveSensor
 {
-    TopicPrefix = "GravitySensor",
-    MaxValue    = 100.0,   // m/s² — chosen to cover all plausible gravity values
-    Seed        = HashCode.Combine("GravitySensor").ToDouble(), // unique seed
-    NoiseWhite  = 0.005,   // 0.5% white noise baseline
-    NoisePink   = 0.010,   // 1.0% slow drift baseline
-};
+    public required string TopicPrefix { get; init; }  // e.g. "GravitySensor"
+    public required string ValueName   { get; init; }  // e.g. "Strength"
+    public double MaxValue   { get; init; } = 1.0;
+    public double Seed       { get; init; } = 0.0;     // decorrelates noise from other sensors
+    public double NoiseWhite { get; init; } = 0.0;     // fraction of MaxValue, e.g. 0.005
+    public double NoisePink  { get; init; } = 0.0;
 
-// Attach neutron star interference (when near one):
-double starPrecessionPeriod = Environment.NearestStar.RotationPeriod * 1000.0; // axial precession >> rotation
-gravitySensor.ExternalNoiseSources.Add(() =>
-    Noise.Periodic(starPrecessionPeriod, phase: 0.3)
-    * Noise.Scale(1.0, gravitySensor.MaxValue, 0.15)          // up to 15% of max
+    // Optional environment-driven noise (EM interference, stellar activity, etc.)
+    public List<Func<double>> ExternalNoiseSources { get; } = [];
+
+    public void Publish(double rawValue)
+    {
+        double noise = Noise.Scale(Noise.White(Seed),      MaxValue, NoiseWhite)
+                     + Noise.Scale(Noise.Pink(Seed + 1e4), MaxValue, NoisePink);
+        foreach (var source in ExternalNoiseSources)
+            noise += source();
+        DataBus.Instruments.Publish($"{TopicPrefix}.{ValueName}", rawValue + noise);
+    }
+}
+```
+
+### `GravitySensor`
+
+Concrete sensor for gravitational field strength. Reads `Environment.GravitationalStrength`
+(m/s²) and publishes to `"GravitySensor.Strength"`. Call `Tick()` once per sim tick
+from `Simulation.Publish()`.
+
+```csharp
+public sealed class GravitySensor
+{
+    private readonly PassiveSensor _sensor = new()
+    {
+        TopicPrefix = "GravitySensor",
+        ValueName   = Topics.GravitySensor.Strength,
+        MaxValue    = 100.0,  // m/s² — covers asteroids to neutron stars
+        Seed        = (double)HashCode.Combine("GravitySensor"),
+        NoiseWhite  = 0.005,
+        NoisePink   = 0.010,
+    };
+
+    public PassiveSensor Sensor => _sensor;  // expose to attach ExternalNoiseSources
+
+    public void Tick()
+        => _sensor.Publish(SensorData.Environment.GravitationalStrength);
+}
+```
+
+### Usage example — attaching neutron star interference
+
+```csharp
+double precessionPeriod = Environment.NearestStar.RotationPeriod * 1000.0;
+gravitySensor.Sensor.ExternalNoiseSources.Add(() =>
+    Noise.Periodic(precessionPeriod, phase: 0.3)
+    * Noise.Scale(1.0, 100.0, 0.15)   // up to 15% of max
     * Noise.DistanceFalloff(Environment.DistanceToNearestStar, dangerRadius)
 );
-
-// Each sim tick:
-double rawGravity  = Environment.GravitationalStrength;
-gravitySensor.Publish(rawGravity); // applies noise internally, publishes to bus
 ```
 
 ```
 Inferior/
-    Inferior.Core/          — shared types, DVec3, units, DataBus
-    Inferior.Galaxy/        — generation, star systems, orbital mechanics
-    Inferior.Rendering/     — MonoGame rendering, camera, mesh
-    Inferior.Gameplay/      — physics, power sim, damage, flight model
-    Inferior.UI/            — IUIRenderer, controls
-    Inferior.Game/          — entry point, state machine, game loop
+    Inferior.Core/          — DVec3, Units, DataBus, GameClock, Noise, PlayerInput
+    Inferior.Galaxy/        — star/system generation, OrbitalBody, StarPhysics
+    Inferior.Gameplay/      — Simulation, Physics/, SensorData/, Sensors/
+    Inferior.Rendering/     — Camera3D, MeshFactory
+    Inferior.UI/            — UIManager, UIRenderer, Theme, all controls
+    Inferior.Game/          — entry point, game states, SpaceSimulation
+```
+
+Dependency graph:
+```
+Core ← Galaxy ← Gameplay ← Rendering
+Core ←─────────────────── UI
+Core ← Galaxy ← Gameplay ← Game  (references everything)
 ```
 
 ---
@@ -1094,3 +1141,4 @@ Inferior/
 | 2026-06-01 | Added Simulation loop section: Simulation class, tick order, PlayerInput snapshot, TickPhysics/Power/Damage/Radar/Publish stubs, startup publications pattern. |
 | 2026-06-02 | Added GameClock, Environment query class, Noise static class with 1D simplex implementations, usage example. |
 | 2026-06-02 | Fixed DVec3 consistency in Environment (was Vector3), added SimTime atomicity note per Code review. |
+| 2026-06-04 | Major sync: Simulation moved to Inferior.Gameplay; Tick order updated (GameClock + UpdateEnvironment); WorldSnapshot pattern documented; Environment updated (SimWorld, GravityCalculations, UpdateFromSimThread, private setters); mass lock superseded by hyperspace interference; GameClock.Advance now public; Sensors section added (PassiveSensor, GravitySensor); UI controls list updated (InstrumentMeter, SystemConsole, DirectionBall); project structure updated. |
