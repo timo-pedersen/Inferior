@@ -15,11 +15,22 @@ namespace Inferior.Gameplay.SensorData;
 /// </summary>
 public static class Environment
 {
-    // ── Updated by sim thread once per tick ───────────────────────────────────
+    // ── Updated by sim thread once per tick via UpdateFromSimThread() ────────────
 
-    public static SimWorld World        { get; set; } = new();
-    public static DVec3    ShipPosition { get; set; }   // DVec3 for galaxy-scale precision
-    public static DVec3    ShipVelocity { get; set; }
+    public static SimWorld World        { get; private set; } = new();
+    public static DVec3    ShipPosition { get; private set; }
+    public static DVec3    ShipVelocity { get; private set; }
+
+    /// <summary>
+    /// Single point of entry for sim-thread state updates.
+    /// Private setters keep accidental writes from other callers impossible.
+    /// </summary>
+    public static void UpdateFromSimThread(SimWorld world, DVec3 shipPos, DVec3 shipVel)
+    {
+        World        = world;
+        ShipPosition = shipPos;
+        ShipVelocity = shipVel;
+    }
 
     // ── Nearest star ──────────────────────────────────────────────────────────
 

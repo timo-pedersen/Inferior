@@ -34,10 +34,10 @@ public sealed class SpaceSimulation : Simulation
     protected override void UpdateEnvironment()
     {
         var snap = _worldSnapshot;
+        if (snap == null) return;  // retain previous state until main thread provides one
+
         var world = SensorEnvironment.World;
         world.MassiveBodies.Clear();
-
-        if (snap == null) return;
 
         world.MassiveBodies.Add(new CelestialBody
         {
@@ -45,13 +45,13 @@ public sealed class SpaceSimulation : Simulation
             Mass           = snap.Star.MassKg,
             Radius         = snap.Star.RadiusMeters,
             Class          = snap.Star.SpectralClass,
-            RotationPeriod = 2.192e6, // ~25.4 days default
+            RotationPeriod = 2.192e6,
         });
 
         foreach (var planet in snap.System.Planets)
             CollectBody(world, planet, DVec3.Zero, snap.GameTime);
 
-        SensorEnvironment.ShipPosition = snap.ShipPos;
+        SensorEnvironment.UpdateFromSimThread(world, snap.ShipPos, DVec3.Zero);
     }
 
     private static void CollectBody(SimWorld world, OrbitalBody body, DVec3 parentPos, double gameTime)
