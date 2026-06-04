@@ -113,27 +113,15 @@ public sealed class DirectionBall : Control
         float upComp      = Vector3.Dot(dir, _up);
         float forwardComp = Vector3.Dot(dir, _forward);
 
-        // 2D projection — right maps to X, up maps to -Y (screen Y is down)
-        var projected = new Vector2(rightComp, -upComp);
-
-        Vector2 dotPos;
-        bool    inFront;
-
-        if (forwardComp >= 0f)
-        {
-            // Front hemisphere — dot sits inside the circle
-            dotPos  = center + projected * ballRadius;
-            inFront = true;
-        }
-        else
-        {
-            // Rear hemisphere — dot sits on the rim at the correct azimuth
-            Vector2 rimDir = projected.LengthSquared() > 1e-6f
-                ? Vector2.Normalize(projected)
-                : Vector2.UnitX;   // exactly-behind fallback
-            dotPos  = center + rimDir * ballRadius;
-            inFront = false;
-        }
+        // 2D projection — right maps to X, up maps to -Y (screen Y is down).
+        // For a unit vector: rightComp² + upComp² = 1 − forwardComp²
+        // This means the projected magnitude is always ≤ 1, so the dot naturally
+        // sits inside the circle for both hemispheres — symmetric around the equator.
+        // Front hemisphere: dot moves from centre (straight ahead) to rim (90° off).
+        // Rear hemisphere:  same math, filled → hollow to distinguish.
+        var     projected = new Vector2(rightComp, -upComp);
+        Vector2 dotPos    = center + projected * ballRadius;
+        bool    inFront   = forwardComp >= 0f;
 
         const float DotRadius = 3.5f;
 
