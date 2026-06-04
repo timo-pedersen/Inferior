@@ -5,6 +5,7 @@ using Inferior.Core;
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
 
@@ -80,10 +81,13 @@ public sealed class SystemSpaceState : GameState
     private UIManager?       _ui;
     private InstrumentMeter? _heartbeatMeter;
     private InstrumentMeter? _simTimeMeter;
+    private InstrumentMeter? _gravityMeter;
     private SystemConsole?   _console;
+    private DirectionBall?   _dirBall;
     // Stored so we can unsubscribe on OnExit
     private Action<double>?  _heartbeatHandler;
     private Action<double>?  _simTimeHandler;
+    private Action<double>?  _gravityHandler;
     private Action<string>?  _systemHandler;
 
     // ── Visual constants ──────────────────────────────────────────────────────
@@ -189,9 +193,18 @@ public sealed class SystemSpaceState : GameState
         {
             Label    = "SIM TIME",
             MinValue = 0,
-            MaxValue = 300,   // auto-scrolls past max — value still shows correctly
+            MaxValue = 300,
             Format   = "F0",
             Bounds   = new Rectangle(16, 162, 205, 46),
+        };
+
+        _gravityMeter = new InstrumentMeter
+        {
+            Label    = "GRAVITY",
+            MinValue = 0,
+            MaxValue = 30,    // m/s² — covers gas giants; value text shows true reading
+            Format   = "F4",
+            Bounds   = new Rectangle(16, 216, 205, 46),
         };
 
         _console = new SystemConsole
@@ -199,20 +212,30 @@ public sealed class SystemSpaceState : GameState
             Header    = "SYSTEM LOG",
             MaxLines  = 7,
             LineBreak = LineBreakMode.Wrap,
-            Bounds    = new Rectangle(16, 216, 205, 145),
+            Bounds    = new Rectangle(16, 270, 205, 130),
+        };
+
+        _dirBall = new DirectionBall
+        {
+            Header = "HEADING",
+            Bounds = new Rectangle(228, 108, 130, 155),
         };
 
         _ui.Add(_heartbeatMeter);
         _ui.Add(_simTimeMeter);
+        _ui.Add(_gravityMeter);
         _ui.Add(_console);
+        _ui.Add(_dirBall);
 
         // Subscribe — handlers run on main thread during DataBus.Drain()
         _heartbeatHandler = v => _heartbeatMeter.SetValue(v);
         _simTimeHandler   = v => _simTimeMeter.SetValue(v);
+        _gravityHandler   = v => _gravityMeter.SetValue(v);
         _systemHandler    = msg => _console.AddMessage(msg);
 
         DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
         DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.SimTime}",   _simTimeHandler);
+        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.Strength}", _gravityHandler);
         DataBus.System.Subscribe(Topics.System.All, _systemHandler);
 
         // First system message — confirms state entry
@@ -226,6 +249,8 @@ public sealed class SystemSpaceState : GameState
             DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
         if (_simTimeHandler != null)
             DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.SimTime}", _simTimeHandler);
+        if (_gravityHandler != null)
+            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.Strength}", _gravityHandler);
         if (_systemHandler != null)
             DataBus.System.Unsubscribe(Topics.System.All, _systemHandler);
 
@@ -260,6 +285,22 @@ public sealed class SystemSpaceState : GameState
         // Camera input (mouse look only when right button held)
         _camera.Update(dt, mouse, keys);
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
+
+        // Update direction ball — orientation + direction to star
+        if (_dirBall != null)
+        {
+            _dirBall.SetOrientation(_camera.Forward, _camera.Right, _camera.Up);
+
+            // Star is always at universe origin
+            var toStar = DVec3.Zero - _camera.UniversePosition;
+            if (toStar.Length > 0.001)
+            {
+                toStar = toStar / toStar.Length; // normalise
+                _dirBall.SetVector("star",
+                    new Vector3((float)toStar.X, (float)toStar.Y, (float)toStar.Z),
+                    new Color(255, 220, 80), "★");
+            }
+        }
 
         // Rebuild body positions
         _bodyPositions.Clear();

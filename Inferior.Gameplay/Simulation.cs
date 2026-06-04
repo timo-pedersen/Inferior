@@ -1,10 +1,20 @@
 using System.Diagnostics;
+using Inferior.Core.Simulation;   // GameClock
 
-namespace Inferior.Core.Simulation;
+namespace Inferior.Gameplay;
 
 /// <summary>
 /// Runs the physics/power/damage/radar simulation at 60 Hz on a background thread.
 /// Main thread calls SetInput() each frame; DataBus.Drain() dispatches results.
+///
+/// Tick order each frame:
+///   1. GameClock.Advance     — central time authority
+///   2. UpdateEnvironment     — sync world state for sensors
+///   3. TickPhysics           — thrust, positions, velocities
+///   4. TickPower             — distribute power, generate heat
+///   5. TickDamage            — heat/impact damage, component states
+///   6. TickRadar             — scan nearby objects, publish contacts
+///   7. Publish               — push live values to DataBus
 /// </summary>
 public class Simulation
 {
@@ -27,7 +37,7 @@ public class Simulation
         _thread?.Join(TimeSpan.FromMilliseconds(500));
     }
 
-    // Called from main thread each frame — atomically replaces the input snapshot
+    /// <summary>Called from main thread each frame — atomically replaces the input snapshot.</summary>
     public void SetInput(PlayerInput input)
         => _input = input;
 
@@ -55,10 +65,7 @@ public class Simulation
     {
         var input = _input; // read snapshot once — consistent across tick
 
-        // Advance the central clock before any subsystem reads it
         GameClock.Advance(dt);
-
-        // Sync Environment so sensors and noise have current ship state
         UpdateEnvironment();
 
         TickPhysics(input, dt);
@@ -68,10 +75,10 @@ public class Simulation
         Publish();
     }
 
-    /// <summary>Push current ship state into Environment before sensor/noise reads.</summary>
-    protected virtual void UpdateEnvironment() { }
+    // ── Subsystems — override in concrete subclasses ──────────────────────────
 
-    // ── Subsystems ────────────────────────────────────────────────────────────
+    /// <summary>Sync ship position/velocity into Environment for this tick's sensors.</summary>
+    protected virtual void UpdateEnvironment() { }
 
     protected virtual void TickPhysics(PlayerInput input, double dt) { }
 

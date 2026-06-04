@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Inferior.Core.Math;
+using System.Runtime.CompilerServices;
 
 namespace Inferior.Galaxy;
 
@@ -177,51 +178,72 @@ public sealed class Star
         return rng.WeightedPick(classes, weights);
     }
 
+    public static (double, double) MassRange(SpectralClass sc)
+    {
+        return sc switch
+        {
+            SpectralClass.O => (16, 150),
+            SpectralClass.B => (2, 16),
+            SpectralClass.A => (1.4, 2.1),
+            SpectralClass.F => (1.04, 1.4),
+            SpectralClass.G => (0.8, 1.04),
+            SpectralClass.K => (0.45, 0.8),
+            SpectralClass.M => (0.08, 0.45),
+            SpectralClass.WhiteDwarf => (0.17, 1.33),
+            SpectralClass.NeutronStar => (1.4, 2.1),
+            SpectralClass.BlackHole => (5, 20),
+            _ => (0, 0),
+        };
+    }
+
     private static (double mass, double radius, double luminosity, double temp)
         GetPhysicals(SpectralClass sc, Core.Random.SeededRandom rng)
     {
+        (double massLow, double massHigh) = MassRange(sc);
+        double solarMass = rng.NextDouble(massLow, massHigh);
+        double solarRadius = StarPhysics.StellarRadius(sc, solarMass);
         // Returns (mass in solar masses, radius in solar radii, luminosity, temp K)
         // then converts to SI at the end
         (double massS, double radS, double lum, double temp) = sc switch
         {
             SpectralClass.O => (
-                rng.NextDouble(20, 90),
-                rng.NextDouble(7, 15),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(30_000, 1_000_000),
                 rng.NextDouble(30_000, 50_000)),
             SpectralClass.B => (
-                rng.NextDouble(3, 20),
-                rng.NextDouble(2, 7),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(100, 30_000),
                 rng.NextDouble(10_000, 30_000)),
             SpectralClass.A => (
-                rng.NextDouble(1.5, 3),
-                rng.NextDouble(1.4, 2),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(6, 100),
                 rng.NextDouble(7_500, 10_000)),
             SpectralClass.F => (
-                rng.NextDouble(1.05, 1.5),
-                rng.NextDouble(1.1, 1.4),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(1.5, 6),
                 rng.NextDouble(6_000, 7_500)),
             SpectralClass.G => (
-                rng.NextDouble(0.8, 1.05),
-                rng.NextDouble(0.85, 1.1),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(0.5, 1.5),
                 rng.NextDouble(5_200, 6_000)),
             SpectralClass.K => (
-                rng.NextDouble(0.45, 0.8),
-                rng.NextDouble(0.6, 0.85),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(0.1, 0.5),
                 rng.NextDouble(3_700, 5_200)),
             SpectralClass.M => (
-                rng.NextDouble(0.08, 0.45),
-                rng.NextDouble(0.1, 0.6),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(0.001, 0.1),
                 rng.NextDouble(2_400, 3_700)),
             SpectralClass.WhiteDwarf => (
-                rng.NextDouble(0.5, 1.2),
-                rng.NextDouble(0.008, 0.02),
+                solarMass,
+                solarRadius,
                 rng.NextDouble(0.0001, 0.01),
                 rng.NextDouble(8_000, 40_000)),
             SpectralClass.NeutronStar => (

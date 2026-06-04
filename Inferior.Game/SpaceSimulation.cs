@@ -1,5 +1,7 @@
 using Inferior.Core.DataBus;
-using Inferior.Core.Simulation;
+using Inferior.Core.Simulation;   // GameClock
+using Inferior.Gameplay;          // Simulation base
+using Inferior.Gameplay.Sensors;
 
 namespace Inferior.Game;
 
@@ -10,9 +12,12 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
-    private double _nextMessageAt = 8.0;  // first system message after 8 sim-seconds
+    private double _nextMessageAt = 8.0;
     private bool   _startupPublished;
-    private double _lastHeartbeat;        // for threshold-crossing detection
+    private double _lastHeartbeat;
+
+    // ── Sensors ───────────────────────────────────────────────────────────────
+    private readonly GravitySensor _gravity = new();
 
     protected override void Publish()
     {
@@ -42,6 +47,9 @@ public sealed class SpaceSimulation : Simulation
         if (_lastHeartbeat > 10.0 && heartbeat <= 10.0)
             DataBus.System.Publish(Topics.System.All, "Heartbeat below minimum");
         _lastHeartbeat = heartbeat;
+
+        // ── Sensors ───────────────────────────────────────────────────────────
+        _gravity.Tick();
 
         // ── Periodic status ───────────────────────────────────────────────────
         if (t >= _nextMessageAt)

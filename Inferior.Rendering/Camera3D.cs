@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Inferior.Core.Math;
 
-namespace Inferior.Game;
+namespace Inferior.Rendering;
 
 /// <summary>
 /// Free-look 3D camera for system space flight.

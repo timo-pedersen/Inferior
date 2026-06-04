@@ -1,5 +1,4 @@
 ﻿using Inferior.Core;
-using Inferior.Core.Simulation;
 using Inferior.Game.States;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;

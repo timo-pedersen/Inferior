@@ -1,4 +1,4 @@
-namespace Inferior.Core.Simulation;
+namespace Inferior.Gameplay;
 
 /// <summary>
 /// Immutable input snapshot. Written by the main thread, read once per sim tick.

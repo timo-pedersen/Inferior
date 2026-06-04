@@ -51,6 +51,11 @@ public static class Topics
         public const string Sanity = "Sanity";
     }
 
+    public static class GravitySensor
+    {
+        public const string Strength = "Strength";   // m/s² — net gravitational acceleration
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {

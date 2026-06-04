@@ -32,8 +32,8 @@ public static class GameClock
     // ── Simulation thread interface ───────────────────────────────────────────
 
     /// <summary>Called by the simulation thread every tick. Not thread-safe by design — see class doc.</summary>
-    internal static void Advance(double dt) => _simTime += dt;
+    public static void Advance(double dt) => _simTime += dt;
 
     /// <summary>Reset at session start (new game or load).</summary>
-    internal static void Reset() => _simTime = 0;
+    public static void Reset() => _simTime = 0;
 }

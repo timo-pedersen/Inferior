@@ -12,7 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Inferior.Core\Inferior.Core.csproj" />
-    <ProjectReference Include="..\Inferior.Gameplay\Inferior.Gameplay.csproj" />
+    <ProjectReference Include="..\Inferior.Galaxy\Inferior.Galaxy.csproj" />
   </ItemGroup>
 
 </Project>
