@@ -58,6 +58,9 @@ public sealed class SystemSpaceState : GameState
     // Reusable ring vertex array — rebuilt each frame per orbit
     private VertexPositionColor[] _ringVerts = null!;
 
+    // Skybox star field — built once on enter, static for the session
+    private VertexPositionColor[] _skyboxVerts = [];
+
     // ── 2D overlay (SpriteBatch for HUD) ──────────────────────────────────────
     private Texture2D _pixel = null!;
 
@@ -90,6 +93,10 @@ public sealed class SystemSpaceState : GameState
     private Action<double>?  _simTimeHandler;
     private Action<double>?  _gravityHandler;
     private Action<string>?  _systemHandler;
+    private Action<double>?  _gravDirXHandler;
+    private Action<double>?  _gravDirYHandler;
+    private Action<double>?  _gravDirZHandler;
+    private double           _gravDirX, _gravDirY, _gravDirZ;
 
     // ── Visual constants ──────────────────────────────────────────────────────
     // Visual radii in render units (NOT true physical radius — inflated for visibility)
@@ -173,6 +180,9 @@ public sealed class SystemSpaceState : GameState
         // Ring vertices reused per orbit ring
         _ringVerts = MeshFactory.CreateRingVertices(128);
 
+        // Skybox — galaxy stars projected onto a far sphere around the current system
+        _skyboxVerts = BuildSkybox(_star, GalaxyGenerator.Generate());
+
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
 
@@ -235,9 +245,16 @@ public sealed class SystemSpaceState : GameState
         _gravityHandler   = v => _gravityMeter.SetValue(v);
         _systemHandler    = msg => _console.AddMessage(msg);
 
+        _gravDirXHandler = v => _gravDirX = v;
+        _gravDirYHandler = v => _gravDirY = v;
+        _gravDirZHandler = v => _gravDirZ = v;
+
         DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
         DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.SimTime}",   _simTimeHandler);
-        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.Strength}", _gravityHandler);
+        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.Strength}",   _gravityHandler);
+        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
+        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionY}", _gravDirYHandler);
+        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         DataBus.System.Subscribe(Topics.System.All, _systemHandler);
 
         // First system message — confirms state entry
@@ -252,7 +269,13 @@ public sealed class SystemSpaceState : GameState
         if (_simTimeHandler != null)
             DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.SimTime}", _simTimeHandler);
         if (_gravityHandler != null)
-            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.Strength}", _gravityHandler);
+            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.Strength}",   _gravityHandler);
+        if (_gravDirXHandler != null)
+            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
+        if (_gravDirYHandler != null)
+            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionY}", _gravDirYHandler);
+        if (_gravDirZHandler != null)
+            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         if (_systemHandler != null)
             DataBus.System.Unsubscribe(Topics.System.All, _systemHandler);
 
@@ -288,20 +311,25 @@ public sealed class SystemSpaceState : GameState
         _camera.Update(dt, mouse, keys);
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
 
-        // Update direction ball — orientation + direction to star
+        // Update direction ball — orientation + direction to star + gravity
         if (_dirBall != null)
         {
             _dirBall.SetOrientation(_camera.Forward, _camera.Right, _camera.Up);
 
-            // Star is always at universe origin
+            // Star — always at universe origin
             var toStar = DVec3.Zero - _camera.UniversePosition;
             if (toStar.Length > 0.001)
             {
-                toStar = toStar / toStar.Length; // normalise
+                toStar = toStar / toStar.Length;
                 _dirBall.SetVector("star",
                     new Vector3((float)toStar.X, (float)toStar.Y, (float)toStar.Z),
                     new Color(255, 220, 80), "★");
             }
+
+            // Gravity — from DataBus (zeros until sim world is populated)
+            var gravDir = new Vector3((float)_gravDirX, (float)_gravDirY, (float)_gravDirZ);
+            if (gravDir.LengthSquared() > 0.001f)
+                _dirBall.SetVector("grav", gravDir, new Color(120, 200, 255), "g");
         }
 
         // Rebuild body positions
@@ -349,6 +377,10 @@ public sealed class SystemSpaceState : GameState
         _effect.DirectionalLight0.Direction    = lightDir;
         _effect.DirectionalLight0.DiffuseColor = _star.LightColor.ToVector3();
         _effect.AmbientLightColor              = _star.GlowColor.ToVector3() * _star.AmbientIntensity;
+
+        // Pass 0 — skybox (drawn before depth buffer has any data, so geometry always wins)
+        gd.DepthStencilState = DepthStencilState.None;
+        DrawSkybox();
 
         // Pass 1 — opaque geometry (depth writes on)
         gd.BlendState        = BlendState.AlphaBlend;
@@ -552,6 +584,66 @@ public sealed class SystemSpaceState : GameState
         }
     }
 
+    // ── Skybox ────────────────────────────────────────────────────────────────
+
+    private const float SkyboxRadius   = 20_000f;
+    private const float SkyboxBaseSize = 80f;     // RU — scaled by MapDotSize per star
+
+    private static VertexPositionColor[] BuildSkybox(Star currentStar, Star[] galaxy)
+    {
+        var verts = new List<VertexPositionColor>(galaxy.Length * 6);
+
+        foreach (var star in galaxy)
+        {
+            if (star.GalaxyIndex == currentStar.GalaxyIndex) continue;
+
+            DVec3  offset = star.GalacticPos - currentStar.GalacticPos;
+            double dist   = offset.Length;
+            if (dist < 0.001) continue;
+
+            var dir    = Vector3.Normalize(new Vector3((float)(offset.X / dist), (float)(offset.Y / dist), (float)(offset.Z / dist)));
+            var center = dir * SkyboxRadius;
+            float size = star.MapDotSize * SkyboxBaseSize;
+
+            Vector3 worldUp = MathF.Abs(dir.Y) < 0.99f ? Vector3.UnitY : Vector3.UnitX;
+            Vector3 tan     = Vector3.Normalize(Vector3.Cross(dir, worldUp));
+            Vector3 bitan   = Vector3.Cross(dir, tan);
+
+            Color col = star.GlowColor;
+            verts.Add(new VertexPositionColor(center + (-tan + bitan) * size, col));
+            verts.Add(new VertexPositionColor(center + ( tan + bitan) * size, col));
+            verts.Add(new VertexPositionColor(center + (-tan - bitan) * size, col));
+            verts.Add(new VertexPositionColor(center + ( tan + bitan) * size, col));
+            verts.Add(new VertexPositionColor(center + ( tan - bitan) * size, col));
+            verts.Add(new VertexPositionColor(center + (-tan - bitan) * size, col));
+        }
+
+        return [.. verts];
+    }
+
+    private void DrawSkybox()
+    {
+        if (_skyboxVerts.Length == 0) return;
+
+        _gd.BlendState      = BlendState.Opaque;
+        _gd.RasterizerState = RasterizerState.CullNone;
+
+        _effect.World              = Matrix.Identity;
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = true;
+        _effect.TextureEnabled     = false;
+
+        foreach (var pass in _effect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _skyboxVerts, 0, _skyboxVerts.Length / 3);
+        }
+
+        _effect.VertexColorEnabled = false;
+        _effect.LightingEnabled    = true;
+        _gd.RasterizerState        = RasterizerState.CullCounterClockwise;
+    }
+
     // ── 2D HUD ────────────────────────────────────────────────────────────────
 
     private void DrawHUD(SpriteBatch sb)
@@ -643,20 +735,12 @@ public sealed class SystemSpaceState : GameState
         _timeButtonRect = new Rectangle(16, 60, 190, 36);
     }
 
-    private static float VisualRadius(OrbitalBody body) => body.BodyType switch
-    {
-        BodyType.GasGiant    => 5.0f,
-        BodyType.IceGiant    => 3.5f,
-        BodyType.EarthLike   => 2.0f,
-        BodyType.OceanPlanet => 2.0f,
-        BodyType.Desert      => 1.8f,
-        BodyType.Volcanic    => 1.8f,
-        BodyType.RockyPlanet => 1.5f,
-        BodyType.IcePlanet   => 1.5f,
-        BodyType.Moon        => 0.7f,
-        BodyType.Asteroid    => 0.2f,
-        _                    => 1.0f,
-    };
+    // Visual inflation factor: 100 = planets appear 100× their true physical radius.
+    // Reduce toward 1 for true-scale navigation.
+    private const float PlanetVisualScale = 100f;
+
+    private static float VisualRadius(OrbitalBody body) =>
+        (float)(body.RadiusMeters * Camera3D.RenderScale * PlanetVisualScale);
 
     private static Color BodyColor(OrbitalBody body) => body.BodyType switch
     {

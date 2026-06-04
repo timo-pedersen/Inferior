@@ -53,7 +53,10 @@ public static class Topics
 
     public static class GravitySensor
     {
-        public const string Strength = "Strength";   // m/s² — net gravitational acceleration
+        public const string Strength   = "Strength";    // m/s² — net gravitational acceleration
+        public const string DirectionX = "DirectionX";  // normalised gravity vector components
+        public const string DirectionY = "DirectionY";
+        public const string DirectionZ = "DirectionZ";
     }
 
     /// <summary>Debug / development sensors — not present in release builds.</summary>

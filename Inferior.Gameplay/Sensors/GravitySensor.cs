@@ -7,17 +7,14 @@ namespace Inferior.Gameplay.Sensors;
 /// Passive gravity field sensor. Measures net gravitational acceleration at the
 /// ship's current position and publishes it to DataBus.Instruments.
 ///
-/// Topic: "GravitySensor.Strength"  (m/s²)
+/// Topics:
+///   "GravitySensor.Strength"    m/s² — net gravitational acceleration (noised)
+///   "GravitySensor.DirectionX/Y/Z" — normalised gravity vector, no noise applied
+///                                    (direction noise would be physically wrong)
 ///
-/// Noise model:
+/// Noise model (strength only):
 ///   ±0.5% white jitter — baseline instrument noise
 ///   ±1.0% pink drift   — thermal drift and sensor aging
-///
-/// External noise sources can be attached at runtime for environmental effects
-/// (e.g. neutron star EM interference via ExternalNoiseSources).
-///
-/// Note: reads Environment.GravitationalStrength, which returns 0 until
-/// SimWorld.MassiveBodies is populated by the physics layer.
 /// </summary>
 public sealed class GravitySensor
 {
@@ -35,12 +32,24 @@ public sealed class GravitySensor
     public PassiveSensor Sensor => _sensor;
 
     /// <summary>
-    /// Read gravitational strength from Environment and publish to DataBus.
+    /// Read gravitational vector from Environment and publish strength + direction.
     /// Call once per sim tick from Simulation.Publish().
     /// </summary>
     public void Tick()
     {
-        double strength = SensorData.Environment.GravitationalStrength;
-        _sensor.Publish(strength);
+        var    vec      = SensorData.Environment.GravitationalVector;
+        double strength = vec.Length;
+
+        _sensor.Publish(strength);   // strength gets noise applied
+
+        // Direction is published without noise — adding noise to a unit vector
+        // would violate the physics (it wouldn't stay unit length)
+        if (strength > 1e-10)
+        {
+            var norm = vec / strength;
+            DataBus.Instruments.Publish($"GravitySensor.{Topics.GravitySensor.DirectionX}", norm.X);
+            DataBus.Instruments.Publish($"GravitySensor.{Topics.GravitySensor.DirectionY}", norm.Y);
+            DataBus.Instruments.Publish($"GravitySensor.{Topics.GravitySensor.DirectionZ}", norm.Z);
+        }
     }
 }
