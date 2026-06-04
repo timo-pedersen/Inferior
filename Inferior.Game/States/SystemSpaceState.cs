@@ -39,8 +39,9 @@ namespace Inferior.Game.States;
 public sealed class SystemSpaceState : GameState
 {
     // ── Dependencies ──────────────────────────────────────────────────────────
-    private readonly GraphicsDevice _gd;
-    private readonly SpriteFont     _font;
+    private readonly GraphicsDevice  _gd;
+    private readonly SpriteFont      _font;
+    private readonly SpaceSimulation _simulation;
 
     // ── System data ───────────────────────────────────────────────────────────
     private Star       _star   = null!;
@@ -109,11 +110,12 @@ public sealed class SystemSpaceState : GameState
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
-    public SystemSpaceState(GraphicsDevice gd, SpriteFont font)
+    public SystemSpaceState(GraphicsDevice gd, SpriteFont font, SpaceSimulation simulation)
         : base(GameStateId.SystemSpace)
     {
-        _gd   = gd;
-        _font = font;
+        _gd         = gd;
+        _font       = font;
+        _simulation = simulation;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -306,6 +308,9 @@ public sealed class SystemSpaceState : GameState
         _bodyPositions.Clear();
         foreach (var planet in _system.Planets)
             planet.CollectPositions(_gameTimeSeconds, DVec3.Zero, _bodyPositions);
+
+        // Feed current world state to simulation so sensors have live gravity data
+        _simulation.SetWorldState(_star, _system, _camera.UniversePosition, _gameTimeSeconds);
 
         HandleKeyboard(keys, mouse);
 

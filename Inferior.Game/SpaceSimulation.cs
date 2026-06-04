@@ -1,7 +1,11 @@
 using Inferior.Core.DataBus;
+using Inferior.Core.Math;
 using Inferior.Core.Simulation;   // GameClock
+using Inferior.Galaxy;
 using Inferior.Gameplay;          // Simulation base
+using Inferior.Gameplay.Physics;
 using Inferior.Gameplay.Sensors;
+using SensorEnvironment = Inferior.Gameplay.SensorData.Environment;
 
 namespace Inferior.Game;
 
@@ -16,8 +20,52 @@ public sealed class SpaceSimulation : Simulation
     private bool   _startupPublished;
     private double _lastHeartbeat;
 
+    // ── World state snapshot (written by main thread, read by sim thread) ─────
+    private sealed record WorldSnapshot(Star Star, StarSystem System, DVec3 ShipPos, double GameTime);
+    private volatile WorldSnapshot? _worldSnapshot;
+
+    /// <summary>Called from main thread each frame when in a star system.</summary>
+    public void SetWorldState(Star star, StarSystem system, DVec3 shipPos, double gameTime)
+        => _worldSnapshot = new WorldSnapshot(star, system, shipPos, gameTime);
+
     // ── Sensors ───────────────────────────────────────────────────────────────
     private readonly GravitySensor _gravity = new();
+
+    protected override void UpdateEnvironment()
+    {
+        var snap = _worldSnapshot;
+        var world = SensorEnvironment.World;
+        world.MassiveBodies.Clear();
+
+        if (snap == null) return;
+
+        world.MassiveBodies.Add(new CelestialBody
+        {
+            Position       = DVec3.Zero,
+            Mass           = snap.Star.MassKg,
+            Radius         = snap.Star.RadiusMeters,
+            Class          = snap.Star.SpectralClass,
+            RotationPeriod = 2.192e6, // ~25.4 days default
+        });
+
+        foreach (var planet in snap.System.Planets)
+            CollectBody(world, planet, DVec3.Zero, snap.GameTime);
+
+        SensorEnvironment.ShipPosition = snap.ShipPos;
+    }
+
+    private static void CollectBody(SimWorld world, OrbitalBody body, DVec3 parentPos, double gameTime)
+    {
+        DVec3 pos = body.GetPosition(gameTime, parentPos);
+        world.MassiveBodies.Add(new CelestialBody
+        {
+            Position = pos,
+            Mass     = body.MassKg,
+            Radius   = body.RadiusMeters,
+        });
+        foreach (var child in body.Children)
+            CollectBody(world, child, pos, gameTime);
+    }
 
     protected override void Publish()
     {

@@ -17,10 +17,28 @@ public class SimWorld
     // ── Stubs — implementation follows from the physics simulation ────────────
 
     public CelestialBody NearestStar(DVec3 position)
-        => _stubStar; // TODO: find nearest star from MassiveBodies by type
+    {
+        // Stars are always far more massive than any planet — heaviest body is the star.
+        CelestialBody? best = null;
+        double bestMass = 0;
+        foreach (var b in MassiveBodies)
+        {
+            if (b.Mass > bestMass) { bestMass = b.Mass; best = b; }
+        }
+        return best ?? _stubStar;
+    }
 
     public CelestialBody NearestMassiveBody(DVec3 position)
-        => _stubStar; // TODO: find nearest by distance among MassiveBodies
+    {
+        CelestialBody? best = null;
+        double bestDistSq = double.MaxValue;
+        foreach (var b in MassiveBodies)
+        {
+            double dSq = (b.Position - position).LengthSquared;
+            if (dSq < bestDistSq) { bestDistSq = dSq; best = b; }
+        }
+        return best ?? _stubStar;
+    }
 
     public DVec3  MagneticFieldAt(DVec3 position) => DVec3.Zero; // TODO: stellar magnetic model
     public double RadiationAt(DVec3 position)     => 0.0;        // TODO: inverse-square stellar flux

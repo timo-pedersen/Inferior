@@ -17,9 +17,9 @@ public static class Environment
 {
     // ── Updated by sim thread once per tick ───────────────────────────────────
 
-    internal static SimWorld World        { get; set; } = new();
-    internal static DVec3    ShipPosition { get; set; }   // DVec3 for galaxy-scale precision
-    internal static DVec3    ShipVelocity { get; set; }
+    public static SimWorld World        { get; set; } = new();
+    public static DVec3    ShipPosition { get; set; }   // DVec3 for galaxy-scale precision
+    public static DVec3    ShipVelocity { get; set; }
 
     // ── Nearest star ──────────────────────────────────────────────────────────
 
