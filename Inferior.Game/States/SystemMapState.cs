@@ -319,23 +319,18 @@ public sealed class SystemMapState : GameState
             DrawCircle(sb, centre, radiusPx, ColOrbitRing, CircleSegments(radiusPx));
         }
 
-        foreach (var (body, pos) in _bodyPositions)
+        foreach (var planet in _system.Planets)
         {
-            if (body.BodyType != BodyType.Moon) continue;
+            if (planet.Children.Count == 0) continue;
 
-            foreach (var planet in _system.Planets)
+            DVec3   planetPos    = planet.GetPosition(_gameTimeSeconds, DVec3.Zero);
+            Vector2 parentScreen = SystemToScreen(new Vector2((float)planetPos.X, (float)planetPos.Z));
+
+            foreach (var moon in planet.Children)
             {
-                if (!planet.Children.Contains(body)) continue;
-
-                DVec3 planetPos = planet.GetPosition(_gameTimeSeconds, DVec3.Zero);
-                Vector2 parentScreen = SystemToScreen(
-                    new Vector2((float)planetPos.X, (float)planetPos.Z));
-
-                float radiusPx = (float)(body.OrbitalRadius / _metersPerPixel);
+                float radiusPx = (float)(moon.OrbitalRadius / _metersPerPixel);
                 if (radiusPx >= MinOrbitRingPixels)
-                    DrawCircle(sb, parentScreen, radiusPx, ColMoonOrbit,
-                        CircleSegments(radiusPx));
-                break;
+                    DrawCircle(sb, parentScreen, radiusPx, ColMoonOrbit, CircleSegments(radiusPx));
             }
         }
     }
@@ -434,7 +429,8 @@ public sealed class SystemMapState : GameState
         DrawText(sb, display.Name, new Vector2(tx, ty), Color.White, 1.05f);
         ty += (int)(lineH * 1.3f);
 
-        DrawText(sb, $"{display.BodyType}", new Vector2(tx, ty), BodyColor(display));
+        string typeLabel = IsMoon(display) ? "Moon" : $"{display.BodyType}";
+        DrawText(sb, typeLabel, new Vector2(tx, ty), BodyColor(display));
         ty += lineH;
 
         if (display.AtmosphereType != AtmosphereType.None)
@@ -587,6 +583,9 @@ public sealed class SystemMapState : GameState
     private bool IsOnScreen(Vector2 screenPos, float margin)
         => screenPos.X >= -margin && screenPos.X <= _gd.Viewport.Width  + margin
         && screenPos.Y >= -margin && screenPos.Y <= _gd.Viewport.Height + margin;
+
+    private bool IsMoon(OrbitalBody body) =>
+        _system.Planets.Any(p => p.Children.Contains(body));
 
     private float VisualRadius(OrbitalBody body)
     {

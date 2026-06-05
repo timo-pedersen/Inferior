@@ -737,7 +737,7 @@ public sealed class SystemSpaceState : GameState
 
     // Visual inflation factor: 100 = planets appear 100× their true physical radius.
     // Reduce toward 1 for true-scale navigation.
-    private const float PlanetVisualScale = 100f;
+    private const float PlanetVisualScale = 10f;
 
     private static float VisualRadius(OrbitalBody body) =>
         (float)(body.RadiusMeters * Camera3D.RenderScale * PlanetVisualScale);

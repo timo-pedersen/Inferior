@@ -20,7 +20,7 @@ namespace Inferior.Galaxy;
 /// </summary>
 public static class GalaxyGenerator
 {
-    public const int   StarCount  = 2048;
+    public const int   StarCount  = 20480;
     public const int   ArmCount   = 4;
     public const int   MasterSeed = 19721978; // homage: Elite released 1984, original BBC Micro 1981
 
