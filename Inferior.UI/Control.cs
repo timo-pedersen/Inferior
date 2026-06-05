@@ -156,7 +156,7 @@ public abstract class Control
     /// Find the topmost visible control (or self) at screen position.
     /// Returns null if nothing hit.
     /// </summary>
-    public Control? FindAt(Point screenPos)
+    public virtual Control? FindAt(Point screenPos)
     {
         if (!HitTest(screenPos)) return null;
 

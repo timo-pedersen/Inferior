@@ -66,14 +66,22 @@ public sealed class UIManager : IDisposable
 
     // ── Per-frame ─────────────────────────────────────────────────────────────
 
-    /// <summary>Call once per frame before Draw.</summary>
-    public void Update(double dt, InputState input)
+    /// <summary>
+    /// Advance animations on all controls without routing any input.
+    /// Call every frame unconditionally, even when the game is consuming input itself.
+    /// </summary>
+    public void Animate(double dt)
     {
-        // Update all controls
         foreach (var root in _roots)
             root.Update(dt);
+    }
 
-        // Update hover state
+    /// <summary>
+    /// Route input to controls. Call only when UI should receive mouse/keyboard input.
+    /// Always call Animate(dt) first in the same frame.
+    /// </summary>
+    public void Update(double dt, InputState input)
+    {
         UpdateHover(input);
 
         // Route mouse input — roots in reverse (topmost first)

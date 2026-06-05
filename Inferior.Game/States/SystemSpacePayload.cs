@@ -7,6 +7,7 @@ namespace Inferior.Game.States;
 /// Carries enough context to regenerate the system and spawn the camera near the target.
 /// </summary>
 public record SystemSpacePayload(
-    Star         Star,
-    OrbitalBody? TargetBody,   // null = spawn near star
-    double       GameTime);
+    Star           Star,
+    OrbitalBody?   TargetBody,    // null = spawn near star
+    double         GameTime,
+    CockpitLayout? Layout = null);

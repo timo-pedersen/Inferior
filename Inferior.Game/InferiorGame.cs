@@ -46,6 +46,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
         Core.DataBus.DataBus.Drain();
         _stateMachine.Update(gameTime);
+        IsMouseVisible = _stateMachine.CurrentWantsCursor;
         base.Update(gameTime);
     }
 

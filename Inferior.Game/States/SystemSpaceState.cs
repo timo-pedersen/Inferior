@@ -78,8 +78,8 @@ public sealed class SystemSpaceState : GameState
     private StateTransition? _pendingTransition;
     private MouseState       _prevMouse;
     private KeyboardState    _prevKeys;
-    private Rectangle        _backButtonRect;
-    private Rectangle        _timeButtonRect;
+    private Button?          _backButton;
+    private Button?          _timeButton;
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
     private UIManager?       _ui;
@@ -88,6 +88,8 @@ public sealed class SystemSpaceState : GameState
     private InstrumentMeter? _gravityMeter;
     private SystemConsole?   _console;
     private DirectionBall?   _dirBall;
+    private EdgePanelHost?   _rightPanel;
+    private EdgePanelHost?   _leftPanel;
     // Stored so we can unsubscribe on OnExit
     private Action<double>?  _heartbeatHandler;
     private Action<double>?  _simTimeHandler;
@@ -97,6 +99,12 @@ public sealed class SystemSpaceState : GameState
     private Action<double>?  _gravDirYHandler;
     private Action<double>?  _gravDirZHandler;
     private double           _gravDirX, _gravDirY, _gravDirZ;
+
+    // ── UI mouse mode ─────────────────────────────────────────────────────────
+    // TAB toggles between free-look ship control and mouse-driven UI interaction.
+    private bool _uiMouseMode;
+
+    public override bool WantsCursor => _uiMouseMode;
 
     // ── Visual constants ──────────────────────────────────────────────────────
     // Visual radii in render units (NOT true physical radius — inflated for visibility)
@@ -192,52 +200,88 @@ public sealed class SystemSpaceState : GameState
         // ── DataBus UI setup ──────────────────────────────────────────────────
         var theme = Theme.InferiorDark(_font);
         _ui = new UIManager(_gd, theme);
+        _uiMouseMode = false;
 
-        _heartbeatMeter = new InstrumentMeter
-        {
-            Label    = "HEARTBEAT",
-            MinValue = 0,
-            MaxValue = 100,
-            Bounds   = new Rectangle(16, 108, 205, 46),
-        };
+        // ── Right panel: INSTR tab (meters) + NAV tab (direction ball) ────────
+        const int panelW   = 260;
+        const int innerW   = panelW - 16; // 8px padding each side
+        const int meterH   = 46;
+        const int meterGap = 8;
 
-        _simTimeMeter = new InstrumentMeter
-        {
-            Label    = "SIM TIME",
-            MinValue = 0,
-            MaxValue = 300,
-            Format   = "F0",
-            Bounds   = new Rectangle(16, 162, 205, 46),
-        };
+        _heartbeatMeter = new InstrumentMeter { Label = "HEARTBEAT", MinValue = 0, MaxValue = 100,
+            Bounds = new Rectangle(0, 0, innerW, meterH) };
+        _simTimeMeter = new InstrumentMeter { Label = "SIM TIME", MinValue = 0, MaxValue = 300,
+            Format = "F0", Bounds = new Rectangle(0, meterH + meterGap, innerW, meterH) };
+        _gravityMeter = new InstrumentMeter { Label = "GRAVITY", MinValue = 0, MaxValue = 30,
+            Format = "F4", Bounds = new Rectangle(0, (meterH + meterGap) * 2, innerW, meterH) };
 
-        _gravityMeter = new InstrumentMeter
-        {
-            Label    = "GRAVITY",
-            MinValue = 0,
-            MaxValue = 30,    // m/s² — covers gas giants; value text shows true reading
-            Format   = "F4",
-            Bounds   = new Rectangle(16, 216, 205, 46),
-        };
-
-        _console = new SystemConsole
-        {
-            Header    = "SYSTEM LOG",
-            MaxLines  = 7,
-            LineBreak = LineBreakMode.Wrap,
-            Bounds    = new Rectangle(16, 270, 205, 130),
-        };
+        var instrPanel = new Panel { DrawBackground = false, DrawBorder = false };
+        instrPanel.Add(_heartbeatMeter);
+        instrPanel.Add(_simTimeMeter);
+        instrPanel.Add(_gravityMeter);
 
         _dirBall = new DirectionBall
         {
             Header = "HEADING",
-            Bounds = new Rectangle(228, 108, 130, 155),
+            Bounds = new Rectangle(0, 0, innerW, innerW),
+        };
+        var navPanel = new Panel { DrawBackground = false, DrawBorder = false };
+        navPanel.Add(_dirBall);
+
+        _rightPanel = new EdgePanelHost(PanelEdge.Right)
+        {
+            PanelSize     = panelW,
+            HandleSize    = 28,
+            HandleLength  = 80,
+            CornerMargin  = 8,
+            Bounds        = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
+        };
+        _rightPanel.AddTab("INSTR", instrPanel);
+        _rightPanel.AddTab("NAV",   navPanel);
+
+        // ── Left panel: LOG tab (system console) ──────────────────────────────
+        _console = new SystemConsole
+        {
+            Header    = "SYSTEM LOG",
+            MaxLines  = 9,
+            LineBreak = LineBreakMode.Wrap,
+            Bounds    = new Rectangle(0, 0, innerW, 220),
+        };
+        var logPanel = new Panel { DrawBackground = false, DrawBorder = false };
+        logPanel.Add(_console);
+
+        _leftPanel = new EdgePanelHost(PanelEdge.Left)
+        {
+            PanelSize     = panelW,
+            HandleSize    = 28,
+            HandleLength  = 80,
+            CornerMargin  = 8,
+            Bounds        = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
+        };
+        _leftPanel.AddTab("LOG", logPanel);
+
+        _ui.Add(_rightPanel);
+        _ui.Add(_leftPanel);
+
+        _backButton = new Button("< SYSTEM MAP", new Rectangle(16, 16, 160, 36));
+        _timeButton = new Button($"TIME: {TimeLabels[_timeCompIndex]}", new Rectangle(16, 60, 190, 36));
+
+        _backButton.Clicked += _ =>
+            _pendingTransition = StateTransition.To(GameStateId.SystemMap,
+                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
+
+        _timeButton.Clicked += _ =>
+        {
+            _timeCompIndex = (_timeCompIndex + 1) % TimeCompressions.Length;
+            _timeButton.Text = $"TIME: {TimeLabels[_timeCompIndex]}";
         };
 
-        _ui.Add(_heartbeatMeter);
-        _ui.Add(_simTimeMeter);
-        _ui.Add(_gravityMeter);
-        _ui.Add(_console);
-        _ui.Add(_dirBall);
+        _ui.Add(_backButton);
+        _ui.Add(_timeButton);
+
+        // Restore panel layout if returning from system map
+        if (payload is SystemSpacePayload { Layout: { } layout })
+            ApplyCockpitLayout(layout);
 
         // Subscribe — handlers run on main thread during DataBus.Drain()
         _heartbeatHandler = v => _heartbeatMeter.SetValue(v);
@@ -292,6 +336,9 @@ public sealed class SystemSpaceState : GameState
     {
         _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
         UpdateUI();
+        var screenBounds = new Rectangle(0, 0, width, height);
+        if (_rightPanel != null) _rightPanel.Bounds = screenBounds;
+        if (_leftPanel  != null) _leftPanel.Bounds  = screenBounds;
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -302,13 +349,28 @@ public sealed class SystemSpaceState : GameState
         var keys  = Keyboard.GetState();
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
 
-        // Feed input to UI before updating _prevMouse/_prevKeys
-        _ui?.Update(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
+        // TAB toggles between UI mouse mode and ship control mode
+        bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
+        if (tabJustPressed)
+            _uiMouseMode = !_uiMouseMode;
+
+        // Animations always run, regardless of input mode
+        _ui?.Animate(dt);
+
+        // In UI mode: UI gets input and camera is locked.
+        // In ship mode: camera gets input and UI is non-interactive.
+        if (_uiMouseMode)
+        {
+            _ui?.Update(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
+            // Feed neutral input to camera so it clears any held right-drag state
+            _camera.Update(dt, new MouseState(), new KeyboardState());
+        }
+        else
+        {
+            _camera.Update(dt, mouse, keys);
+        }
 
         _gameTimeSeconds += dt * TimeCompression;
-
-        // Camera input (mouse look only when right button held)
-        _camera.Update(dt, mouse, keys);
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
 
         // Update direction ball — orientation + direction to star + gravity
@@ -340,7 +402,8 @@ public sealed class SystemSpaceState : GameState
         // Feed current world state to simulation so sensors have live gravity data
         _simulation.SetWorldState(_star, _system, _camera.UniversePosition, _gameTimeSeconds);
 
-        HandleKeyboard(keys, mouse);
+        if (!_uiMouseMode)
+            HandleKeyboard(keys, mouse);
 
         _prevMouse = mouse;
         _prevKeys  = keys;
@@ -404,8 +467,6 @@ public sealed class SystemSpaceState : GameState
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
-        DrawBackButton(sb, Mouse.GetState());
-        DrawTimeButton(sb, Mouse.GetState());
         sb.End();
 
         // UI library draws on top — owns its own SpriteBatch
@@ -657,29 +718,17 @@ public sealed class SystemSpaceState : GameState
         string timeStr = Units.FormatTime(_gameTimeSeconds);
         DrawText(sb, $"T+{timeStr}", new Vector2(16, _gd.Viewport.Height - 58), ColHUDDim, 0.8f);
 
-        // Controls hint
-        DrawText(sb, "Right drag: look   WASD/QE: move   Shift: fast   Ctrl: slow",
-            new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
-    }
-
-    private void DrawBackButton(SpriteBatch sb, MouseState mouse)
-    {
-        bool hov = _backButtonRect.Contains(mouse.X, mouse.Y);
-        DrawRect(sb, _backButtonRect, hov ? new Color(35, 55, 85) : ColPanel);
-        DrawRectBorder(sb, _backButtonRect, ColBorder);
-        DrawText(sb, "< SYSTEM MAP",  // ← back to 2D orbital view
-            new Vector2(_backButtonRect.X + 10, _backButtonRect.Y + 8),
-            hov ? Color.White : ColHUD, 0.85f);
-    }
-
-    private void DrawTimeButton(SpriteBatch sb, MouseState mouse)
-    {
-        bool hov = _timeButtonRect.Contains(mouse.X, mouse.Y);
-        DrawRect(sb, _timeButtonRect, hov ? new Color(35, 55, 85) : ColPanel);
-        DrawRectBorder(sb, _timeButtonRect, ColBorder);
-        DrawText(sb, $"TIME: {TimeLabels[_timeCompIndex]}",
-            new Vector2(_timeButtonRect.X + 10, _timeButtonRect.Y + 8),
-            hov ? Color.White : ColHUD, 0.85f);
+        // Controls hint — changes with UI mode
+        if (_uiMouseMode)
+        {
+            DrawText(sb, "UI MODE  —  TAB: return to flight",
+                new Vector2(16, _gd.Viewport.Height - 30), new Color(80, 160, 220), 0.72f);
+        }
+        else
+        {
+            DrawText(sb, "Right drag: look   WASD/QE: move   Shift: fast   Ctrl: slow   TAB: UI",
+                new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
+        }
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
@@ -687,19 +736,10 @@ public sealed class SystemSpaceState : GameState
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
         bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
-        bool backClicked = mouse.LeftButton == ButtonState.Released
-                        && _prevMouse.LeftButton == ButtonState.Pressed
-                        && _backButtonRect.Contains(mouse.X, mouse.Y);
 
-        bool timeClicked = mouse.LeftButton == ButtonState.Released
-                        && _prevMouse.LeftButton == ButtonState.Pressed
-                        && _timeButtonRect.Contains(mouse.X, mouse.Y);
-
-        if (escPressed || backClicked)
-            _pendingTransition = StateTransition.To(GameStateId.SystemMap, (_star, _gameTimeSeconds));
-
-        if (timeClicked)
-            _timeCompIndex = (_timeCompIndex + 1) % TimeCompressions.Length;
+        if (escPressed)
+            _pendingTransition = StateTransition.To(GameStateId.SystemMap,
+                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
 
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
             _timeCompIndex = System.Math.Min(_timeCompIndex + 1, TimeCompressions.Length - 1);
@@ -729,10 +769,21 @@ public sealed class SystemSpaceState : GameState
     private float AspectRatio =>
         (float)_gd.Viewport.Width / _gd.Viewport.Height;
 
-    private void UpdateUI()
+    private void UpdateUI() { }
+
+    // ── Cockpit layout ────────────────────────────────────────────────────────
+
+    private CockpitLayout CaptureCockpitLayout()
     {
-        _backButtonRect = new Rectangle(16, 16, 160, 36);
-        _timeButtonRect = new Rectangle(16, 60, 190, 36);
+        var (rightTab, rightOpen) = _rightPanel?.CaptureState() ?? (-1, false);
+        var (leftTab,  leftOpen)  = _leftPanel?.CaptureState()  ?? (-1, false);
+        return new CockpitLayout(rightTab, rightOpen, leftTab, leftOpen);
+    }
+
+    private void ApplyCockpitLayout(CockpitLayout layout)
+    {
+        _rightPanel?.ApplyState(layout.RightActiveTab, layout.RightOpen);
+        _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
     }
 
     // Visual inflation factor: 100 = planets appear 100× their true physical radius.

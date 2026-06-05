@@ -102,6 +102,12 @@ public abstract class GameState
 
     /// <summary>Optional: handle window resize.</summary>
     public virtual void OnResize(int width, int height) { }
+
+    /// <summary>
+    /// True when this state wants the OS mouse cursor visible.
+    /// InferiorGame reads this once per frame and applies it to Game.IsMouseVisible.
+    /// </summary>
+    public virtual bool WantsCursor => true;
 }
 
 // ── State machine ─────────────────────────────────────────────────────────────
@@ -115,7 +121,8 @@ public sealed class GameStateMachine
     private readonly Dictionary<GameStateId, GameState> _states = new();
     private GameState? _current;
 
-    public GameStateId? CurrentId => _current?.Id;
+    public GameStateId? CurrentId    => _current?.Id;
+    public bool CurrentWantsCursor  => _current?.WantsCursor ?? false;
 
     public void Register(GameState state)
         => _states[state.Id] = state;

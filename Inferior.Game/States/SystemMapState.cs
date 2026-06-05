@@ -4,6 +4,8 @@ using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using Inferior.UI;
+using Inferior.UI.Controls;
 
 namespace Inferior.Game.States;
 
@@ -56,6 +58,9 @@ public sealed class SystemMapState : GameState
     private OrbitalBody?     _hoveredBody;
     private StateTransition? _pendingTransition;
 
+    // Preserved across round-trips to SystemSpace
+    private CockpitLayout    _cockpitLayout = CockpitLayout.Default;
+
     // ── Input ─────────────────────────────────────────────────────────────────
     private MouseState    _prevMouse;
     private KeyboardState _prevKeys;
@@ -72,11 +77,12 @@ public sealed class SystemMapState : GameState
     private const double DoubleClickSeconds = 0.35;
 
     // ── UI ────────────────────────────────────────────────────────────────────
-    private Rectangle _backButtonRect;
-    private Rectangle _timeButtonRect;
-    private Vector2   _screenCentre;
-    private Texture2D _pixel  = null!;
-    private Texture2D _circle = null!;
+    private UIManager? _ui;
+    private Button?    _backButton;
+    private Button?    _timeButton;
+    private Vector2    _screenCentre;
+    private Texture2D  _pixel  = null!;
+    private Texture2D  _circle = null!;
 
     // ── Visual constants ──────────────────────────────────────────────────────
     private const float StarVisualRadius    = 28f; // Clamp min size for visibility, then scale up with zoom
@@ -114,16 +120,26 @@ public sealed class SystemMapState : GameState
     {
         if (payload is Star star)
         {
-            _star           = star;
-            _system         = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            _star            = star;
+            _system          = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
             _gameTimeSeconds = 0;
+            // _cockpitLayout intentionally not reset — persists across galaxy map visits
+        }
+        else if (payload is SystemMapPayload mp)
+        {
+            // Returning from SystemSpace — restore star, game time, and cockpit layout
+            _star            = mp.Star;
+            _system          = StarSystem.Generate(mp.Star, GalaxyGenerator.SystemSeed(mp.Star));
+            _gameTimeSeconds = mp.GameTime;
+            _cockpitLayout   = mp.Layout;
         }
         else if (payload is (Star returnStar, double returnTime))
         {
-            // Returning from SystemSpace — restore star and game time
+            // Legacy tuple form — kept for safety
             _star            = returnStar;
             _system          = StarSystem.Generate(returnStar, GalaxyGenerator.SystemSeed(returnStar));
             _gameTimeSeconds = returnTime;
+            _cockpitLayout   = CockpitLayout.Default;
         }
 
         _selectedBody = null;
@@ -136,12 +152,34 @@ public sealed class SystemMapState : GameState
 
         UpdateScreenCentre();
         FitSystemToView();
-        UpdateUI();
+
+        var theme = Theme.InferiorDark(_font);
+        _ui?.Dispose();
+        _ui = new UIManager(_gd, theme);
+
+        _backButton = new Button("< GALAXY MAP", new Rectangle(16, 16, 160, 36));
+        _timeButton = new Button($"TIME: {TimeCompressionLabels[_timeCompIndex]}",
+            new Rectangle(16, 60, 220, 36));
+
+        _backButton.Clicked += _ =>
+            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap, _star);
+
+        _timeButton.Clicked += _ =>
+        {
+            _timeCompIndex = (_timeCompIndex + 1) % TimeCompressions.Length;
+            _timeButton.Text = $"TIME: {TimeCompressionLabels[_timeCompIndex]}";
+        };
+
+        _ui.Add(_backButton);
+        _ui.Add(_timeButton);
+
         _pendingTransition = null;
     }
 
     public override void OnExit()
     {
+        _ui?.Dispose();
+        _ui = null;
         _pixel?.Dispose();
         _circle?.Dispose();
     }
@@ -149,7 +187,6 @@ public sealed class SystemMapState : GameState
     public override void OnResize(int width, int height)
     {
         UpdateScreenCentre();
-        UpdateUI();
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -164,6 +201,11 @@ public sealed class SystemMapState : GameState
         _gameTimeSeconds += real * TimeCompression;
 
         RebuildBodyPositions();
+
+        // UI always gets input here (cursor always visible in system map)
+        var input = new InputState(mouse, _prevMouse, keys, _prevKeys);
+        _ui?.Animate(real);
+        _ui?.Update(real, input);
 
         HandleZoom(mouse);
         HandleLeftButton(mouse, now);
@@ -192,11 +234,11 @@ public sealed class SystemMapState : GameState
         DrawBodies(sb);
         DrawBodyNames(sb);
         DrawInfoPanel(sb);
-        DrawBackButton(sb, Mouse.GetState());
-        DrawTimeControls(sb, Mouse.GetState());
         DrawHints(sb);
 
         sb.End();
+
+        _ui?.Draw();
     }
 
     // ── Input handlers ────────────────────────────────────────────────────────
@@ -245,13 +287,8 @@ public sealed class SystemMapState : GameState
 
         if (justReleased && !_isDragging)
         {
-            if (_backButtonRect.Contains(mouse.X, mouse.Y)) return;
-
-            if (_timeButtonRect.Contains(mouse.X, mouse.Y))
-            {
-                _timeCompIndex = (_timeCompIndex + 1) % TimeCompressions.Length;
-                return;
-            }
+            // Don't body-select if a UI button consumed this click
+            if (_ui?.FindAt(new Point(mouse.X, mouse.Y)) != null) return;
 
             // Hit test: body first, then star
             OrbitalBody? hitBody = HitTestBody(mousePos);
@@ -266,7 +303,7 @@ public sealed class SystemMapState : GameState
                 // Launch into system flight near this body (or star)
                 _pendingTransition = StateTransition.To(
                     GameStateId.SystemSpace,
-                    new SystemSpacePayload(_star, hitBody, _gameTimeSeconds));
+                    new SystemSpacePayload(_star, hitBody, _gameTimeSeconds, _cockpitLayout));
                 return;
             }
 
@@ -286,11 +323,8 @@ public sealed class SystemMapState : GameState
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
         bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
-        bool backClicked = mouse.LeftButton == ButtonState.Released
-                        && _prevMouse.LeftButton == ButtonState.Pressed
-                        && _backButtonRect.Contains(mouse.X, mouse.Y);
 
-        if (escPressed || backClicked)
+        if (escPressed)
             _pendingTransition = StateTransition.To(GameStateId.GalaxyMap, _star);
 
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
@@ -475,30 +509,6 @@ public sealed class SystemMapState : GameState
         DrawText(sb, "Double-click to approach", new Vector2(tx, ty + 4), ColHovered * 0.7f, 0.75f);
     }
 
-    private void DrawBackButton(SpriteBatch sb, MouseState mouse)
-    {
-        bool hovered = _backButtonRect.Contains(mouse.X, mouse.Y);
-        DrawRect(sb, _backButtonRect, hovered ? ColButtonHover : ColButton);
-        DrawRectBorder(sb, _backButtonRect, ColPanelBorder, 1);
-        DrawText(sb, "< GALAXY MAP",
-            new Vector2(_backButtonRect.X + 10, _backButtonRect.Y + 8),
-            hovered ? Color.White : ColText, 0.85f);
-    }
-
-    private void DrawTimeControls(SpriteBatch sb, MouseState mouse)
-    {
-        bool hovered = _timeButtonRect.Contains(mouse.X, mouse.Y);
-        DrawRect(sb, _timeButtonRect, hovered ? ColButtonHover : ColButton);
-        DrawRectBorder(sb, _timeButtonRect, ColPanelBorder, 1);
-
-        DrawText(sb, $"TIME: {TimeCompressionLabels[_timeCompIndex]}",
-            new Vector2(_timeButtonRect.X + 10, _timeButtonRect.Y + 8),
-            hovered ? Color.White : ColText, 0.85f);
-        DrawText(sb, "[ / ]",
-            new Vector2(_timeButtonRect.Right - 40, _timeButtonRect.Y + 8),
-            ColTextDim, 0.75f);
-    }
-
     private void DrawHints(SpriteBatch sb)
     {
         int x = 16;
@@ -574,11 +584,7 @@ public sealed class SystemMapState : GameState
     private void UpdateScreenCentre()
         => _screenCentre = new Vector2(_gd.Viewport.Width * 0.5f, _gd.Viewport.Height * 0.5f);
 
-    private void UpdateUI()
-    {
-        _backButtonRect = new Rectangle(16, 16, 150, 36);
-        _timeButtonRect = new Rectangle(16, 60, 190, 36);
-    }
+
 
     private bool IsOnScreen(Vector2 screenPos, float margin)
         => screenPos.X >= -margin && screenPos.X <= _gd.Viewport.Width  + margin
