@@ -63,7 +63,8 @@ public sealed class SystemSpaceState : GameState
     private VertexPositionColor[] _skyboxGlowVerts = [];  // TriangleList — tiny quads for bright/near stars
 
     // ── 2D overlay (SpriteBatch for HUD) ──────────────────────────────────────
-    private Texture2D _pixel = null!;
+    private Texture2D _pixel       = null!;
+    private Texture2D _starGlowTex = null!;  // soft radial gradient — reused for all glow layers
 
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
@@ -194,6 +195,8 @@ public sealed class SystemSpaceState : GameState
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
+
+        _starGlowTex = CreateStarGlowTexture(_gd, 128);
 
         _pendingTransition = null;
         UpdateUI();
@@ -331,6 +334,7 @@ public sealed class SystemSpaceState : GameState
         _sphereVb?.Dispose();
         _sphereIb?.Dispose();
         _pixel?.Dispose();
+        _starGlowTex?.Dispose();
     }
 
     public override void OnResize(int width, int height)
@@ -439,7 +443,10 @@ public sealed class SystemSpaceState : GameState
             : Vector3.Normalize(-starRenderPos); // light FROM star TOWARD scene
 
         _effect.DirectionalLight0.Direction    = lightDir;
-        _effect.DirectionalLight0.DiffuseColor = _star.LightColor.ToVector3();
+        // Boost diffuse well above 1.0 so the lit side of planets is bright.
+        // BasicEffect clamps output to [0,1] per channel, so this drives the lit
+        // hemisphere toward white without blowing out the dark side.
+        _effect.DirectionalLight0.DiffuseColor = _star.LightColor.ToVector3() * 3.0f;
         _effect.AmbientLightColor              = _star.GlowColor.ToVector3() * _star.AmbientIntensity;
 
         // Pass 0 — skybox (drawn before depth buffer has any data, so geometry always wins)
@@ -456,15 +463,20 @@ public sealed class SystemSpaceState : GameState
         foreach (var (body, pos) in _bodyPositions)
             DrawPlanetBody(body, pos);
 
-        // Pass 2 — transparent glows (depth test but no depth writes, so they don't occlude)
+        // Pass 2 — transparent (depth test, no depth writes)
         gd.BlendState        = BlendState.AlphaBlend;
         gd.DepthStencilState = DepthStencilState.DepthRead;
-        DrawStarGlows();
         foreach (var (body, pos) in _bodyPositions)
             DrawAtmosphere(body, pos);
 
         // ── 2D overlay ────────────────────────────────────────────────────────
         gd.DepthStencilState = DepthStencilState.None;
+
+        // Star glow — additive so layers accumulate as emitted light.
+        // Drawn after all 3D geometry so it blooms over planets that are in front.
+        sb.Begin(blendState: BlendState.Additive);
+        DrawStarGlow2D(sb);
+        sb.End();
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
@@ -484,8 +496,10 @@ public sealed class SystemSpaceState : GameState
         float   radius    = StarApparentRadius(renderPos);
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = false;
-        DrawSphere(renderPos, radius,         _star.GlowColor, false);
-        DrawSphere(renderPos, radius * 0.35f, Color.White,     false);
+        // Hot stellar surface — mostly white with a subtle spectral tint.
+        // 70% white + 30% LightColor keeps the star bright while hinting at type.
+        Color bodyColor = Color.Lerp(Color.White, _star.LightColor, 0.30f);
+        DrawSphere(renderPos, radius, bodyColor, false);
         _effect.LightingEnabled = true;
     }
 
@@ -497,17 +511,63 @@ public sealed class SystemSpaceState : GameState
         DrawSphere(renderPos, PlanetApparentRadius(body, renderPos), BodyColor(body), lit: true);
     }
 
-    // ── Transparent pass (AlphaBlend + DepthRead) ─────────────────────────────
+    // ── 2D star glow (screen-space, additive) ────────────────────────────────
 
-    private void DrawStarGlows()
+    private void DrawStarGlow2D(SpriteBatch sb)
     {
         Vector3 renderPos = _camera.ToRenderSpace(DVec3.Zero);
-        float   radius    = StarApparentRadius(renderPos);
-        _effect.LightingEnabled    = false;
-        _effect.VertexColorEnabled = false;
-        DrawSphere(renderPos, radius * 1.6f, _star.GlowColor * 0.25f, false);
-        DrawSphere(renderPos, radius * 1.2f, _star.GlowColor * 0.50f, false);
-        _effect.LightingEnabled = true;
+
+        // Project star to clip space — bail if behind the camera
+        var clip = Vector4.Transform(new Vector4(renderPos, 1f),
+                                     _camera.ViewMatrix * _camera.ProjectionMatrix);
+        if (clip.W <= 0f) return;
+
+        var   vp    = _gd.Viewport;
+        float ndcX  = clip.X / clip.W;
+        float ndcY  = clip.Y / clip.W;
+        var   screen = new Vector2(
+            (ndcX + 1f) * 0.5f * vp.Width,
+            (1f - ndcY) * 0.5f * vp.Height);
+
+        // Convert the 3D body radius to screen pixels
+        float dist      = MathF.Max(renderPos.Length(), 0.001f);
+        float projScale = vp.Height / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
+        float bodyR     = MathF.Min(StarApparentRadius(renderPos) * projScale / dist, 220f);
+
+        // Layers drawn largest→smallest so the bright core paints over the outer halo.
+        // Additive blend: layers accumulate as emitted light, center saturates to white.
+        DrawGlowLayer(sb, screen, bodyR * 14f,  _star.GlowColor * 0.07f); // faint outer corona
+        DrawGlowLayer(sb, screen, bodyR * 6f,   _star.GlowColor * 0.28f); // mid halo
+        DrawGlowLayer(sb, screen, bodyR * 2.5f, _star.GlowColor * 0.65f); // inner corona
+        DrawGlowLayer(sb, screen, bodyR * 1.1f, Color.White     * 0.90f); // white-hot surface
+    }
+
+    private void DrawGlowLayer(SpriteBatch sb, Vector2 center, float radius, Color color)
+    {
+        if (radius < 1f) return;
+        int r = (int)radius;
+        sb.Draw(_starGlowTex,
+            new Rectangle((int)(center.X - radius), (int)(center.Y - radius), r * 2, r * 2),
+            color);
+    }
+
+    // Gaussian radial gradient baked into a texture — reused for every glow layer.
+    private static Texture2D CreateStarGlowTexture(GraphicsDevice gd, int size)
+    {
+        var   tex  = new Texture2D(gd, size, size);
+        var   data = new Color[size * size];
+        float r    = size * 0.5f;
+
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float t     = MathF.Min(MathF.Sqrt((x - r) * (x - r) + (y - r) * (y - r)) / r, 1f);
+            float alpha = MathF.Exp(-t * t * 3f); // gaussian: 1.0 at center → ~0.05 at edge
+            data[y * size + x] = Color.White * alpha;
+        }
+
+        tex.SetData(data);
+        return tex;
     }
 
     /// <summary>
