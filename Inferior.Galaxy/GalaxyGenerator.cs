@@ -10,8 +10,8 @@ namespace Inferior.Galaxy;
 /// Galaxy layout:
 ///   - Four spiral arms offset by 90°
 ///   - Stars scattered around arm centrelines with gaussian spread
-///   - Z (vertical) offset from galactic plane via gaussian — galaxy has thickness
-///   - Denser core with tighter Z distribution
+///   - Z (vertical) offset: thick bulge at the core, thinning to a flat disk at the outer arms
+///   - Denser core with tighter Z distribution; halo field stars are puffier than the disk
 ///   - Arms have slightly different character (density, star types)
 ///   - Sparse rift regions between arms make crossing difficult
 ///
@@ -25,11 +25,13 @@ public static class GalaxyGenerator
     public const int   MasterSeed = 19721978; // homage: Elite released 1984, original BBC Micro 1981
 
     // Galaxy geometry (light-years)
-    private const double GalaxyRadius     = 50_000.0;  // ly — Milky Way scale
+    public  const double GalaxyRadiusLY   = 50_000.0;  // ly — exposed for skybox distance falloff
+    private const double GalaxyRadius     = GalaxyRadiusLY;
     private const double CoreRadius       = 4_000.0;   // dense core region
     private const double ArmWidth         = 0.21;      // gaussian σ in radians
-    private const double GalacticThickness= 1_500.0;   // σ of Z distribution (ly)
-    private const double CoreThickness    = 300.0;     // tighter Z in core
+    private const double CoreThickness     = 300.0;     // σ of Z for nuclear bulge and inner arms (ly)
+    private const double DiskThickness    = 150.0;     // σ of Z for outer disk (ly) — thin flat disk
+    private const double HaloThickness    = 600.0;     // σ of Z for halo/field stars (ly)
 
     // Spiral arm parameters
     private const double ArmTightness = 0.45;          // how tightly wound (b in r = e^(bθ))
@@ -144,8 +146,9 @@ public static class GalaxyGenerator
         double x = r * System.Math.Cos(angle);
         double z = r * System.Math.Sin(angle);
 
-        // Z offset — thinner farther from core
-        double zThickness = DMath.Lerp(CoreThickness, GalacticThickness, t);
+        // Disk thins toward the outer arms: thick inner region (bulge) → flat outer disk.
+        // t=0 is near the core, t=1 is the outer tip of the arm.
+        double zThickness = DMath.Lerp(CoreThickness, DiskThickness, t);
         double y = rng.NextGaussian(0, zThickness);
 
         return new DVec3(x, y, z);
@@ -158,7 +161,7 @@ public static class GalaxyGenerator
         double angle = rng.NextAngle();
         double x     = r * System.Math.Cos(angle);
         double z     = r * System.Math.Sin(angle);
-        double y     = rng.NextGaussian(0, GalacticThickness * 1.5); // halo is puffier
+        double y     = rng.NextGaussian(0, HaloThickness); // halo is puffier than the disk
 
         return new DVec3(x, y, z);
     }
