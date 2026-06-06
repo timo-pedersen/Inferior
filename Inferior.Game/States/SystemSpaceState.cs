@@ -287,6 +287,9 @@ public sealed class SystemSpaceState : GameState
         if (payload is SystemSpacePayload { Layout: { } layout })
             ApplyCockpitLayout(layout);
 
+        // Start in ship-control mode — panels retracted, handles and buttons hidden
+        ApplyUiMode(false);
+
         // Subscribe — handlers run on main thread during DataBus.Drain()
         _heartbeatHandler = v => _heartbeatMeter.SetValue(v);
         _simTimeHandler   = v => _simTimeMeter.SetValue(v);
@@ -357,7 +360,10 @@ public sealed class SystemSpaceState : GameState
         // TAB toggles between UI mouse mode and ship control mode
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
         if (tabJustPressed)
+        {
             _uiMouseMode = !_uiMouseMode;
+            ApplyUiMode(_uiMouseMode);
+        }
 
         // Animations always run, regardless of input mode
         _ui?.Animate(dt);
@@ -879,6 +885,16 @@ public sealed class SystemSpaceState : GameState
         (float)_gd.Viewport.Width / _gd.Viewport.Height;
 
     private void UpdateUI() { }
+
+    // ── UI mode ───────────────────────────────────────────────────────────────
+
+    private void ApplyUiMode(bool active)
+    {
+        if (_rightPanel != null) _rightPanel.UiModeActive = active;
+        if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
+        if (_backButton != null) { _backButton.Visible = active; _backButton.Enabled = active; }
+        if (_timeButton != null) { _timeButton.Visible = active; _timeButton.Enabled = active; }
+    }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
 

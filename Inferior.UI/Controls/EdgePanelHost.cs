@@ -43,8 +43,12 @@ public sealed class EdgePanelHost : Control
     private int    _activeTab     = -1;
     private bool   _isOpen        = false;
     private double _slideProgress = 0.0;   // 0 = fully retracted, 1 = fully extended
+    private double _edgeShift     = 1.0;   // 0 = normal (handles visible gap), 1 = flush with screen edge
     private int    _hoveredHandle = -1;    // set by HandleInput (UI mode only), cleared by Update
     private const double SlideDuration = 0.15;
+
+    /// <summary>When false, tab handles are hidden and the panel slides flush with the screen edge.</summary>
+    public bool UiModeActive { get; set; } = true;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -117,32 +121,33 @@ public sealed class EdgePanelHost : Control
 
     private Rectangle PanelBodyRect()
     {
-        var   s  = AbsoluteBounds;
-        float ep = EaseOut(_slideProgress);
+        var   s     = AbsoluteBounds;
+        float ep    = EaseOut(_slideProgress);
+        int   shift = (int)(_edgeShift * HandleSize);  // nudges panel flush with screen edge in ship mode
 
         return Edge switch
         {
             PanelEdge.Right => new Rectangle(
-                s.Right - (int)((HandleSize + PanelSize) * ep),
+                s.Right - (int)((HandleSize + PanelSize) * ep) + shift,
                 s.Y + CornerMargin,
                 PanelSize,
                 s.Height - CornerMargin * 2),
 
             PanelEdge.Left => new Rectangle(
-                s.Left + (int)((HandleSize + PanelSize) * ep) - PanelSize,
+                s.Left + (int)((HandleSize + PanelSize) * ep) - PanelSize - shift,
                 s.Y + CornerMargin,
                 PanelSize,
                 s.Height - CornerMargin * 2),
 
             PanelEdge.Top => new Rectangle(
                 s.X + CornerMargin,
-                s.Top + (int)((HandleSize + PanelSize) * ep) - PanelSize,
+                s.Top + (int)((HandleSize + PanelSize) * ep) - PanelSize - shift,
                 s.Width - CornerMargin * 2,
                 PanelSize),
 
             PanelEdge.Bottom => new Rectangle(
                 s.X + CornerMargin,
-                s.Bottom - (int)((HandleSize + PanelSize) * ep),
+                s.Bottom - (int)((HandleSize + PanelSize) * ep) + shift,
                 s.Width - CornerMargin * 2,
                 PanelSize),
 
@@ -158,12 +163,19 @@ public sealed class EdgePanelHost : Control
 
     public override void Update(double dt)
     {
-        // Drive animation
+        // Drive panel open/close animation
         double target = _isOpen ? 1.0 : 0.0;
         if (_slideProgress < target)
             _slideProgress = System.Math.Min(target, _slideProgress + dt / SlideDuration);
         else if (_slideProgress > target)
             _slideProgress = System.Math.Max(target, _slideProgress - dt / SlideDuration);
+
+        // Drive edge-flush animation: 0 = normal gap for handles, 1 = panel flush with screen edge
+        double edgeTarget = UiModeActive ? 0.0 : 1.0;
+        if (_edgeShift < edgeTarget)
+            _edgeShift = System.Math.Min(edgeTarget, _edgeShift + dt / SlideDuration);
+        else if (_edgeShift > edgeTarget)
+            _edgeShift = System.Math.Max(edgeTarget, _edgeShift - dt / SlideDuration);
 
         // Keep active content sized to fill the current ContentBounds so HitTest works
         if (_activeTab >= 0)
@@ -264,12 +276,15 @@ public sealed class EdgePanelHost : Control
         // Children (only visible ones — i.e. active tab content)
         base.Draw(sb, renderer, theme);
 
-        // Handles drawn on top so they're always visible
-        for (int i = 0; i < _tabs.Count; i++)
+        // Handles drawn on top — only visible in UI mode
+        if (UiModeActive)
         {
-            bool active  = _isOpen && _activeTab == i;
-            bool hovered = _hoveredHandle == i;
-            DrawHandle(sb, renderer, theme, HandleRect(i), _tabs[i].Label, active, hovered);
+            for (int i = 0; i < _tabs.Count; i++)
+            {
+                bool active  = _isOpen && _activeTab == i;
+                bool hovered = _hoveredHandle == i;
+                DrawHandle(sb, renderer, theme, HandleRect(i), _tabs[i].Label, active, hovered);
+            }
         }
     }
 
