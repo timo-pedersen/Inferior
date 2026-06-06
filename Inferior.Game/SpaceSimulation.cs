@@ -124,12 +124,33 @@ public sealed class SpaceSimulation : Simulation
         foreach (var planet in snap.System.Planets)
             CollectBody(world, planet, DVec3.Zero, snap.GameTime);
 
-        // Prefer ship's authoritative position; fall back to main-thread reference pos
-        // (used in debug camera mode when no ship physics are running for sensors)
+        // Use the reference position the main thread chose — it's already mode-aware:
+        // ship position in flight, camera position in debug cam (see SystemSpaceState.SetWorldState).
+        // The ship object stays alive in debug mode, so ship?.Position would give the frozen
+        // spawn point rather than where the camera actually is.
         var ship  = _ship;
-        DVec3 pos = ship?.Position ?? snap.ShipPos;
+        DVec3 pos = snap.ShipPos;
         DVec3 vel = ship?.Velocity ?? DVec3.Zero;
-        SensorEnvironment.UpdateFromSimThread(world, pos, vel);
+
+        // Body positions are in ecliptic space (from GetPosition).
+        // Ship position is in galaxy space. Rotate it back to ecliptic so the sensor
+        // computes delta in a consistent coordinate frame.
+        // Rodrigues' formula in double precision — avoids catastrophic cancellation that
+        // occurs when casting 1e11 m coordinates to float before the rotation.
+        // Inverse rotation = negate the angle (same axis, opposite direction).
+        // Note: gravity direction is published in ecliptic space; SystemSpaceState
+        // rotates it to galaxy space before display.
+        double az   = snap.System.EclipticTiltAzimuthRadians;
+        double tilt = snap.System.EclipticTiltRadians;
+        double kx   = System.Math.Cos(az), kz = System.Math.Sin(az);  // ky = 0
+        double cosA = System.Math.Cos(-tilt), sinA = System.Math.Sin(-tilt);
+        double dot  = kx * pos.X + kz * pos.Z;                        // k·p (ky=0)
+        DVec3 shipEcliptic = new DVec3(
+            pos.X * cosA + (          - kz * pos.Y) * sinA + kx * dot * (1.0 - cosA),
+            pos.Y * cosA + (kz * pos.X - kx * pos.Z) * sinA,
+            pos.Z * cosA + (kx * pos.Y            ) * sinA + kz * dot * (1.0 - cosA));
+
+        SensorEnvironment.UpdateFromSimThread(world, shipEcliptic, vel);
     }
 
     private static void CollectBody(SimWorld world, OrbitalBody body, DVec3 parentPos, double gameTime)

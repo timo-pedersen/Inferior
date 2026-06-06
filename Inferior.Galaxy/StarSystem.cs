@@ -16,6 +16,13 @@ public sealed class StarSystem
     public IReadOnlyList<OrbitalBody> Planets => _planets;
     public IReadOnlyList<OrbitalBody> AsteroidBelt => _asteroidBelt;
 
+    // ── Ecliptic tilt (3D flight view only — system map is unaffected) ────────
+    // Angle (radians) and azimuth of the axis around which the orbital plane is tilted
+    // relative to the galaxy plane. Stored as primitives; the rendering layer converts
+    // to a Matrix so Galaxy doesn't need a MonoGame dependency.
+    public float EclipticTiltRadians        { get; private set; }
+    public float EclipticTiltAzimuthRadians { get; private set; }
+
     private readonly List<OrbitalBody> _planets      = new();
     private readonly List<OrbitalBody> _asteroidBelt = new();
 
@@ -89,6 +96,11 @@ public sealed class StarSystem
         // Asteroid belt — roughly between inner and outer planets if enough planets
         if (planetCount >= 3)
             GenerateAsteroidBelt(system, star, rng);
+
+        // Random ecliptic tilt — each system's orbital plane is tilted independently
+        var eclipticRng = rng.Derive(9876);
+        system.EclipticTiltRadians        = (float)(eclipticRng.NextDouble(0.0, System.Math.PI / 5.0));
+        system.EclipticTiltAzimuthRadians = (float)(eclipticRng.NextAngle());
 
         return system;
     }

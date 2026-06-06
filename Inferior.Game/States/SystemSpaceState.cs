@@ -52,6 +52,7 @@ public sealed class SystemSpaceState : GameState
     // ── 3D infrastructure ─────────────────────────────────────────────────────
     private Camera3D   _camera = null!;
     private BasicEffect _effect = null!;
+    private Matrix      _eclipticRotation = Matrix.Identity;
 
     private VertexBuffer _sphereVb = null!;
     private IndexBuffer  _sphereIb = null!;
@@ -148,14 +149,16 @@ public sealed class SystemSpaceState : GameState
             _star            = p.Star;
             _system          = StarSystem.Generate(p.Star, GalaxyGenerator.SystemSeed(p.Star));
             _gameTimeSeconds = p.GameTime;
+            ComputeEclipticRotation();
 
             DVec3 startPos;
             if (p.TargetBody != null)
             {
-                // Spawn above and behind the target body — 5× its physical radius away
-                DVec3  bodyPos = p.TargetBody.GetPosition(p.GameTime, DVec3.Zero);
-                double dist    = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
-                startPos = bodyPos + new DVec3(0, dist * 0.4, dist);
+                // Spawn above and behind the target body — spawn offset is in ecliptic space
+                // then rotated into galaxy space so the ship appears near the body's tilted position
+                DVec3  bodyEcliptic = p.TargetBody.GetPosition(p.GameTime, DVec3.Zero);
+                double dist         = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
+                startPos = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
             }
             else
             {
@@ -170,6 +173,7 @@ public sealed class SystemSpaceState : GameState
             // Fallback: entered directly with just a star (shouldn't happen in normal flow)
             _star    = star;
             _system  = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            ComputeEclipticRotation();
             var fallbackPos = new DVec3(0, 0.5e11, 3e11);
             _camera  = new Camera3D(fallbackPos, AspectRatio);
             SpawnShip(fallbackPos);
@@ -428,16 +432,26 @@ public sealed class SystemSpaceState : GameState
                     new Color(255, 220, 80), "★");
             }
 
-            // Gravity — from DataBus (zeros until sim world is populated)
-            var gravDir = new Vector3((float)_gravDirX, (float)_gravDirY, (float)_gravDirZ);
-            if (gravDir.LengthSquared() > 0.001f)
-                _dirBall.SetVector("grav", gravDir, new Color(120, 200, 255), "g");
+            // Gravity direction comes from the sensor in ecliptic space.
+            // Rotate to galaxy space before passing to the direction ball so it aligns
+            // with visual planet positions (which are already in galaxy space).
+            var gravEcliptic = new Vector3((float)_gravDirX, (float)_gravDirY, (float)_gravDirZ);
+            if (gravEcliptic.LengthSquared() > 0.001f)
+            {
+                var gravGalaxy = Vector3.TransformNormal(gravEcliptic, _eclipticRotation);
+                _dirBall.SetVector("grav", gravGalaxy, new Color(120, 200, 255), "g");
+            }
         }
 
-        // Rebuild body positions
+        // Rebuild body positions — collect in ecliptic space then rotate to galaxy space
         _bodyPositions.Clear();
         foreach (var planet in _system.Planets)
             planet.CollectPositions(_gameTimeSeconds, DVec3.Zero, _bodyPositions);
+        for (int i = 0; i < _bodyPositions.Count; i++)
+        {
+            var (body, pos) = _bodyPositions[i];
+            _bodyPositions[i] = (body, EclipticToGalaxy(pos));
+        }
 
         // Feed world state to simulation — use ship snapshot position in ship mode,
         // camera position in debug mode (sensors track whoever is "there")
@@ -697,12 +711,14 @@ public sealed class SystemSpaceState : GameState
             // Colour ring by distance from camera for depth feel
             Color col = ColOrbitRing;
 
-            DrawRing(ringRadius, col);
+            // Apply ecliptic tilt so rings lie in the system's orbital plane, not the galaxy plane
+            _effect.World = Matrix.CreateScale(ringRadius) * _eclipticRotation;
+            DrawRingRaw(col);
 
-            // Moon orbit rings — centred on current planet position
+            // Moon orbit rings — centred on the planet's tilted position
             if (planet.Children.Count > 0)
             {
-                DVec3 planetUniverse = planet.GetPosition(_gameTimeSeconds, DVec3.Zero);
+                DVec3 planetUniverse = EclipticToGalaxy(planet.GetPosition(_gameTimeSeconds, DVec3.Zero));
                 Vector3 planetRender = _camera.ToRenderSpace(planetUniverse);
 
                 foreach (var moon in planet.Children)
@@ -710,8 +726,9 @@ public sealed class SystemSpaceState : GameState
                     float moonRingR = (float)(moon.OrbitalRadius * Camera3D.RenderScale);
                     if (moonRingR < 0.01f) continue;
 
-                    // Translate ring to planet's render position
+                    // Scale → tilt → translate to planet position
                     _effect.World = Matrix.CreateScale(moonRingR)
+                                  * _eclipticRotation
                                   * Matrix.CreateTranslation(planetRender);
 
                     DrawRingRaw(new Color(20, 28, 44, 140));
@@ -928,6 +945,23 @@ public sealed class SystemSpaceState : GameState
         (float)_gd.Viewport.Width / _gd.Viewport.Height;
 
     private void UpdateUI() { }
+
+    // ── Ecliptic tilt ─────────────────────────────────────────────────────────
+
+    private void ComputeEclipticRotation()
+    {
+        var tiltAxis = new Vector3(
+            MathF.Cos(_system.EclipticTiltAzimuthRadians),
+            0f,
+            MathF.Sin(_system.EclipticTiltAzimuthRadians));
+        _eclipticRotation = Matrix.CreateFromAxisAngle(tiltAxis, _system.EclipticTiltRadians);
+    }
+
+    private DVec3 EclipticToGalaxy(DVec3 pos)
+    {
+        var v = Vector3.Transform(new Vector3((float)pos.X, (float)pos.Y, (float)pos.Z), _eclipticRotation);
+        return new DVec3(v.X, v.Y, v.Z);
+    }
 
     // ── Ship ──────────────────────────────────────────────────────────────────
 
