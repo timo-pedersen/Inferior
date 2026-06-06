@@ -375,7 +375,14 @@ public sealed class SystemSpaceState : GameState
             ApplyUiMode(_uiMouseMode);
         }
         if (f11JustPressed)
+        {
+            if (_debugCameraMode)
+            {
+                // Leaving debug cam — teleport ship to where the camera is now
+                _simulation.TeleportShip(_camera.UniversePosition, _camera.Orientation);
+            }
             _debugCameraMode = !_debugCameraMode;
+        }
 
         // Animations always run, regardless of input mode
         _ui?.Animate(dt);

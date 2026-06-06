@@ -46,9 +46,18 @@ public sealed class SpaceSimulation : Simulation
     /// <summary>Latest ship state. Null until the first physics tick completes.</summary>
     public ShipSnapshot? ShipState => _shipSnapshot;
 
-    // ── Snap-to-origin request (Home key, main thread → sim thread) ───────────
-    private volatile bool _snapToOriginRequested;
-    public void RequestSnapToOrigin() => _snapToOriginRequested = true;
+    // ── Teleport request (main thread → sim thread) ───────────────────────────
+    // Used by Home key (snap to origin) and F11 (sync debug cam ↔ ship position).
+    // Immutable record + volatile ref — assignment is atomic, no partial reads.
+    private sealed record TeleportRequest(DVec3 Position, Quaternion Orientation);
+    private volatile TeleportRequest? _teleportRequest;
+
+    public void RequestSnapToOrigin()
+        => _teleportRequest = new TeleportRequest(new DVec3(0, 0.5e11, 3e11), Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
+
+    /// <summary>Teleport the ship to the given position and orientation next tick.</summary>
+    public void TeleportShip(DVec3 position, Quaternion orientation)
+        => _teleportRequest = new TeleportRequest(position, orientation);
 
     // ── World state snapshot (written by main thread, read by sim thread) ─────
     private sealed record WorldSnapshot(Star Star, StarSystem System, DVec3 ShipPos, double GameTime);
@@ -68,12 +77,14 @@ public sealed class SpaceSimulation : Simulation
         var ship = _ship;  // read once — volatile
         if (ship == null) return;
 
-        // ── Snap-to-origin (Home key) ─────────────────────────────────────
-        if (_snapToOriginRequested)
+        // ── Teleport (Home key or debug-cam sync) ────────────────────────
+        var teleport = _teleportRequest;
+        if (teleport != null)
         {
-            ship.Position = new DVec3(0, 0.5e11, 3e11);
+            ship.Position = teleport.Position;
             ship.Velocity = DVec3.Zero;
-            _snapToOriginRequested = false;
+            ship.SetOrientation(teleport.Orientation);
+            _teleportRequest = null;
         }
 
         // ── Rotation ─────────────────────────────────────────────────────
