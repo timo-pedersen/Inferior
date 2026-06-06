@@ -69,6 +69,25 @@ public sealed class Star
         _                        => Color.White,
     };
 
+    /// <summary>
+    /// How strongly the star sphere surface is tinted toward LightColor.
+    /// Hot stars (O/B/A) stay near-white; cool stars (K/M) show clear colour.
+    /// </summary>
+    public float BodyTintStrength => SpectralClass switch
+    {
+        SpectralClass.O           => 0.55f,
+        SpectralClass.B           => 0.40f,
+        SpectralClass.A           => 0.20f,
+        SpectralClass.F           => 0.30f,
+        SpectralClass.G           => 0.45f,
+        SpectralClass.K           => 0.60f,
+        SpectralClass.M           => 0.70f,
+        SpectralClass.WhiteDwarf  => 0.15f,
+        SpectralClass.NeutronStar => 0.10f,
+        SpectralClass.BlackHole   => 0.00f,
+        _                         => 0.30f,
+    };
+
     /// <summary>Ambient light intensity. O/B/Neutron = very dark shadows.</summary>
     public float AmbientIntensity => SpectralClass switch
     {
@@ -83,8 +102,8 @@ public sealed class Star
     /// <summary>Glow/billboard tint seen in skybox and system view.</summary>
     public Color GlowColor => SpectralClass switch
     {
-        SpectralClass.O           => new Color(140, 180, 255),
-        SpectralClass.B           => new Color(160, 200, 255),
+        SpectralClass.O           => new Color(20,  40, 255),
+        SpectralClass.B           => new Color(50,  75, 255),
         SpectralClass.A           => new Color(220, 230, 255),
         SpectralClass.F           => new Color(255, 245, 210),
         SpectralClass.G           => new Color(255, 230, 150),

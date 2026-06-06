@@ -549,9 +549,9 @@ public sealed class SystemSpaceState : GameState
         float   radius    = StarApparentRadius(renderPos);
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = false;
-        // Hot stellar surface — mostly white with a subtle spectral tint.
-        // 70% white + 30% LightColor keeps the star bright while hinting at type.
-        Color bodyColor = Color.Lerp(Color.White, _star.LightColor, 0.30f);
+        // Star surface colour — white base tinted toward LightColor by a per-class factor.
+        // Hot stars (O/B) stay near-white; cool stars (K/M) show clear yellow/orange/red.
+        Color bodyColor = Color.Lerp(Color.White, _star.LightColor, _star.BodyTintStrength);
         DrawSphere(renderPos, radius, bodyColor, false);
         _effect.LightingEnabled = true;
     }
