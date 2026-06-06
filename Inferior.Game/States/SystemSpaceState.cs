@@ -5,6 +5,8 @@ using Inferior.Core;
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using Inferior.Gameplay;
+using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
@@ -102,9 +104,11 @@ public sealed class SystemSpaceState : GameState
     private Action<double>?  _gravDirZHandler;
     private double           _gravDirX, _gravDirY, _gravDirZ;
 
-    // ── UI mouse mode ─────────────────────────────────────────────────────────
-    // TAB toggles between free-look ship control and mouse-driven UI interaction.
+    // ── Camera modes ──────────────────────────────────────────────────────────
+    // TAB  — toggles between ship-control and mouse-driven UI interaction.
+    // F11  — toggles between ship camera (cockpit) and free debug camera.
     private bool _uiMouseMode;
+    private bool _debugCameraMode;
 
     public override bool WantsCursor => _uiMouseMode;
 
@@ -159,13 +163,16 @@ public sealed class SystemSpaceState : GameState
                 startPos = new DVec3(0, 0.5e11, 3e11);
             }
             _camera = new Camera3D(startPos, AspectRatio);
+            SpawnShip(startPos);
         }
         else if (payload is Star star)
         {
             // Fallback: entered directly with just a star (shouldn't happen in normal flow)
             _star    = star;
             _system  = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
-            _camera  = new Camera3D(new DVec3(0, 0.5e11, 3e11), AspectRatio);
+            var fallbackPos = new DVec3(0, 0.5e11, 3e11);
+            _camera  = new Camera3D(fallbackPos, AspectRatio);
+            SpawnShip(fallbackPos);
         }
 
         // BasicEffect — our shader
@@ -204,7 +211,8 @@ public sealed class SystemSpaceState : GameState
         // ── DataBus UI setup ──────────────────────────────────────────────────
         var theme = Theme.InferiorDark(_font);
         _ui = new UIManager(_gd, theme);
-        _uiMouseMode = false;
+        _uiMouseMode   = false;
+        _debugCameraMode = false;
 
         // ── Right panel: INSTR tab (meters) + NAV tab (direction ball) ────────
         const int panelW   = 260;
@@ -357,28 +365,42 @@ public sealed class SystemSpaceState : GameState
         var keys  = Keyboard.GetState();
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
 
-        // TAB toggles between UI mouse mode and ship control mode
+        // TAB — UI mode toggle; F11 — ship/debug camera toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
+        bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
+
         if (tabJustPressed)
         {
             _uiMouseMode = !_uiMouseMode;
             ApplyUiMode(_uiMouseMode);
         }
+        if (f11JustPressed)
+            _debugCameraMode = !_debugCameraMode;
 
         // Animations always run, regardless of input mode
         _ui?.Animate(dt);
 
-        // In UI mode: UI gets input and camera is locked.
-        // In ship mode: camera gets input and UI is non-interactive.
         if (_uiMouseMode)
         {
+            // UI mode — UI gets mouse/keyboard; camera and ship are frozen
             _ui?.Update(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
-            // Feed neutral input to camera so it clears any held right-drag state
-            _camera.Update(dt, new MouseState(), new KeyboardState());
+            if (_debugCameraMode)
+                _camera.Update(dt, new MouseState(), new KeyboardState()); // clear any held drag
+            _simulation.SetInput(PlayerInput.Zero);
+        }
+        else if (_debugCameraMode)
+        {
+            // Debug camera — free-look, ship receives no input and stays put
+            _camera.Update(dt, mouse, keys);
+            _simulation.SetInput(PlayerInput.Zero);
         }
         else
         {
-            _camera.Update(dt, mouse, keys);
+            // Ship mode — input goes to the simulation; camera follows cockpit
+            _simulation.SetInput(BuildShipInput(mouse, keys));
+            var snap = _simulation.ShipState;
+            if (snap != null)
+                _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
         }
 
         _gameTimeSeconds += dt * TimeCompression;
@@ -410,8 +432,12 @@ public sealed class SystemSpaceState : GameState
         foreach (var planet in _system.Planets)
             planet.CollectPositions(_gameTimeSeconds, DVec3.Zero, _bodyPositions);
 
-        // Feed current world state to simulation so sensors have live gravity data
-        _simulation.SetWorldState(_star, _system, _camera.UniversePosition, _gameTimeSeconds);
+        // Feed world state to simulation — use ship snapshot position in ship mode,
+        // camera position in debug mode (sensors track whoever is "there")
+        DVec3 refPos = _debugCameraMode
+            ? _camera.UniversePosition
+            : _simulation.ShipState?.Position ?? _camera.UniversePosition;
+        _simulation.SetWorldState(_star, _system, refPos, _gameTimeSeconds);
 
         if (!_uiMouseMode)
             HandleKeyboard(keys, mouse);
@@ -824,24 +850,29 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawHUD(SpriteBatch sb)
     {
-        // Speed indicator
-        double speedMs = _camera.MoveSpeedMs;
-        string speedStr = Units.FormatSpeed(speedMs);
-        DrawText(sb, $"Speed: {speedStr}", new Vector2(16, _gd.Viewport.Height - 80), ColHUD);
+        // Speed indicator — ship velocity in ship mode, debug cam setting otherwise
+        double speedMs = _debugCameraMode
+            ? _camera.MoveSpeedMs
+            : _simulation.ShipState?.Velocity.Length ?? 0.0;
+        DrawText(sb, $"Speed: {Units.FormatSpeed(speedMs)}", new Vector2(16, _gd.Viewport.Height - 80), ColHUD);
 
         // Game time
-        string timeStr = Units.FormatTime(_gameTimeSeconds);
-        DrawText(sb, $"T+{timeStr}", new Vector2(16, _gd.Viewport.Height - 58), ColHUDDim, 0.8f);
+        DrawText(sb, $"T+{Units.FormatTime(_gameTimeSeconds)}", new Vector2(16, _gd.Viewport.Height - 58), ColHUDDim, 0.8f);
 
-        // Controls hint — changes with UI mode
+        // Controls hint — changes with mode
         if (_uiMouseMode)
         {
             DrawText(sb, "UI MODE  —  TAB: return to flight",
                 new Vector2(16, _gd.Viewport.Height - 30), new Color(80, 160, 220), 0.72f);
         }
+        else if (_debugCameraMode)
+        {
+            DrawText(sb, "DEBUG CAM  —  Right drag: look   WASD/QE: move   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
+                new Vector2(16, _gd.Viewport.Height - 30), new Color(220, 160, 80), 0.72f);
+        }
         else
         {
-            DrawText(sb, "Right drag: look   WASD/QE: move   Shift: fast   Ctrl: slow   TAB: UI",
+            DrawText(sb, "Right drag: look   WASD/QE: thrust   F11: debug cam   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
         }
     }
@@ -850,7 +881,8 @@ public sealed class SystemSpaceState : GameState
 
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
-        bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
+        bool escPressed  = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
+        bool homePressed = keys.IsKeyDown(Keys.Home)   && !_prevKeys.IsKeyDown(Keys.Home);
 
         if (escPressed)
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
@@ -858,24 +890,28 @@ public sealed class SystemSpaceState : GameState
 
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
             _timeCompIndex = System.Math.Min(_timeCompIndex + 1, TimeCompressions.Length - 1);
-
         if (keys.IsKeyDown(Keys.OemOpenBrackets) && !_prevKeys.IsKeyDown(Keys.OemOpenBrackets))
             _timeCompIndex = System.Math.Max(_timeCompIndex - 1, 0);
 
-        // Mouse wheel adjusts movement speed
         int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
-        if (scroll != 0)
-        {
-            double factor = scroll > 0 ? 2.0 : 0.5;
-            _camera.MoveSpeedMs = System.Math.Clamp(
-                _camera.MoveSpeedMs * factor, 1e6, 1e12);
-        }
 
-        // Home — snap back to near star
-        if (keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home))
+        if (_debugCameraMode)
         {
-            // Reconstruct camera near origin — same as OnEnter
-            _camera = new Camera3D(new DVec3(0, 0.5e11, 3e11), AspectRatio);
+            // Scroll adjusts debug camera fly speed
+            if (scroll != 0)
+            {
+                double factor = scroll > 0 ? 2.0 : 0.5;
+                _camera.MoveSpeedMs = System.Math.Clamp(_camera.MoveSpeedMs * factor, 1e6, 1e12);
+            }
+            // Home — reset debug camera to near-star
+            if (homePressed)
+                _camera = new Camera3D(new DVec3(0, 0.5e11, 3e11), AspectRatio);
+        }
+        else
+        {
+            // Home — snap ship back to near-star (useful during dev)
+            if (homePressed)
+                _simulation.RequestSnapToOrigin();
         }
     }
 
@@ -885,6 +921,43 @@ public sealed class SystemSpaceState : GameState
         (float)_gd.Viewport.Width / _gd.Viewport.Height;
 
     private void UpdateUI() { }
+
+    // ── Ship ──────────────────────────────────────────────────────────────────
+
+    private void SpawnShip(DVec3 startPos)
+    {
+        var ship = new Ship
+        {
+            Position    = startPos,
+            SizeClass   = SizeClass.Medium,
+            MoveSpeedMs = 5e9,
+        };
+        // Same initial orientation as the debug camera — slight downward pitch
+        ship.SetOrientation(Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
+        _simulation.SetShip(ship);
+    }
+
+    private const float MouseSens = 0.003f;
+
+    private PlayerInput BuildShipInput(MouseState mouse, KeyboardState keys)
+    {
+        // Rotation — right-drag maps to pitch/yaw as raw angle deltas (radians)
+        double pitchInput = 0.0, yawInput = 0.0;
+        if (mouse.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Pressed)
+        {
+            int dx = mouse.X - _prevMouse.X;
+            int dy = mouse.Y - _prevMouse.Y;
+            yawInput   = -dx * MouseSens;
+            pitchInput = -dy * MouseSens;
+        }
+
+        // Thrust — keyboard axes, -1..1
+        double fwd  = (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
+        double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
+        double vert = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
+
+        return new PlayerInput(fwd, lat, vert, 0.0, pitchInput, yawInput, false, true);
+    }
 
     // ── UI mode ───────────────────────────────────────────────────────────────
 

@@ -31,6 +31,7 @@ public sealed class Camera3D
 
     // ── Orientation ───────────────────────────────────────────────────────────
     private Quaternion _orientation;
+    public  Quaternion Orientation => _orientation;
 
     private const float MouseSens = 0.003f;
 
@@ -74,6 +75,18 @@ public sealed class Camera3D
     {
         HandleMouseLook(mouse);
         HandleMovement(dt, keys);
+        RefreshAxes();
+        UpdateViewMatrix();
+    }
+
+    /// <summary>
+    /// Position the camera at the given universe position with the given orientation.
+    /// Used in ship mode — the ship drives the camera rather than the camera driving itself.
+    /// </summary>
+    public void SetPose(DVec3 position, Quaternion orientation)
+    {
+        UniversePosition = position;
+        _orientation     = Quaternion.Normalize(orientation);
         RefreshAxes();
         UpdateViewMatrix();
     }
