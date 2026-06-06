@@ -64,7 +64,7 @@ public sealed class Camera3D
         // Start with a slight downward pitch so the ecliptic plane is visible
         _orientation = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
 
-        SetProjection(MathHelper.ToRadians(60f), aspectRatio, 0.1f, 50_000f);
+        SetProjection(MathHelper.ToRadians(60f), aspectRatio, 0.001f, 50_000f);
         RefreshAxes();
         UpdateViewMatrix();
     }

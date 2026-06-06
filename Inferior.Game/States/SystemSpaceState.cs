@@ -350,7 +350,7 @@ public sealed class SystemSpaceState : GameState
 
     public override void OnResize(int width, int height)
     {
-        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
+        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
         UpdateUI();
         var screenBounds = new Rectangle(0, 0, width, height);
         if (_rightPanel != null) _rightPanel.Bounds = screenBounds;
@@ -411,7 +411,7 @@ public sealed class SystemSpaceState : GameState
         }
 
         _gameTimeSeconds += dt * TimeCompression;
-        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.1f, 50_000f);
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
 
         // Update direction ball — orientation + direction to star + gravity
         if (_dirBall != null)
