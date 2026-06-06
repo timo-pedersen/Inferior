@@ -51,7 +51,10 @@ giving a natural soft ceiling. "Flight assist off" as an expert mode.
 Ship engines create a **standing wave of ionised metal ions** partially switched through 
 a hyperspace plane. The asymmetry this creates in normal space produces thrust. 
 Both forward and reverse thrust are possible from the same drive. Rotational 
-control comes from a gyroscopic effect of the drive — no separate thrusters needed.
+control comes from a gyroscopic effect of the drive — no separate thrusters needed. 
+An optional dedicated gyro component is available for some ships and enhances 
+rotational authority, particularly useful for high-mass hulls or engines with 
+weaker built-in gyro capability.
 
 The tube which contains the standing wave can be slightly curved in one direction,
 creating thrust in one direction perpendicular to the backwards / forwards axis. 
