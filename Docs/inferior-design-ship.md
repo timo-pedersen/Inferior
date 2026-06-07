@@ -36,6 +36,60 @@ Ship class determines:
 Four size classes planned. Determines what engines, equipment and components 
 can be installed. Size class is stubbed in initial implementation.
 
+
+
+### Small
+Small hulls are expected to be around 20-50m in length.
+
+### Medium
+Medium hulls are expected to be around 50-100m in length, suitable for a wide range of roles including exploration, combat, and cargo transport.
+
+
+### Large
+Large hulls are expected to be around 150-300m in length, designed for heavy combat, large cargo transport, or specialized roles like mining or salvage.
+
+
+### Capital
+capital hulls are expected to be 500m+ in length, serving as flagships, carriers, or massive freighters. These ships will have extensive component slots and unique capabilities, but will also require significant player investment to operate effectively.
+
+
+## Types of ships
+
+### Explorer
+
+### Freighter
+Large cargo capacity, slower speed and turn rate, minimal combat capability. Focus on trading and transport.
+
+Special - can be equipped with an EMP bomb, that is dropped, which offsets the lack of offensive capability. 
+The EMP bomb is a one-use item that disables nearby ships' systems for a short duration, allowing the freighter to 
+escape or avoid combat. You may only have one EMP bomb equipped at a time (possibly two for special ships), and it 
+needs to be bought again at station.
+
+### Combat
+
+### Luxury
+
+### Utility
+
+### Mining
+
+### Salvage
+
+### Passenger Transport
+
+### Support
+
+### Science & Research
+
+### Customisation
+
+### Racing
+
+### Smuggler
+
+### Military
+
+
 ---
 
 ## Equipment
