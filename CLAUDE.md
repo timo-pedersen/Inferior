@@ -153,7 +153,7 @@ States subject to change.
 - Randomness-as-simulation: events seeded on (systemID + timeWindow) so
   the universe feels consistent without full simulation
 
-## Developer console (from day one)
+## Developer console (eventually, not from day one)
 Essential for tuning. Commands like:
   goto sol / timescale 10000 / spawn ship pirate / planet earth
 

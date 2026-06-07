@@ -41,21 +41,61 @@ can be installed. Size class is stubbed in initial implementation.
 ### Small
 Small hulls are expected to be around 20-50m in length.
 
+4
+
 ### Medium
 Medium hulls are expected to be around 50-100m in length, suitable for a wide range of roles including exploration, combat, and cargo transport.
 
+6
 
 ### Large
-Large hulls are expected to be around 150-300m in length, designed for heavy combat, large cargo transport, or specialized roles like mining or salvage.
+Large hulls are expected to be around 100-250m in length, designed for heavy combat, large cargo transport, or specialized roles like mining or salvage.
 
+4
 
 ### Capital
-capital hulls are expected to be 500m+ in length, serving as flagships, carriers, or massive freighters. These ships will have extensive component slots and unique capabilities, but will also require significant player investment to operate effectively.
+capital hulls are expected to be 250-300m+ in length, serving as flagships, carriers, or massive freighters. These ships will have extensive component 
+slots and unique capabilities, but will also require significant player investment to operate effectively.
 
+2
 
-## Types of ships
+---
+
+## Size Class Limitations
+
+Size class determines which components can be installed. This is the primary balancing
+mechanism for ship progression — larger ships need larger (and heavier, more expensive)
+components to run effectively.
+
+| Size class | Component slots (approx) | Max component class | Notes |
+|------------|--------------------------|--------------------|----|
+| Small | ~6 | Class 2 | Fast, agile; limited power and cargo |
+| Medium | ~10 | Class 4 | Versatile; balanced performance across roles |
+| Large | ~16 | Class 6 | Powerful; sacrifices agility and docking access |
+| Capital | ~24 | Class 8 | Massive capability; limited to open space and large stations |
+
+**Component classes** are not yet fully defined. The table above uses placeholder
+values — actual numbers will be tuned per-hull once component design is finalised.
+
+**Size class is currently stubbed** — the enum exists (`ShipSizeClass`) and is stored on
+`Ship`, but it is not yet enforced at component installation time. Enforcement comes when
+component slot rules are implemented.
+
+A ship that does not meet component requirements is not illegal — it simply cannot be
+built via the normal factory path. `ShipBuilder` will accept any component in any slot
+for now; validation belongs in the fitting screen logic, not the builder.
+
+---
+
+## Ship roles
+
+Some ships may have a defined role or specialization, which influences their base stats, available hardpoints, and starting equipment.
+Other ships may be more general-purpose, allowing players to customize them for various roles through component choices and loadouts.
+
 
 ### Explorer
+
+Long jump range. Large reactor and fuel tanks. Moderate cargo capacity.
 
 ### Freighter
 Large cargo capacity, slower speed and turn rate, minimal combat capability. Focus on trading and transport.
@@ -67,28 +107,55 @@ needs to be bought again at station.
 
 ### Combat
 
+The expected. Balance of offence and defence important. Moderate cargo capacity for mission rewards and loot.
+
 ### Luxury
+
+High cost, high maintenance, but with unique aesthetics and comfort features. Not necessarily the best at combat or cargo, but a status symbol for wealthy captains.
 
 ### Utility
 
+Repair ships, tugs, and other support vessels. Not designed for combat or long-range travel, but essential for fleet operations and station maintenance.
+
 ### Mining
+
+Mining ships are equipped with specialized equipment for extracting resources from asteroids and planetary surfaces. They have large cargo holds for storing mined materials 
+and may have limited combat capabilities to defend against pirates.
 
 ### Salvage
 
+Salvage ships are designed for scavenging derelict vessels and space debris. They have equipment for cutting and towing, as well as enhanced 
+sensors for locating salvageable materials.
+
 ### Passenger Transport
+
+Passenger transport ships are designed for carrying people rather than cargo. They have luxurious accommodations and amenities, but may have 
+limited cargo capacity and combat capabilities.
 
 ### Support
 
+Support ships provide various services to other vessels, such as electronic warfare, reconnaissance, or medical aid. They may have specialized 
+equipment for their roles and can be crucial in fleet operations.
+
 ### Science & Research
 
-### Customisation
+Science and research vessels are equipped with advanced sensors and laboratories for conducting experiments and gathering data. They may have limited
+combat capabilities and cargo space, but are essential for exploration and scientific discovery.
 
 ### Racing
 
+Racing ships are designed for speed and agility, with powerful engines and minimal to no cargo capacity. They are used in competitive racing events and may 
+have specialized equipment for enhancing performance and maneuverability.
+
 ### Smuggler
+
+Smuggler ships are designed for stealth and evasion, with features that help them avoid detection by authorities. They may have hidden compartments for
+contraband and enhanced sensors for detecting pursuers.
 
 ### Military
 
+Military ships are heavily armed and armored, designed for combat and defense. They have advanced weaponry, strong shields, 
+and reinforced hulls, but may have limited cargo capacity and slower speeds compared to other ship types.
 
 ---
 

@@ -107,6 +107,83 @@ public class ShipSignature
 }
 ```
 
+### `PowerBus` (ship component)
+
+Passive conduit between the reactor and consumers. The bus is dumb — it does not know
+about priorities or consumers. It just delivers power to whatever draws from it, until
+it runs out. Priority enforcement is a separate concern (`PowerPriorityManager`).
+
+```csharp
+public sealed class PowerBus : ShipComponent
+{
+    public string          Name      { get; init; }  // e.g. "MainBus"
+    public PowerCapacitor  Capacitor { get; }        // the stored charge
+
+    // Connect a source (e.g. reactor output capacitor) — called at ship wiring time
+    public void ConnectSource(PowerCapacitor source);
+
+    // Called by consumers each tick — depletes capacitor
+    public double Draw(double watts, double dt);
+
+    // Tick: refill from source up to capacity, then publish {Name}.Level sensor
+    public override void Tick(double dt);
+}
+```
+
+Publishes `"{Name}.Level"` (0–1 fill fraction) to `DataBus.Instruments` each tick.
+
+### `PowerPriorityManager` (ship component)
+
+Optional component attached to a `PowerBus`. Registers consumers with priority levels
+and intercepts their draws — serving `Critical` consumers first, then `High`, `Normal`,
+`Low`. When supply is insufficient, lower-priority consumers receive reduced or zero power.
+
+```csharp
+public sealed class PowerPriorityManager : ShipComponent
+{
+    public void AttachToBus(PowerBus bus);
+
+    // Components register themselves — name for logging, demandWatts for polling,
+    // deliver callback receives what was actually allocated
+    public void Register(string name,
+                         Func<double>   demandWatts,
+                         Action<double> deliver,
+                         PowerPriority  priority);
+
+    // Tick: polls all registered consumers in priority order, draws from bus,
+    // delivers allocated amount, and publishes starvation warnings to DataBus.System
+    // when delivered < 95% of demand
+    public override void Tick(double dt);
+}
+```
+
+`PowerPriorityManager` settings (consumer name → priority) are saved with the ship via
+`InstalledComponentRecord.Settings`, so player priority assignments persist across sessions.
+
+### `FlyabilityMonitor` (ship component)
+
+Runs periodic flyability checks and publishes results to `DataBus.System`. Operates
+independently of the power system — it has its own internal battery and never becomes
+unflyable due to power starvation (the ship computer always knows if you can launch).
+
+```csharp
+public sealed class FlyabilityMonitor : ShipComponent
+{
+    public double CheckInterval { get; set; } = 5.0;  // seconds between check passes
+
+    // Checks are lambdas returning null (pass) or a message string (fail)
+    public void AddCheck(string name, Func<string?> check);
+
+    // Tick: runs all checks every CheckInterval seconds.
+    // Publishes "[FLY] {name}: {issue}" for each failing check.
+    // Publishes "[FLY] All checks nominal" when all pass.
+    public override void Tick(double dt);
+}
+```
+
+`Ship.CanFly` and `Ship.FlyabilityIssues` reflect the last published check results.
+The game queries `CanFly` before allowing undock; the fitting screen shows the issue list.
+
 ---
 
 ## Heat system
@@ -506,6 +583,78 @@ protected override void Update(GameTime gameTime)
 
 ---
 
+## CommandBus
+
+Reverse-direction companion to `DataBus`. Where `DataBus` flows sim → main thread,
+`CommandBus` flows main thread → sim thread. Used for player actions that need to
+reach the simulation — throttle changes, system toggles, jump requests, etc.
+
+```csharp
+// In Inferior.Core
+public static class CommandBus
+{
+    // Player-initiated commands — queued by main thread, drained once per sim tick
+    public static readonly Bus<double> Throttle  = new();  // 0.0–1.0 reactor output
+    public static readonly Bus<bool>   JumpArmed = new();  // arm/disarm jump drive
+    // Add buses here as command types are defined
+}
+```
+
+**Threading contract:**
+- `Publish` — called from main thread (e.g. in response to key press or UI event)
+- `Drain` — called from sim thread at the start of each `Simulation.Tick()` — same
+  `Bus<T>` infrastructure as `DataBus`, same thread-safety guarantees
+- Handlers registered by simulation components; they execute on the sim thread
+
+```csharp
+// In Simulation.Tick():
+CommandBus.Drain();   // dispatch all pending commands before physics tick
+```
+
+Unlike `DataBus`, `CommandBus` is drained by the **simulation thread**, not the main
+thread. The sim thread calls `CommandBus.Drain()` at the top of each tick so that
+commands issued during the previous frame are processed before physics runs.
+
+---
+
+## Topics
+
+Convention for all `DataBus.Instruments` topic strings. Using a `Topics` static class
+avoids magic strings and makes all published/subscribed values discoverable.
+
+```csharp
+// Inferior.Core
+public static class Topics
+{
+    public static class GravitySensor
+    {
+        public const string Strength = "GravitySensor.Strength";  // m/s²
+    }
+
+    public static class Reactor
+    {
+        public const string Output    = "Reactor.Output";     // watts
+        public const string FuelLevel = "Reactor.FuelLevel";  // 0–1 fraction
+    }
+
+    public static class PowerBus
+    {
+        // Topic format: "{busName}.Level" — e.g. "MainBus.Level"
+        // Bus components publish under their own Name property
+    }
+
+    // Add sections here as systems are implemented
+}
+```
+
+**Topic naming convention:** `ComponentName.ValueName`  
+For multiple instances: `ComponentName_N.ValueName` (e.g. `Shield_2.Capacitor`).
+
+Topics are always strings on the bus — the `Topics` class is just a typed index.
+Subscribing with a raw string literal is valid but discouraged outside tests.
+
+---
+
 ## Physics
 
 ### Hyperspace interference check
@@ -537,45 +686,10 @@ int SystemSeed(int galaxySeed, double x, double y, double z)
 
 ## UI
 
-### `IUIRenderer`
-
-```csharp
-public interface IUIRenderer
-{
-    void DrawPanel(Rectangle bounds, PanelStyle style);
-    void DrawButton(Rectangle bounds, string text, ButtonState state);
-    void DrawTextBox(Rectangle bounds, string text, bool focused);
-    void DrawLabel(Rectangle bounds, string text);
-    void DrawWindow(Rectangle bounds, string title, bool focused);
-    // Add as needed
-}
-```
-
-### `Control` (base)
-
-```csharp
-public abstract class Control
-{
-    public Rectangle Bounds     { get; set; }
-    public Color     ForeColor  { get; set; }
-    public Color     BackColor  { get; set; }
-    public Color     TextColor  { get; set; }
-    public string    Font       { get; set; }
-    public float     FontSize   { get; set; }
-    public bool      Visible    { get; set; }
-    public bool      Focused    { get; set; }
-
-    public event EventHandler? OnClick;
-    public event EventHandler? OnFocus;
-    public event EventHandler<int>? OnMouseWheel;  // delta for bars / numeric controls
-}
-```
-
-Controls: `Button`, `Label`, `TextBox`, `Panel`, `Window` (draggable container),
-`InstrumentMeter` (bar + value readout, subscribes to a DataBus topic),
-`SystemConsole` (scrolling message log, supports Clip/Wrap/Bleed line-break modes),
-`DirectionBall` (projects 3D direction vectors onto a 2D sphere — filled dot = front
-hemisphere, hollow rim dot = rear hemisphere, central crosshair for alignment).
+> Full UI design reference has moved to `inferior-design-ui.md`.
+> Controls: `Button`, `Label`, `Panel`, `Window`, `InstrumentMeter`, `SystemConsole`,
+> `DirectionBall`, `EdgePanelHost`. See that document for class sketches, layout rules,
+> `UIManager`, `Theme`, `InputState`, and coordinate conventions.
 
 ---
 
@@ -1142,3 +1256,4 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-02 | Added GameClock, Environment query class, Noise static class with 1D simplex implementations, usage example. |
 | 2026-06-02 | Fixed DVec3 consistency in Environment (was Vector3), added SimTime atomicity note per Code review. |
 | 2026-06-04 | Major sync: Simulation moved to Inferior.Gameplay; Tick order updated (GameClock + UpdateEnvironment); WorldSnapshot pattern documented; Environment updated (SimWorld, GravityCalculations, UpdateFromSimThread, private setters); mass lock superseded by hyperspace interference; GameClock.Advance now public; Sensors section added (PassiveSensor, GravitySensor); UI controls list updated (InstrumentMeter, SystemConsole, DirectionBall); project structure updated. |
+| 2026-06-07 | Added CommandBus section (reverse bus, sim thread drains); Topics static class with naming convention and all current topics; PowerBus, PowerPriorityManager, FlyabilityMonitor in Power system section; UI section redirected to inferior-design-ui.md. |

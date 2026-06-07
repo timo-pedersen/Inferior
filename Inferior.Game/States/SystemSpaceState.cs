@@ -36,7 +36,6 @@ namespace Inferior.Game.States;
 ///
 /// Controls: see Camera3D.cs
 /// ESC / back button: return to SystemMapState
-/// [ / ]            : time compression
 /// Home             : snap camera to star
 /// </summary>
 public sealed class SystemSpaceState : GameState
@@ -72,10 +71,6 @@ public sealed class SystemSpaceState : GameState
 
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
-    private static readonly double[] TimeCompressions  = [1, 100, 10_000, 1_000_000];
-    private static readonly string[] TimeLabels        = ["1x", "100x", "10k x", "1M x"];
-    private int _timeCompIndex = 0;
-    private double TimeCompression => TimeCompressions[_timeCompIndex];
 
     // ── Cached body positions ─────────────────────────────────────────────────
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
@@ -85,7 +80,6 @@ public sealed class SystemSpaceState : GameState
     private MouseState       _prevMouse;
     private KeyboardState    _prevKeys;
     private Button?          _backButton;
-    private Button?          _timeButton;
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
     private UIManager?       _ui;
@@ -238,10 +232,11 @@ public sealed class SystemSpaceState : GameState
             Topic = $"GravitySensor.{Topics.GravitySensor.Strength}",
             Format = "F4", Bounds = new Rectangle(0, (meterH + meterGap) * 2, innerW, meterH) 
         };
-        _reactorPowerOutputMeter = new InstrumentMeter 
+        _reactorPowerOutputMeter = new InstrumentMeter
         { Label = "REACTOR OUTPUT", MinValue = 0, MaxValue = 120,
             Topic = "Reactor.Output",
-            Bounds = new Rectangle(0, (meterH + meterGap) * 3, innerW, meterH) 
+            ScaleFactor = 1e-6,   // bus publishes watts; meter displays MW
+            Bounds = new Rectangle(0, (meterH + meterGap) * 3, innerW, meterH)
         };
 
         var instrPanel = new Panel { DrawBackground = false, DrawBorder = false };
@@ -295,20 +290,12 @@ public sealed class SystemSpaceState : GameState
         _ui.Add(_leftPanel);
 
         _backButton = new Button("< SYSTEM MAP", new Rectangle(26, 16, 160, 36));
-        _timeButton = new Button($"TIME: {TimeLabels[_timeCompIndex]}", new Rectangle(26, 60, 190, 36));
 
         _backButton.Clicked += _ =>
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
                 new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
 
-        _timeButton.Clicked += _ =>
-        {
-            _timeCompIndex = (_timeCompIndex + 1) % TimeCompressions.Length;
-            _timeButton.Text = $"TIME: {TimeLabels[_timeCompIndex]}";
-        };
-
         _ui.Add(_backButton);
-        _ui.Add(_timeButton);
 
         // Restore panel layout if returning from system map
         if (payload is SystemSpacePayload { Layout: { } layout })
@@ -422,7 +409,7 @@ public sealed class SystemSpaceState : GameState
                 _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
         }
 
-        _gameTimeSeconds += dt * TimeCompression;
+        _gameTimeSeconds += dt;
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
 
         // Update direction ball — orientation + direction to star + gravity
@@ -920,11 +907,6 @@ public sealed class SystemSpaceState : GameState
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
                 new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
 
-        if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
-            _timeCompIndex = System.Math.Min(_timeCompIndex + 1, TimeCompressions.Length - 1);
-        if (keys.IsKeyDown(Keys.OemOpenBrackets) && !_prevKeys.IsKeyDown(Keys.OemOpenBrackets))
-            _timeCompIndex = System.Math.Max(_timeCompIndex - 1, 0);
-
         int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
 
         if (_debugCameraMode)
@@ -1018,7 +1000,6 @@ public sealed class SystemSpaceState : GameState
         if (_rightPanel != null) _rightPanel.UiModeActive = active;
         if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
         if (_backButton != null) { _backButton.Visible = active; _backButton.Enabled = active; }
-        if (_timeButton != null) { _timeButton.Visible = active; _timeButton.Enabled = active; }
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────

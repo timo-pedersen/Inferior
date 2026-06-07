@@ -7,13 +7,15 @@
     <File Path="Docs/inferior-classes.md" />
     <File Path="Docs/inferior-design-persistence.md" />
     <File Path="Docs/inferior-design-ship.md" />
+    <File Path="Docs/inferior-design-ui.md" />
     <File Path="Docs/inferior-design.md" />
     <File Path="Docs/inferior-lore.md" />
+    <File Path="Review20260607.md" />
   </Folder>
   <Project Path="Inferior.Core/Inferior.Core.csproj" />
   <Project Path="Inferior.Galaxy/Inferior.Galaxy.csproj" />
-  <Project Path="Inferior.Game/Inferior.Game.csproj" />
   <Project Path="Inferior.Game.Test/Inferior.Game.Test.csproj" />
+  <Project Path="Inferior.Game/Inferior.Game.csproj" />
   <Project Path="Inferior.Gameplay/Inferior.Gameplay.csproj" />
   <Project Path="Inferior.Persistence/Inferior.Persistence.csproj" />
   <Project Path="Inferior.Rendering/Inferior.Rendering.csproj" />

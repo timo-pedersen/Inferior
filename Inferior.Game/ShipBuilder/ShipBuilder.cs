@@ -1,3 +1,4 @@
+using Inferior.Core;
 using Inferior.Gameplay.Ship;
 using Inferior.Persistence.Data;
 

@@ -145,17 +145,11 @@ So shield startup may have the following sequence:
 ### No voltage/impedance simulation
 Only MW flow, efficiency, and heat matter. Superconducting bus segments generate zero heat. Only converters and active consumers generate heat.
 
-### Three buses
-This section is inaccurate. 
-The bus system is still being designed, but NOT the general idea is that there are 
-three buses with different priority levels. There will be one main bus, which supplies
-most of consumers. Other energy kinds will be produced by converters attached to main bus.
+### One main bus + converters
 
-| Bus | Consumers |
-|-----|-----------|
-| High Power | Weapons, engines, shields (big, intermittent) |
-| Low Power | Life support, sensors, comms (small, continuous) |
-| Emergency | Minimal life support only — when main reactor fails |
+One main power bus fed by the reactor. Consumers draw from it directly. Specialised
+energy types (e.g. alpha red, weapon charge) are produced by converters attached to
+the main bus — they tap the bus and convert power to the required form.
 
 Ship computer (ie panels, switches; not ship ai or advanced functions such as 
 flight control, those require access to hyperspace and main power), lights, doors, 
@@ -509,5 +503,6 @@ Geography of production creates trade routes, conflict zones, and exploration in
 - Internal component hitboxes, no: instead probability-based penetration from face integrity is the direction, but not fully spec'd
 - Full hyperspace mode geometry for flat and tunnel types (gravity shadows, Voronoi topology)
 - Faction / reputation system design
-- Multiplayer: not planned but architecture should not exclude it — no time compression
+- Multiplayer: not planned but architecture should not exclude it — no time compression in flight
+- Time compression: available in 2D system map for watching orbits; not used during 3D flight (`SystemSpaceState`)
 

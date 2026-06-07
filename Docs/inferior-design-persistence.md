@@ -131,7 +131,7 @@ of live game objects. All mapping lives in `Game`, in `ShipExtensions.cs` alongs
 the builder.
 
 ```csharp
-// Inferior.Game/Ships/ShipExtensions.cs
+// Inferior.Game/ShipBuilder/ShipExtensions.cs
 public static class ShipExtensions
 {
     public static ShipRecord ToRecord(this Ship ship) => new()
@@ -241,7 +241,7 @@ public void ShipRecord_ShouldNotLeakOutsidePermittedTypes()
 Maps `ShipRecord` → `Ship`. Knows about both. The only constructor path for `Ship`.
 
 ```csharp
-// Inferior.Game/Ships/ShipBuilder.cs
+// Inferior.Game/ShipBuilder/ShipBuilder.cs
 
 public class ShipBuilder
 {
@@ -423,7 +423,7 @@ the sim thread and hand the resulting record to the main thread for serializatio
 
 ```
 Inferior.Game/
-  Ships/
+  ShipBuilder/
     ShipBuilder.cs              ← ShipRecord → Ship
     ShipExtensions.cs           ← Ship → ShipRecord  (ToRecord)
     ShipPersistenceService.cs   ← orchestrates both

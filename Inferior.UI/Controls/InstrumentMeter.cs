@@ -17,10 +17,16 @@ namespace Inferior.UI.Controls;
 /// </summary>
 public sealed class InstrumentMeter : Control
 {
-    public string Label    { get; set; } = "";
-    public double MinValue { get; set; } = 0.0;
-    public double MaxValue { get; set; } = 100.0;
-    public string Format   { get; set; } = "F1";   // value display format
+    public string Label       { get; set; } = "";
+    public double MinValue    { get; set; } = 0.0;
+    public double MaxValue    { get; set; } = 100.0;
+    public string Format      { get; set; } = "F1";   // value display format
+    /// <summary>
+    /// Multiplied against the raw bus value before display and bar scaling.
+    /// Use to convert bus units to display units (e.g. 1e-6 for watts → MW).
+    /// Defaults to 1.0 (no conversion).
+    /// </summary>
+    public double ScaleFactor { get; set; } = 1.0;
 
     // ── DataBus auto-subscribe ────────────────────────────────────────────────
 
@@ -53,10 +59,10 @@ public sealed class InstrumentMeter : Control
         }
     }
 
-    private double _value;
+    private double _rawValue;
 
-    /// <summary>Update the displayed value directly. Called automatically when Topic is set.</summary>
-    public void SetValue(double value) => _value = value;
+    /// <summary>Update the raw bus value. ScaleFactor is applied at draw time.</summary>
+    public void SetValue(double value) => _rawValue = value;
 
     public override void Draw(SpriteBatch sb, UIRenderer renderer, Theme theme)
     {
@@ -82,8 +88,9 @@ public sealed class InstrumentMeter : Control
         int valueW    = 44;                               // reserved for value text
         int barTrackW = ab.Width - pad * 2 - valueW - 4;
 
+        double displayValue = _rawValue * ScaleFactor;
         double frac = MaxValue > MinValue
-            ? System.Math.Clamp((_value - MinValue) / (MaxValue - MinValue), 0.0, 1.0)
+            ? System.Math.Clamp((displayValue - MinValue) / (MaxValue - MinValue), 0.0, 1.0)
             : 0.0;
         int fillW = (int)(barTrackW * frac);
 
@@ -97,7 +104,7 @@ public sealed class InstrumentMeter : Control
                 theme.Accent);
 
         // Value text — right-aligned in reserved area
-        string valStr = _value.ToString(Format);
+        string valStr = displayValue.ToString(Format);
         var valSize   = renderer.MeasureText(valStr, theme.Font, theme.SmallScale);
         renderer.DrawText(sb, valStr,
             new Vector2(ab.Right - pad - valSize.X, barY + (barH - valSize.Y) * 0.5f),

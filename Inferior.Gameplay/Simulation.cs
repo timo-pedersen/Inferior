@@ -74,7 +74,7 @@ public class Simulation
         TickPower(dt);
         TickDamage(dt);
         TickRadar();
-        TickEMP();
+        TickEMP(dt);
         Publish();
     }
 
@@ -91,9 +91,9 @@ public class Simulation
 
     protected virtual void TickRadar() { }
 
-    protected virtual void TickEMP() 
+    protected virtual void TickEMP(double dt)
     {
-        SensorData.EMP.Tick(TickRate);
+        SensorData.EMP.Tick(dt);
     }
 
     protected virtual void Publish() { }
