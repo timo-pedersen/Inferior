@@ -1,4 +1,4 @@
-namespace Inferior.Gameplay.Components;
+namespace Inferior.Gameplay.Components.Power;
 
 /// <summary>
 /// Simple energy buffer. Charge fills it from a power source; Draw depletes it for a consumer.

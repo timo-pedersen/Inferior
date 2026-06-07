@@ -1,7 +1,7 @@
 using Inferior.Core;
 using Inferior.Core.DataBus;
 
-namespace Inferior.Gameplay.Components;
+namespace Inferior.Gameplay.Components.Power;
 
 /// <summary>
 /// Optional power priority manager for a bus.

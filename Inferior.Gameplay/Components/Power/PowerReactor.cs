@@ -1,6 +1,6 @@
 using Inferior.Core.DataBus;
 
-namespace Inferior.Gameplay.Components;
+namespace Inferior.Gameplay.Components.Power;
 
 /// <summary>
 /// Primary power source. Generates MW from fuel at a throttleable output level.

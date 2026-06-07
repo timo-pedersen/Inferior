@@ -54,7 +54,7 @@ Superconducting components: `BaseEfficiency = 1.0` — zero heat regardless of l
 ```csharp
 public enum PowerPriority
 {
-    Critical,  // life support — never starved
+    Critical,  // essential flight systems (e.g. artificial gravity) — never starved
     High,      // navigation — starved last
     Normal,    // weapons
     Low        // luxury — starved first
@@ -183,6 +183,23 @@ public sealed class FlyabilityMonitor : ShipComponent
 
 `Ship.CanFly` and `Ship.FlyabilityIssues` reflect the last published check results.
 The game queries `CanFly` before allowing undock; the fitting screen shows the issue list.
+
+**Built-in power consistency checks** are registered automatically when the monitor is
+wired to a bus and reactor. These are not custom lambdas — they run as part of the
+monitor's standard check pass:
+
+- **Individual component overspec** — a single component's peak draw exceeds what the
+  reactor can deliver at 100% output. Example: a Class 4 engine on a Class 1 reactor.
+- **Aggregate overspec** — the sum of all registered consumers' peak demand exceeds
+  reactor output, or exceeds the power bus rated capacity. The ship would run fine at
+  partial load but cannot meet full simultaneous demand.
+- **Bus underrated** — the power bus rated capacity is lower than the reactor's output,
+  meaning the reactor can produce more than the bus can carry.
+
+These checks are advisory, not blocking. A ship with aggregate overspec can still launch
+— the priority manager handles starvation at runtime. The monitor flags the condition so
+the player can make an informed choice. The fitting screen shows which consumers are
+contributing to the overspec.
 
 ---
 

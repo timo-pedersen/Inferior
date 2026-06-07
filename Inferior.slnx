@@ -10,7 +10,6 @@
     <File Path="Docs/inferior-design-ui.md" />
     <File Path="Docs/inferior-design.md" />
     <File Path="Docs/inferior-lore.md" />
-    <File Path="Review20260607.md" />
   </Folder>
   <Project Path="Inferior.Core/Inferior.Core.csproj" />
   <Project Path="Inferior.Galaxy/Inferior.Galaxy.csproj" />

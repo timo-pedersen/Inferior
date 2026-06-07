@@ -1,6 +1,6 @@
 using Inferior.Core.DataBus;
 
-namespace Inferior.Gameplay.Components;
+namespace Inferior.Gameplay.Components.Power;
 
 /// <summary>
 /// Power distribution bus — a passive energy buffer.

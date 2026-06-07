@@ -60,11 +60,11 @@ Reports to buses
 
 ## Artificial Gravity
 
-Always on. Provides artificial gravity and inertial dampening, which affects flight and hyperspace.
+Provides artificial gravity and inertial dampening, which affects flight and hyperspace.
 
-Requires converter from main bus.
+Requires converter from main bus (H-sw sub-band). Cannot be manually disabled — no off switch. In practice behaves as always-on: its `InputCapacitor` absorbs brief power interruptions silently. A sustained bus failure will eventually drop gravity, but the in-game consequence is minor — no damage mechanic. Should be registered at `Critical` priority with the `PowerPriorityManager`.
 
-* Power \- consumes steady power.
+* Power — consumes steady power.
 
 ## Gyro
 

@@ -1,4 +1,5 @@
 using Inferior.Core.DataBus;
+using Inferior.Gameplay.Components.Power;
 
 namespace Inferior.Gameplay.Components;
 

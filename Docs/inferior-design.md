@@ -126,7 +126,7 @@ priority level. When power is insufficient, the manager reduces power to
 lower-priority consumers first. This creates meaningful tradeoffs in combat and 
 emergencies.
 
-Default Priority order: `Critical` (life support) → `High` (navigation) → `Normal` (weapons) → `Low` (luxury).
+Default Priority order: `Critical` (essential flight systems, e.g. artificial gravity) → `High` (navigation) → `Normal` (weapons) → `Low` (luxury). Life support is battery-backed and not part of this hierarchy — it always runs.
 
 Capacitors buffer burst demand. When firing a weapon a certain amount of energy is drained. 
 Fire rate is **never hard-coded**, it emerges from charge state.
@@ -138,7 +138,7 @@ cold starts and emergencies, and the user may prioritize certain startups over o
 So shield startup may have the following sequence:
 1. Assuming ship "turned on", ie Generator started.
 1. Shield capacitor starts charging from generator output. [Message on system bus - Shield: initiating startup]
-1. Once capacitor reaches 80%, shield generator can start up. [Message on system bus - Shield: Capacitor at 32% etc at regular intervals]
+1. Once the shield capacitor is fully charged, the generator starts up. [Message on system bus - Shield: Capacitor at 32% etc at regular intervals]
 1. This drains the capacitor fully, and is a small sonic "boom" or impact on ship, ship might turn slightly from the surge of power, and a visual effect on the shield generator itself. [Message on system bus - Shield: Shield online]
 1. Shield can now build up, [Message on system bus - Shield: Shield at 15% etc]
 
@@ -153,8 +153,8 @@ the main bus — they tap the bus and convert power to the required form.
 
 Ship computer (ie panels, switches; not ship ai or advanced functions such as 
 flight control, those require access to hyperspace and main power), lights, doors, 
-and displays run on a **permanent battery outside the simulation entirely** — 
-not subject to power starvation. No Half-Life flashlight syndrome.
+displays, and **life support** run on a **permanent battery outside the simulation 
+entirely** — not subject to power starvation. No Half-Life flashlight syndrome.
 
 ### Generator
 

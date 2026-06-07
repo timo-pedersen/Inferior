@@ -1,6 +1,7 @@
 using Microsoft.Xna.Framework;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
+using Inferior.Gameplay.Components.Power;
 
 namespace Inferior.Gameplay.Ship;
 
