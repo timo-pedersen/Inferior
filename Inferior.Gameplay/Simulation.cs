@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Inferior.Core.DataBus;
 using Inferior.Core.Simulation;   // GameClock
 
 namespace Inferior.Gameplay;
@@ -63,7 +64,8 @@ public class Simulation
 
     private void Tick(double dt)
     {
-        var input = _input; // read snapshot once — consistent across tick
+        CommandBus.Drain();          // apply any commands queued by the main thread
+        var input = _input;          // read snapshot once — consistent across tick
 
         GameClock.Advance(dt);
         UpdateEnvironment();

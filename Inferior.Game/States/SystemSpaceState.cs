@@ -7,6 +7,7 @@ using Inferior.Core.Math;
 using Inferior.Galaxy;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Ship;
+using Inferior.Gameplay.Components;
 using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
@@ -91,14 +92,12 @@ public sealed class SystemSpaceState : GameState
     private InstrumentMeter? _heartbeatMeter;
     private InstrumentMeter? _simTimeMeter;
     private InstrumentMeter? _gravityMeter;
+    private InstrumentMeter? _reactorPowerOutputMeter;
     private SystemConsole?   _console;
     private DirectionBall?   _dirBall;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
     // Stored so we can unsubscribe on OnExit
-    private Action<double>?  _heartbeatHandler;
-    private Action<double>?  _simTimeHandler;
-    private Action<double>?  _gravityHandler;
     private Action<string>?  _systemHandler;
     private Action<double>?  _gravDirXHandler;
     private Action<double>?  _gravDirYHandler;
@@ -216,7 +215,7 @@ public sealed class SystemSpaceState : GameState
         var theme = Theme.InferiorDark(_font);
         _ui = new UIManager(_gd, theme);
         _uiMouseMode   = false;
-        _debugCameraMode = false;
+        _debugCameraMode = true;
 
         // ── Right panel: INSTR tab (meters) + NAV tab (direction ball) ────────
         const int panelW   = 260;
@@ -224,23 +223,39 @@ public sealed class SystemSpaceState : GameState
         const int meterH   = 46;
         const int meterGap = 8;
 
-        _heartbeatMeter = new InstrumentMeter { Label = "HEARTBEAT", MinValue = 0, MaxValue = 100,
-            Bounds = new Rectangle(0, 0, innerW, meterH) };
-        _simTimeMeter = new InstrumentMeter { Label = "SIM TIME", MinValue = 0, MaxValue = 300,
-            Format = "F0", Bounds = new Rectangle(0, meterH + meterGap, innerW, meterH) };
-        _gravityMeter = new InstrumentMeter { Label = "GRAVITY", MinValue = 0, MaxValue = 30,
-            Format = "F4", Bounds = new Rectangle(0, (meterH + meterGap) * 2, innerW, meterH) };
+        _heartbeatMeter = new InstrumentMeter 
+        { Label = "HEARTBEAT", MinValue = 0, MaxValue = 100,
+            Topic = $"Debug.{Topics.Debug.Heartbeat}",
+            Bounds = new Rectangle(0, 0, innerW, meterH) 
+        };
+        _simTimeMeter = new InstrumentMeter 
+        { Label = "SIM TIME", MinValue = 0, MaxValue = 300,
+            Topic = $"Debug.{Topics.Debug.SimTime}",
+            Format = "F0", Bounds = new Rectangle(0, meterH + meterGap, innerW, meterH) 
+        };
+        _gravityMeter = new InstrumentMeter 
+        { Label = "GRAVITY", MinValue = 0, MaxValue = 30,
+            Topic = $"GravitySensor.{Topics.GravitySensor.Strength}",
+            Format = "F4", Bounds = new Rectangle(0, (meterH + meterGap) * 2, innerW, meterH) 
+        };
+        _reactorPowerOutputMeter = new InstrumentMeter 
+        { Label = "REACTOR OUTPUT", MinValue = 0, MaxValue = 120,
+            Topic = "Reactor.Output",
+            Bounds = new Rectangle(0, (meterH + meterGap) * 3, innerW, meterH) 
+        };
 
         var instrPanel = new Panel { DrawBackground = false, DrawBorder = false };
         instrPanel.Add(_heartbeatMeter);
         instrPanel.Add(_simTimeMeter);
         instrPanel.Add(_gravityMeter);
+        instrPanel.Add(_reactorPowerOutputMeter);
 
         _dirBall = new DirectionBall
         {
             Header = "HEADING",
             Bounds = new Rectangle(0, 0, innerW, innerW),
         };
+
         var navPanel = new Panel { DrawBackground = false, DrawBorder = false };
         navPanel.Add(_dirBall);
 
@@ -279,8 +294,8 @@ public sealed class SystemSpaceState : GameState
         _ui.Add(_rightPanel);
         _ui.Add(_leftPanel);
 
-        _backButton = new Button("< SYSTEM MAP", new Rectangle(16, 16, 160, 36));
-        _timeButton = new Button($"TIME: {TimeLabels[_timeCompIndex]}", new Rectangle(16, 60, 190, 36));
+        _backButton = new Button("< SYSTEM MAP", new Rectangle(26, 16, 160, 36));
+        _timeButton = new Button($"TIME: {TimeLabels[_timeCompIndex]}", new Rectangle(26, 60, 190, 36));
 
         _backButton.Clicked += _ =>
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
@@ -302,19 +317,13 @@ public sealed class SystemSpaceState : GameState
         // Start in ship-control mode — panels retracted, handles and buttons hidden
         ApplyUiMode(false);
 
-        // Subscribe — handlers run on main thread during DataBus.Drain()
-        _heartbeatHandler = v => _heartbeatMeter.SetValue(v);
-        _simTimeHandler   = v => _simTimeMeter.SetValue(v);
-        _gravityHandler   = v => _gravityMeter.SetValue(v);
-        _systemHandler    = msg => _console.AddMessage(msg);
+        // Meters subscribe themselves via Topic — only non-meter handlers need wiring here
+        _systemHandler = msg => _console.AddMessage(msg);
 
         _gravDirXHandler = v => _gravDirX = v;
         _gravDirYHandler = v => _gravDirY = v;
         _gravDirZHandler = v => _gravDirZ = v;
 
-        DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
-        DataBus.Instruments.Subscribe($"Debug.{Topics.Debug.SimTime}",   _simTimeHandler);
-        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.Strength}",   _gravityHandler);
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionY}", _gravDirYHandler);
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
@@ -326,13 +335,12 @@ public sealed class SystemSpaceState : GameState
 
     public override void OnExit()
     {
-        // Unsubscribe before disposing controls
-        if (_heartbeatHandler != null)
-            DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.Heartbeat}", _heartbeatHandler);
-        if (_simTimeHandler != null)
-            DataBus.Instruments.Unsubscribe($"Debug.{Topics.Debug.SimTime}", _simTimeHandler);
-        if (_gravityHandler != null)
-            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.Strength}",   _gravityHandler);
+        // Meters unsubscribe themselves when Topic is cleared
+        if (_heartbeatMeter        != null) _heartbeatMeter.Topic        = "";
+        if (_simTimeMeter          != null) _simTimeMeter.Topic          = "";
+        if (_gravityMeter          != null) _gravityMeter.Topic          = "";
+        if (_reactorPowerOutputMeter != null) _reactorPowerOutputMeter.Topic = "";
+
         if (_gravDirXHandler != null)
             DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
         if (_gravDirYHandler != null)
@@ -970,11 +978,14 @@ public sealed class SystemSpaceState : GameState
         var ship = new Ship
         {
             Position    = startPos,
-            SizeClass   = SizeClass.Medium,
+            SizeClass   = ShipSizeClass.Medium,
             MoveSpeedMs = 5e9,
         };
-        // Same initial orientation as the debug camera — slight downward pitch
         ship.SetOrientation(Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
+
+        // Minimal component loadout — enough to fly
+        ship.Install(new PowerReactor("Reactor", maxOutputW: 120e6, outputCapacitorJ: 50e6));
+
         _simulation.SetShip(ship);
     }
 

@@ -102,6 +102,13 @@ public sealed class SpaceSimulation : Simulation
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition);
     }
 
+    // ── Power ─────────────────────────────────────────────────────────────────
+
+    protected override void TickPower(double dt)
+    {
+        _ship?.TickComponents(dt);
+    }
+
     // ── Environment ───────────────────────────────────────────────────────────
 
     protected override void UpdateEnvironment()

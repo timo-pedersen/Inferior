@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Inferior.Core.Math;
+using Inferior.Gameplay.Components;
 
 namespace Inferior.Gameplay.Ship;
 
@@ -12,12 +13,29 @@ namespace Inferior.Gameplay.Ship;
 public sealed class Ship
 {
     // ── Identity ──────────────────────────────────────────────────────────────
-    public SizeClass SizeClass { get; init; } = SizeClass.Medium;
+    public ShipSizeClass SizeClass { get; init; } = ShipSizeClass.Medium;
 
     // ── Physics state ──────────────────────────────────────────────────────────
     public DVec3      Position    { get; set; }
     public DVec3      Velocity    { get; set; }
     public Quaternion Orientation { get; private set; } = Quaternion.Identity;
+
+    // ── Components ────────────────────────────────────────────────────────────
+    private readonly List<ShipComponent> _components = new();
+    public IReadOnlyList<ShipComponent> Components => _components;
+
+    public void Install(ShipComponent component)
+    {
+        _components.Add(component);
+        ComponentMass += component is PowerReactor r ? r.MaxOutputW * 0.00001 : 0; // stub
+        component.OnStartup();
+    }
+
+    public void TickComponents(double dt)
+    {
+        foreach (var c in _components)
+            c.Tick(dt);
+    }
 
     // ── Mass ──────────────────────────────────────────────────────────────────
     public double HullMass      { get; init; } = 50_000.0;  // kg, hull only

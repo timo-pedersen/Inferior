@@ -1,3 +1,4 @@
+using Inferior.Core.DataBus;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -5,7 +6,8 @@ namespace Inferior.UI.Controls;
 
 /// <summary>
 /// Horizontal bar meter for a single instrument value.
-/// Does not know about DataBus — the caller subscribes and calls SetValue().
+/// Set Topic to auto-subscribe to DataBus.Instruments — no manual wiring needed.
+/// SetValue() is still available for one-off updates or custom handlers.
 ///
 /// Layout (example 200×46):
 ///   ┌──────────────────────────────────────────┐
@@ -20,9 +22,40 @@ public sealed class InstrumentMeter : Control
     public double MaxValue { get; set; } = 100.0;
     public string Format   { get; set; } = "F1";   // value display format
 
+    // ── DataBus auto-subscribe ────────────────────────────────────────────────
+
+    private string          _topic         = "";
+    private Action<double>? _topicHandler;
+
+    /// <summary>
+    /// When set, the meter subscribes to DataBus.Instruments for this topic and
+    /// updates automatically each frame. Changing Topic unsubscribes the old one.
+    /// Leave empty to drive the meter manually via SetValue().
+    /// </summary>
+    public string Topic
+    {
+        get => _topic;
+        set
+        {
+            if (_topic == value) return;
+            if (_topicHandler != null && _topic.Length > 0)
+                DataBus.Instruments.Unsubscribe(_topic, _topicHandler);
+            _topic = value;
+            if (_topic.Length > 0)
+            {
+                _topicHandler = SetValue;
+                DataBus.Instruments.Subscribe(_topic, _topicHandler);
+            }
+            else
+            {
+                _topicHandler = null;
+            }
+        }
+    }
+
     private double _value;
 
-    /// <summary>Thread-safe enough for display — called from DataBus handler on main thread.</summary>
+    /// <summary>Update the displayed value directly. Called automatically when Topic is set.</summary>
     public void SetValue(double value) => _value = value;
 
     public override void Draw(SpriteBatch sb, UIRenderer renderer, Theme theme)

@@ -1,3 +1,3 @@
 namespace Inferior.Gameplay.Ship;
 
-public enum SizeClass { Small, Medium, Large, Capital }
+public enum ShipSizeClass { Small, Medium, Large, Capital }
