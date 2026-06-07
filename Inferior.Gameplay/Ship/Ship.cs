@@ -13,7 +13,15 @@ namespace Inferior.Gameplay.Ship;
 public sealed class Ship
 {
     // ── Identity ──────────────────────────────────────────────────────────────
-    public ShipSizeClass SizeClass { get; init; } = ShipSizeClass.Medium;
+    public string        Id          { get; init; } = "";
+    public string        HullTypeId  { get; init; } = "";
+    public string?       Name        { get; init; }
+    public DateTime      CreatedDate { get; init; }
+    public ShipSizeClass SizeClass   { get; init; } = ShipSizeClass.Medium;
+
+    // ── Flyability ────────────────────────────────────────────────────────────
+    public bool                  CanFly           => true;  // stub — always flyable until systems are wired
+    public IReadOnlyList<string> FlyabilityIssues => [];
 
     // ── Physics state ──────────────────────────────────────────────────────────
     public DVec3      Position    { get; set; }
