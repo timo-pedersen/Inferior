@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/Solution Items/Docs/">
     <File Path="Docs/inferior-classes.md" />
+    <File Path="Docs/inferior-components-and-sensors.md" />
     <File Path="Docs/inferior-design-persistence.md" />
     <File Path="Docs/inferior-design-ship.md" />
     <File Path="Docs/inferior-design-ui.md" />

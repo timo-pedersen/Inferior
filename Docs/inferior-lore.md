@@ -126,7 +126,9 @@ The genetically modified and hybrid peoples evacuated by the Bolon at the end of
 
 ### What hyperspace is
 
-Hyperspace is a parallel set of planes that co-exist alongside normal space. It is not a single uniform void — there are many distinct hyperspace planes, each with different physical properties. The First and Second Age relationship with hyperspace was entirely empirical: whatever worked, worked. The Third Age has introduced the first theoretical frameworks and the systematic A–Z classification.
+Hyperspace is a parallel set of planes that co-exist alongside normal space. It is not a single uniform void — there are many distinct hyperspace 
+planes, each with different physical properties. The First and Second Age relationship with hyperspace was entirely empirical: whatever worked, 
+worked. The Third Age has introduced the first theoretical frameworks and the systematic A–Z classification.
 
 Hyperspace is not traversable by biological matter in its raw form. All interaction with it is mediated by technology — specifically, by hyperspace crystals.
 
@@ -222,11 +224,23 @@ Different anomaly types produce crystals with different properties — the speci
 
 ## Hyperspace crystals
 
-Hyperspace effects are produced by **special crystals excited by laser**. The crystals are themselves hyperspace-doped exotic materials: hyperspace subatomic particles have attached to the atomic nuclei of the base material, altering the electron cloud and therefore the material's physical properties.
+Hyperspace effects are produced by **special crystals excited by laser**. The crystals are themselves hyperspace-doped exotic materials: hyperspace subatomic 
+particles have attached to the atomic nuclei of the base material, altering the electron cloud and therefore the material's physical properties.
 
-This creates the "which came first" paradox: producing hyperspace-doped crystals requires hyperspace interaction, but naturally occurring versions exist near anomalies. The in-universe answer: anomalies came first. Early researchers found glowing rocks in asteroid fields near anomaly regions, characterised their properties, and eventually learned to seed and cultivate them deliberately. The technology bootstrapped itself from natural observation.
+This creates the "which came first" paradox: producing hyperspace-doped crystals requires hyperspace interaction, but naturally occurring versions exist near 
+anomalies. The in-universe answer: anomalies came first. Early researchers found glowing rocks in asteroid fields near anomaly regions, characterised their 
+properties, and eventually learned to seed and cultivate them deliberately. The technology bootstrapped itself from natural observation.
 
-Crystals are not interchangeable. Different anomaly sources produce crystals with different affinities. The Graham bands (P, Q, R) are the primary exotic particle sources used in crystal and hull element fabrication.
+Crystals are not interchangeable. Different anomaly sources produce crystals with different affinities. The Graham bands (P, Q, R) are the primary exotic 
+particle sources used in crystal and hull element fabrication.
+
+Crystals can be exited by lasers. Hyperspace band and sub band tuning etc can be achieved by tuning the laser parameters:
+* Wavelength
+* Polarisation
+* Incoming angle
+* A number of lasers (aka as Vectors), usually one to three, and their relative configuration / angle
+
+This is how the drive and other systems produce their effects.
 
 ---
 

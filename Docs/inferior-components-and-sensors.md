@@ -133,6 +133,33 @@ Always working. Not currently planned.
 
 Always available. On off switch for ship (turns off reactor).
 
+## HyperspaceHeatSink
+
+The ship's central thermal mass and heat disposal device. A hyperspace component that
+dissipates heat into a separate hyperspace plane rather than radiating it into realspace
+(which would produce a large, detectable thermal signature).
+
+In reality draws power from the bus, but this is not simulated — modelling the consequences
+of heat sink power loss adds complexity without meaningful gameplay.
+
+Heat flow into and through this component:
+
+1. Component thermal masses heat up during operation.
+2. Coolant transports heat from each component's thermal mass to this sink.
+   No thermal mass in the coolant fluid — it is a pure transport medium.
+   Transport rate per component is capped by `HeatFlowPerComponent` on the coolant system.
+   Transport efficiency scales with coolant level (0.0–1.0).
+3. The sink dissipates heat to hyperspace at its `HeatDissipation` rate.
+   If incoming heat exceeds the dissipation rate, `StoredHeatJ` accumulates.
+   When `StoredHeatJ` reaches `CapacityJ`, the sink saturates — heat dumps instantly into
+   realspace, causing a massive thermal spike and EM burst detectable by every passive
+   sensor in range.
+
+* CapacityJ — maximum heat energy before saturation (**joules**)
+* StoredHeatJ — current stored heat (**joules**)
+* TransferRate — maximum incoming rate from coolant transport (**watts**)
+* HeatDissipation — rate at which heat is dissipated to hyperspace (**watts**)
+
 # Special Components
 
 ## Coolant system
@@ -150,6 +177,21 @@ and handles dissipation.
 * CoolantLeakage — fractional fill loss per second (coolant is modelled as a 0–1 level; leakage is a constant drain rate)
 
 Consumable: Coolant fluid.
+
+## Exhaust
+
+A mostly passive system that expels degenerate material from engines, which is produced when ionized matter from metal rods are passed through
+hyperspace. Degenerated matter production scales with engine thrust, and is separated out and expelled though the exhaust system, which is 
+similar to exhaust pipes on cars. 
+
+This material is mostly inert, but may deposit inside the pipes, and needs to be cleaned periodically. 
+No cleaning / buildup affects engine efficiency.
+
+Cleaned out material can be harvested for strange crystals that can be sold.
+
+* DegenerateMaterialBuildUp
+
+Sensors can report the level of buildup. Cleaning is done at stations.
 
 # Non components
 
@@ -182,6 +224,41 @@ Some sensors are ‘active’, they have to be given a command on the command bu
 
 ---
 
+# Consumables
+
+Resources consumed during play and replenished at stations or in the field.
+Each is tracked per ship and saved on dock.
+
+## Reactor fuel
+
+Consumed by the power core. Consumption scales with output level — efficient cruising
+burns far less than combat power. Replenished at stations; can also be siphoned from
+stars (high risk, high yield — see lore doc).
+
+## Metal rods
+
+Reaction mass for the drive. Consumed in proportion to thrust offset — idling the
+drive burns nothing; maximum offset burns the most. Strange crystals occasionally
+form in exhaust deposits and can be harvested.
+
+## Coolant fluid
+
+Slowly lost through constant minor leakage in the coolant loop. Level is tracked as
+a 0.0–1.0 fill fraction. Efficiency of heat transport from components to the
+`HyperspaceHeatSink` scales with this level — a depleted coolant system can no longer
+keep components cool even if the heat sink has capacity to spare. Replenished instantly
+at stations; repair of the coolant system itself takes time.
+
+## Ammunition
+
+Consumed by weapons. Not yet designed — placeholder.
+
+## Repair materials
+
+Used for hull panel patching and component repair in the field. Not yet designed — placeholder.
+
+---
+
 ## Changelog
 
 | Date | Change |
@@ -192,3 +269,4 @@ Some sensors are ‘active’, they have to be given a command on the command bu
 | 2026-06-08 | HeatCapacity corrected to J/K in shared properties. Engine, shield, and coolant properties annotated with units. ShieldSize clarified as m² (hull face mapping pending). EnergyType cross-referenced to PowerOutType. |
 | 2026-06-08 | Shield: ShieldSize replaced by Radius (metres, player-facing) and ShieldArea (calculated, π × r², m²). MaxPower annotated as scaling with ShieldArea at manufacture time. |
 | 2026-06-08 | Coolant system corrected: no thermal mass in coolant (pure transport medium). HeatCapacity and HeatDissipation removed from coolant properties (both belong to HyperspaceHeatSink). Numbered steps rewritten to match. |
+| 2026-06-08 | HyperspaceHeatSink added to battery-backed section with heat flow description and property list. Consumables section added (reactor fuel, metal rods, coolant fluid, ammunition, repair materials). |
