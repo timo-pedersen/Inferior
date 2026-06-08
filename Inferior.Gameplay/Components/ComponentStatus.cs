@@ -2,8 +2,8 @@ namespace Inferior.Gameplay.Components;
 
 public enum ComponentStatus
 {
-    Stopped,       // no power, dormant
+    PowerOff,      // switched off or never started — draws no power, does nothing
     PowerOn,       // power received; startup timer not yet started
     Initializing,  // startup timer running — warming up
-    Started,       // fully operational
+    Running,       // fully operational
 }

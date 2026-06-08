@@ -33,7 +33,7 @@ public sealed class FlyabilityMonitor : ShipComponent
     public void AddCheck(string name, Func<string?> check)
         => _checks.Add((name, check));
 
-    public override void Tick(double dt)
+    protected override void OnTick(double dt)
     {
         _cooldown -= dt;
         if (_cooldown > 0.0) { TickSensors(); return; }

@@ -62,7 +62,7 @@ public sealed class PowerBus : ShipComponent
         return deliveredJ / dt;
     }
 
-    public override void Tick(double dt)
+    protected override void OnTick(double dt)
     {
         if (_source != null && dt > 0.0)
         {
@@ -80,11 +80,11 @@ public sealed class PowerBus : ShipComponent
         TickSensors();
     }
 
-    public override void OnStartup()
+    protected override void OnInitializationComplete()
     {
-        base.OnStartup();
+        PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: {Capacitor.MaxJ / 1e6:F1} MJ bus online");
+            $"{Name}: online — {Capacitor.MaxJ / 1e6:F1} MJ bus");
     }
 
     private void RegisterSensors()

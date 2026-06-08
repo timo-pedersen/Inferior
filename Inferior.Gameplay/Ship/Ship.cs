@@ -37,7 +37,8 @@ public sealed class Ship
     {
         _components.Add(component);
         ComponentMass += component is PowerReactor r ? r.MaxPower * 0.00001 : 0; // stub
-        component.OnStartup();
+        component.PowerOn = true;
+        component.NotifyPowerAvailable();
     }
 
     public void TickComponents(double dt)

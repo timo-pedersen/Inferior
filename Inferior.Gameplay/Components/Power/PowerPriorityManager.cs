@@ -43,7 +43,7 @@ public sealed class PowerPriorityManager : ShipComponent
     public void Register(string name, Func<double> demandWatts, Action<double> deliver, PowerPriority priority)
         => _consumers.Add(new Entry(name, demandWatts, deliver, priority));
 
-    public override void Tick(double dt)
+    protected override void OnTick(double dt)
     {
         if (_bus != null)
             DistributePower(dt);

@@ -43,7 +43,7 @@ public sealed class PowerReactor : ShipComponent
         RegisterCommands();
     }
 
-    public override void Tick(double dt)
+    protected override void OnTick(double dt)
     {
         double target   = MaxPower * Throttle;
         CurrentOutput   = target * Efficiency;
@@ -60,11 +60,11 @@ public sealed class PowerReactor : ShipComponent
         TickSensors();
     }
 
-    public override void OnStartup()
+    protected override void OnInitializationComplete()
     {
-        base.OnStartup();
+        PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: {MaxPower / 1e6:F0} MW reactor, " +
+            $"{Name}: online — {MaxPower / 1e6:F0} MW reactor, " +
             $"{OutputCapacitor.MaxJ / 1e6:F1} MJ capacitor");
     }
 

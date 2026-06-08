@@ -73,15 +73,15 @@ public sealed class HyperspaceHeatSink : ShipComponent
     /// Standard sim-loop tick. Publishes sensor values.
     /// Heat processing should be driven by the coolant system via Tick(incomingHeatWatts, dt).
     /// </summary>
-    public override void Tick(double dt)
+    protected override void OnTick(double dt)
     {
         TickSensors();
     }
 
-    public override void OnStartup()
+    protected override void OnInitializationComplete()
     {
-        base.OnStartup();
+        PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: {CapacityJ / 1e6:F0} MJ capacity, {HeatDissipation / 1e3:F0} kW dissipation");
+            $"{Name}: online — {CapacityJ / 1e6:F0} MJ capacity, {HeatDissipation / 1e3:F0} kW dissipation");
     }
 }
