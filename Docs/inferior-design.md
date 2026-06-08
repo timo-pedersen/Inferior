@@ -233,19 +233,22 @@ A **hyperspace device** that dumps heat into a separate hyperspace plane.
 
 ```
 Component generates heat and heats up locally
-    │  (heat = power through × (1 - efficiency))
+    │  (heat = power × (1 − efficiency))
     ▼
-Heat is transported via Coolant to Heat Capacitor (thermal mass with finite capacity)
-    │  (Efficiency dependent on coolant level)
+Coolant transports heat from component thermal mass → HyperspaceHeatSink
+    │  (efficiency scales with coolant level; rate per component capped by HeatFlowPerComponent)
+    │  (coolant has no thermal mass of its own — pure transport medium)
     ▼
-Central thermal mass (heat capacitor)
-    │  (Efficiency dependent on damage level and component stats)
+HyperspaceHeatSink absorbs incoming heat into its own thermal mass
+    │  (requires power to operate; if inflow > HeatDissipation rate, stored heat accumulates)
     ▼
-Heat sink (hyperspace device — requires power, does not generate heat for practical reasons)
+Heat dissipated to hyperspace at HeatDissipation rate
+    (saturation: stored heat ≥ capacity → instant thermal spike in realspace + EM burst)
 ```
 
-When total heat generation exceeds coolant capacity, excess stays local. 
-When local thermal mass saturates → damage + heat signature.
+When a component's thermal mass is not being drained fast enough (low coolant, damaged coolant
+system), excess heat stays local in the component. When local thermal mass saturates → damage
+and heat signature.
 
 **Damage-efficiency feedback loop:** damage → lower efficiency → more heat → worse cooling → more damage. 
 A spiral the player must manage by reducing load, improving cooling, or repairing.
@@ -261,13 +264,13 @@ Perhaps coolant system repair takes some time, coolant top-up is instant.
 Creates a meaningful resource management loop.
 
 Implementation wise:
-- All components and some other systems generate heat. Based on efficiency and 
-damage state.
-- Heat is transferred to a central thermal mass, a capacitor of sorts. 
-Efficiency of this transport is based on the level of coolant fluid.
-- Heat sink dissipates heat from heat capacitor into hyperspace, it just 
-'disappears'. Has a finite capacity and flow rate. When heat exceeds capacity, it stays in the thermal mass, eventually causing damage and increasing heat signature.
-- Coolant fluid level is just simulated as a number plus a leak rate.
+- All components generate heat based on efficiency and damage state.
+- Coolant transports heat from component thermal masses directly to the HyperspaceHeatSink.
+  Transport efficiency scales with coolant level (0–1). Coolant has no thermal mass.
+- HyperspaceHeatSink holds the central thermal mass. It dissipates heat to hyperspace
+  at its HeatDissipation rate. When stored heat exceeds its capacity, saturation occurs —
+  instant spike into realspace, every passive sensor in range lights up.
+- Coolant fluid level is simulated as a 0–1 number with a constant leak rate.
 
 ## Hull & damage
 
@@ -519,3 +522,4 @@ Geography of production creates trade routes, conflict zones, and exploration in
 | Date | Change |
 |------|--------|
 | 2026-06-08 | Life support moved to battery (removed from Critical priority). Shield startup threshold: 80% → fully charged. ArtGrav: clarified always-on semantics. Water flow analogy: watts/joules/dt note added. |
+| 2026-06-08 | Heat model corrected: coolant has no thermal mass (pure transport medium). Flow diagram updated to three steps. HyperspaceHeatSink identified as the sole central thermal mass. Implementation notes rewritten to match. |

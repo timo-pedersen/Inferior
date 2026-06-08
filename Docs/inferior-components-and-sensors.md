@@ -13,7 +13,7 @@ All components share:
 * PowerConsumption — nominal peak draw in **watts**; used for FlyabilityMonitor overspec checks
 * Efficiency — 0.0–1.0
 * Damage — 0.0 = pristine, 1.0 = destroyed
-* HeatCapacity — local thermal mass in **joules**
+* HeatCapacity — local thermal mass in **J/K** (joules per kelvin)
 
 ## Power core
 
@@ -53,10 +53,10 @@ Engines provide torque for pitch, yaw etc.
 
 Certain engines can generate a power called ‘Red Alpha’. This can be used to drive a gyro, which provides *extra* torque for pitch, yaw etc.
 
-* MaxPower  
-* MaxDownThrust (bigger value \- planets with large gravity can be landed upon).  
-* MaxThrust (depends on MaxPower and fuel, a derived read only value)  
-* AlphaRedPower
+* MaxPower — peak draw from main bus (**watts**)
+* MaxDownThrust — maximum downward thrust, e.g. for landing (**newtons**; larger = usable on high-gravity planets)
+* MaxThrust — maximum forward/reverse thrust; derived from MaxPower and fuel, read-only (**newtons**)
+* AlphaRedPower — Red Alpha output when paired with a second engine (**watts**)
 
 Consumable: Metal rods  
 Reports to buses
@@ -90,11 +90,12 @@ Startup requires the shield capacitor to get fully charged. Then it is started m
 
 Connected via converter.
 
-* EnergyType (there are two energy types used for shields)  
-* MaxPower  
-* InternalShieldCapacitor  
-* ShieldSize  
-* Deflection (calculated value from MaxPower and ShieldSize)
+* EnergyType — V-Alpha or V-Theta sub-band (see `PowerOutType`; Theta is the superior grade)
+* MaxPower — peak draw from converter (**watts**); set at manufacture for a given Radius; scales with ShieldArea
+* InternalShieldCapacitor — energy stored in the shield buffer (**joules**); drives deflection directly
+* Radius — shield radius (**metres**); the player-facing stat shown in the fitting screen
+* ShieldArea — calculated as `π × Radius²` (**m²**); power consumption scales with this; determines which hull faces are protected (hull face mapping pending design)
+* Deflection — fraction of incoming damage absorbed; calculated from MaxPower and ShieldArea (**0.0–1.0**)
 
 # Components without heat management or power requirement from a bus.
 
@@ -136,16 +137,17 @@ Always available. On off switch for ship (turns off reactor).
 
 ## Coolant system
 
-Model is a simpler version of the power distribution system:
+Pure transport medium — no thermal mass of its own. Moves heat from component
+thermal masses to the `HyperspaceHeatSink`, which holds the central thermal mass
+and handles dissipation.
 
-1. Component generates heat, temp increase.   
-2. Temp is removed from the component and added to the thermal mass of the coolant system.  
-3. Heat flows from thermal mass to hyperspace, depending on efficiancy.
+1. Component generates heat; temperature increases in component's local thermal mass.
+2. Coolant transports heat from component thermal mass → HyperspaceHeatSink.
+   Rate per component limited by `HeatFlowPerComponent`. Efficiency scales with coolant level.
+3. HyperspaceHeatSink dissipates heat to hyperspace (see that component for capacity and dissipation stats).
 
-* HeatFlowPerComponent (how much heat can be removed from a single component)  
-* HeatCapacity (internal heat capacity)  
-* HeatDissipation (how much heat can be dissipated into hyperspace)  
-* CoolantLeakage (almost always leaks a little, easier to just top up)
+* HeatFlowPerComponent — maximum transport rate from a single component (**watts**)
+* CoolantLeakage — fractional fill loss per second (coolant is modelled as a 0–1 level; leakage is a constant drain rate)
 
 Consumable: Coolant fluid.
 
@@ -187,3 +189,6 @@ Some sensors are ‘active’, they have to be given a command on the command bu
 | 2026-06-08 | Initial document — component list, shared properties, sensors overview |
 | 2026-06-08 | ArtGrav clarified: no off switch, InputCapacitor absorbs brief interruptions, Critical priority |
 | 2026-06-08 | Unit annotations added to shared properties, Power bus (watts/joules distinction), Power core |
+| 2026-06-08 | HeatCapacity corrected to J/K in shared properties. Engine, shield, and coolant properties annotated with units. ShieldSize clarified as m² (hull face mapping pending). EnergyType cross-referenced to PowerOutType. |
+| 2026-06-08 | Shield: ShieldSize replaced by Radius (metres, player-facing) and ShieldArea (calculated, π × r², m²). MaxPower annotated as scaling with ShieldArea at manufacture time. |
+| 2026-06-08 | Coolant system corrected: no thermal mass in coolant (pure transport medium). HeatCapacity and HeatDissipation removed from coolant properties (both belong to HyperspaceHeatSink). Numbered steps rewritten to match. |

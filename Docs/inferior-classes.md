@@ -11,7 +11,8 @@
 ### Units convention
 
 > **Rate properties** (`MaxPower`, `PowerConsumption`, reactor output) are always **watts** (W).
-> **Storage properties** (`MaxJ` on capacitors, `HeatCapacity`) are always **joules** (J).
+> **Storage properties** (`MaxJ` on capacitors) are always **joules** (J).
+> **Thermal mass** (`HeatCapacity`) is always **J/K** (joules per kelvin): temperature rise = heat (J) ÷ thermal mass (J/K).
 > Each simulation tick converts: `energy (J) = power (W) × dt`.
 > All internal simulation values use raw SI — no MW or MJ in code. Display scaling is
 > handled by `InstrumentMeter.ScaleFactor`. Where a unit could be ambiguous, doc comments
@@ -50,7 +51,7 @@ public abstract class ShipComponent
     // ── Health ────────────────────────────────────────────────────────────────
     public double Efficiency   { get; protected set; } = 1.0;  // 0.0–1.0
     public double Damage       { get; protected set; } = 0.0;  // 0.0 = pristine, 1.0 = destroyed
-    public double HeatCapacity { get; init; }                   // joules — local thermal mass
+    public double HeatCapacity { get; init; }                   // J/K — local thermal mass
 
     // ── Tick ──────────────────────────────────────────────────────────────────
     public virtual void Tick(double dt) { }
@@ -317,17 +318,18 @@ contributing to the overspec.
 ```csharp
 public class ThermalNode
 {
-    public double HeatCapacity    { get; }  // MJ — how much it can absorb
-    public double DissipationRate { get; }  // passive cooling, MW
-    public double CurrentHeat     { get; private set; }
+    public double HeatCapacity    { get; }  // J/K — local thermal mass; temperature rise = heat (J) ÷ capacity (J/K)
+    public double DissipationRate { get; }  // watts — passive cooling rate
+    public double CurrentHeat     { get; private set; }  // joules — thermal energy currently stored
 
     // Normalised 0–1 — maps directly to green/yellow/red gauge ranges
     public double Temperature => CurrentHeat / HeatCapacity;
 
-    public void Update(double heatInput, double dt)
+    public void Update(double heatInputWatts, double dt)
     {
-        double dissipated = DissipationRate * dt;
-        CurrentHeat = Math.Max(0, CurrentHeat + (heatInput - dissipated) * dt);
+        // Both terms in watts → multiply the net by dt to get joules added this tick
+        double netWatts = heatInputWatts - DissipationRate;
+        CurrentHeat = Math.Max(0, CurrentHeat + netWatts * dt);
     }
 
     // Thresholds drive DataBus messages
@@ -339,14 +341,19 @@ public class ThermalNode
 
 ### `HyperspaceHeatSink`
 
+The central thermal mass of the ship's heat system. Coolant transports heat from
+component thermal masses into this sink; the sink dissipates it to hyperspace.
+The coolant system has no thermal mass of its own.
+
 ```csharp
 public class HyperspaceHeatSink
 {
-    public double Capacity     { get; }   // MJ before saturated
-    public double CurrentLoad  { get; private set; }
-    public double TransferRate { get; }   // MW it can absorb
-    public double PowerDraw    { get; }   // costs energy to run
-    public bool   IsSaturated  => CurrentLoad >= Capacity;
+    public double CapacityJ       { get; }   // joules — max stored heat before saturation
+    public double StoredHeatJ     { get; private set; }
+    public double TransferRate    { get; }   // watts — max rate of incoming heat from coolant
+    public double HeatDissipation { get; }   // watts — rate at which heat is dumped to hyperspace
+    public double PowerDraw       { get; }   // watts — costs energy to run
+    public bool   IsSaturated     => StoredHeatJ >= CapacityJ;
 
     // When saturated — dumps heat back into realspace instantly
     // Massive thermal spike + EM burst — every passive sensor in range lights up
@@ -438,15 +445,23 @@ public class InternalComponent
 ```csharp
 public class Shield
 {
+    public double Radius     { get; init; }                   // metres — player-facing stat
+    public double ShieldArea => Math.PI * Radius * Radius;    // m² — power consumption scales with this
+
     public double Capacitor    { get; private set; }  // 0–1, never a binary on/off
-    public double ChargeRate   { get; }               // from power bus
+    public double ChargeRate   { get; }               // watts — from power bus
     public double MaxReduction { get; init; } = 0.85; // even full shields let 15% through
+
+    // MaxPower is set at manufacture time for a given Radius; scales with ShieldArea by design
+    public double MaxPower { get; init; }             // watts
 
     // Damage reduction linear with charge
     public double DamageReduction => Capacitor * MaxReduction;
 
-    // Power draw increases when depleted — shield working harder
-    public double PowerDraw => BasePower * (1.0 + (1.0 - Capacitor) * 0.5);
+    // Power draw scales with capacitor state — shield works harder when depleted
+    // Area scaling is already baked into MaxPower at manufacture time
+    public double PowerDraw => MaxPower * (1.0 + (1.0 - Capacitor) * 0.5);
+    // Full charge → MaxPower. Empty → 1.5 × MaxPower.
 
     // Heat per hit increases as shield depletes
     // Low shield → more heat → threatens generator → slows recharge → spiral
@@ -1382,3 +1397,6 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-04 | Major sync: Simulation moved to Inferior.Gameplay; Tick order updated (GameClock + UpdateEnvironment); WorldSnapshot pattern documented; Environment updated (SimWorld, GravityCalculations, UpdateFromSimThread, private setters); mass lock superseded by hyperspace interference; GameClock.Advance now public; Sensors section added (PassiveSensor, GravitySensor); UI controls list updated (InstrumentMeter, SystemConsole, DirectionBall); project structure updated. |
 | 2026-06-07 | Added CommandBus section (reverse bus, sim thread drains); Topics static class with naming convention and all current topics; PowerBus, PowerPriorityManager, FlyabilityMonitor in Power system section; UI section redirected to inferior-design-ui.md. |
 | 2026-06-08 | Units convention note added. ShipComponent abstract base class (Status/ComponentStatus enum, StartupTimer, InputCapacitor, PowerConsumption, Efficiency, Damage, HeatCapacity). PowerCapacitor class sketch (Draw/Charge in joules). PowerBus updated: MaxPower/MaxPowerPerConnection/MaxConnections (watts throughput) added, distinguished from Capacitor.MaxJ (joules storage), Draw() return value clarified. PowerNode comments updated from MW to watts. Critical priority comment updated (life support → essential flight systems). |
+| 2026-06-08 | HeatCapacity corrected to J/K throughout (was joules). Units convention note updated to separate thermal mass. ThermalNode.Update() formula fixed (was applying dt twice). ThermalNode comments corrected from MJ/MW to J/K and watts. |
+| 2026-06-08 | Shield class sketch: added Radius (metres) and ShieldArea (π × r², m²). MaxPower added as explicit stored property. BasePower undefined reference replaced with MaxPower throughout. ChargeRate annotated as watts. |
+| 2026-06-08 | HyperspaceHeatSink: corrected units (MJ/MW → joules/watts). Renamed CurrentLoad → StoredHeatJ, Capacity → CapacityJ. Added HeatDissipation (watts). Added clarifying note: coolant has no thermal mass; sink holds the central thermal mass. |
