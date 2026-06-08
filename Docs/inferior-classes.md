@@ -102,7 +102,11 @@ public class PowerCapacitor
 
 ---
 
-### `PowerNode`
+> ⚠️ **Superseded** — `PowerNode` and `PowerComponent` predate the `ShipComponent` base class
+> and the `PowerBus` / `PowerPriorityManager` architecture. Kept for historical reference only.
+> Do not implement. See `ShipComponent`, `PowerBus`, and `PowerPriorityManager` above.
+
+### `PowerNode` *(superseded)*
 Base unit for anything in the power graph.
 
 ```csharp
@@ -119,7 +123,7 @@ public class PowerNode
 }
 ```
 
-### `PowerComponent`
+### `PowerComponent` *(superseded)*
 Extends `PowerNode` with damage and thermal feedback.
 
 ```csharp
@@ -155,7 +159,12 @@ public enum PowerPriority
 }
 ```
 
-### Power simulation tick
+> ⚠️ **Superseded** — This pseudocode predates the coolant → `HyperspaceHeatSink` heat model
+> and the `PowerBus` / `PowerPriorityManager` architecture. The central `coolingCapacity`
+> and `DistributeExcessHeat` pattern no longer reflect the design. Kept for historical
+> reference only. See the `Simulation loop` section for the current tick order.
+
+### Power simulation tick *(superseded)*
 
 ```csharp
 void SimulatePower(double dt)
@@ -315,6 +324,21 @@ contributing to the overspec.
 
 ### `ThermalNode`
 
+Represents the local thermal state of a single component. Instantiated inside the
+component's constructor when heat management applies; `null` means the component
+generates no heat and is excluded from all coolant and heat-sink calculations.
+
+**Which components have a `ThermalNode`:**
+- Power-bus consumers (reactor, engine, shields, converters, etc.) — yes
+- Passive sensors and battery-backed components (FlyabilityMonitor, life support,
+  cockpit, lights) — no (`ThermalNode = null`)
+
+**Passive cooling: none.** There is no component-level passive dissipation via hull
+radiation or otherwise. All heat removal is exclusively through the coolant loop.
+If coolant level is zero the cooling efficiency is zero — heat rises unchecked until
+the component fails or the reactor is shut down. This may be revisited if gameplay
+demands a passive-cooling fallback.
+
 ```csharp
 public class ThermalNode
 {
@@ -342,6 +366,20 @@ public class ThermalNode
     public bool IsCritical => NormalizedTemperature > 0.9;
     public bool IsFailure  => NormalizedTemperature >= 1.0;  // component takes damage or shuts down
 }
+```
+
+**Usage in `ShipComponent`:**
+```csharp
+// In a heated component's constructor:
+ThermalNode = new ThermalNode(heatCapacity: 5_000, maxHeatJ: 200_000);
+
+// In the coolant system tick — for each component with a non-null ThermalNode:
+double heatGenerated = component.PowerConsumption * (1.0 - component.Efficiency);
+double coolingWatts  = coolantSystem.CoolingRateFor(component);  // 0 if coolant empty
+component.ThermalNode.Update(heatGenerated - coolingWatts, dt);
+
+if (component.ThermalNode.IsFailure)
+    component.AccumulateDamage(dt);
 ```
 
 ### `HyperspaceHeatSink`
@@ -1405,3 +1443,4 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-08 | Shield class sketch: added Radius (metres) and ShieldArea (π × r², m²). MaxPower added as explicit stored property. BasePower undefined reference replaced with MaxPower throughout. ChargeRate annotated as watts. |
 | 2026-06-08 | HyperspaceHeatSink: corrected units (MJ/MW → joules/watts). Renamed CurrentLoad → StoredHeatJ, Capacity → CapacityJ. Added HeatDissipation (watts). Added clarifying note: coolant has no thermal mass; sink holds the central thermal mass. |
 | 2026-06-08 | ThermalNode: removed DissipationRate (no passive cooling through hull; all heat routes via coolant). Temperature now explicitly in Kelvin. Added MaxHeatJ (joules) and NormalizedTemperature (0–1) for damage thresholds. Thresholds updated to use NormalizedTemperature. Update() parameter renamed to netHeatWatts. HyperspaceHeatSink: PowerDraw removed (power draw not simulated). |
+| 2026-06-08 | PowerNode, PowerComponent, Power simulation tick marked as superseded (predates ShipComponent + PowerBus architecture and coolant→sink heat model). ThermalNode section expanded: optional-node pattern (null = no heat), which components have nodes, no-passive-cooling rule documented, usage example added. |
