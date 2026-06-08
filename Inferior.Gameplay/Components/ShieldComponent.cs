@@ -105,6 +105,17 @@ public sealed class ShieldComponent : ShipComponent
         TickSensors();
     }
 
+    // ── Power-off drain ───────────────────────────────────────────────────────
+
+    private const double DrainRateW = 1e6;  // 1 MW — drains a 5 MJ capacitor in ~5 seconds
+
+    protected override void OnPowerOffTick(double dt)
+    {
+        if (_capacitor.StoredJ <= 0.0) return;
+        _capacitor.Draw(DrainRateW * dt);
+        TickSensors();
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     private double DemandWatts()

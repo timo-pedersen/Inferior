@@ -88,10 +88,13 @@ public sealed class SystemSpaceState : GameState
     private InstrumentMeter? _simTimeMeter;
     private InstrumentMeter? _gravityMeter;
     private InstrumentMeter? _reactorPowerOutputMeter;
+    private InstrumentMeter? _shieldCapacitorMeter;
+    private Button?          _shieldToggleButton;
     private SystemConsole?   _console;
     private DirectionBall?   _dirBall;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
+    private CockpitRail?     _cockpitRail;
     // Stored so we can unsubscribe on OnExit
     private Action<string>?  _systemHandler;
     private Action<double>?  _gravDirXHandler;
@@ -239,12 +242,20 @@ public sealed class SystemSpaceState : GameState
             ScaleFactor = 1e-6,   // bus publishes watts; meter displays MW
             Bounds = new Rectangle(0, (meterH + meterGap) * 3, innerW, meterH)
         };
+        _shieldCapacitorMeter = new InstrumentMeter
+        { Label = "SHIELD CAP", MinValue = 0, MaxValue = 100,
+            Topic = $"Shield.{Topics.Shield.Capacitor}",
+            ScaleFactor = 100.0,  // sensor publishes 0–1 fill; meter displays 0–100 %
+            Format = "F0",
+            Bounds = new Rectangle(0, (meterH + meterGap) * 4, innerW, meterH)
+        };
 
         var instrPanel = new Panel { DrawBackground = false, DrawBorder = false };
         instrPanel.Add(_heartbeatMeter);
         instrPanel.Add(_simTimeMeter);
         instrPanel.Add(_gravityMeter);
         instrPanel.Add(_reactorPowerOutputMeter);
+        instrPanel.Add(_shieldCapacitorMeter);
 
         _dirBall = new DirectionBall
         {
@@ -266,17 +277,7 @@ public sealed class SystemSpaceState : GameState
         _rightPanel.AddTab("INSTR", instrPanel);
         _rightPanel.AddTab("NAV",   navPanel);
 
-        // ── Left panel: LOG tab (system console) ──────────────────────────────
-        _console = new SystemConsole
-        {
-            Header    = "SYSTEM LOG",
-            MaxLines  = 9,
-            LineBreak = LineBreakMode.Wrap,
-            Bounds    = new Rectangle(0, 0, innerW, 220),
-        };
-        var logPanel = new Panel { DrawBackground = false, DrawBorder = false };
-        logPanel.Add(_console);
-
+        // ── Left panel: empty (tabs moved to CockpitRail) ─────────────────────
         _leftPanel = new EdgePanelHost(PanelEdge.Left)
         {
             PanelSize     = panelW,
@@ -285,10 +286,35 @@ public sealed class SystemSpaceState : GameState
             CornerMargin  = 8,
             Bounds        = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
         };
-        _leftPanel.AddTab("LOG", logPanel);
 
         _ui.Add(_rightPanel);
         _ui.Add(_leftPanel);
+
+        // ── CockpitRail: LOG and SYS tabs at the bottom ───────────────────────
+        _console = new SystemConsole
+        {
+            Header    = "SYSTEM LOG",
+            MaxLines  = 6,
+            LineBreak = LineBreakMode.Wrap,
+            Bounds    = new Rectangle(0, 0, 500, 200),
+        };
+
+        _shieldToggleButton = new Button("SHIELD: OFF", new Rectangle(0, 0, 200, 36));
+        _shieldToggleButton.Clicked += _ =>
+        {
+            if (_shield == null) return;
+            _shield.PowerOn = !_shield.PowerOn;
+            _shieldToggleButton.Text = _shield.PowerOn ? "SHIELD: ON" : "SHIELD: OFF";
+        };
+
+        _cockpitRail = new CockpitRail
+        {
+            Bounds = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
+        };
+        _cockpitRail.AddCenterTab("LOG", _console);
+        _cockpitRail.AddCenterTab("SYS", _shieldToggleButton);
+
+        _ui.Add(_cockpitRail);
 
         _backButton = new Button("< SYSTEM MAP", new Rectangle(26, 16, 160, 36));
 
@@ -328,6 +354,7 @@ public sealed class SystemSpaceState : GameState
         if (_simTimeMeter          != null) _simTimeMeter.Topic          = "";
         if (_gravityMeter          != null) _gravityMeter.Topic          = "";
         if (_reactorPowerOutputMeter != null) _reactorPowerOutputMeter.Topic = "";
+        if (_shieldCapacitorMeter   != null) _shieldCapacitorMeter.Topic   = "";
 
         if (_gravDirXHandler != null)
             DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
@@ -353,8 +380,9 @@ public sealed class SystemSpaceState : GameState
         _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
         UpdateUI();
         var screenBounds = new Rectangle(0, 0, width, height);
-        if (_rightPanel != null) _rightPanel.Bounds = screenBounds;
-        if (_leftPanel  != null) _leftPanel.Bounds  = screenBounds;
+        if (_rightPanel  != null) _rightPanel.Bounds  = screenBounds;
+        if (_leftPanel   != null) _leftPanel.Bounds   = screenBounds;
+        if (_cockpitRail != null) _cockpitRail.Bounds = screenBounds;
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -956,6 +984,8 @@ public sealed class SystemSpaceState : GameState
 
     // ── Ship ──────────────────────────────────────────────────────────────────
 
+    private ShieldComponent? _shield;
+
     private void SpawnShip(DVec3 startPos)
     {
         var ship = new Ship
@@ -966,8 +996,22 @@ public sealed class SystemSpaceState : GameState
         };
         ship.SetOrientation(Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
 
-        // Minimal component loadout — enough to fly
-        ship.Install(new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6));
+        var reactor = new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6);
+
+        var bus = new PowerBus("MainBus", capacityJ: 10e6);
+        bus.ConnectSource(reactor.OutputCapacitor);
+
+        var powerManager = new PowerPriorityManager();
+        powerManager.AttachToBus(bus);
+
+        _shield = new ShieldComponent("Shield", maxShieldJ: 5e6, chargeRateW: 500e3);
+        _shield.RegisterWithPowerManager(powerManager);
+
+        ship.Install(reactor);
+        ship.Install(bus);
+        ship.Install(powerManager);
+        ship.Install(_shield);
+        _shield.PowerOn = false;  // starts off — player enables via SYS panel
 
         _simulation.SetShip(ship);
     }
@@ -1001,6 +1045,8 @@ public sealed class SystemSpaceState : GameState
         if (_rightPanel != null) _rightPanel.UiModeActive = active;
         if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
         if (_backButton != null) { _backButton.Visible = active; _backButton.Enabled = active; }
+        // CockpitRail is always interactable — peek strip and open/close toggle work in all modes.
+        // Wing/tab input is already gated by _slide in CockpitRail.HandleInput.
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────

@@ -140,9 +140,17 @@ public abstract class ShipComponent
 
         if (Status == ComponentStatus.Running)
             OnTick(dt);
+        else if (Status == ComponentStatus.PowerOff)
+            OnPowerOffTick(dt);
     }
 
     protected virtual void OnTick(double dt) { }
+
+    /// <summary>
+    /// Called every tick while Status == PowerOff. Override for post-shutdown behaviour
+    /// such as capacitor drain or thermal dissipation. Default no-ops.
+    /// </summary>
+    protected virtual void OnPowerOffTick(double dt) { }
 
     // ── Lifecycle hooks ───────────────────────────────────────────────────────
     /// <summary>Called once when the startup timer begins running (StartupTimer > 0 only).</summary>
