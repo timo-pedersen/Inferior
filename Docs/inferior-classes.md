@@ -318,24 +318,29 @@ contributing to the overspec.
 ```csharp
 public class ThermalNode
 {
-    public double HeatCapacity    { get; }  // J/K — local thermal mass; temperature rise = heat (J) ÷ capacity (J/K)
-    public double DissipationRate { get; }  // watts — passive cooling rate
-    public double CurrentHeat     { get; private set; }  // joules — thermal energy currently stored
+    public double HeatCapacity { get; }  // J/K — local thermal mass; temperature rise = heat (J) ÷ capacity (J/K)
+    public double MaxHeatJ     { get; }  // joules — heat energy at which component fails
 
-    // Normalised 0–1 — maps directly to green/yellow/red gauge ranges
+    public double CurrentHeat  { get; private set; }  // joules — thermal energy currently stored
+
+    // Physical temperature in Kelvin — published to DataBus for display
+    // InstrumentMeter.ScaleFactor handles any unit conversion for the gauge
     public double Temperature => CurrentHeat / HeatCapacity;
 
-    public void Update(double heatInputWatts, double dt)
+    // Normalised 0–1 — used for damage thresholds and gauge colour ranges
+    public double NormalizedTemperature => CurrentHeat / MaxHeatJ;
+
+    // netHeatWatts: positive = heating up, negative = cooling down
+    // Coolant removal is calculated externally and passed as a negative contribution
+    public void Update(double netHeatWatts, double dt)
     {
-        // Both terms in watts → multiply the net by dt to get joules added this tick
-        double netWatts = heatInputWatts - DissipationRate;
-        CurrentHeat = Math.Max(0, CurrentHeat + netWatts * dt);
+        CurrentHeat = Math.Max(0, CurrentHeat + netHeatWatts * dt);
     }
 
-    // Thresholds drive DataBus messages
-    public bool IsWarning  => Temperature > 0.7;
-    public bool IsCritical => Temperature > 0.9;
-    public bool IsFailure  => Temperature >= 1.0;  // component takes damage or shuts down
+    // Thresholds use NormalizedTemperature (0–1)
+    public bool IsWarning  => NormalizedTemperature > 0.7;
+    public bool IsCritical => NormalizedTemperature > 0.9;
+    public bool IsFailure  => NormalizedTemperature >= 1.0;  // component takes damage or shuts down
 }
 ```
 
@@ -352,7 +357,6 @@ public class HyperspaceHeatSink
     public double StoredHeatJ     { get; private set; }
     public double TransferRate    { get; }   // watts — max rate of incoming heat from coolant
     public double HeatDissipation { get; }   // watts — rate at which heat is dumped to hyperspace
-    public double PowerDraw       { get; }   // watts — costs energy to run
     public bool   IsSaturated     => StoredHeatJ >= CapacityJ;
 
     // When saturated — dumps heat back into realspace instantly
@@ -1400,3 +1404,4 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-08 | HeatCapacity corrected to J/K throughout (was joules). Units convention note updated to separate thermal mass. ThermalNode.Update() formula fixed (was applying dt twice). ThermalNode comments corrected from MJ/MW to J/K and watts. |
 | 2026-06-08 | Shield class sketch: added Radius (metres) and ShieldArea (π × r², m²). MaxPower added as explicit stored property. BasePower undefined reference replaced with MaxPower throughout. ChargeRate annotated as watts. |
 | 2026-06-08 | HyperspaceHeatSink: corrected units (MJ/MW → joules/watts). Renamed CurrentLoad → StoredHeatJ, Capacity → CapacityJ. Added HeatDissipation (watts). Added clarifying note: coolant has no thermal mass; sink holds the central thermal mass. |
+| 2026-06-08 | ThermalNode: removed DissipationRate (no passive cooling through hull; all heat routes via coolant). Temperature now explicitly in Kelvin. Added MaxHeatJ (joules) and NormalizedTemperature (0–1) for damage thresholds. Thresholds updated to use NormalizedTemperature. Update() parameter renamed to netHeatWatts. HyperspaceHeatSink: PowerDraw removed (power draw not simulated). |

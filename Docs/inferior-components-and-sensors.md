@@ -34,13 +34,13 @@ internal `PowerCapacitor` buffer (joules): a bus can have a large buffer but a n
 
 * FromBus  
 * ToComponent  
-* MaxPower
+* MaxPower — throughput ceiling (**watts**)
 
 ## Converters
 
 * FromBus  
 * ToComponent  
-* MaxPower  
+* MaxPower — throughput ceiling (**watts**)
 * PowerOutType
 
 ## Engine(s)
@@ -67,7 +67,7 @@ Provides artificial gravity and inertial dampening, which affects flight and hyp
 
 Requires converter from main bus (H-sw sub-band). Cannot be manually disabled — no off switch. In practice behaves as always-on: its `InputCapacitor` absorbs brief power interruptions silently. A sustained bus failure will eventually drop gravity, but the in-game consequence is minor — no damage mechanic. Should be registered at `Critical` priority with the `PowerPriorityManager`.
 
-* Power — consumes steady power.
+* Power — consumes steady power (**watts**)
 
 ## Gyro
 
@@ -75,7 +75,7 @@ Optional component that can be installed on some ships. Requires special power g
 
 * CarbonCrystalType (graphite crystal, carbon fiber, diamond)  
 * CarbonCrystalQualityGrade (A, B, C)  
-* AddedTorqueFactor (calculated from weight, crystal type and quality grade).
+* AddedTorqueFactor — calculated from ship mass, crystal type and quality grade; **double**, unit and formula TBD
 
 ## Shields
 
@@ -189,7 +189,7 @@ No cleaning / buildup affects engine efficiency.
 
 Cleaned out material can be harvested for strange crystals that can be sold.
 
-* DegenerateMaterialBuildUp
+* DegenerateMaterialBuildUp — **0.0–1.0** dimensionless level; 0 = clean, 1 = fully blocked
 
 Sensors can report the level of buildup. Cleaning is done at stations.
 
@@ -270,4 +270,5 @@ Used for hull panel patching and component repair in the field. Not yet designed
 | 2026-06-08 | Shield: ShieldSize replaced by Radius (metres, player-facing) and ShieldArea (calculated, π × r², m²). MaxPower annotated as scaling with ShieldArea at manufacture time. |
 | 2026-06-08 | Coolant system corrected: no thermal mass in coolant (pure transport medium). HeatCapacity and HeatDissipation removed from coolant properties (both belong to HyperspaceHeatSink). Numbered steps rewritten to match. |
 | 2026-06-08 | HyperspaceHeatSink added to battery-backed section with heat flow description and property list. Consumables section added (reactor fuel, metal rods, coolant fluid, ammunition, repair materials). |
+| 2026-06-08 | Unit annotations added to Connectors (MaxPower watts), Converters (MaxPower watts), ArtificialGravity (Power watts), Gyro (AddedTorqueFactor double/TBD), Exhaust (DegenerateMaterialBuildUp 0–1 dimensionless). |
 | 2026-06-08 | Added exhaust section under special components. |

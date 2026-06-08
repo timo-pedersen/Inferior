@@ -143,12 +143,12 @@ cold starts and emergencies, and the user may prioritize certain startups over o
 So shield startup may have the following sequence:
 1. Assuming ship "turned on", ie Generator started.
 1. Shield capacitor starts charging from generator output. [Message on system bus - Shield: initiating startup]
-1. Once the shield capacitor is fully charged, the generator starts up. [Message on system bus - Shield: Capacitor at 32% etc at regular intervals]
+1. Once the shield capacitor is fully charged, the shield starts up. [Message on system bus - Shield: Capacitor at 32% etc at regular intervals]
 1. This drains the capacitor fully, and is a small sonic "boom" or impact on ship, ship might turn slightly from the surge of power, and a visual effect on the shield generator itself. [Message on system bus - Shield: Shield online]
 1. Shield can now build up, [Message on system bus - Shield: Shield at 15% etc]
 
 ### No voltage/impedance simulation
-Only MW flow, efficiency, and heat matter. Superconducting bus segments generate zero heat. Only converters and active consumers generate heat.
+Only watts flow, efficiency, and heat matter. Superconducting bus segments generate zero heat. Only converters and active consumers generate heat.
 
 ### One main bus + converters
 
@@ -265,6 +265,8 @@ Creates a meaningful resource management loop.
 
 Implementation wise:
 - All components generate heat based on efficiency and damage state.
+- Heat does not leak through the hull or dissipate from individual components directly.
+  All heat is routed via the coolant system to the HyperspaceHeatSink — there is no other path.
 - Coolant transports heat from component thermal masses directly to the HyperspaceHeatSink.
   Transport efficiency scales with coolant level (0–1). Coolant has no thermal mass.
 - HyperspaceHeatSink holds the central thermal mass. It dissipates heat to hyperspace
@@ -523,3 +525,4 @@ Geography of production creates trade routes, conflict zones, and exploration in
 |------|--------|
 | 2026-06-08 | Life support moved to battery (removed from Critical priority). Shield startup threshold: 80% → fully charged. ArtGrav: clarified always-on semantics. Water flow analogy: watts/joules/dt note added. |
 | 2026-06-08 | Heat model corrected: coolant has no thermal mass (pure transport medium). Flow diagram updated to three steps. HyperspaceHeatSink identified as the sole central thermal mass. Implementation notes rewritten to match. |
+| 2026-06-08 | No passive heat dissipation through hull or individual components — explicit note added. All heat routes via coolant to HyperspaceHeatSink only. MW → watts in voltage/impedance section. Shield startup wording fixed (shield starts up, not generator). |
