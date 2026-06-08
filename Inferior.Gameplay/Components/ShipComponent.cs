@@ -1,55 +1,71 @@
 using Inferior.Core.DataBus;
-using Inferior.Gameplay.Components.Power;
 
 namespace Inferior.Gameplay.Components;
 
 /// <summary>
-/// Base for all installed ship components. Handles damage, efficiency, thermal state,
-/// and the list of sensors that publish to DataBus each tick.
+/// Common base for every installed ship component — power-bus consumers, sensors,
+/// shields, drives, gyro, and battery-backed components alike.
 ///
-/// Port model (flat, not hierarchy):
-///   - Reactor:   no InputCapacitor, has OutputCapacitor
-///   - Consumer:  has InputCapacitor, no OutputCapacitor
-///   - Converter: has both
-/// Concrete subclasses set whichever ports they need.
+/// Battery-backed components (FlyabilityMonitor, life support, cockpit) derive from this
+/// but set PowerConsumption = 0 and are not registered with PowerPriorityManager.
 /// </summary>
 public abstract class ShipComponent
 {
     // ── Identity ──────────────────────────────────────────────────────────────
-    public string Name { get; init; } = "";
+    /// <summary>Used in bus messages and diagnostics. e.g. "MainEngine", "TopShield".</summary>
+    public string Name { get; init; } = string.Empty;
 
-    // ── Damage and efficiency ─────────────────────────────────────────────────
-    /// <summary>0 = pristine, 1 = destroyed.</summary>
-    public double Damage         { get; protected set; }
-    public double BaseEfficiency { get; init; } = 1.0;
-    /// <summary>Efficiency drops linearly with damage — at 100% damage, 60% of efficiency is lost.</summary>
-    public double CurrentEfficiency => BaseEfficiency * (1.0 - Damage * 0.6);
+    // ── Lifecycle ──────────────────────────────────────────────────────────────
+    public ComponentStatus Status { get; protected set; } = ComponentStatus.Stopped;
 
-    // ── Thermal ───────────────────────────────────────────────────────────────
-    /// <summary>J/K — determines how quickly the component heats up under a given heat load.</summary>
-    public double ThermalMassJ   { get; init; } = 10_000.0;
-    /// <summary>Temperature above ambient at which damage begins to accumulate.</summary>
-    public double HeatToleranceK { get; init; } = 600.0;
-    /// <summary>Fraction of heat shed per second (passive cooling to ambient).</summary>
-    public double CoolingRate    { get; init; } = 0.05;
-    /// <summary>Current temperature above ambient, Kelvin.</summary>
-    public double Temperature    { get; private set; }
+    /// <summary>
+    /// Seconds from power-on until the component transitions to Started.
+    /// 0.0 = instant. Non-zero values produce the emergent cold-start sequence.
+    /// </summary>
+    public double StartupTimer { get; init; } = 0.0;
 
-    // ── Power ports (set by concrete subclass) ────────────────────────────────
-    public PowerCapacitor? InputCapacitor  { get; protected init; }
-    public PowerCapacitor? OutputCapacitor { get; protected init; }
+    // ── Power ──────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Local energy buffer in joules. Absorbs brief supply interruptions without
+    /// the component noticing. Size generously for ArtificialGravity; minimally for a sensor.
+    /// </summary>
+    public double InputCapacitorMaxJ    { get; init; } = 0.0;
+    public double InputCapacitorChargeJ { get; protected set; }
+
+    /// <summary>
+    /// Nominal peak draw in watts. Used by FlyabilityMonitor overspec checks.
+    /// Reflects maximum demand, not instantaneous — actual draw varies with load.
+    /// </summary>
+    public double PowerConsumption { get; init; }  // watts
+
+    // ── Health ────────────────────────────────────────────────────────────────
+    public double Efficiency { get; protected set; } = 1.0;  // 0.0–1.0
+    public double Damage     { get; protected set; } = 0.0;  // 0.0 = pristine, 1.0 = destroyed
+
+    /// <summary>
+    /// Accumulate damage from excess heat. Called by TickDamage when ThermalNode.IsFailure.
+    /// excessHeatJ: joules above MaxHeatJ — used to scale the accumulation rate.
+    /// Virtual — subclasses may override to tune the rate per component type.
+    /// </summary>
+    public virtual void AccumulateDamage(double excessHeatJ, double dt)
+        => Damage = Math.Min(1.0, Damage + excessHeatJ * dt * 0.0001);  // rate TBD
+
+    // ── Heat ──────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Null for battery-backed components that generate no heat.
+    /// Heated components construct this in their own constructor, passing the appropriate
+    /// HeatCapacity (J/K) and MaxHeatJ (joules). Those values live on the node.
+    /// </summary>
+    public ThermalNode? ThermalNode { get; protected init; }
 
     // ── Sensors ───────────────────────────────────────────────────────────────
     public IReadOnlyList<ComponentSensor> Sensors => _sensors;
     protected readonly List<ComponentSensor> _sensors = new();
 
     // ── Tick ──────────────────────────────────────────────────────────────────
-
-    /// <summary>Advance this component by one sim tick. Subclass must call TickSensors() before returning.</summary>
-    public abstract void Tick(double dt);
+    public virtual void Tick(double dt) { }
 
     // ── Startup ───────────────────────────────────────────────────────────────
-
     /// <summary>Publish all sensor ranges and announce presence on the system bus.</summary>
     public virtual void OnStartup()
     {
@@ -59,24 +75,9 @@ public abstract class ShipComponent
     }
 
     // ── Protected helpers ─────────────────────────────────────────────────────
-
     protected void TickSensors()
     {
         foreach (var s in _sensors)
             s.Tick();
-    }
-
-    /// <summary>
-    /// Apply a heat load (watts) for dt seconds. Includes passive cooling and damage
-    /// accumulation when temperature exceeds tolerance.
-    /// </summary>
-    protected void ApplyHeat(double watts, double dt)
-    {
-        Temperature += watts * dt / ThermalMassJ;
-        Temperature -= Temperature * CoolingRate * dt;
-        Temperature  = Math.Max(0.0, Temperature);
-
-        if (Temperature > HeatToleranceK)
-            Damage = Math.Min(1.0, Damage + (Temperature - HeatToleranceK) * dt * 0.0001);
     }
 }

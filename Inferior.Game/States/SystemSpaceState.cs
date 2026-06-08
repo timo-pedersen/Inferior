@@ -967,7 +967,7 @@ public sealed class SystemSpaceState : GameState
         ship.SetOrientation(Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
 
         // Minimal component loadout — enough to fly
-        ship.Install(new PowerReactor("Reactor", maxOutputW: 120e6, outputCapacitorJ: 50e6));
+        ship.Install(new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6));
 
         _simulation.SetShip(ship);
     }

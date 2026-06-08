@@ -1,38 +1,34 @@
 namespace Inferior.Gameplay.Components.Power;
 
 /// <summary>
-/// Simple energy buffer. Charge fills it from a power source; Draw depletes it for a consumer.
-/// Both operations are clamped so the capacitor never over- or under-flows.
+/// Reusable energy buffer. Always works in joules internally.
+/// Used as the bus's internal buffer, component input capacitors, and reactor output staging.
 /// </summary>
 public sealed class PowerCapacitor
 {
-    public double MaxJ    { get; }
-    public double ChargeJ { get; private set; }
+    public double MaxJ    { get; init; }   // maximum stored energy (joules)
+    public double StoredJ { get; private set; }
 
-    /// <summary>0.0 = empty, 1.0 = full.</summary>
-    public double Level => MaxJ > 0.0 ? ChargeJ / MaxJ : 0.0;
+    /// <summary>0–1 fill fraction. Published as "{bus}.Level" on the instruments bus.</summary>
+    public double FillFraction => MaxJ > 0.0 ? StoredJ / MaxJ : 0.0;
 
+    public PowerCapacitor() { }
     public PowerCapacitor(double maxJ) => MaxJ = maxJ;
 
-    /// <summary>
-    /// Fill from a source delivering <paramref name="watts"/> for <paramref name="dt"/> seconds.
-    /// Returns the actual watts absorbed (may be less if nearly full).
-    /// </summary>
-    public double Charge(double watts, double dt)
+    /// <summary>Withdraw up to requestedJ joules. Returns actual joules delivered (≤ requestedJ).</summary>
+    public double Draw(double requestedJ)
     {
-        double toAdd = Math.Min(watts * dt, MaxJ - ChargeJ);
-        ChargeJ += toAdd;
-        return dt > 0.0 ? toAdd / dt : 0.0;
+        double actual = Math.Min(requestedJ, StoredJ);
+        StoredJ -= actual;
+        return actual;
     }
 
-    /// <summary>
-    /// Deliver up to <paramref name="watts"/> to a consumer for <paramref name="dt"/> seconds.
-    /// Returns the actual watts delivered (may be less if nearly empty).
-    /// </summary>
-    public double Draw(double watts, double dt)
+    /// <summary>Charge at up to maxWatts for dt seconds. Returns joules actually added.</summary>
+    public double Charge(double maxWatts, double dt)
     {
-        double toTake = Math.Min(watts * dt, ChargeJ);
-        ChargeJ -= toTake;
-        return dt > 0.0 ? toTake / dt : 0.0;
+        double spaceJ  = MaxJ - StoredJ;
+        double addedJ  = Math.Min(maxWatts * dt, spaceJ);
+        StoredJ += addedJ;
+        return addedJ;
     }
 }

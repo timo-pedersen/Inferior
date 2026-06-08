@@ -3,10 +3,14 @@ using Inferior.Core.DataBus;
 namespace Inferior.Gameplay.Components.Power;
 
 /// <summary>
-/// Power distribution bus — a passive energy buffer.
+/// Power distribution bus — a passive energy buffer between reactor and consumers.
 /// Gets charged from an upstream source each tick; consumers call Draw() on demand.
 /// The bus itself knows nothing about consumers or priorities.
 /// Priority enforcement is handled by an optional PowerPriorityManager.
+///
+/// Throughput limits (MaxPower, MaxPowerPerConnection) are wire-gauge constraints —
+/// how fast energy can flow — distinct from the Capacitor buffer (joules stored).
+/// A bus can have a large buffer but a narrow wire gauge, or vice versa.
 ///
 /// Install order matters: reactor must tick before bus (fills source cap),
 /// bus must tick before consumers (fills bus cap from source).
@@ -16,38 +20,60 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerBus : ShipComponent
 {
+    // ── Throughput limits (watts — rate, not stored energy) ───────────────────
+    /// <summary>Total throughput ceiling (watts).</summary>
+    public double MaxPower              { get; init; }
+    /// <summary>Per-connector ceiling (watts).</summary>
+    public double MaxPowerPerConnection { get; init; }
+    /// <summary>Maximum number of attached consumers.</summary>
+    public int    MaxConnections        { get; init; }
+
+    // ── Energy buffer ─────────────────────────────────────────────────────────
     public PowerCapacitor Capacitor { get; }
 
     private PowerCapacitor? _source;
 
-    public PowerBus(string name, double capacityJ)
+    public PowerBus(string name, double capacityJ,
+                    double maxPower              = double.MaxValue,
+                    double maxPowerPerConnection = double.MaxValue,
+                    int    maxConnections        = int.MaxValue)
     {
-        Name             = name;
-        Capacitor        = new PowerCapacitor(capacityJ);
-        OutputCapacitor  = Capacitor;
+        Name                  = name;
+        Capacitor             = new PowerCapacitor(capacityJ);
+        MaxPower              = maxPower;
+        MaxPowerPerConnection = maxPowerPerConnection;
+        MaxConnections        = maxConnections;
         RegisterSensors();
     }
 
-    /// <summary>Connect the upstream source capacitor (e.g. reactor output cap).</summary>
+    /// <summary>Connect the upstream source capacitor (e.g. reactor output capacitor).</summary>
     public void ConnectSource(PowerCapacitor source) => _source = source;
 
     /// <summary>
-    /// Draw power from this bus. Returns actual watts delivered (may be less if depleted).
-    /// Called by consumers each tick.
+    /// Draw up to requestedWatts from this bus for dt seconds.
+    /// Converts to joules internally (requestedWatts × dt), draws from the Capacitor,
+    /// then returns actual watts delivered — may be less if depleted or capped by MaxPower.
     /// </summary>
-    public double Draw(double watts, double dt) => Capacitor.Draw(watts, dt);
+    public double Draw(double requestedWatts, double dt)
+    {
+        if (dt <= 0.0) return 0.0;
+        double cappedWatts = Math.Min(requestedWatts, MaxPower);
+        double deliveredJ  = Capacitor.Draw(cappedWatts * dt);
+        return deliveredJ / dt;
+    }
 
     public override void Tick(double dt)
     {
         if (_source != null && dt > 0.0)
         {
-            // Pull from source to fill up the bus capacitor
-            double canAbsorbJ    = Capacitor.MaxJ - Capacitor.ChargeJ;
-            if (canAbsorbJ > 0.0)
+            // Pull from source up to the wire-gauge limit (MaxPower) and available space
+            double spaceJ       = Capacitor.MaxJ - Capacitor.StoredJ;
+            double maxTransferJ = MaxPower * dt;
+            double requestedJ   = Math.Min(spaceJ, maxTransferJ);
+            if (requestedJ > 0.0)
             {
-                double requestedW  = canAbsorbJ / dt;
-                double deliveredW  = _source.Draw(requestedW, dt);
-                Capacitor.Charge(deliveredW, dt);
+                double deliveredJ = _source.Draw(requestedJ);
+                Capacitor.Charge(deliveredJ / dt, dt);
             }
         }
 
@@ -65,7 +91,7 @@ public sealed class PowerBus : ShipComponent
     {
         _sensors.Add(new ComponentSensor(
             $"{Name}.Level",
-            () => Capacitor.Level,
+            () => Capacitor.FillFraction,
             safeRange:  new RangeValue(0.2, 1.0),
             totalRange: new RangeValue(0.0, 1.0)));
     }
