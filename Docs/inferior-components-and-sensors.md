@@ -270,3 +270,4 @@ Used for hull panel patching and component repair in the field. Not yet designed
 | 2026-06-08 | Shield: ShieldSize replaced by Radius (metres, player-facing) and ShieldArea (calculated, π × r², m²). MaxPower annotated as scaling with ShieldArea at manufacture time. |
 | 2026-06-08 | Coolant system corrected: no thermal mass in coolant (pure transport medium). HeatCapacity and HeatDissipation removed from coolant properties (both belong to HyperspaceHeatSink). Numbered steps rewritten to match. |
 | 2026-06-08 | HyperspaceHeatSink added to battery-backed section with heat flow description and property list. Consumables section added (reactor fuel, metal rods, coolant fluid, ammunition, repair materials). |
+| 2026-06-08 | Added exhaust section under special components. |
