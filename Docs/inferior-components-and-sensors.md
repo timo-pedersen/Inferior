@@ -13,7 +13,7 @@ All components share:
 * PowerConsumption — nominal peak draw in **watts**; used for FlyabilityMonitor overspec checks
 * Efficiency — 0.0–1.0
 * Damage — 0.0 = pristine, 1.0 = destroyed
-* HeatCapacity — local thermal mass in **J/K** (joules per kelvin)
+* ThermalNode — local heat state; `null` for battery-backed components that generate no heat. `HeatCapacity` (J/K) and `MaxHeatJ` (joules) live on this node when present — see classes reference.
 
 ## Power core
 
@@ -275,3 +275,4 @@ Used for hull panel patching and component repair in the field. Not yet designed
 | 2026-06-08 | Unit annotations added to Connectors (MaxPower watts), Converters (MaxPower watts), ArtificialGravity (Power watts), Gyro (AddedTorqueFactor double/TBD), Exhaust (DegenerateMaterialBuildUp 0–1 dimensionless). |
 | 2026-06-08 | Added exhaust section under special components. |
 | 2026-06-08 | HyperspaceHeatSink: proportional dissipation model documented. HeatDissipation annotated as max rate at full capacity. Step 3 rewritten with equilibrium explanation. |
+| 2026-06-08 | Shared properties: HeatCapacity replaced with ThermalNode entry (null on battery-backed components; HeatCapacity and MaxHeatJ live on the node when present). |
