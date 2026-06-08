@@ -388,14 +388,34 @@ The central thermal mass of the ship's heat system. Coolant transports heat from
 component thermal masses into this sink; the sink dissipates it to hyperspace.
 The coolant system has no thermal mass of its own.
 
+Dissipation is proportional to fill level — Newton's Law of Cooling applied to hyperspace.
+The more heat stored, the faster it dissipates. This means the sink always finds a natural
+equilibrium: `fill fraction = heat inflow / HeatDissipation`. A ship cruising at low power
+settles the sink low with ample headroom. Redlining raises the equilibrium toward saturation.
+If sustained heat inflow exceeds `HeatDissipation`, no sub-capacity equilibrium exists —
+saturation is inevitable.
+
 ```csharp
 public class HyperspaceHeatSink
 {
     public double CapacityJ       { get; }   // joules — max stored heat before saturation
     public double StoredHeatJ     { get; private set; }
-    public double TransferRate    { get; }   // watts — max rate of incoming heat from coolant
-    public double HeatDissipation { get; }   // watts — rate at which heat is dumped to hyperspace
-    public bool   IsSaturated     => StoredHeatJ >= CapacityJ;
+    public double TransferRate    { get; }   // watts — max incoming rate from coolant
+    public double HeatDissipation { get; }   // watts — max dissipation rate, reached at full capacity
+
+    // Actual dissipation scales with fill level — not a constant rate
+    public double CurrentDissipationRate => HeatDissipation * (StoredHeatJ / CapacityJ);
+
+    public bool IsSaturated => StoredHeatJ >= CapacityJ;
+
+    public void Tick(double incomingHeatWatts, double dt)
+    {
+        double net = incomingHeatWatts - CurrentDissipationRate;  // watts
+        StoredHeatJ = Math.Clamp(StoredHeatJ + net * dt, 0, CapacityJ);
+
+        if (IsSaturated)
+            OnSaturation?.Invoke();
+    }
 
     // When saturated — dumps heat back into realspace instantly
     // Massive thermal spike + EM burst — every passive sensor in range lights up
@@ -1444,3 +1464,5 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-08 | HyperspaceHeatSink: corrected units (MJ/MW → joules/watts). Renamed CurrentLoad → StoredHeatJ, Capacity → CapacityJ. Added HeatDissipation (watts). Added clarifying note: coolant has no thermal mass; sink holds the central thermal mass. |
 | 2026-06-08 | ThermalNode: removed DissipationRate (no passive cooling through hull; all heat routes via coolant). Temperature now explicitly in Kelvin. Added MaxHeatJ (joules) and NormalizedTemperature (0–1) for damage thresholds. Thresholds updated to use NormalizedTemperature. Update() parameter renamed to netHeatWatts. HyperspaceHeatSink: PowerDraw removed (power draw not simulated). |
 | 2026-06-08 | PowerNode, PowerComponent, Power simulation tick marked as superseded (predates ShipComponent + PowerBus architecture and coolant→sink heat model). ThermalNode section expanded: optional-node pattern (null = no heat), which components have nodes, no-passive-cooling rule documented, usage example added. |
+| 2026-06-08 | ThermalNode: added ExcessHeatJ (joules above failure threshold). TickDamage: ThermalNode null guard added, ExcessHeat fixed to ExcessHeatJ. ShipSignature: ThermalSignature comment corrected. RadarContact: Vector3 → DVec3. TickPhysics: mass lock annotated as design-pending. |
+| 2026-06-08 | HyperspaceHeatSink: proportional dissipation model (Newton's Law of Cooling). HeatDissipation now max rate at full capacity; actual rate = HeatDissipation × fill fraction. Added CurrentDissipationRate property and Tick() method. |

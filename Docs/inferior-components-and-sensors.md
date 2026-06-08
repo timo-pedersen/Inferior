@@ -149,16 +149,18 @@ Heat flow into and through this component:
    No thermal mass in the coolant fluid — it is a pure transport medium.
    Transport rate per component is capped by `HeatFlowPerComponent` on the coolant system.
    Transport efficiency scales with coolant level (0.0–1.0).
-3. The sink dissipates heat to hyperspace at its `HeatDissipation` rate.
-   If incoming heat exceeds the dissipation rate, `StoredHeatJ` accumulates.
-   When `StoredHeatJ` reaches `CapacityJ`, the sink saturates — heat dumps instantly into
-   realspace, causing a massive thermal spike and EM burst detectable by every passive
-   sensor in range.
+3. The sink dissipates heat to hyperspace at a rate proportional to its fill level:
+   `dissipation = HeatDissipation × (StoredHeatJ / CapacityJ)`.
+   This is Newton's Law of Cooling — the more heat stored, the faster it dissipates.
+   The sink naturally finds equilibrium at `fill fraction = heat inflow / HeatDissipation`.
+   If sustained heat inflow exceeds `HeatDissipation`, no equilibrium exists and
+   `StoredHeatJ` climbs to `CapacityJ` — saturation dumps heat instantly into realspace,
+   causing a massive thermal spike and EM burst detectable by every passive sensor in range.
 
 * CapacityJ — maximum heat energy before saturation (**joules**)
 * StoredHeatJ — current stored heat (**joules**)
 * TransferRate — maximum incoming rate from coolant transport (**watts**)
-* HeatDissipation — rate at which heat is dissipated to hyperspace (**watts**)
+* HeatDissipation — maximum dissipation rate, reached at full capacity (**watts**); actual rate = `HeatDissipation × (StoredHeatJ / CapacityJ)`
 
 # Special Components
 
@@ -272,3 +274,4 @@ Used for hull panel patching and component repair in the field. Not yet designed
 | 2026-06-08 | HyperspaceHeatSink added to battery-backed section with heat flow description and property list. Consumables section added (reactor fuel, metal rods, coolant fluid, ammunition, repair materials). |
 | 2026-06-08 | Unit annotations added to Connectors (MaxPower watts), Converters (MaxPower watts), ArtificialGravity (Power watts), Gyro (AddedTorqueFactor double/TBD), Exhaust (DegenerateMaterialBuildUp 0–1 dimensionless). |
 | 2026-06-08 | Added exhaust section under special components. |
+| 2026-06-08 | HyperspaceHeatSink: proportional dissipation model documented. HeatDissipation annotated as max rate at full capacity. Step 3 rewritten with equilibrium explanation. |

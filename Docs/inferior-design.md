@@ -240,10 +240,12 @@ Coolant transports heat from component thermal mass → HyperspaceHeatSink
     │  (coolant has no thermal mass of its own — pure transport medium)
     ▼
 HyperspaceHeatSink absorbs incoming heat into its own thermal mass
-    │  (requires power to operate; if inflow > HeatDissipation rate, stored heat accumulates)
+    │  (dissipation rate scales with fill level: HeatDissipation × StoredHeatJ / CapacityJ)
+    │  (equilibrium fill fraction = heat inflow / HeatDissipation)
     ▼
-Heat dissipated to hyperspace at HeatDissipation rate
-    (saturation: stored heat ≥ capacity → instant thermal spike in realspace + EM burst)
+Heat dissipated to hyperspace at proportional rate
+    (saturation: if inflow > HeatDissipation, no equilibrium → stored heat reaches CapacityJ
+     → instant thermal spike in realspace + EM burst)
 ```
 
 When a component's thermal mass is not being drained fast enough (low coolant, damaged coolant
@@ -269,8 +271,10 @@ Implementation wise:
   All heat is routed via the coolant system to the HyperspaceHeatSink — there is no other path.
 - Coolant transports heat from component thermal masses directly to the HyperspaceHeatSink.
   Transport efficiency scales with coolant level (0–1). Coolant has no thermal mass.
-- HyperspaceHeatSink holds the central thermal mass. It dissipates heat to hyperspace
-  at its HeatDissipation rate. When stored heat exceeds its capacity, saturation occurs —
+- HyperspaceHeatSink dissipates heat to hyperspace at a rate proportional to its fill level
+  (Newton's Law of Cooling): `dissipation = HeatDissipation × (StoredHeatJ / CapacityJ)`.
+  The sink finds a natural equilibrium at `fill fraction = heat inflow / HeatDissipation`.
+  When sustained heat inflow exceeds HeatDissipation, saturation is inevitable —
   instant spike into realspace, every passive sensor in range lights up.
 - Coolant fluid level is simulated as a 0–1 number with a constant leak rate.
 
@@ -526,3 +530,4 @@ Geography of production creates trade routes, conflict zones, and exploration in
 | 2026-06-08 | Life support moved to battery (removed from Critical priority). Shield startup threshold: 80% → fully charged. ArtGrav: clarified always-on semantics. Water flow analogy: watts/joules/dt note added. |
 | 2026-06-08 | Heat model corrected: coolant has no thermal mass (pure transport medium). Flow diagram updated to three steps. HyperspaceHeatSink identified as the sole central thermal mass. Implementation notes rewritten to match. |
 | 2026-06-08 | No passive heat dissipation through hull or individual components — explicit note added. All heat routes via coolant to HyperspaceHeatSink only. MW → watts in voltage/impedance section. Shield startup wording fixed (shield starts up, not generator). |
+| 2026-06-08 | HyperspaceHeatSink dissipation model corrected: proportional to fill level (Newton's Law of Cooling), not a constant rate. Flow diagram and implementation notes updated. |
