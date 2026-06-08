@@ -8,14 +8,107 @@
 
 ## Power system
 
+### Units convention
+
+> **Rate properties** (`MaxPower`, `PowerConsumption`, reactor output) are always **watts** (W).
+> **Storage properties** (`MaxJ` on capacitors, `HeatCapacity`) are always **joules** (J).
+> Each simulation tick converts: `energy (J) = power (W) × dt`.
+> All internal simulation values use raw SI — no MW or MJ in code. Display scaling is
+> handled by `InstrumentMeter.ScaleFactor`. Where a unit could be ambiguous, doc comments
+> state it explicitly.
+
+---
+
+### `ShipComponent` (abstract base)
+
+Common base for every installed component — power-bus consumers, sensors, shields, drives,
+gyro, and battery-backed components alike. Battery-backed components (`FlyabilityMonitor`,
+life support, cockpit) derive from this but set `PowerConsumption = 0` and are not
+registered with `PowerPriorityManager`.
+
+```csharp
+public abstract class ShipComponent
+{
+    // ── Lifecycle ──────────────────────────────────────────────────────────────
+    public ComponentStatus Status { get; protected set; } = ComponentStatus.Stopped;
+
+    /// Seconds from power-on until the component transitions to Started.
+    /// 0.0 = instant. Non-zero values produce the emergent cold-start sequence.
+    public double StartupTimer { get; init; } = 0.0;
+
+    // ── Power ──────────────────────────────────────────────────────────────────
+    /// Local energy buffer in joules. Absorbs brief supply interruptions without
+    /// the component noticing. Size this generously for ArtificialGravity;
+    /// minimally for a light sensor.
+    public double InputCapacitorMaxJ   { get; init; } = 0.0;
+    public double InputCapacitorChargeJ { get; protected set; }
+
+    /// Nominal peak draw in watts. Used by FlyabilityMonitor overspec checks.
+    /// Reflects maximum demand, not instantaneous — actual draw varies with load.
+    public double PowerConsumption { get; init; }   // watts
+
+    // ── Health ────────────────────────────────────────────────────────────────
+    public double Efficiency   { get; protected set; } = 1.0;  // 0.0–1.0
+    public double Damage       { get; protected set; } = 0.0;  // 0.0 = pristine, 1.0 = destroyed
+    public double HeatCapacity { get; init; }                   // joules — local thermal mass
+
+    // ── Tick ──────────────────────────────────────────────────────────────────
+    public virtual void Tick(double dt) { }
+}
+
+public enum ComponentStatus
+{
+    Stopped,       // no power, dormant
+    PowerOn,       // power received; startup timer not yet started
+    Initializing,  // startup timer running — warming up
+    Started,       // fully operational
+}
+```
+
+---
+
+### `PowerCapacitor`
+
+Reusable energy buffer. Used as the bus's internal buffer, as component `InputCapacitor`
+storage, and as the reactor's output staging area. Always works in joules.
+
+```csharp
+public class PowerCapacitor
+{
+    public double MaxJ    { get; init; }   // maximum stored energy (joules)
+    public double StoredJ { get; private set; }
+
+    public double FillFraction => StoredJ / MaxJ;   // 0–1, published as "{bus}.Level"
+
+    /// Withdraw up to requestedJ joules. Returns actual joules delivered (≤ requestedJ).
+    public double Draw(double requestedJ)
+    {
+        double actual = Math.Min(requestedJ, StoredJ);
+        StoredJ -= actual;
+        return actual;
+    }
+
+    /// Charge at up to maxWatts for dt seconds. Returns joules actually added.
+    public double Charge(double maxWatts, double dt)
+    {
+        double spaceJ  = MaxJ - StoredJ;
+        double addedJ  = Math.Min(maxWatts * dt, spaceJ);
+        StoredJ += addedJ;
+        return addedJ;
+    }
+}
+```
+
+---
+
 ### `PowerNode`
 Base unit for anything in the power graph.
 
 ```csharp
 public class PowerNode
 {
-    public double MaxOutput    { get; }   // MW capacity
-    public double CurrentLoad  { get; }   // MW currently drawn
+    public double MaxOutput    { get; }   // watts — throughput ceiling
+    public double CurrentLoad  { get; }   // watts — currently drawn
     public double Efficiency   { get; }   // 0.0–1.0
 
     // The only physics that matters:
@@ -116,16 +209,30 @@ it runs out. Priority enforcement is a separate concern (`PowerPriorityManager`)
 ```csharp
 public sealed class PowerBus : ShipComponent
 {
-    public string          Name      { get; init; }  // e.g. "MainBus"
-    public PowerCapacitor  Capacitor { get; }        // the stored charge
+    public string Name { get; init; }  // e.g. "MainBus"
+
+    // ── Throughput limits (watts — rate, not stored energy) ───────────────────
+    // These are wire-gauge limits: how fast energy can flow, regardless of
+    // how much is stored in the capacitor buffer below.
+    public double MaxPower              { get; init; }  // total throughput ceiling (W)
+    public double MaxPowerPerConnection { get; init; }  // per-connector ceiling (W)
+    public int    MaxConnections        { get; init; }  // maximum attached consumers
+
+    // ── Energy buffer (joules — stored charge) ────────────────────────────────
+    // The capacitor absorbs burst demand and smooths supply fluctuations.
+    // A bus can have a large buffer (high MaxJ) with a narrow wire gauge (low MaxPower).
+    public PowerCapacitor Capacitor { get; }
 
     // Connect a source (e.g. reactor output capacitor) — called at ship wiring time
     public void ConnectSource(PowerCapacitor source);
 
-    // Called by consumers each tick — depletes capacitor
-    public double Draw(double watts, double dt);
+    // Request up to requestedWatts from the bus this tick.
+    // Returns actual watts delivered (≤ requestedWatts), capped by MaxPower and
+    // remaining stored charge. The caller handles × dt if it needs joules.
+    public double Draw(double requestedWatts, double dt);
 
-    // Tick: refill from source up to capacity, then publish {Name}.Level sensor
+    // Tick: charge Capacitor from source at up to MaxPower × dt joules per tick,
+    // then publish "{Name}.Level" (0–1 fill fraction) to DataBus.Instruments.
     public override void Tick(double dt);
 }
 ```
@@ -1274,3 +1381,4 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-02 | Fixed DVec3 consistency in Environment (was Vector3), added SimTime atomicity note per Code review. |
 | 2026-06-04 | Major sync: Simulation moved to Inferior.Gameplay; Tick order updated (GameClock + UpdateEnvironment); WorldSnapshot pattern documented; Environment updated (SimWorld, GravityCalculations, UpdateFromSimThread, private setters); mass lock superseded by hyperspace interference; GameClock.Advance now public; Sensors section added (PassiveSensor, GravitySensor); UI controls list updated (InstrumentMeter, SystemConsole, DirectionBall); project structure updated. |
 | 2026-06-07 | Added CommandBus section (reverse bus, sim thread drains); Topics static class with naming convention and all current topics; PowerBus, PowerPriorityManager, FlyabilityMonitor in Power system section; UI section redirected to inferior-design-ui.md. |
+| 2026-06-08 | Units convention note added. ShipComponent abstract base class (Status/ComponentStatus enum, StartupTimer, InputCapacitor, PowerConsumption, Efficiency, Damage, HeatCapacity). PowerCapacitor class sketch (Draw/Charge in joules). PowerBus updated: MaxPower/MaxPowerPerConnection/MaxConnections (watts throughput) added, distinguished from Capacitor.MaxJ (joules storage), Draw() return value clarified. PowerNode comments updated from MW to watts. Critical priority comment updated (life support → essential flight systems). |

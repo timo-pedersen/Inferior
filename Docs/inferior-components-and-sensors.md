@@ -7,25 +7,28 @@ They listen to the command bus.
 
 All components share:
 
-* Status (PowerOn, Initializing, Started, Stopped)  
-* Startup initialization timer (time after power-up to available)  
-* InputCapacitor  
-* PowerConsumption  
-* Efficiency  
-* Damage  
-* HeatCapacity
+* Status (`Stopped` → `PowerOn` → `Initializing` → `Started`)
+* Startup initialization timer — seconds from power-on to `Started` state; 0 = instant
+* InputCapacitor — local energy buffer in **joules**; absorbs brief supply interruptions silently
+* PowerConsumption — nominal peak draw in **watts**; used for FlyabilityMonitor overspec checks
+* Efficiency — 0.0–1.0
+* Damage — 0.0 = pristine, 1.0 = destroyed
+* HeatCapacity — local thermal mass in **joules**
 
 ## Power core
 
-* MaxPowerGeneration
+* MaxPowerGeneration — peak output in **watts** (`MaxPower` in code, matching the bus convention)
 
 Consumable: Reactor fuel
 
 ## Power bus
 
-* MaxPower  
-* MaxPowerPerConnection  
-* MaxConnections
+Throughput limits (watts — wire-gauge limits, not stored energy). Distinct from the bus's
+internal `PowerCapacitor` buffer (joules): a bus can have a large buffer but a narrow wire gauge.
+
+* MaxPower — total throughput ceiling (**watts**)
+* MaxPowerPerConnection — per-connector ceiling (**watts**)
+* MaxConnections — maximum attached consumers (count)
 
 ## Connectors (like water hoses or electrical wires)
 
@@ -174,3 +177,13 @@ Components have internal passive sensors for eg heat, power consumption, efficie
 
 Some sensors are ‘active’, they have to be given a command on the command bus in order to provide a value, and may require power to function and some may take some time to charge or get all data. A planet mineral scanner may require a huge energy pulse to scan, and the result may not show up for a few seconds, for instance.
 
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-06-08 | Initial document — component list, shared properties, sensors overview |
+| 2026-06-08 | ArtGrav clarified: no off switch, InputCapacitor absorbs brief interruptions, Critical priority |
+| 2026-06-08 | Unit annotations added to shared properties, Power bus (watts/joules distinction), Power core |

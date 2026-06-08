@@ -121,6 +121,11 @@ Likely this will be based on power core output.
 Generator = pump. Main bus = pipe. Consumers and capacitors draw from it. When demand 
 exceeds supply, components are **starved by priority**.
 
+**Units:** flow rate is in **watts** (joules per second). Stored charge is in **joules**.
+Each simulation tick converts: `energy (J) = power (W) × dt`. A bus has both a
+throughput ceiling (watts — wire gauge) and a buffer (joules — tank size). These are
+separate properties; a bus can have a large buffer but still have a narrow wire gauge.
+
 Priority order is defined via a power supervisor system — each consumer registers with a 
 priority level. When power is insufficient, the manager reduces power to 
 lower-priority consumers first. This creates meaningful tradeoffs in combat and 
@@ -506,3 +511,11 @@ Geography of production creates trade routes, conflict zones, and exploration in
 - Multiplayer: not planned but architecture should not exclude it — no time compression in flight
 - Time compression: available in 2D system map for watching orbits; not used during 3D flight (`SystemSpaceState`)
 
+
+---
+
+## Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-06-08 | Life support moved to battery (removed from Critical priority). Shield startup threshold: 80% → fully charged. ArtGrav: clarified always-on semantics. Water flow analogy: watts/joules/dt note added. |

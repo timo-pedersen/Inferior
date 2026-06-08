@@ -11,6 +11,7 @@ using Inferior.Gameplay.Components;
 using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
+using Inferior.Gameplay.Components.Power;
 
 namespace Inferior.Game.States;
 
