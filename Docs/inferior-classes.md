@@ -49,9 +49,15 @@ public abstract class ShipComponent
     public double PowerConsumption { get; init; }   // watts
 
     // ── Health ────────────────────────────────────────────────────────────────
-    public double Efficiency   { get; protected set; } = 1.0;  // 0.0–1.0
-    public double Damage       { get; protected set; } = 0.0;  // 0.0 = pristine, 1.0 = destroyed
-    public double HeatCapacity { get; init; }                   // J/K — local thermal mass
+    public double Efficiency { get; protected set; } = 1.0;  // 0.0–1.0
+    public double Damage     { get; protected set; } = 0.0;  // 0.0 = pristine, 1.0 = destroyed
+
+    // ── Heat ──────────────────────────────────────────────────────────────────
+    /// Null for battery-backed components that generate no heat.
+    /// Heated components construct this in their own constructor, passing the
+    /// appropriate HeatCapacity (J/K) and MaxHeatJ (joules). Those values live
+    /// on the node — HeatCapacity does not need to be a base-class property.
+    public ThermalNode? ThermalNode { get; protected init; }
 
     // ── Tick ──────────────────────────────────────────────────────────────────
     public virtual void Tick(double dt) { }
@@ -237,8 +243,9 @@ public sealed class PowerBus : ShipComponent
     public void ConnectSource(PowerCapacitor source);
 
     // Request up to requestedWatts from the bus this tick.
-    // Returns actual watts delivered (≤ requestedWatts), capped by MaxPower and
-    // remaining stored charge. The caller handles × dt if it needs joules.
+    // Converts to joules internally (requestedWatts × dt), draws from the Capacitor,
+    // then returns actual watts delivered — caller convenience; Capacitor works in joules.
+    // Capped by MaxPower and remaining stored charge.
     public double Draw(double requestedWatts, double dt);
 
     // Tick: charge Capacitor from source at up to MaxPower × dt joules per tick,
@@ -342,6 +349,12 @@ demands a passive-cooling fallback.
 ```csharp
 public class ThermalNode
 {
+    public ThermalNode(double heatCapacity, double maxHeatJ)
+    {
+        HeatCapacity = heatCapacity;
+        MaxHeatJ     = maxHeatJ;
+    }
+
     public double HeatCapacity { get; }  // J/K — local thermal mass; temperature rise = heat (J) ÷ capacity (J/K)
     public double MaxHeatJ     { get; }  // joules — heat energy at which component fails
 
@@ -408,6 +421,8 @@ public class HyperspaceHeatSink
 
     public bool IsSaturated => StoredHeatJ >= CapacityJ;
 
+    // incomingHeatWatts must be clamped to TransferRate by the caller (coolant system)
+    // before being passed in — the sink does not enforce this limit internally.
     public void Tick(double incomingHeatWatts, double dt)
     {
         double net = incomingHeatWatts - CurrentDissipationRate;  // watts
@@ -1466,3 +1481,4 @@ Core ← Galaxy ← Gameplay ← Game  (references everything)
 | 2026-06-08 | PowerNode, PowerComponent, Power simulation tick marked as superseded (predates ShipComponent + PowerBus architecture and coolant→sink heat model). ThermalNode section expanded: optional-node pattern (null = no heat), which components have nodes, no-passive-cooling rule documented, usage example added. |
 | 2026-06-08 | ThermalNode: added ExcessHeatJ (joules above failure threshold). TickDamage: ThermalNode null guard added, ExcessHeat fixed to ExcessHeatJ. ShipSignature: ThermalSignature comment corrected. RadarContact: Vector3 → DVec3. TickPhysics: mass lock annotated as design-pending. |
 | 2026-06-08 | HyperspaceHeatSink: proportional dissipation model (Newton's Law of Cooling). HeatDissipation now max rate at full capacity; actual rate = HeatDissipation × fill fraction. Added CurrentDissipationRate property and Tick() method. |
+| 2026-06-08 | ShipComponent: HeatCapacity removed (lives on ThermalNode, not needed on base). ThermalNode? property added (null = no heat, heated components set in constructor). ThermalNode: constructor added. PowerBus.Draw(): watts/joules conversion documented. HyperspaceHeatSink.Tick(): TransferRate caller contract documented. |
