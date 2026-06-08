@@ -37,7 +37,7 @@ public sealed class UIRenderer : IDisposable
 
         float angle = MathF.Atan2(delta.Y, delta.X);
         sb.Draw(_pixel,
-            new Rectangle((int)from.X, (int)from.Y, (int)length, (int)System.Math.Max(1f, thickness)),
+            new Rectangle((int)from.X, (int)from.Y, (int)System.Math.Max(1f, length), (int)System.Math.Max(1f, thickness)),
             null, color, angle, Vector2.Zero, SpriteEffects.None, 0f);
     }
 
@@ -64,46 +64,49 @@ public sealed class UIRenderer : IDisposable
 
     // ── Text ──────────────────────────────────────────────────────────────────
 
+    // Strip characters outside the font's glyph range to prevent ArgumentException.
+    // DefaultCharacter does NOT suppress throws for truly absent codepoints in MonoGame,
+    // so we always filter regardless of whether it is set.
+    private static string SanitizeText(SpriteFont font, string text)
+        => new string(text.Where(c => IsInFont(font, c)).ToArray());
+
+    private static bool IsInFont(SpriteFont font, char c)
+        => font.Characters.Contains(c);
+
     public void DrawText(SpriteBatch sb, string text, Vector2 pos,
         SpriteFont font, float scale, Color color)
     {
-        // Strip characters outside the font's glyph range to prevent crashes.
-        // SpriteFont.DefaultCharacter handles unknowns only if set; stripping is safer.
-        var safe = font.DefaultCharacter.HasValue
-            ? text
-            : new string(text.Where(c => IsInFont(font, c)).ToArray());
+        var safe = SanitizeText(font, text);
         if (safe.Length > 0)
             sb.DrawString(font, safe, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-    }
-
-    private static bool IsInFont(SpriteFont font, char c)
-    {
-        try { font.MeasureString(c.ToString()); return true; }
-        catch { return false; }
     }
 
     public void DrawTextCentred(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color)
     {
-        var size = font.MeasureString(text) * scale;
+        var safe = SanitizeText(font, text);
+        if (safe.Length == 0) return;
+        var size = font.MeasureString(safe) * scale;
         var pos  = new Vector2(
             bounds.X + (bounds.Width  - size.X) * 0.5f,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);
-        sb.DrawString(font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sb.DrawString(font, safe, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
     }
 
     public void DrawTextLeft(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color, int padding = 0)
     {
-        var size = font.MeasureString(text) * scale;
+        var safe = SanitizeText(font, text);
+        if (safe.Length == 0) return;
+        var size = font.MeasureString(safe) * scale;
         var pos  = new Vector2(
             bounds.X + padding,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);
-        sb.DrawString(font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sb.DrawString(font, safe, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
     }
 
     public Vector2 MeasureText(string text, SpriteFont font, float scale)
-        => font.MeasureString(text) * scale;
+        => font.MeasureString(SanitizeText(font, text)) * scale;
 
     // ── Control drawing ───────────────────────────────────────────────────────
 
