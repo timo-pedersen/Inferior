@@ -214,8 +214,8 @@ public sealed class SystemSpaceState : GameState
         // ── DataBus UI setup ──────────────────────────────────────────────────
         var theme = Theme.InferiorDark(_font);
         _ui = new UIManager(_gd, theme);
-        _uiMouseMode   = false;
-        _debugCameraMode = true;
+        _uiMouseMode     = false;
+        _debugCameraMode = false;
 
         // ── Right panel: INSTR tab (meters) + NAV tab (direction ball) ────────
         const int panelW   = 260;
@@ -332,7 +332,10 @@ public sealed class SystemSpaceState : GameState
         var radarPlaceholder = new Panel { DrawBackground = false, DrawBorder = false };
         var miscPlaceholder  = new Panel { DrawBackground = false, DrawBorder = false };
 
-        _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28));
+        _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28))
+        {
+            FontScale = 0.72f,
+        };
         _shieldToggleButton.SetState(false, false);
         _shieldToggleButton.Toggled += (_, on) =>
         {
@@ -934,7 +937,7 @@ public sealed class SystemSpaceState : GameState
         }
         else if (_debugCameraMode)
         {
-            DrawText(sb, "DEBUG CAM  —  Right drag: look   WASD/QE: move   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
+            DrawText(sb, "DEBUG CAM  —  Right drag: look   WASD: fwd/strafe   RF: up/down   QE: roll   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), new Color(220, 160, 80), 0.72f);
         }
         else

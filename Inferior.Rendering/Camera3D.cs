@@ -150,8 +150,8 @@ public sealed class Camera3D
         if (keys.IsKeyDown(Keys.S)) move -= ToDVec3(Forward);
         if (keys.IsKeyDown(Keys.D)) move += ToDVec3(Right);
         if (keys.IsKeyDown(Keys.A)) move -= ToDVec3(Right);
-        if (keys.IsKeyDown(Keys.E)) move += ToDVec3(Up);
-        if (keys.IsKeyDown(Keys.Q)) move -= ToDVec3(Up);
+        if (keys.IsKeyDown(Keys.R)) move += ToDVec3(Up);
+        if (keys.IsKeyDown(Keys.F)) move -= ToDVec3(Up);
 
         double len = move.Length;
         if (len > 0.001)

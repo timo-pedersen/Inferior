@@ -102,12 +102,16 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     private static Star FindStartStar(Star[] galaxy)
     {
+        // Target: 50% of the way from galactic centre toward the right edge (positive X)
+        const double targetX = GalaxyGenerator.GalaxyRadiusLY * 0.5;
+        var target = new Inferior.Core.Math.DVec3(targetX, 0, 0);
+
         Star?  best     = null;
         double bestDist = double.MaxValue;
         foreach (var star in galaxy)
         {
             if (star.SpectralClass is not (SpectralClass.G or SpectralClass.K)) continue;
-            double d = star.GalacticPos.Length;
+            double d = (star.GalacticPos - target).Length;
             if (d >= bestDist) continue;
             bestDist = d;
             best     = star;
