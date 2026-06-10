@@ -157,12 +157,13 @@ public sealed class SystemMapState : GameState
         _ui?.Dispose();
         _ui = new UIManager(_gd, theme);
 
-        _backButton = new Button("< GALAXY MAP", new Rectangle(16, 16, 160, 36));
+        _backButton = new Button("< BACK TO FLIGHT", new Rectangle(16, 16, 180, 36));
         _timeButton = new Button($"TIME: {TimeCompressionLabels[_timeCompIndex]}",
             new Rectangle(16, 60, 220, 36));
 
         _backButton.Clicked += _ =>
-            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap, _star);
+            _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
+                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout));
 
         _timeButton.Clicked += _ =>
         {
@@ -323,9 +324,16 @@ public sealed class SystemMapState : GameState
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
         bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
+        bool nPressed   = keys.IsKeyDown(Keys.N)      && !_prevKeys.IsKeyDown(Keys.N);
 
         if (escPressed)
-            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap, _star);
+            // Esc = back to flight
+            _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
+                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout));
+        else if (nPressed)
+            // N = galaxy map
+            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
+                new GalaxyMapPayload(_star, _gameTimeSeconds));
 
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
             _timeCompIndex = System.Math.Min(_timeCompIndex + 1, TimeCompressions.Length - 1);
@@ -512,8 +520,11 @@ public sealed class SystemMapState : GameState
     private void DrawHints(SpriteBatch sb)
     {
         int x = 16;
-        int y = _gd.Viewport.Height - 50;
+        int y = _gd.Viewport.Height - 68;
         DrawText(sb, "Double-click body/star - approach   Scroll - zoom   Home - recentre",
+            new Vector2(x, y), ColTextDim, 0.72f);
+        y += 18;
+        DrawText(sb, "N - galaxy map   Esc - back to flight",
             new Vector2(x, y), ColTextDim, 0.72f);
     }
 

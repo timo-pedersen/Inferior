@@ -80,7 +80,6 @@ public sealed class SystemSpaceState : GameState
     private StateTransition? _pendingTransition;
     private MouseState       _prevMouse;
     private KeyboardState    _prevKeys;
-    private Button?          _backButton;
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
     private UIManager?       _ui;
@@ -90,10 +89,11 @@ public sealed class SystemSpaceState : GameState
     private InstrumentMeter? _connectorFlowMeter;
     private AnalogueNeedle?  _connectorNeedle;
     private InstrumentMeter? _shieldCapacitorMeter;
-    private ToggleButton?     _shieldToggleButton;
+    private ToggleButton?    _shieldToggleButton;
     private Action<double>?  _shieldCapacitorHandler;
     private SystemConsole?   _console;
     private DirectionBall?   _dirBall;
+    private DirectionBall?   _cockpitDirBall;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
     private CockpitRail?     _cockpitRail;
@@ -296,20 +296,25 @@ public sealed class SystemSpaceState : GameState
         _rightPanel.AddTab("INSTR", instrPanel);
         _rightPanel.AddTab("NAV",   navPanel);
 
-        // ── Left panel: empty (tabs moved to CockpitRail) ─────────────────────
+        // Side panels stop at the CockpitRail wing top to avoid overlap
+        int wingH       = 160; // matches CockpitRail.WingHeight
+        int sidePanelH  = _gd.Viewport.Height - wingH;
+
+        // ── Left panel: empty for now ─────────────────────────────────────────
         _leftPanel = new EdgePanelHost(PanelEdge.Left)
         {
             PanelSize     = panelW,
             HandleSize    = 28,
             HandleLength  = 80,
             CornerMargin  = 8,
-            Bounds        = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
+            Bounds        = new Rectangle(0, 0, _gd.Viewport.Width, sidePanelH),
         };
+        _rightPanel.Bounds = new Rectangle(0, 0, _gd.Viewport.Width, sidePanelH);
 
         _ui.Add(_rightPanel);
         _ui.Add(_leftPanel);
 
-        // ── CockpitRail: LOG and SYS tabs at the bottom ───────────────────────
+        // ── CockpitRail: 4 tabs (RADAR, DIR BALL, ???, LOG) ──────────────────
         _console = new SystemConsole
         {
             Header    = "SYSTEM LOG",
@@ -318,13 +323,21 @@ public sealed class SystemSpaceState : GameState
             Bounds    = new Rectangle(0, 0, 500, 200),
         };
 
-        _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(0, 0, 200, 36));
-        _shieldToggleButton.SetState(false, false);  // starts confirmed-off
+        _cockpitDirBall = new DirectionBall
+        {
+            Header = "HEADING",
+            Bounds = new Rectangle(0, 0, 300, 300),
+        };
+
+        var radarPlaceholder = new Panel { DrawBackground = false, DrawBorder = false };
+        var miscPlaceholder  = new Panel { DrawBackground = false, DrawBorder = false };
+
+        _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28));
+        _shieldToggleButton.SetState(false, false);
         _shieldToggleButton.Toggled += (_, on) =>
         {
             if (_shield == null) return;
             _shield.PowerOn = on;
-            // IsConfirmed stays null (pending) until the bus confirms via capacitor fill
         };
 
         _shieldCapacitorHandler = fill =>
@@ -332,7 +345,7 @@ public sealed class SystemSpaceState : GameState
             if (_shieldToggleButton == null) return;
             _shieldToggleButton.IsConfirmed = fill >= 1.0 ? true
                                             : fill <= 0.0 ? false
-                                            : null;  // charging or draining — pending
+                                            : null;
         };
         DataBus.Instruments.Subscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
 
@@ -340,18 +353,13 @@ public sealed class SystemSpaceState : GameState
         {
             Bounds = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
         };
-        _cockpitRail.AddCenterTab("LOG", _console);
-        _cockpitRail.AddCenterTab("SYS", _shieldToggleButton);
+        _cockpitRail.AddCenterTab("RADAR",    radarPlaceholder);
+        _cockpitRail.AddCenterTab("DIR BALL", _cockpitDirBall);
+        _cockpitRail.AddCenterTab("???",      miscPlaceholder);
+        _cockpitRail.AddCenterTab("LOG",      _console);
+        _cockpitRail.RightWing.Add(_shieldToggleButton);
 
         _ui.Add(_cockpitRail);
-
-        _backButton = new Button("< SYSTEM MAP", new Rectangle(26, 16, 160, 36));
-
-        _backButton.Clicked += _ =>
-            _pendingTransition = StateTransition.To(GameStateId.SystemMap,
-                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
-
-        _ui.Add(_backButton);
 
         // Restore panel layout if returning from system map
         if (payload is SystemSpacePayload { Layout: { } layout })
@@ -411,10 +419,11 @@ public sealed class SystemSpaceState : GameState
     {
         _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
         UpdateUI();
-        var screenBounds = new Rectangle(0, 0, width, height);
-        if (_rightPanel  != null) _rightPanel.Bounds  = screenBounds;
-        if (_leftPanel   != null) _leftPanel.Bounds   = screenBounds;
-        if (_cockpitRail != null) _cockpitRail.Bounds = screenBounds;
+        int wingH      = _cockpitRail?.WingHeight ?? 160;
+        var sideBounds = new Rectangle(0, 0, width, height - wingH);
+        if (_rightPanel  != null) _rightPanel.Bounds  = sideBounds;
+        if (_leftPanel   != null) _leftPanel.Bounds   = sideBounds;
+        if (_cockpitRail != null) _cockpitRail.Bounds = new Rectangle(0, 0, width, height);
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
@@ -473,31 +482,9 @@ public sealed class SystemSpaceState : GameState
         _gameTimeSeconds += dt;
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
 
-        // Update direction ball — orientation + direction to star + gravity
-        if (_dirBall != null)
-        {
-            _dirBall.SetOrientation(_camera.Forward, _camera.Right, _camera.Up);
-
-            // Star — always at universe origin
-            var toStar = DVec3.Zero - _camera.UniversePosition;
-            if (toStar.Length > 0.001)
-            {
-                toStar = toStar / toStar.Length;
-                _dirBall.SetVector("star",
-                    new Vector3((float)toStar.X, (float)toStar.Y, (float)toStar.Z),
-                    new Color(255, 220, 80), "★");
-            }
-
-            // Gravity direction comes from the sensor in ecliptic space.
-            // Rotate to galaxy space before passing to the direction ball so it aligns
-            // with visual planet positions (which are already in galaxy space).
-            var gravEcliptic = new Vector3((float)_gravDirX, (float)_gravDirY, (float)_gravDirZ);
-            if (gravEcliptic.LengthSquared() > 0.001f)
-            {
-                var gravGalaxy = Vector3.TransformNormal(gravEcliptic, _eclipticRotation);
-                _dirBall.SetVector("grav", gravGalaxy, new Color(120, 200, 255), "g");
-            }
-        }
+        // Update direction balls — both the right-panel ball and the cockpit center ball
+        UpdateDirectionBall(_dirBall);
+        UpdateDirectionBall(_cockpitDirBall);
 
         // Rebuild body positions — collect in ecliptic space then rotate to galaxy space
         _bodyPositions.Clear();
@@ -952,7 +939,7 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
-            DrawText(sb, "Right drag: look   WASD/QE: thrust   F11: debug cam   TAB: UI",
+            DrawText(sb, "Right drag: look   WASD: fwd/strafe   QE: roll   RF: up/down   M: system map   N: galaxy map   F11: debug   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
         }
     }
@@ -961,12 +948,17 @@ public sealed class SystemSpaceState : GameState
 
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
-        bool escPressed  = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
-        bool homePressed = keys.IsKeyDown(Keys.Home)   && !_prevKeys.IsKeyDown(Keys.Home);
+        bool mPressed    = keys.IsKeyDown(Keys.M)    && !_prevKeys.IsKeyDown(Keys.M);
+        bool nPressed    = keys.IsKeyDown(Keys.N)    && !_prevKeys.IsKeyDown(Keys.N);
+        bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
 
-        if (escPressed)
+        if (mPressed)
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
                 new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
+
+        if (nPressed)
+            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
+                new GalaxyMapPayload(_star, _gameTimeSeconds));
 
         int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
 
@@ -996,6 +988,28 @@ public sealed class SystemSpaceState : GameState
         (float)_gd.Viewport.Width / _gd.Viewport.Height;
 
     private void UpdateUI() { }
+
+    private void UpdateDirectionBall(DirectionBall? ball)
+    {
+        if (ball == null) return;
+        ball.SetOrientation(_camera.Forward, _camera.Right, _camera.Up);
+
+        var toStar = DVec3.Zero - _camera.UniversePosition;
+        if (toStar.Length > 0.001)
+        {
+            toStar = toStar / toStar.Length;
+            ball.SetVector("star",
+                new Vector3((float)toStar.X, (float)toStar.Y, (float)toStar.Z),
+                new Color(255, 220, 80), "★");
+        }
+
+        var gravEcliptic = new Vector3((float)_gravDirX, (float)_gravDirY, (float)_gravDirZ);
+        if (gravEcliptic.LengthSquared() > 0.001f)
+        {
+            var gravGalaxy = Vector3.TransformNormal(gravEcliptic, _eclipticRotation);
+            ball.SetVector("grav", gravGalaxy, new Color(120, 200, 255), "g");
+        }
+    }
 
     // ── Ecliptic tilt ─────────────────────────────────────────────────────────
 
@@ -1067,11 +1081,13 @@ public sealed class SystemSpaceState : GameState
         }
 
         // Thrust — keyboard axes, -1..1
+        // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = roll
         double fwd  = (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
         double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
-        double vert = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
+        double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
+        double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
 
-        return new PlayerInput(fwd, lat, vert, 0.0, pitchInput, yawInput, false, true);
+        return new PlayerInput(fwd, lat, vert, roll, pitchInput, yawInput, false, true);
     }
 
     // ── UI mode ───────────────────────────────────────────────────────────────
@@ -1080,9 +1096,7 @@ public sealed class SystemSpaceState : GameState
     {
         if (_rightPanel != null) _rightPanel.UiModeActive = active;
         if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
-        if (_backButton != null) { _backButton.Visible = active; _backButton.Enabled = active; }
-        // CockpitRail is always interactable — peek strip and open/close toggle work in all modes.
-        // Wing/tab input is already gated by _slide in CockpitRail.HandleInput.
+        // CockpitRail is always interactable — peek strip tabs and toggle work in all modes.
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────

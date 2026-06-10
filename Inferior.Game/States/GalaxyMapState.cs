@@ -40,7 +40,8 @@ public sealed class GalaxyMapState : GameState
     // ── Selection & navigation ────────────────────────────────────────────────
     private Star?  _selectedStar;
     private Star?  _jumpTarget;
-    private Star   _currentSystem = null!;
+    private Star   _currentSystem  = null!;
+    private double _storedGameTime = 0.0;
 
     // Pending transition — set in input handlers, consumed in Update
     private StateTransition? _pendingTransition;
@@ -114,22 +115,25 @@ public sealed class GalaxyMapState : GameState
     {
         // Generate galaxy if first entry
         if (_stars.Length == 0)
-        {
-            _stars         = GalaxyGenerator.Generate();
-            _currentSystem = FindStartingSystem();
-            _visitedSystems.Add(_currentSystem.GalaxyIndex);
+            _stars = GalaxyGenerator.Generate();
 
+        // Arriving from in-flight (N key) or system map (N key)
+        if (payload is GalaxyMapPayload gmp)
+        {
+            _currentSystem  = gmp.CurrentStar;
+            _storedGameTime = gmp.GameTime;
+            _visitedSystems.Add(_currentSystem.GalaxyIndex);
             _cameraPos = new Vector2(
                 (float)_currentSystem.GalacticPos.X,
                 (float)_currentSystem.GalacticPos.Z);
         }
-
-        // Returning from system view — re-select the star we came from
-        if (payload is Star returnedFrom)
+        else if (_currentSystem == null!)
         {
-            _selectedStar  = returnedFrom;
-            _currentSystem = returnedFrom;
-            _visitedSystems.Add(returnedFrom.GalaxyIndex);
+            _currentSystem = FindStartingSystem();
+            _visitedSystems.Add(_currentSystem.GalaxyIndex);
+            _cameraPos = new Vector2(
+                (float)_currentSystem.GalacticPos.X,
+                (float)_currentSystem.GalacticPos.Z);
         }
 
         _pixel = new Texture2D(_gd, 1, 1);
@@ -388,12 +392,20 @@ public sealed class GalaxyMapState : GameState
     private void HandleKeyboard(KeyboardState keys)
     {
         bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
-        if (!escPressed) return;
+        bool mPressed   = keys.IsKeyDown(Keys.M)      && !_prevKeys.IsKeyDown(Keys.M);
 
-        if (_jumpTarget != null)
-            _jumpTarget = null;
-        else
-            _selectedStar = null;
+        if (escPressed)
+        {
+            // Return to in-flight view of current system
+            _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
+                new SystemSpacePayload(_currentSystem, null, _storedGameTime, null));
+        }
+        else if (mPressed)
+        {
+            // M = open system map for the current system
+            _pendingTransition = StateTransition.To(GameStateId.SystemMap,
+                new SystemMapPayload(_currentSystem, _storedGameTime, CockpitLayout.Default));
+        }
     }
 
     // ── Search helpers ────────────────────────────────────────────────────────
@@ -657,13 +669,15 @@ public sealed class GalaxyMapState : GameState
 
     private void DrawHints(SpriteBatch sb)
     {
-        int x = _gd.Viewport.Width  - 220;
-        int y = _gd.Viewport.Height - 80;
+        int x = _gd.Viewport.Width  - 240;
+        int y = _gd.Viewport.Height - 100;
 
         DrawText(sb, "Left-click    select",        new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Double-click  system map",    new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Right-click   jump target",   new Vector2(x, y), ColTextDim, 0.72f); y += 18;
-        DrawText(sb, "Scroll        zoom",           new Vector2(x, y), ColTextDim, 0.72f);
+        DrawText(sb, "Scroll        zoom",           new Vector2(x, y), ColTextDim, 0.72f); y += 18;
+        DrawText(sb, "M             current system", new Vector2(x, y), ColTextDim, 0.72f); y += 18;
+        DrawText(sb, "Esc           back to flight", new Vector2(x, y), ColTextDim, 0.72f);
     }
 
     // ── Coordinate transforms ─────────────────────────────────────────────────

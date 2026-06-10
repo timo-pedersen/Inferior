@@ -1,4 +1,5 @@
 using Inferior.Core;
+using Inferior.Galaxy;
 using Inferior.Game.States;
 using Inferior.UI;
 using Microsoft.Xna.Framework;
@@ -62,7 +63,10 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         _stateMachine.Register(new GalaxyMapState(GraphicsDevice, _font));
         _stateMachine.Register(new SystemMapState(GraphicsDevice, _font));
         _stateMachine.Register(new SystemSpaceState(GraphicsDevice, _font, _simulation));
-        _stateMachine.Start(GameStateId.GalaxyMap);
+
+        var galaxy    = GalaxyGenerator.Generate();
+        var startStar = FindStartStar(galaxy);
+        _stateMachine.Start(GameStateId.SystemSpace, new SystemSpacePayload(startStar, null, 0.0, null));
     }
 
     protected override void Update(GameTime gameTime)
@@ -92,6 +96,23 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         GraphicsDevice.Clear(Color.CornflowerBlue);
         _stateMachine.Draw(gameTime, GraphicsDevice, _spriteBatch!);
         base.Draw(gameTime);
+    }
+
+    // ── Startup helper ────────────────────────────────────────────────────────
+
+    private static Star FindStartStar(Star[] galaxy)
+    {
+        Star?  best     = null;
+        double bestDist = double.MaxValue;
+        foreach (var star in galaxy)
+        {
+            if (star.SpectralClass is not (SpectralClass.G or SpectralClass.K)) continue;
+            double d = star.GalacticPos.Length;
+            if (d >= bestDist) continue;
+            bestDist = d;
+            best     = star;
+        }
+        return best ?? galaxy[0];
     }
 
     // ── Window mode cycling ───────────────────────────────────────────────────
