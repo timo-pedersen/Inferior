@@ -93,7 +93,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     protected override void Draw(GameTime gameTime)
     {
-        GraphicsDevice.Clear(Color.CornflowerBlue);
+        GraphicsDevice.Clear(Color.Black);
         _stateMachine.Draw(gameTime, GraphicsDevice, _spriteBatch!);
         base.Draw(gameTime);
     }

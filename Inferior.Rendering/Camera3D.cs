@@ -71,10 +71,13 @@ public sealed class Camera3D
 
     // ── Per-frame update ──────────────────────────────────────────────────────
 
+    private const float RollRateRps = 1.2f;  // radians per second
+
     public void Update(double dt, MouseState mouse, KeyboardState keys)
     {
         HandleMouseLook(mouse);
         HandleMovement(dt, keys);
+        HandleRoll(dt, keys);
         RefreshAxes();
         UpdateViewMatrix();
     }
@@ -156,6 +159,18 @@ public sealed class Camera3D
         double len = move.Length;
         if (len > 0.001)
             UniversePosition += (move / len) * speed * dt;
+    }
+
+    private void HandleRoll(double dt, KeyboardState keys)
+    {
+        float roll = 0f;
+        if (keys.IsKeyDown(Keys.E)) roll += 1f;
+        if (keys.IsKeyDown(Keys.Q)) roll -= 1f;
+        if (roll == 0f) return;
+
+        float angle = roll * RollRateRps * (float)dt;
+        var rollQ   = Quaternion.CreateFromAxisAngle(Forward, angle);
+        _orientation = Quaternion.Normalize(rollQ * _orientation);
     }
 
     private void RefreshAxes()

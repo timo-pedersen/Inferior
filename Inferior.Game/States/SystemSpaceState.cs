@@ -150,31 +150,34 @@ public sealed class SystemSpaceState : GameState
             _gameTimeSeconds = p.GameTime;
             ComputeEclipticRotation();
 
-            DVec3      startPos;
-            Quaternion startOri;
-
             if (p.TargetBody != null)
             {
-                // Approach from double-click — spawn near the body
+                // Approach from double-click — force new spawn near the body
+                _ship = null;
                 DVec3  bodyEcliptic = p.TargetBody.GetPosition(p.GameTime, DVec3.Zero);
                 double dist         = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
-                startPos = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
-                startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+                var    startPos     = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
+                _camera = new Camera3D(startPos, AspectRatio);
+                SpawnShip(startPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
             }
-            else if (p.SpawnPos.HasValue)
+            else if (_ship != null)
             {
-                // Returning from a map — restore exactly where the player was
-                startPos = p.SpawnPos.Value;
-                startOri = p.SpawnOrientation ?? Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+                // Returning from a map — ship instance is already alive in the simulation
+                // with the correct position. Just re-register it and sync the camera.
+                _simulation.SetShip(_ship);
+                var snap = _simulation.ShipState;
+                var camPos = snap?.CockpitWorldPosition ?? _ship.CockpitWorldPosition;
+                var camOri = snap?.Orientation          ?? _ship.Orientation;
+                _camera = new Camera3D(camPos, AspectRatio);
+                _camera.SetPose(camPos, camOri);
             }
             else
             {
-                // First entry or galaxy-map Esc without saved position — start 2 AU out
-                startPos = new DVec3(0, 0.5e11, 3e11);
-                startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+                // First entry — start 2 AU out
+                var startPos = new DVec3(0, 0.5e11, 3e11);
+                _camera = new Camera3D(startPos, AspectRatio);
+                SpawnShip(startPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
             }
-            _camera = new Camera3D(startPos, AspectRatio);
-            SpawnShip(startPos, startOri);
         }
         else if (payload is Star star)
         {
@@ -398,6 +401,9 @@ public sealed class SystemSpaceState : GameState
 
     public override void OnExit()
     {
+        // Stop ship from drifting while browsing maps
+        _simulation.SetInput(PlayerInput.Zero);
+
         // Meters unsubscribe themselves when Topic is cleared
         if (_reactorPowerOutputMeter != null) _reactorPowerOutputMeter.Topic = "";
         if (_reactorDrawnMeter       != null) _reactorDrawnMeter.Topic       = "";
@@ -1047,8 +1053,10 @@ public sealed class SystemSpaceState : GameState
     }
 
     // ── Ship ──────────────────────────────────────────────────────────────────
+    // _ship persists between OnEnter/OnExit calls — only recreated for new spawns.
 
-    private ShieldComponent? _shield;
+    private Ship?             _ship;
+    private ShieldComponent?  _shield;
 
     private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
@@ -1081,6 +1089,7 @@ public sealed class SystemSpaceState : GameState
         ship.Install(shieldConnector);
         _shield.PowerOn = false;  // starts off — player enables via SYS panel
 
+        _ship = ship;
         _simulation.SetShip(ship);
     }
 
