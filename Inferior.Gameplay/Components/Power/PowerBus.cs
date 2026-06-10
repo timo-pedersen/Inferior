@@ -31,7 +31,11 @@ public sealed class PowerBus : ShipComponent
     // ── Energy buffer ─────────────────────────────────────────────────────────
     public PowerCapacitor Capacitor { get; }
 
+    /// <summary>Watts drawn from this bus during the previous tick (one-tick lag).</summary>
+    public double DrawnWatts { get; private set; }
+
     private PowerCapacitor? _source;
+    private double _drawnThisTick;
 
     public PowerBus(string name, double capacityJ,
                     double maxPower              = double.MaxValue,
@@ -59,11 +63,19 @@ public sealed class PowerBus : ShipComponent
         if (dt <= 0.0) return 0.0;
         double cappedWatts = Math.Min(requestedWatts, MaxPower);
         double deliveredJ  = Capacitor.Draw(cappedWatts * dt);
-        return deliveredJ / dt;
+        double deliveredW  = deliveredJ / dt;
+        _drawnThisTick += deliveredW;
+        return deliveredW;
     }
 
     protected override void OnTick(double dt)
     {
+        // Snapshot previous tick's draw, then reset accumulator for this tick.
+        // Consumers draw via PowerPriorityManager.Tick() which runs after this,
+        // so DrawnWatts always reflects the previous tick (one-tick lag at 60 Hz).
+        DrawnWatts     = _drawnThisTick;
+        _drawnThisTick = 0.0;
+
         if (_source != null && dt > 0.0)
         {
             // Pull from source up to the wire-gauge limit (MaxPower) and available space
@@ -94,5 +106,12 @@ public sealed class PowerBus : ShipComponent
             () => Capacitor.FillFraction,
             safeRange:  new RangeValue(0.2, 1.0),
             totalRange: new RangeValue(0.0, 1.0)));
+
+        double maxW = MaxPower < 1e15 ? MaxPower : 1e9;  // sensible range if unset
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.Consumption",
+            () => DrawnWatts,
+            safeRange:  new RangeValue(0, maxW),
+            totalRange: new RangeValue(0, maxW)));
     }
 }

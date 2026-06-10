@@ -26,7 +26,12 @@ public sealed class InstrumentMeter : Control
     /// Use to convert bus units to display units (e.g. 1e-6 for watts → MW).
     /// Defaults to 1.0 (no conversion).
     /// </summary>
-    public double ScaleFactor { get; set; } = 1.0;
+    public double ScaleFactor    { get; set; } = 1.0;
+    /// <summary>
+    /// Speed of exponential smoothing toward the target value.
+    /// Higher = faster response. Default 8.0 settles within ~0.5 s.
+    /// </summary>
+    public double AnimationSpeed { get; set; } = 8.0;
 
     // ── DataBus auto-subscribe ────────────────────────────────────────────────
 
@@ -60,9 +65,20 @@ public sealed class InstrumentMeter : Control
     }
 
     private double _rawValue;
+    private double _displayedValue = double.NaN;  // NaN = not yet received; snaps on first value
 
     /// <summary>Update the raw bus value. ScaleFactor is applied at draw time.</summary>
     public void SetValue(double value) => _rawValue = value;
+
+    public override void Update(double dt)
+    {
+        double target = _rawValue * ScaleFactor;
+        if (double.IsNaN(_displayedValue))
+            _displayedValue = target;
+        else
+            _displayedValue += (target - _displayedValue) * System.Math.Min(AnimationSpeed * dt, 1.0);
+        base.Update(dt);
+    }
 
     public override void Draw(SpriteBatch sb, UIRenderer renderer, Theme theme)
     {
@@ -85,10 +101,10 @@ public sealed class InstrumentMeter : Control
         // Bar track area
         int barY      = ab.Y + pad + headerH;
         int barH      = ab.Height - barY + ab.Y - pad;
-        int valueW    = 44;                               // reserved for value text
+        int valueW    = 44;
         int barTrackW = ab.Width - pad * 2 - valueW - 4;
 
-        double displayValue = _rawValue * ScaleFactor;
+        double displayValue = double.IsNaN(_displayedValue) ? 0.0 : _displayedValue;
         double frac = MaxValue > MinValue
             ? System.Math.Clamp((displayValue - MinValue) / (MaxValue - MinValue), 0.0, 1.0)
             : 0.0;

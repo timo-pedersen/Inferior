@@ -21,9 +21,11 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerReactor : ShipComponent
 {
-    public double MaxPower    { get; }
-    public double Throttle    { get; private set; } = 1.0;
+    public double MaxPower      { get; }
+    public double Throttle      { get; private set; } = 1.0;
     public double CurrentOutput { get; private set; }
+    /// <summary>Watts drawn from the output capacitor last tick (total across all connected buses).</summary>
+    public double DrawnWatts    { get; private set; }
 
     /// <summary>Output capacitor — connect to a PowerBus via bus.ConnectSource(reactor.OutputCapacitor).</summary>
     public PowerCapacitor OutputCapacitor { get; }
@@ -45,6 +47,10 @@ public sealed class PowerReactor : ShipComponent
 
     protected override void OnTick(double dt)
     {
+        // Snapshot joules drawn from the output capacitor since last tick (by all connected buses),
+        // then reset accumulator before charging so only new draws count next tick.
+        DrawnWatts = dt > 0.0 ? OutputCapacitor.SnapshotAndResetDrawn() / dt : 0.0;
+
         double target   = MaxPower * Throttle;
         CurrentOutput   = target * Efficiency;
 
@@ -79,6 +85,12 @@ public sealed class PowerReactor : ShipComponent
         _sensors.Add(new ComponentSensor(
             $"{Name}.Output",
             () => CurrentOutput,                           // watts — ScaleFactor=1e-6 for MW display
+            safeRange:  new RangeValue(0, MaxPower * 0.85),
+            totalRange: new RangeValue(0, MaxPower)));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.Drawn",
+            () => DrawnWatts,                              // watts — ScaleFactor=1e-6 for MW display
             safeRange:  new RangeValue(0, MaxPower * 0.85),
             totalRange: new RangeValue(0, MaxPower)));
 

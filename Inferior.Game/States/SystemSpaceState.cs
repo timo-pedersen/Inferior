@@ -84,10 +84,11 @@ public sealed class SystemSpaceState : GameState
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
     private UIManager?       _ui;
-    private InstrumentMeter? _heartbeatMeter;
-    private InstrumentMeter? _simTimeMeter;
-    private InstrumentMeter? _gravityMeter;
     private InstrumentMeter? _reactorPowerOutputMeter;
+    private InstrumentMeter? _reactorDrawnMeter;
+    private InstrumentMeter? _busConsumptionMeter;
+    private InstrumentMeter? _connectorFlowMeter;
+    private AnalogueNeedle?  _connectorNeedle;
     private InstrumentMeter? _shieldCapacitorMeter;
     private ToggleButton?     _shieldToggleButton;
     private Action<double>?  _shieldCapacitorHandler;
@@ -222,40 +223,57 @@ public sealed class SystemSpaceState : GameState
         const int meterH   = 46;
         const int meterGap = 8;
 
-        _heartbeatMeter = new InstrumentMeter 
-        { Label = "HEARTBEAT", MinValue = 0, MaxValue = 100,
-            Topic = $"Debug.{Topics.Debug.Heartbeat}",
-            Bounds = new Rectangle(0, 0, innerW, meterH) 
-        };
-        _simTimeMeter = new InstrumentMeter 
-        { Label = "SIM TIME", MinValue = 0, MaxValue = 300,
-            Topic = $"Debug.{Topics.Debug.SimTime}",
-            Format = "F0", Bounds = new Rectangle(0, meterH + meterGap, innerW, meterH) 
-        };
-        _gravityMeter = new InstrumentMeter 
-        { Label = "GRAVITY", MinValue = 0, MaxValue = 30,
-            Topic = $"GravitySensor.{Topics.GravitySensor.Strength}",
-            Format = "F4", Bounds = new Rectangle(0, (meterH + meterGap) * 2, innerW, meterH) 
-        };
         _reactorPowerOutputMeter = new InstrumentMeter
-        { Label = "REACTOR OUTPUT", MinValue = 0, MaxValue = 120,
+        { Label = "REACTOR OUT", MinValue = 0, MaxValue = 120,
             Topic = "Reactor.Output",
-            ScaleFactor = 1e-6,   // bus publishes watts; meter displays MW
+            ScaleFactor = 1e-6,   // sensor publishes watts; meter displays MW
+            Format = "F1",
+            Bounds = new Rectangle(0, 0, innerW, meterH)
+        };
+        _reactorDrawnMeter = new InstrumentMeter
+        { Label = "REACTOR DRAW", MinValue = 0, MaxValue = 120,
+            Topic = "Reactor.Drawn",
+            ScaleFactor = 1e-6,   // sensor publishes watts; meter displays MW
+            Format = "F1",
+            Bounds = new Rectangle(0, meterH + meterGap, innerW, meterH)
+        };
+        _busConsumptionMeter = new InstrumentMeter
+        { Label = "BUS DRAW", MinValue = 0, MaxValue = 120,
+            Topic = "MainBus.Consumption",
+            ScaleFactor = 1e-6,   // sensor publishes watts; meter displays MW
+            Format = "F1",
+            Bounds = new Rectangle(0, (meterH + meterGap) * 2, innerW, meterH)
+        };
+        _connectorFlowMeter = new InstrumentMeter
+        { Label = "SHIELD CONN", MinValue = 0, MaxValue = 1.0,
+            Topic = "ShieldConnector.Flow",
+            ScaleFactor = 1e-6,   // sensor publishes watts; meter displays MW (max 0.6 MW)
+            Format = "F3",
             Bounds = new Rectangle(0, (meterH + meterGap) * 3, innerW, meterH)
+        };
+        const int needleH = 130;
+        _connectorNeedle = new AnalogueNeedle
+        { Label = "SHIELD CONN", MinValue = 0, MaxValue = 1.0,
+            Topic = "ShieldConnector.Flow",
+            ScaleFactor = 1e-6,   // sensor publishes watts; needle displays MW
+            Format = "F3",
+            AnimationSpeed = 5.0,
+            Bounds = new Rectangle(0, (meterH + meterGap) * 4, innerW, needleH)
         };
         _shieldCapacitorMeter = new InstrumentMeter
         { Label = "SHIELD CAP", MinValue = 0, MaxValue = 100,
             Topic = $"Shield.{Topics.Shield.Capacitor}",
             ScaleFactor = 100.0,  // sensor publishes 0–1 fill; meter displays 0–100 %
             Format = "F0",
-            Bounds = new Rectangle(0, (meterH + meterGap) * 4, innerW, meterH)
+            Bounds = new Rectangle(0, (meterH + meterGap) * 4 + needleH + meterGap, innerW, meterH)
         };
 
         var instrPanel = new Panel { DrawBackground = false, DrawBorder = false };
-        instrPanel.Add(_heartbeatMeter);
-        instrPanel.Add(_simTimeMeter);
-        instrPanel.Add(_gravityMeter);
         instrPanel.Add(_reactorPowerOutputMeter);
+        instrPanel.Add(_reactorDrawnMeter);
+        instrPanel.Add(_busConsumptionMeter);
+        instrPanel.Add(_connectorFlowMeter);
+        instrPanel.Add(_connectorNeedle);
         instrPanel.Add(_shieldCapacitorMeter);
 
         _dirBall = new DirectionBall
@@ -361,11 +379,12 @@ public sealed class SystemSpaceState : GameState
     public override void OnExit()
     {
         // Meters unsubscribe themselves when Topic is cleared
-        if (_heartbeatMeter        != null) _heartbeatMeter.Topic        = "";
-        if (_simTimeMeter          != null) _simTimeMeter.Topic          = "";
-        if (_gravityMeter          != null) _gravityMeter.Topic          = "";
         if (_reactorPowerOutputMeter != null) _reactorPowerOutputMeter.Topic = "";
-        if (_shieldCapacitorMeter   != null) _shieldCapacitorMeter.Topic   = "";
+        if (_reactorDrawnMeter       != null) _reactorDrawnMeter.Topic       = "";
+        if (_busConsumptionMeter     != null) _busConsumptionMeter.Topic     = "";
+        if (_connectorFlowMeter      != null) _connectorFlowMeter.Topic      = "";
+        if (_connectorNeedle         != null) _connectorNeedle.Topic         = "";
+        if (_shieldCapacitorMeter    != null) _shieldCapacitorMeter.Topic    = "";
 
         if (_gravDirXHandler != null)
             DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
@@ -1011,19 +1030,23 @@ public sealed class SystemSpaceState : GameState
 
         var reactor = new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6);
 
-        var bus = new PowerBus("MainBus", capacityJ: 10e6);
+        var bus = new PowerBus("MainBus", capacityJ: 10e6, maxPower: 120e6);
         bus.ConnectSource(reactor.OutputCapacitor);
 
         var powerManager = new PowerPriorityManager();
         powerManager.AttachToBus(bus);
 
         _shield = new ShieldComponent("Shield", maxShieldJ: 5e6, chargeRateW: 500e3);
-        _shield.RegisterWithPowerManager(powerManager);
+
+        // Connector wires shield to bus via the priority manager, capping at 600 kW
+        var shieldConnector = new ConnectorComponent("ShieldConnector", "MainBus", "Shield", maxPower: 600e3);
+        shieldConnector.Connect(powerManager, _shield.DemandWatts, _shield.ReceivePower);
 
         ship.Install(reactor);
         ship.Install(bus);
         ship.Install(powerManager);
         ship.Install(_shield);
+        ship.Install(shieldConnector);
         _shield.PowerOn = false;  // starts off — player enables via SYS panel
 
         _simulation.SetShip(ship);

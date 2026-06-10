@@ -15,11 +15,23 @@ public sealed class PowerCapacitor
     public PowerCapacitor() { }
     public PowerCapacitor(double maxJ) => MaxJ = maxJ;
 
+    /// <summary>Joules drawn since the last ResetDrawn() call.</summary>
+    public double DrawnJ { get; private set; }
+
+    /// <summary>Snapshot drawn joules and reset the accumulator. Call once per tick from the owning component.</summary>
+    public double SnapshotAndResetDrawn()
+    {
+        double snapshot = DrawnJ;
+        DrawnJ = 0.0;
+        return snapshot;
+    }
+
     /// <summary>Withdraw up to requestedJ joules. Returns actual joules delivered (≤ requestedJ).</summary>
     public double Draw(double requestedJ)
     {
         double actual = Math.Min(requestedJ, StoredJ);
         StoredJ -= actual;
+        DrawnJ  += actual;
         return actual;
     }
 

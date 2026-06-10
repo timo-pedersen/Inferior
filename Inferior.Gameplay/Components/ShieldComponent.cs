@@ -45,13 +45,23 @@ public sealed class ShieldComponent : ShipComponent
 
     // ── Power ─────────────────────────────────────────────────────────────────
 
+    /// <summary>Current power demand in watts (0 when full or offline).</summary>
+    public double DemandWatts() =>
+        Status is ComponentStatus.Initializing or ComponentStatus.Running
+        && _capacitor.FillFraction < 1.0
+            ? ChargeRateW
+            : 0.0;
+
+    /// <summary>Deliver watts from the bus (called by connector or priority manager).</summary>
+    public void ReceivePower(double watts) => _deliveredWatts = watts;
+
     /// <summary>
-    /// Register as a power consumer with the priority manager.
-    /// Call once during ship construction before startup.
+    /// Register as a power consumer directly with the priority manager (no connector).
+    /// Prefer wiring via ConnectorComponent when a connector is installed.
     /// </summary>
     public void RegisterWithPowerManager(PowerPriorityManager manager,
                                          PowerPriority priority = PowerPriority.Normal)
-        => manager.Register(Name, DemandWatts, w => _deliveredWatts = w, priority);
+        => manager.Register(Name, DemandWatts, ReceivePower, priority);
 
     // ── Combat ────────────────────────────────────────────────────────────────
 
@@ -122,14 +132,6 @@ public sealed class ShieldComponent : ShipComponent
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
-
-    private double DemandWatts()
-    {
-        return Status is ComponentStatus.Initializing or ComponentStatus.Running
-            && _capacitor.FillFraction < 1.0
-                ? ChargeRateW
-                : 0.0;
-    }
 
     private void RegisterSensors()
     {
