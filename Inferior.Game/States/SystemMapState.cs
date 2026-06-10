@@ -59,7 +59,9 @@ public sealed class SystemMapState : GameState
     private StateTransition? _pendingTransition;
 
     // Preserved across round-trips to SystemSpace
-    private CockpitLayout    _cockpitLayout = CockpitLayout.Default;
+    private CockpitLayout _cockpitLayout    = CockpitLayout.Default;
+    private DVec3?        _spawnPos;
+    private Quaternion?   _spawnOrientation;
 
     // ── Input ─────────────────────────────────────────────────────────────────
     private MouseState    _prevMouse;
@@ -127,11 +129,13 @@ public sealed class SystemMapState : GameState
         }
         else if (payload is SystemMapPayload mp)
         {
-            // Returning from SystemSpace — restore star, game time, and cockpit layout
-            _star            = mp.Star;
-            _system          = StarSystem.Generate(mp.Star, GalaxyGenerator.SystemSeed(mp.Star));
-            _gameTimeSeconds = mp.GameTime;
-            _cockpitLayout   = mp.Layout;
+            // Returning from SystemSpace — restore star, game time, cockpit layout, and ship position
+            _star             = mp.Star;
+            _system           = StarSystem.Generate(mp.Star, GalaxyGenerator.SystemSeed(mp.Star));
+            _gameTimeSeconds  = mp.GameTime;
+            _cockpitLayout    = mp.Layout;
+            _spawnPos         = mp.SpawnPos;
+            _spawnOrientation = mp.SpawnOrientation;
         }
         else if (payload is (Star returnStar, double returnTime))
         {
@@ -163,7 +167,7 @@ public sealed class SystemMapState : GameState
 
         _backButton.Clicked += _ =>
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout));
+                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout, _spawnPos, _spawnOrientation));
 
         _timeButton.Clicked += _ =>
         {
@@ -324,16 +328,17 @@ public sealed class SystemMapState : GameState
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
         bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
+        bool mPressed   = keys.IsKeyDown(Keys.M)      && !_prevKeys.IsKeyDown(Keys.M);
         bool nPressed   = keys.IsKeyDown(Keys.N)      && !_prevKeys.IsKeyDown(Keys.N);
 
-        if (escPressed)
-            // Esc = back to flight
+        if (escPressed || mPressed)
+            // Esc or M = back to flight (M toggles the system map)
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout));
+                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout, _spawnPos, _spawnOrientation));
         else if (nPressed)
-            // N = galaxy map
+            // N = galaxy map (pass ship position through so galaxy map can hand it back to flight)
             _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
-                new GalaxyMapPayload(_star, _gameTimeSeconds));
+                new GalaxyMapPayload(_star, _gameTimeSeconds, _spawnPos, _spawnOrientation));
 
         if (keys.IsKeyDown(Keys.OemCloseBrackets) && !_prevKeys.IsKeyDown(Keys.OemCloseBrackets))
             _timeCompIndex = System.Math.Min(_timeCompIndex + 1, TimeCompressions.Length - 1);

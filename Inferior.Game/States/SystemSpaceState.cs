@@ -150,22 +150,31 @@ public sealed class SystemSpaceState : GameState
             _gameTimeSeconds = p.GameTime;
             ComputeEclipticRotation();
 
-            DVec3 startPos;
+            DVec3      startPos;
+            Quaternion startOri;
+
             if (p.TargetBody != null)
             {
-                // Spawn above and behind the target body — spawn offset is in ecliptic space
-                // then rotated into galaxy space so the ship appears near the body's tilted position
+                // Approach from double-click — spawn near the body
                 DVec3  bodyEcliptic = p.TargetBody.GetPosition(p.GameTime, DVec3.Zero);
                 double dist         = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
                 startPos = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
+                startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+            }
+            else if (p.SpawnPos.HasValue)
+            {
+                // Returning from a map — restore exactly where the player was
+                startPos = p.SpawnPos.Value;
+                startOri = p.SpawnOrientation ?? Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
             }
             else
             {
-                // Spawned from star double-click — start 2 AU from origin
+                // First entry or galaxy-map Esc without saved position — start 2 AU out
                 startPos = new DVec3(0, 0.5e11, 3e11);
+                startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
             }
             _camera = new Camera3D(startPos, AspectRatio);
-            SpawnShip(startPos);
+            SpawnShip(startPos, startOri);
         }
         else if (payload is Star star)
         {
@@ -175,7 +184,7 @@ public sealed class SystemSpaceState : GameState
             ComputeEclipticRotation();
             var fallbackPos = new DVec3(0, 0.5e11, 3e11);
             _camera  = new Camera3D(fallbackPos, AspectRatio);
-            SpawnShip(fallbackPos);
+            SpawnShip(fallbackPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
         }
 
         // BasicEffect — our shader
@@ -956,12 +965,18 @@ public sealed class SystemSpaceState : GameState
         bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
 
         if (mPressed)
+        {
+            var (pos, ori) = CaptureShipState();
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
-                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout()));
+                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout(), pos, ori));
+        }
 
         if (nPressed)
+        {
+            var (pos, ori) = CaptureShipState();
             _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
-                new GalaxyMapPayload(_star, _gameTimeSeconds));
+                new GalaxyMapPayload(_star, _gameTimeSeconds, pos, ori));
+        }
 
         int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
 
@@ -1035,7 +1050,7 @@ public sealed class SystemSpaceState : GameState
 
     private ShieldComponent? _shield;
 
-    private void SpawnShip(DVec3 startPos)
+    private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
         var ship = new Ship
         {
@@ -1043,7 +1058,7 @@ public sealed class SystemSpaceState : GameState
             SizeClass   = ShipSizeClass.Medium,
             MoveSpeedMs = 5e9,
         };
-        ship.SetOrientation(Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
+        ship.SetOrientation(orientation);
 
         var reactor = new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6);
 
@@ -1103,6 +1118,13 @@ public sealed class SystemSpaceState : GameState
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
+
+    private (DVec3? pos, Quaternion? ori) CaptureShipState()
+    {
+        var snap = _simulation.ShipState;
+        if (snap == null) return (null, null);
+        return (snap.Position, snap.Orientation);
+    }
 
     private CockpitLayout CaptureCockpitLayout()
     {

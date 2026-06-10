@@ -38,10 +38,12 @@ public sealed class GalaxyMapState : GameState
     private Vector2 _screenCentre;
 
     // ── Selection & navigation ────────────────────────────────────────────────
-    private Star?  _selectedStar;
-    private Star?  _jumpTarget;
-    private Star   _currentSystem  = null!;
-    private double _storedGameTime = 0.0;
+    private Star?      _selectedStar;
+    private Star?      _jumpTarget;
+    private Star       _currentSystem    = null!;
+    private double     _storedGameTime   = 0.0;
+    private DVec3?     _spawnPos;
+    private Quaternion? _spawnOrientation;
 
     // Pending transition — set in input handlers, consumed in Update
     private StateTransition? _pendingTransition;
@@ -120,8 +122,10 @@ public sealed class GalaxyMapState : GameState
         // Arriving from in-flight (N key) or system map (N key)
         if (payload is GalaxyMapPayload gmp)
         {
-            _currentSystem  = gmp.CurrentStar;
-            _storedGameTime = gmp.GameTime;
+            _currentSystem    = gmp.CurrentStar;
+            _storedGameTime   = gmp.GameTime;
+            _spawnPos         = gmp.SpawnPos;
+            _spawnOrientation = gmp.SpawnOrientation;
             _visitedSystems.Add(_currentSystem.GalaxyIndex);
             _cameraPos = new Vector2(
                 (float)_currentSystem.GalacticPos.X,
@@ -393,18 +397,19 @@ public sealed class GalaxyMapState : GameState
     {
         bool escPressed = keys.IsKeyDown(Keys.Escape) && !_prevKeys.IsKeyDown(Keys.Escape);
         bool mPressed   = keys.IsKeyDown(Keys.M)      && !_prevKeys.IsKeyDown(Keys.M);
+        bool nPressed   = keys.IsKeyDown(Keys.N)      && !_prevKeys.IsKeyDown(Keys.N);
 
-        if (escPressed)
+        if (escPressed || nPressed)
         {
-            // Return to in-flight view of current system
+            // Esc or N = back to flight (N toggles the galaxy map)
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_currentSystem, null, _storedGameTime, null));
+                new SystemSpacePayload(_currentSystem, null, _storedGameTime, null, _spawnPos, _spawnOrientation));
         }
         else if (mPressed)
         {
-            // M = open system map for the current system
+            // M = open system map for the current system (pass ship position through)
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
-                new SystemMapPayload(_currentSystem, _storedGameTime, CockpitLayout.Default));
+                new SystemMapPayload(_currentSystem, _storedGameTime, CockpitLayout.Default, _spawnPos, _spawnOrientation));
         }
     }
 
