@@ -76,6 +76,46 @@ public static class Environment
     /// <summary>Radiation flux in W/m² from all stellar sources.</summary>
     public static double RadiationFlux => World.RadiationAt(ShipPosition);
 
+    /// <summary>
+    /// External pressure at ship hull (Pa). ~0 in open space; significant inside atmospheres.
+    /// Stub — will be driven by atmosphere layer once planetary entry is implemented.
+    /// </summary>
+    public static double ExternalPressure => 0.0;
+
+    /// <summary>
+    /// External temperature at ship hull (K). Approaches CMB (~2.7 K) in deep space;
+    /// rises steeply near stellar photospheres and inside atmospheres.
+    /// Stub — driven by spectral class and distance as a rough proxy.
+    /// </summary>
+    public static double ExternalTemperature
+    {
+        get
+        {
+            double dist = DistanceToNearestStar;
+            double starR = NearestStar.Radius;
+            if (dist <= 0.0 || starR <= 0.0) return 2.7;
+
+            // Approximate stellar surface temperature from spectral class
+            double surfT = NearestStar.Class switch
+            {
+                Galaxy.SpectralClass.O           => 40_000.0,
+                Galaxy.SpectralClass.B           => 20_000.0,
+                Galaxy.SpectralClass.A           => 8_500.0,
+                Galaxy.SpectralClass.F           => 6_800.0,
+                Galaxy.SpectralClass.G           => 5_778.0,
+                Galaxy.SpectralClass.K           => 4_500.0,
+                Galaxy.SpectralClass.M           => 3_000.0,
+                Galaxy.SpectralClass.WhiteDwarf  => 25_000.0,
+                Galaxy.SpectralClass.NeutronStar => 1_000_000.0,
+                _                                => 2.7,
+            };
+
+            // Stefan-Boltzmann: equilibrium T ∝ T_star × sqrt(R_star / 2d)
+            double ratio = starR / dist;
+            return Math.Max(2.7, surfT * Math.Sqrt(ratio * 0.5));
+        }
+    }
+
     // ── Stellar properties ────────────────────────────────────────────────────
 
     /// <summary>Core pressure in Pascals — used by Star Siphon depth mechanic.</summary>

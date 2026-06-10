@@ -64,7 +64,12 @@ public abstract class Control
     public bool Visible   { get; set; } = true;
     public bool Enabled   { get; set; } = true;
     public bool IsHovered { get; internal set; }
-    public bool IsFocused { get; internal set; }
+    /// <summary>
+    /// Whether this control has keyboard focus.
+    /// Normally managed by UIManager.SetFocus(). The setter is public to support
+    /// game states that manage controls directly without a UIManager.
+    /// </summary>
+    public bool IsFocused { get; set; }
     public bool IsPressed { get; internal set; }
 
     // ── Theme overrides ───────────────────────────────────────────────────────

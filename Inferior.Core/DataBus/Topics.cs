@@ -23,6 +23,7 @@ public static class Topics
 
     public static class Shield
     {
+        public const string Name = "Shield";
         public const string Capacitor   = "Capacitor";
         public const string DamagePercent = "DamagePercent";
     }
@@ -57,6 +58,73 @@ public static class Topics
         public const string DirectionX = "DirectionX";  // normalised gravity vector components
         public const string DirectionY = "DirectionY";
         public const string DirectionZ = "DirectionZ";
+    }
+
+    public static class Engine
+    {
+        public const string Throttle   = "Throttle";    // -1..1
+        public const string Thrust     = "Thrust";      // newtons
+        public const string DownThrust = "DownThrust";  // newtons
+        public const string AlphaRed   = "AlphaRed";    // watts
+        public const string Damage     = "Damage";      // 0..1
+    }
+
+    public static class ArtificialGravity
+    {
+        public const string Power = "Power";  // watts drawn
+    }
+
+    public static class Gyro
+    {
+        public const string TorqueFactor = "TorqueFactor";  // multiplier
+        public const string Damage       = "Damage";
+    }
+
+    public static class LifeSupport
+    {
+        public const string Pressure    = "Pressure";    // Pa
+        public const string Temperature = "Temperature"; // K
+        public const string Oxygen      = "Oxygen";      // 0..1 fraction
+    }
+
+    public static class CoolantSystem
+    {
+        public const string Level    = "Level";    // 0..1 fill fraction
+        public const string FlowRate = "FlowRate"; // watts being transported
+    }
+
+    public static class Exhaust
+    {
+        public const string BuildUp = "BuildUp";  // 0..1 dimensionless
+    }
+
+    public static class RadiationSensor
+    {
+        public const string Flux = "Flux";  // W/m²
+    }
+
+    public static class MagneticField
+    {
+        public const string Strength = "Strength";  // Tesla
+        public const string X        = "X";
+        public const string Y        = "Y";
+        public const string Z        = "Z";
+    }
+
+    public static class ExternalPressure
+    {
+        public const string Value = "Pressure";  // Pa
+    }
+
+    public static class ExternalTemperature
+    {
+        public const string Value = "Temperature";  // K
+    }
+
+    public static class HeatSink
+    {
+        public const string Fill        = "Fill";        // 0..1 stored/capacity
+        public const string Dissipation = "Dissipation"; // watts current rate
     }
 
     /// <summary>Debug / development sensors — not present in release builds.</summary>

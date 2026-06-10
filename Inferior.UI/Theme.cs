@@ -34,6 +34,23 @@ public sealed class Theme
     public Color TextDisabled { get; set; }
     public Color TextTitle    { get; set; }
 
+    // ── TextBox ───────────────────────────────────────────────────────────────
+    public Color TextBoxBackground      { get; set; }
+    public Color TextBoxBorder          { get; set; }
+    public Color TextBoxBorderFocus     { get; set; }
+    public Color TextBoxSelection       { get; set; }
+    public Color TextBoxCursor          { get; set; }
+    public Color TextBoxPlaceholder     { get; set; }
+    public Color TextBoxScrollbar       { get; set; }
+    public Color TextBoxScrollbarThumb  { get; set; }
+
+    // ── ToggleButton ──────────────────────────────────────────────────────────
+    public Color ToggleOff              { get; set; }  // background when off
+    public Color ToggleOn               { get; set; }  // background when on / confirmed
+    public Color TogglePending          { get; set; }  // indicator when on but unconfirmed
+    public Color ToggleIndicatorOff     { get; set; }  // small dot/square when off
+    public Color ToggleIndicatorOn      { get; set; }  // small dot/square when on
+
     // ── Accent / focus ────────────────────────────────────────────────────────
     public Color Accent       { get; set; }  // focus rings, highlights
 
@@ -87,6 +104,23 @@ public sealed class Theme
         TextDisabled = new Color(80,  85,  100),
         TextTitle    = new Color(220, 230, 245),
 
+        // TextBox
+        TextBoxBackground     = new Color(6,  10, 20),
+        TextBoxBorder         = new Color(40, 60, 90),
+        TextBoxBorderFocus    = new Color(80, 160, 220),
+        TextBoxSelection      = new Color(40, 100, 180, 160),
+        TextBoxCursor         = new Color(200, 220, 255),
+        TextBoxPlaceholder    = new Color(70,  75,  90),
+        TextBoxScrollbar      = new Color(20,  25,  40),
+        TextBoxScrollbarThumb = new Color(60,  90, 130),
+
+        // ToggleButton
+        ToggleOff           = new Color(20, 30, 55),
+        ToggleOn            = new Color(20, 60, 30),
+        TogglePending       = new Color(180, 140, 30),
+        ToggleIndicatorOff  = new Color(60, 65, 80),
+        ToggleIndicatorOn   = new Color(80, 210, 100),
+
         // Accent
         Accent = new Color(80, 160, 220),
 
@@ -126,6 +160,23 @@ public sealed class Theme
         TextHover    = new Color(10,  15,  30),
         TextDisabled = new Color(160, 165, 175),
         TextTitle    = new Color(20,  25,  40),
+
+        // TextBox
+        TextBoxBackground     = new Color(250, 252, 255),
+        TextBoxBorder         = new Color(160, 170, 190),
+        TextBoxBorderFocus    = new Color(60,  100, 200),
+        TextBoxSelection      = new Color(100, 150, 230, 150),
+        TextBoxCursor         = new Color(30,  40, 60),
+        TextBoxPlaceholder    = new Color(170, 175, 185),
+        TextBoxScrollbar      = new Color(220, 222, 230),
+        TextBoxScrollbarThumb = new Color(150, 160, 180),
+
+        // ToggleButton
+        ToggleOff           = new Color(220, 225, 235),
+        ToggleOn            = new Color(200, 235, 210),
+        TogglePending       = new Color(240, 215, 120),
+        ToggleIndicatorOff  = new Color(170, 175, 185),
+        ToggleIndicatorOn   = new Color(50,  180, 80),
 
         Accent = new Color(60, 100, 200),
 

@@ -4,6 +4,8 @@ using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using Inferior.UI;
+using Inferior.UI.Controls;
 
 namespace Inferior.Game.States;
 
@@ -70,6 +72,21 @@ public sealed class GalaxyMapState : GameState
     private const float MaxZLinePixels     = 18f;
     private const float GalaxyThicknessLY  = 3_000f;
 
+    // ── Search ────────────────────────────────────────────────────────────────
+    private TextBox         _searchBox     = null!;
+    private UIRenderer      _uiRenderer    = null!;
+    private Theme           _uiTheme       = null!;
+    private List<Star>      _searchResults = [];
+    private int             _searchSelIdx  = -1;
+    private MouseState      _prevMouseUI;
+    private KeyboardState   _prevKeysUI;
+
+    private const int SearchBoxW  = 240;
+    private const int SearchBoxH  = 28;
+    private const int SearchMargin = 16;
+    private const int DropdownItemH = 24;
+    private const int DropdownMaxItems = 10;
+
     // ── Colours ───────────────────────────────────────────────────────────────
     private static readonly Color ColBackground  = new(8,   8,  18);
     private static readonly Color ColGrid        = new(20, 25,  40);
@@ -119,6 +136,22 @@ public sealed class GalaxyMapState : GameState
         _pixel.SetData([Color.White]);
         _circle = CreateCircleTexture(32);
 
+        // Search UI
+        _uiRenderer = new UIRenderer(_gd);
+        _uiTheme    = Theme.InferiorDark(_font);
+
+        _searchBox = new TextBox
+        {
+            Multiline = false,
+            Placeholder = "Search systems...",
+            Bounds = new Rectangle(SearchMargin, SearchMargin, SearchBoxW, SearchBoxH),
+            TabIndex = 1,
+        };
+        _searchBox.TextChanged += (_, text) => UpdateSearchResults(text);
+
+        _prevMouseUI = Mouse.GetState();
+        _prevKeysUI  = Keyboard.GetState();
+
         _pendingTransition = null;
         UpdateScreenCentre();
     }
@@ -127,6 +160,7 @@ public sealed class GalaxyMapState : GameState
     {
         _pixel?.Dispose();
         _circle?.Dispose();
+        _uiRenderer?.Dispose();
     }
 
     public override void OnResize(int width, int height) => UpdateScreenCentre();
@@ -138,14 +172,95 @@ public sealed class GalaxyMapState : GameState
         var mouse   = Mouse.GetState();
         var keys    = Keyboard.GetState();
         double elapsed = gameTime.TotalGameTime.TotalSeconds;
+        double dt       = gameTime.ElapsedGameTime.TotalSeconds;
 
-        HandleZoom(mouse);
-        HandleLeftButton(mouse, elapsed);
-        HandleRightClick(mouse);
-        HandleKeyboard(keys);
+        // Build InputState for the UI search box
+        var typedChars = InputState.DrainTypedChars();
+        var uiInput    = new InputState(mouse, _prevMouseUI, keys, _prevKeysUI, typedChars);
+        _prevMouseUI   = mouse;
+        _prevKeysUI    = keys;
 
-        _prevMouse = mouse;
-        _prevKeys  = keys;
+        // Animate search box
+        _searchBox.Update(dt);
+
+        // Handle dropdown keyboard nav before passing input to search box
+        bool dropdownActive = _searchResults.Count > 0 && _searchBox.Text.Length > 0;
+        bool inputConsumedByDropdown = false;
+
+        if (dropdownActive && _searchBox.IsFocused)
+        {
+            if (uiInput.IsKeyPressed(Keys.Down))
+            {
+                _searchSelIdx = Math.Min(_searchSelIdx + 1, _searchResults.Count - 1);
+                inputConsumedByDropdown = true;
+            }
+            else if (uiInput.IsKeyPressed(Keys.Up))
+            {
+                _searchSelIdx = Math.Max(_searchSelIdx - 1, 0);
+                inputConsumedByDropdown = true;
+            }
+            else if (uiInput.IsKeyPressed(Keys.Enter) && _searchSelIdx >= 0)
+            {
+                SelectSearchResult(_searchSelIdx);
+                inputConsumedByDropdown = true;
+            }
+            else if (uiInput.IsKeyPressed(Keys.Escape))
+            {
+                _searchBox.Text = "";
+                _searchResults.Clear();
+                _searchSelIdx = -1;
+                inputConsumedByDropdown = true;
+            }
+        }
+
+        if (!inputConsumedByDropdown)
+            _searchBox.HandleInput(uiInput);
+
+        // Focus/unfocus search box on Ctrl+F
+        if (uiInput.IsKeyPressed(Keys.F) && uiInput.Ctrl)
+        {
+            _searchBox.IsFocused = !_searchBox.IsFocused;
+        }
+
+        // Click on a dropdown result
+        if (uiInput.LeftPressed && dropdownActive)
+        {
+            var mx = uiInput.MousePosition.X;
+            var my = uiInput.MousePosition.Y;
+            int dropX = SearchMargin;
+            int dropY = SearchMargin + SearchBoxH;
+
+            for (int i = 0; i < Math.Min(_searchResults.Count, DropdownMaxItems); i++)
+            {
+                var itemRect = new Rectangle(dropX, dropY + i * DropdownItemH, SearchBoxW, DropdownItemH);
+                if (itemRect.Contains(mx, my))
+                {
+                    SelectSearchResult(i);
+                    break;
+                }
+            }
+        }
+
+        // Only handle game map input when search box is not focused
+        if (!_searchBox.IsFocused)
+        {
+            HandleZoom(mouse);
+            HandleLeftButton(mouse, elapsed);
+            HandleRightClick(mouse);
+            HandleKeyboard(keys);
+        }
+        else
+        {
+            // Still update previous state even if not processing game input
+            _prevMouse = mouse;
+            _prevKeys  = keys;
+        }
+
+        if (!_searchBox.IsFocused)
+        {
+            _prevMouse = mouse;
+            _prevKeys  = keys;
+        }
 
         // Consume and return any pending transition
         var transition     = _pendingTransition;
@@ -169,8 +284,12 @@ public sealed class GalaxyMapState : GameState
         DrawInfoPanel(sb);
         DrawZoomIndicator(sb);
         DrawHints(sb);
+        DrawSearchHint(sb);
 
         sb.End();
+
+        // Search UI — uses UIRenderer (its own SpriteBatch Begin/End)
+        DrawSearchUI(sb);
     }
 
     // ── Input handlers ────────────────────────────────────────────────────────
@@ -275,6 +394,85 @@ public sealed class GalaxyMapState : GameState
             _jumpTarget = null;
         else
             _selectedStar = null;
+    }
+
+    // ── Search helpers ────────────────────────────────────────────────────────
+
+    private void UpdateSearchResults(string query)
+    {
+        _searchSelIdx = -1;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            _searchResults.Clear();
+            return;
+        }
+
+        _searchResults = _stars
+            .Where(s => s.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(s => s.Name.StartsWith(query, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenBy(s => s.Name)
+            .Take(DropdownMaxItems)
+            .ToList();
+    }
+
+    private void SelectSearchResult(int index)
+    {
+        if (index < 0 || index >= _searchResults.Count) return;
+        var star = _searchResults[index];
+        _selectedStar = star;
+        // Centre camera on the selected star
+        _cameraPos = new Vector2((float)star.GalacticPos.X, (float)star.GalacticPos.Z);
+        _searchBox.Text = "";
+        _searchResults.Clear();
+        _searchSelIdx  = -1;
+        _searchBox.IsFocused = false;
+    }
+
+    private void DrawSearchHint(SpriteBatch sb)
+    {
+        DrawText(sb, "Ctrl+F  search",
+            new Vector2(SearchMargin, _gd.Viewport.Height - 100), ColTextDim, 0.72f);
+    }
+
+    private void DrawSearchUI(SpriteBatch sb)
+    {
+        // Search box
+        sb.Begin(blendState: BlendState.AlphaBlend);
+        _searchBox.Draw(sb, _uiRenderer, _uiTheme);
+
+        // Dropdown results
+        bool showDropdown = _searchResults.Count > 0 && _searchBox.Text.Length > 0;
+        if (showDropdown)
+        {
+            int dropX = SearchMargin;
+            int dropY = SearchMargin + SearchBoxH;
+            int count = Math.Min(_searchResults.Count, DropdownMaxItems);
+
+            // Dropdown background
+            var dropBg = new Rectangle(dropX, dropY, SearchBoxW, count * DropdownItemH);
+            _uiRenderer.FillRect(sb, dropBg, new Color(8, 12, 25, 240));
+            _uiRenderer.DrawRect(sb, dropBg, new Color(40, 60, 90), 1);
+
+            for (int i = 0; i < count; i++)
+            {
+                var star    = _searchResults[i];
+                var itemRect = new Rectangle(dropX, dropY + i * DropdownItemH, SearchBoxW, DropdownItemH);
+
+                if (i == _searchSelIdx)
+                    _uiRenderer.FillRect(sb, itemRect, new Color(40, 80, 130, 200));
+
+                // Star colour dot
+                _uiRenderer.DrawDot(sb,
+                    new Vector2(dropX + 10, dropY + i * DropdownItemH + DropdownItemH / 2f),
+                    3f, star.MapColor);
+
+                _uiRenderer.DrawText(sb, star.Name,
+                    new Vector2(dropX + 22, dropY + i * DropdownItemH + (DropdownItemH - 14) / 2f),
+                    _font, 0.85f, new Color(200, 210, 225));
+            }
+        }
+
+        sb.End();
     }
 
     // ── Drawing ───────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 using Inferior.Core;
 using Inferior.Game.States;
+using Inferior.UI;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -40,6 +41,9 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
     protected override void Initialize()
     {
         _simulation.Start();
+
+        // Wire typed-character events so TextBox controls receive input correctly
+        Window.TextInput += (_, e) => InputState.PushTypedChar(e.Character);
 
         // Centre the window on screen after the display mode is known
         var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;

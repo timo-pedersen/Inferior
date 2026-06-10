@@ -17,6 +17,11 @@ public sealed class UIRenderer : IDisposable
     private readonly Texture2D      _circle;
     private bool                    _disposed;
 
+    private static readonly RasterizerState _scissorState = new() { ScissorTestEnable = true };
+
+    /// <summary>GraphicsDevice — needed by controls that manage their own scissor clipping.</summary>
+    public GraphicsDevice GraphicsDevice => _gd;
+
     public UIRenderer(GraphicsDevice gd)
     {
         _gd    = gd;
@@ -214,6 +219,129 @@ public sealed class UIRenderer : IDisposable
         var ring = new Rectangle(bounds.X + 2, bounds.Y + 2,
                                  bounds.Width - 4, bounds.Height - 4);
         DrawRect(sb, ring, accent, 1);
+    }
+
+    // ── Clipped drawing ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ends the current SpriteBatch, enables scissor clipping to <paramref name="clip"/>,
+    /// calls <paramref name="draw"/>, then restores the normal AlphaBlend SpriteBatch.
+    /// The caller must not call sb.End() inside the draw action.
+    /// </summary>
+    public void DrawWithClip(SpriteBatch sb, Rectangle clip, Action draw)
+    {
+        var oldScissor = _gd.ScissorRectangle;
+        sb.End();
+        _gd.ScissorRectangle = clip;
+        sb.Begin(blendState: BlendState.AlphaBlend,
+                 samplerState: SamplerState.PointClamp,
+                 rasterizerState: _scissorState);
+        draw();
+        sb.End();
+        _gd.ScissorRectangle = oldScissor;
+        sb.Begin(blendState: BlendState.AlphaBlend);
+    }
+
+    // ── TextBox ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Draw a TextBox control's background, selection, cursor, and text.
+    /// The caller is responsible for scissor clipping the text area if needed —
+    /// use <see cref="DrawWithClip"/> around the text-drawing portion.
+    /// </summary>
+    public void DrawTextBoxFrame(SpriteBatch sb, Rectangle bounds, Theme theme,
+        bool focused, bool enabled)
+    {
+        Color back   = enabled ? theme.TextBoxBackground  : theme.ButtonBackgroundDisabled;
+        Color border = focused ? theme.TextBoxBorderFocus : theme.TextBoxBorder;
+        int   bw     = focused ? 2 : theme.BorderThickness;
+
+        FillRect(sb, bounds, back);
+        DrawRect(sb, bounds, border, bw);
+    }
+
+    public void DrawTextBoxSelection(SpriteBatch sb, Rectangle selRect, Theme theme)
+        => FillRect(sb, selRect, theme.TextBoxSelection);
+
+    public void DrawTextBoxCursor(SpriteBatch sb, int x, int top, int height, Theme theme)
+        => FillRect(sb, new Rectangle(x, top, 2, height), theme.TextBoxCursor);
+
+    public void DrawTextBoxScrollbar(SpriteBatch sb, Rectangle track, Rectangle thumb, Theme theme)
+    {
+        FillRect(sb, track, theme.TextBoxScrollbar);
+        FillRect(sb, thumb, theme.TextBoxScrollbarThumb);
+    }
+
+    // ── ToggleButton ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Draw a ToggleButton.
+    /// isOn        — the player's requested state (what was clicked).
+    /// isConfirmed — null = state not yet confirmed by the system.
+    ///               true/false = system has confirmed the state matches isOn.
+    /// flashState  — true = show the pending indicator lit, false = dim (for blinking).
+    /// </summary>
+    public void DrawToggleButton(SpriteBatch sb, Rectangle bounds,
+        string text, Theme theme,
+        bool isOn, bool? isConfirmed, bool flashState,
+        bool hovered, bool focused, bool enabled,
+        Color? backOverride = null, Color? textOverride = null,
+        SpriteFont? fontOverride = null, float? scaleOverride = null)
+    {
+        bool pending = isOn && isConfirmed == null;
+        bool showOn  = isConfirmed == true;
+
+        Color back = backOverride ?? (
+            !enabled ? theme.ButtonBackgroundDisabled :
+            showOn   ? theme.ToggleOn                 :
+            isOn     ? (pending && flashState ? theme.TogglePending : theme.ToggleOn) :
+                       theme.ToggleOff);
+
+        if (hovered && enabled)
+            back = Color.Lerp(back, theme.ButtonBackgroundHover, 0.35f);
+
+        Color border = focused ? theme.ButtonBorderFocus :
+                       hovered ? theme.ButtonBorderHover :
+                                 theme.ButtonBorder;
+        int bw = focused ? 2 : theme.BorderThickness;
+
+        FillRect(sb, bounds, back);
+        DrawRect(sb, bounds, border, bw);
+
+        // Indicator dot — small square on the left side
+        int   dotSize = Math.Max(6, bounds.Height / 5);
+        var   dotRect = new Rectangle(
+            bounds.X + theme.Padding / 2,
+            bounds.Y + (bounds.Height - dotSize) / 2,
+            dotSize, dotSize);
+
+        Color dotColor = !enabled        ? theme.ToggleIndicatorOff :
+                         showOn          ? theme.ToggleIndicatorOn  :
+                         pending && flashState ? theme.TogglePending :
+                         isOn            ? theme.ToggleIndicatorOn  :
+                                           theme.ToggleIndicatorOff;
+        FillRect(sb, dotRect, dotColor);
+        DrawRect(sb, dotRect, Color.Black * 0.3f, 1);
+
+        if (!string.IsNullOrEmpty(text))
+        {
+            var   font   = fontOverride  ?? theme.Font;
+            float scale  = scaleOverride ?? theme.FontScale;
+            Color textC  = textOverride  ?? (!enabled ? theme.TextDisabled :
+                                             hovered  ? theme.TextHover    :
+                                                        theme.TextNormal);
+
+            // Indent text to make room for the indicator dot
+            var textBounds = new Rectangle(
+                dotRect.Right + theme.Padding / 2,
+                bounds.Y,
+                bounds.Width - dotRect.Right - theme.Padding,
+                bounds.Height);
+            DrawTextLeft(sb, text, textBounds, font, scale, textC, 0);
+        }
+
+        if (focused)
+            DrawFocusRing(sb, bounds, theme.Accent);
     }
 
     // ── Texture creation ──────────────────────────────────────────────────────

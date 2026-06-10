@@ -89,7 +89,8 @@ public sealed class SystemSpaceState : GameState
     private InstrumentMeter? _gravityMeter;
     private InstrumentMeter? _reactorPowerOutputMeter;
     private InstrumentMeter? _shieldCapacitorMeter;
-    private Button?          _shieldToggleButton;
+    private ToggleButton?     _shieldToggleButton;
+    private Action<double>?  _shieldCapacitorHandler;
     private SystemConsole?   _console;
     private DirectionBall?   _dirBall;
     private EdgePanelHost?   _rightPanel;
@@ -299,13 +300,23 @@ public sealed class SystemSpaceState : GameState
             Bounds    = new Rectangle(0, 0, 500, 200),
         };
 
-        _shieldToggleButton = new Button("SHIELD: OFF", new Rectangle(0, 0, 200, 36));
-        _shieldToggleButton.Clicked += _ =>
+        _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(0, 0, 200, 36));
+        _shieldToggleButton.SetState(false, false);  // starts confirmed-off
+        _shieldToggleButton.Toggled += (_, on) =>
         {
             if (_shield == null) return;
-            _shield.PowerOn = !_shield.PowerOn;
-            _shieldToggleButton.Text = _shield.PowerOn ? "SHIELD: ON" : "SHIELD: OFF";
+            _shield.PowerOn = on;
+            // IsConfirmed stays null (pending) until the bus confirms via capacitor fill
         };
+
+        _shieldCapacitorHandler = fill =>
+        {
+            if (_shieldToggleButton == null) return;
+            _shieldToggleButton.IsConfirmed = fill >= 1.0 ? true
+                                            : fill <= 0.0 ? false
+                                            : null;  // charging or draining — pending
+        };
+        DataBus.Instruments.Subscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
 
         _cockpitRail = new CockpitRail
         {
@@ -364,6 +375,8 @@ public sealed class SystemSpaceState : GameState
             DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         if (_systemHandler != null)
             DataBus.System.Unsubscribe(Topics.System.All, _systemHandler);
+        if (_shieldCapacitorHandler != null)
+            DataBus.Instruments.Unsubscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
 
         _ui?.Dispose();
         _ui = null;

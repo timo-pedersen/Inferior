@@ -70,13 +70,21 @@ public sealed class ShieldComponent : ShipComponent
 
     protected override void OnInitializationStarted()
     {
-        DataBus.System.Publish(Topics.System.All, $"{Name}: capacitor at 0% — charging");
+        DataBus.System.Publish(Topics.System.All,
+            $"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging");
         _progressCooldown = 5.0;
     }
 
     protected override void OnInitializingTick(double dt)
     {
         _capacitor.Charge(_deliveredWatts, dt);
+        DataBus.Instruments.Publish($"{Topics.Shield.Name}.{Topics.Shield.Capacitor}", _capacitor.FillFraction);
+
+        if (_capacitor.FillFraction >= 1.0)
+        {
+            CompleteInitialization();
+            return;
+        }
 
         _progressCooldown -= dt;
         if (_progressCooldown <= 0.0)
@@ -85,9 +93,6 @@ public sealed class ShieldComponent : ShipComponent
                 $"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging");
             _progressCooldown = 5.0;
         }
-
-        if (_capacitor.FillFraction >= 1.0)
-            CompleteInitialization();
     }
 
     protected override void OnInitializationComplete()
