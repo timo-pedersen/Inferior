@@ -35,7 +35,7 @@ public sealed class DirectionBall : Control
     // ── Direction vectors ─────────────────────────────────────────────────────
     private readonly Dictionary<string, Entry> _vectors = new();
 
-    private record Entry(Vector3 Direction, Color Color, string Label);
+    private record Entry(Vector3 Direction, Color Color, string Label, float DotRadius = 3.5f);
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -48,8 +48,8 @@ public sealed class DirectionBall : Control
     }
 
     /// <summary>Add or update a named direction vector.</summary>
-    public void SetVector(string key, Vector3 direction, Color color, string label = "")
-        => _vectors[key] = new Entry(direction, color, label);
+    public void SetVector(string key, Vector3 direction, Color color, string label = "", float dotRadius = 3.5f)
+        => _vectors[key] = new Entry(direction, color, label, dotRadius);
 
     public void RemoveVector(string key) => _vectors.Remove(key);
 
@@ -122,23 +122,22 @@ public sealed class DirectionBall : Control
         var     projected = new Vector2(rightComp, -upComp);
         Vector2 dotPos    = center + projected * ballRadius;
         bool    inFront   = forwardComp >= 0f;
-
-        const float DotRadius = 3.5f;
+        float   dotR      = entry.DotRadius;
 
         if (inFront)
         {
-            renderer.DrawDot(sb, dotPos, DotRadius, entry.Color);
+            renderer.DrawDot(sb, dotPos, dotR, entry.Color);
         }
         else
         {
             // Hollow ring — draw as a small circle outline
-            DrawCircleOutline(sb, renderer, dotPos, DotRadius, entry.Color, 10);
+            DrawCircleOutline(sb, renderer, dotPos, dotR, entry.Color, 10);
         }
 
         if (ShowLabels && !string.IsNullOrEmpty(entry.Label))
         {
             renderer.DrawText(sb, entry.Label,
-                dotPos + new Vector2(DotRadius + 2f, -(theme.Font.LineSpacing * theme.SmallScale * 0.72f * 0.5f)),
+                dotPos + new Vector2(dotR + 2f, -(theme.Font.LineSpacing * theme.SmallScale * 0.72f * 0.5f)),
                 theme.Font, theme.SmallScale * 0.72f,
                 entry.Color);
         }

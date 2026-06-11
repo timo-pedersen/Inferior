@@ -20,7 +20,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
     // ── Window mode ───────────────────────────────────────────────────────────
 
     private enum WindowMode { Windowed, Borderless, Fullscreen }
-    private WindowMode   _windowMode = WindowMode.Windowed;
+    private WindowMode   _windowMode = WindowMode.Borderless;
     private KeyboardState _prevKeys;
 
     private const int DefaultWindowWidth  = 1600;
@@ -43,14 +43,41 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
     {
         _simulation.Start();
 
-        // Wire typed-character events so TextBox controls receive input correctly
         Window.TextInput += (_, e) => InputState.PushTypedChar(e.Character);
 
-        // Centre the window on screen after the display mode is known
-        var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
-        Window.Position = new Point(
-            (dm.Width  - DefaultWindowWidth)  / 2,
-            (dm.Height - DefaultWindowHeight) / 2);
+        // Forward resize events to the active game state so UI panels reflow correctly.
+        Window.ClientSizeChanged += (_, _) =>
+            _stateMachine.OnResize(GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height);
+
+        // Queue startup window mode — settings are applied when base.Initialize()
+        // creates the graphics device, so ApplyChanges() is not needed here.
+        switch (_windowMode)
+        {
+            case WindowMode.Borderless:
+                _graphics.HardwareModeSwitch = false;
+                _graphics.IsFullScreen       = true;
+                break;
+
+            case WindowMode.Fullscreen:
+            {
+                var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
+                _graphics.HardwareModeSwitch        = true;
+                _graphics.PreferredBackBufferWidth  = dm.Width;
+                _graphics.PreferredBackBufferHeight = dm.Height;
+                _graphics.IsFullScreen              = true;
+                break;
+            }
+
+            case WindowMode.Windowed:
+            default:
+            {
+                var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
+                Window.Position = new Point(
+                    (dm.Width  - DefaultWindowWidth)  / 2,
+                    (dm.Height - DefaultWindowHeight) / 2);
+                break;
+            }
+        }
 
         base.Initialize();
     }
@@ -128,7 +155,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
             WindowMode.Windowed   => WindowMode.Borderless,
             WindowMode.Borderless => WindowMode.Fullscreen,
             WindowMode.Fullscreen => WindowMode.Windowed,
-            _                     => WindowMode.Windowed,
+            _                     => WindowMode.Borderless,
         };
 
         var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;

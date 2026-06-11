@@ -250,12 +250,14 @@ public sealed class CockpitRail : Control
         renderer.FillRect(sb, RightWingRect, back);
         renderer.FillRect(sb, new Rectangle(cx, cy, cw, CenterHeight), back);
 
-        // Left ramp
+        // Left ramp — diagonal fill (cy→wt) + rectangular fill below the diagonal (wt→sh)
         FillRamp(sb, renderer, cx, cx - rw, cy, wt, back);
+        renderer.FillRect(sb, new Rectangle(cx - rw, wt, rw, sh - wt), back);
 
-        // Right ramp
+        // Right ramp — diagonal fill (cy→wt) + rectangular fill below the diagonal (wt→sh)
         int rRampX = cx + cw;
         FillRamp(sb, renderer, rRampX, rRampX + rw, cy, wt, back);
+        renderer.FillRect(sb, new Rectangle(rRampX, wt, rw, sh - wt), back);
 
         // ── Border lines ─────────────────────────────────────────────────────
 

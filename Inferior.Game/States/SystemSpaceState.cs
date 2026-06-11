@@ -234,7 +234,7 @@ public sealed class SystemSpaceState : GameState
         var theme = Theme.InferiorDark(_font);
         _ui = new UIManager(_gd, theme);
         _uiMouseMode     = false;
-        _debugCameraMode = false;
+        _debugCameraMode = true;
 
         // ── Right panel: INSTR tab (meters) + NAV tab (direction ball) ────────
         const int panelW   = 260;
@@ -421,8 +421,8 @@ public sealed class SystemSpaceState : GameState
         {
             Bounds = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
         };
-        _cockpitRail.AddCenterTab("RADAR",    radarPlaceholder);
         _cockpitRail.AddCenterTab("DIR BALL", _cockpitDirBall);
+        _cockpitRail.AddCenterTab("RADAR",    radarPlaceholder);
         _cockpitRail.AddCenterTab("???",      miscPlaceholder);
         _cockpitRail.AddCenterTab("LOG",      _console);
         _cockpitRail.RightWing.Add(_shieldToggleButton);
@@ -490,7 +490,7 @@ public sealed class SystemSpaceState : GameState
 
     public override void OnResize(int width, int height)
     {
-        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
+        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.00001f, 50_000f);
         UpdateUI();
         int wingH      = _cockpitRail?.WingHeight ?? 160;
         var sideBounds = new Rectangle(0, 0, width, height - wingH);
@@ -564,7 +564,7 @@ public sealed class SystemSpaceState : GameState
         }
 
         _gameTimeSeconds += dt;
-        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.001f, 50_000f);
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.00001f, 50_000f);
 
         // Update direction balls — both the right-panel ball and the cockpit center ball
         UpdateDirectionBall(_dirBall);
@@ -1058,7 +1058,7 @@ public sealed class SystemSpaceState : GameState
             if (scroll != 0)
             {
                 double factor = scroll > 0 ? 2.0 : 0.5;
-                _camera.MoveSpeedMs = System.Math.Clamp(_camera.MoveSpeedMs * factor, 1e6, 1e12);
+                _camera.MoveSpeedMs = System.Math.Clamp(_camera.MoveSpeedMs * factor, 10.0, 1e12);
             }
             // Home — reset debug camera to near-star
             if (homePressed)
@@ -1097,7 +1097,29 @@ public sealed class SystemSpaceState : GameState
         if (gravEcliptic.LengthSquared() > 0.001f)
         {
             var gravGalaxy = Vector3.TransformNormal(gravEcliptic, _eclipticRotation);
-            ball.SetVector("grav", gravGalaxy, new Color(120, 200, 255), "g");
+            ball.SetVector("grav", gravGalaxy, new Color(220, 60, 200), "g", dotRadius: 2.0f);
+        }
+
+        // Planet and moon markers — size inversely proportional to distance.
+        // Moons are dimmer; dot radius clamps to 1.5–6 px.
+        for (int i = 0; i < _bodyPositions.Count; i++)
+        {
+            var (body, bodyPos) = _bodyPositions[i];
+            var toBody = bodyPos - _camera.UniversePosition;
+            double dist = toBody.Length;
+            if (dist < 1e7) continue;   // skip if somehow coincident
+
+            var dir = new Vector3(
+                (float)(toBody.X / dist),
+                (float)(toBody.Y / dist),
+                (float)(toBody.Z / dist));
+
+            float dotR = (float)System.Math.Clamp(1.5e12 / dist, 1.5, 6.0);
+            var color  = body.BodyType == BodyType.Moon
+                ? new Color(100, 130, 150)
+                : new Color(100, 200, 160);
+
+            ball.SetVector($"body_{i}", dir, color, "", dotR);
         }
     }
 
@@ -1214,9 +1236,7 @@ public sealed class SystemSpaceState : GameState
         _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
     }
 
-    // Visual inflation factor: 100 = planets appear 100× their true physical radius.
-    // Reduce toward 1 for true-scale navigation.
-    private const float PlanetVisualScale = 10f;
+    private const float PlanetVisualScale = 1f;
 
     private static float VisualRadius(OrbitalBody body) =>
         (float)(body.RadiusMeters * Camera3D.RenderScale * PlanetVisualScale);
