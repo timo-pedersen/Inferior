@@ -206,6 +206,7 @@ public sealed class SpaceSimulation : Simulation
         _lastHeartbeat = heartbeat;
 
         _gravity.Tick();
+        _atmPressure.Tick(_lastDt);
         _solarSpectrum.Tick(_lastDt);
 
         if (t >= _nextMessageAt)

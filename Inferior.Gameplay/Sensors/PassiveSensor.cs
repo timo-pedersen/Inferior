@@ -56,14 +56,45 @@ public sealed class PassiveSensor
     /// </summary>
     public List<Func<double>> ExternalNoiseSources { get; } = [];
 
+    // ── Rate limiting ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Maximum publish rate in posts per second.
+    /// Default 0 = publish every tick (no rate limiting).
+    /// E.g. set to 4.0 to post at most 4 times per second.
+    /// </summary>
+    public double PostsPerSecond { get; set; } = 0;
+
+    /// <summary>
+    /// Minimum raw value required before publishing.
+    /// Default <see cref="double.NegativeInfinity"/> = always publish.
+    /// Use to suppress a sensor entirely when outside its operating range
+    /// (e.g. atmospheric pressure sensor in vacuum: set to 1.0 Pa).
+    /// </summary>
+    public double PostThresholdMinValue { get; set; } = double.NegativeInfinity;
+
+    private double _timeSinceLastPost;
+
     // ── Publish ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Apply noise to <paramref name="rawValue"/> and publish to DataBus.Instruments.
+    /// Apply noise to <paramref name="rawValue"/> and publish to DataBus.Instruments,
+    /// subject to <see cref="PostThresholdMinValue"/> and <see cref="PostsPerSecond"/>.
+    /// <paramref name="dt"/> is the sim tick duration in seconds; pass 0 to skip rate limiting.
     /// Safe to call from the sim thread.
     /// </summary>
-    public void Publish(double rawValue)
+    public void Publish(double rawValue, double dt = 1.0 / 60.0)
     {
+        if (rawValue < PostThresholdMinValue) return;
+
+        if (PostsPerSecond > 0)
+        {
+            _timeSinceLastPost += dt;
+            double minInterval = 1.0 / PostsPerSecond;
+            if (_timeSinceLastPost < minInterval) return;
+            _timeSinceLastPost = 0;
+        }
+
         double noise = Noise.Scale(Noise.White(Seed),       MaxValue, NoiseWhite)
                      + Noise.Scale(Noise.Pink(Seed + 1e4),  MaxValue, NoisePink);
 
