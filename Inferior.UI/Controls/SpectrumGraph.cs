@@ -98,7 +98,7 @@ public sealed class SpectrumGraph : Control
         var sm = _smoothed;
         for (int px = 0; px < graphW; px++)
         {
-            float  t   = graphW > 1 ? (float)px / (graphW - 1) : 0f;
+            float  t   = graphW > 1 ? 1f - (float)px / (graphW - 1) : 1f;
             float  si  = t * (sm.Length - 1);
             int    i0  = (int)si;
             float  f   = si - i0;
