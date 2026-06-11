@@ -68,12 +68,18 @@ public sealed class SpaceSimulation : Simulation
         => _worldSnapshot = new WorldSnapshot(star, system, refPos, gameTime);
 
     // ── Sensors ───────────────────────────────────────────────────────────────
-    private readonly GravitySensor _gravity = new();
+    private readonly GravitySensor              _gravity       = new();
+    private readonly AtmosphericPressureSensor  _atmPressure   = new("AtmosphericSensor");
+    private readonly SolarSpectrumSensor        _solarSpectrum = new("SolarSpectrumSensor");
+
+    // dt stored in TickPhysics for use in Publish (Publish has no dt parameter)
+    private double _lastDt;
 
     // ── Physics ───────────────────────────────────────────────────────────────
 
     protected override void TickPhysics(PlayerInput input, double dt)
     {
+        _lastDt = dt;
         var ship = _ship;  // read once — volatile
         if (ship == null) return;
 
@@ -118,6 +124,7 @@ public sealed class SpaceSimulation : Simulation
 
         var world = SensorEnvironment.World;
         world.MassiveBodies.Clear();
+        world.OrbitalBodies.Clear();
 
         world.MassiveBodies.Add(new CelestialBody
         {
@@ -169,6 +176,7 @@ public sealed class SpaceSimulation : Simulation
             Mass     = body.MassKg,
             Radius   = body.RadiusMeters,
         });
+        world.OrbitalBodies.Add((body, pos));
         foreach (var child in body.Children)
             CollectBody(world, child, pos, gameTime);
     }
@@ -198,6 +206,7 @@ public sealed class SpaceSimulation : Simulation
         _lastHeartbeat = heartbeat;
 
         _gravity.Tick();
+        _solarSpectrum.Tick(_lastDt);
 
         if (t >= _nextMessageAt)
         {

@@ -127,6 +127,16 @@ public static class Topics
         public const string Dissipation = "Dissipation"; // watts current rate
     }
 
+    public static class AtmosphericPressure
+    {
+        public const string Value = "Pressure";  // Pa — published by active AtmosphericPressureSensor on demand
+    }
+
+    public static class SolarSpectrum
+    {
+        public const string Data = "Data";  // double[] — 10-bin normalised Planck spectrum (0-1 per bin)
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {

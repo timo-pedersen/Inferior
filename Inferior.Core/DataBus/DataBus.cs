@@ -26,6 +26,9 @@ public static class DataBus
     // Contact lost — published when a contact disappears; subscribers handle cleanup
     public static readonly Bus<string>       RadarLost        = new();
 
+    // Spectrum scan results — published on demand by active SolarSpectrumSensor
+    public static readonly Bus<double[]>     Spectra          = new();
+
     // Called once per frame from Game.Update() on main thread
     public static void Drain()
     {
@@ -35,5 +38,6 @@ public static class DataBus
         InstrumentRanges.Drain();
         Radar.Drain();
         RadarLost.Drain();
+        Spectra.Drain();
     }
 }

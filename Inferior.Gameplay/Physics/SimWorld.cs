@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Galaxy;
 
 namespace Inferior.Gameplay.Physics;
 
@@ -13,6 +14,9 @@ public class SimWorld
 {
     /// <summary>All bodies large enough to exert meaningful gravity (stars, planets, moons).</summary>
     public List<CelestialBody> MassiveBodies { get; } = [];
+
+    /// <summary>Planets and moons with full generation data — populated alongside MassiveBodies each tick.</summary>
+    public List<(OrbitalBody Body, DVec3 Position)> OrbitalBodies { get; } = [];
 
     // ── Stubs — implementation follows from the physics simulation ────────────
 

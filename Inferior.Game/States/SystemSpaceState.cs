@@ -6,6 +6,7 @@ using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
 using Inferior.Gameplay.Components;
 using Inferior.Rendering;
@@ -103,6 +104,12 @@ public sealed class SystemSpaceState : GameState
     private Action<double>?  _gravDirYHandler;
     private Action<double>?  _gravDirZHandler;
     private double           _gravDirX, _gravDirY, _gravDirZ;
+
+    // ── SCAN tab ──────────────────────────────────────────────────────────────
+    private SpectrumGraph?   _spectrumGraph;
+    private Button?          _spectrumScanButton;
+    private InstrumentMeter? _atmPressureMeter;
+    private double           _scanCooldown;  // seconds remaining before button re-enables
 
     // ── Camera modes ──────────────────────────────────────────────────────────
     // TAB  — toggles between ship-control and mouse-driven UI interaction.
@@ -312,7 +319,52 @@ public sealed class SystemSpaceState : GameState
         int wingH       = 160; // matches CockpitRail.WingHeight
         int sidePanelH  = _gd.Viewport.Height - wingH;
 
-        // ── Left panel: empty for now ─────────────────────────────────────────
+        // ── Left panel: SCAN tab ──────────────────────────────────────────────
+        const int scanBtnH    = 28;
+        const int scanBtnGap  = 8;
+        int       graphW      = innerW;
+        int       graphH      = graphW / 5;  // 1:5 height:width ratio
+
+        _spectrumScanButton = new Button("SCAN SPECTRUM",
+            new Rectangle(0, 0, innerW, scanBtnH));
+        _spectrumScanButton.Clicked += _ =>
+        {
+            if (_scanCooldown > 0) return;
+            CommandBus.Send("SolarSpectrumSensor.Scan");
+            _spectrumScanButton.Text    = "SCANNING...";
+            _spectrumScanButton.Enabled = false;
+            _scanCooldown = SolarSpectrumSensor.ScanDurationSeconds + 0.5;
+        };
+
+        _atmPressureMeter = new InstrumentMeter
+        {
+            Label       = "ATM PRESSURE",
+            MinValue    = 0,
+            MaxValue    = 120_000,  // Pa — up to ~1.2 atm
+            ScaleFactor = 1.0,
+            Format      = "F0",
+            Topic       = "AtmosphericSensor.Pressure",
+            Bounds      = new Rectangle(0, scanBtnH + scanBtnGap, innerW, meterH),
+        };
+
+        var atmScanButton = new Button("ATM SCAN",
+            new Rectangle(0, scanBtnH + scanBtnGap + meterH + scanBtnGap, innerW, scanBtnH));
+        atmScanButton.Clicked += _ => CommandBus.Send("AtmosphericSensor.Scan");
+
+        int spectrumY = scanBtnH + scanBtnGap + meterH + scanBtnGap + scanBtnH + scanBtnGap;
+        _spectrumGraph = new SpectrumGraph
+        {
+            Header = "SOLAR SPECTRUM",
+            Topic  = "SolarSpectrumSensor.Data",
+            Bounds = new Rectangle(0, spectrumY, graphW, graphH),
+        };
+
+        var scanPanel = new Panel { DrawBackground = false, DrawBorder = false };
+        scanPanel.Add(_spectrumScanButton);
+        scanPanel.Add(_atmPressureMeter);
+        scanPanel.Add(atmScanButton);
+        scanPanel.Add(_spectrumGraph);
+
         _leftPanel = new EdgePanelHost(PanelEdge.Left)
         {
             PanelSize     = panelW,
@@ -321,6 +373,7 @@ public sealed class SystemSpaceState : GameState
             CornerMargin  = 8,
             Bounds        = new Rectangle(0, 0, _gd.Viewport.Width, sidePanelH),
         };
+        _leftPanel.AddTab("SCAN", scanPanel);
         _rightPanel.Bounds = new Rectangle(0, 0, _gd.Viewport.Width, sidePanelH);
 
         _ui.Add(_rightPanel);
@@ -411,6 +464,8 @@ public sealed class SystemSpaceState : GameState
         if (_connectorFlowMeter      != null) _connectorFlowMeter.Topic      = "";
         if (_connectorNeedle         != null) _connectorNeedle.Topic         = "";
         if (_shieldCapacitorMeter    != null) _shieldCapacitorMeter.Topic    = "";
+        if (_atmPressureMeter        != null) _atmPressureMeter.Topic        = "";
+        if (_spectrumGraph           != null) _spectrumGraph.Topic           = "";
 
         if (_gravDirXHandler != null)
             DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
@@ -473,6 +528,17 @@ public sealed class SystemSpaceState : GameState
 
         // Animations always run, regardless of input mode
         _ui?.Animate(dt);
+
+        // Re-enable scan button once cooldown expires
+        if (_scanCooldown > 0)
+        {
+            _scanCooldown -= dt;
+            if (_scanCooldown <= 0 && _spectrumScanButton != null)
+            {
+                _spectrumScanButton.Enabled = true;
+                _spectrumScanButton.Text    = "SCAN SPECTRUM";
+            }
+        }
 
         if (_uiMouseMode)
         {

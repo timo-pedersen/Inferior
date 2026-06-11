@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Galaxy;
 using Inferior.Gameplay.Physics;
 
 namespace Inferior.Gameplay.SensorData;
@@ -85,34 +86,18 @@ public static class Environment
     /// <summary>
     /// External temperature at ship hull (K). Approaches CMB (~2.7 K) in deep space;
     /// rises steeply near stellar photospheres and inside atmospheres.
-    /// Stub — driven by spectral class and distance as a rough proxy.
+    /// Driven by spectral class and distance as a rough proxy.
     /// </summary>
     public static double ExternalTemperature
     {
         get
         {
-            double dist = DistanceToNearestStar;
+            double dist  = DistanceToNearestStar;
             double starR = NearestStar.Radius;
             if (dist <= 0.0 || starR <= 0.0) return 2.7;
-
-            // Approximate stellar surface temperature from spectral class
-            double surfT = NearestStar.Class switch
-            {
-                Galaxy.SpectralClass.O           => 40_000.0,
-                Galaxy.SpectralClass.B           => 20_000.0,
-                Galaxy.SpectralClass.A           => 8_500.0,
-                Galaxy.SpectralClass.F           => 6_800.0,
-                Galaxy.SpectralClass.G           => 5_778.0,
-                Galaxy.SpectralClass.K           => 4_500.0,
-                Galaxy.SpectralClass.M           => 3_000.0,
-                Galaxy.SpectralClass.WhiteDwarf  => 25_000.0,
-                Galaxy.SpectralClass.NeutronStar => 1_000_000.0,
-                _                                => 2.7,
-            };
-
-            // Stefan-Boltzmann: equilibrium T ∝ T_star × sqrt(R_star / 2d)
-            double ratio = starR / dist;
-            return Math.Max(2.7, surfT * Math.Sqrt(ratio * 0.5));
+            double surfT = StellarSurfaceTemperatureK(NearestStar.Class);
+            // Stefan-Boltzmann equilibrium: T ∝ T_star × sqrt(R_star / 2d)
+            return Math.Max(2.7, surfT * Math.Sqrt(starR / dist * 0.5));
         }
     }
 
@@ -124,4 +109,178 @@ public static class Environment
 
     public static double NearestStarCoreTemperature
         => Galaxy.StarPhysics.CoreTemperature(NearestStar.Mass, (int)NearestStar.Class);
+
+    // ── Gravitationally dominant body ─────────────────────────────────────────
+
+    /// <summary>
+    /// The body whose gravitational acceleration at the ship position is strongest.
+    /// Typically the star at interplanetary distances; a planet during close approach.
+    /// Returns null only if no bodies have been populated yet.
+    /// </summary>
+    public static CelestialBody? GetGravitationallyDominantBody()
+    {
+        const double G = 6.674e-11;
+        CelestialBody? best = null;
+        double bestG = 0;
+        foreach (var body in World.MassiveBodies)
+        {
+            double rSq = (body.Position - ShipPosition).LengthSquared;
+            if (rSq < 1.0) rSq = 1.0;
+            double g = G * body.Mass / rSq;
+            if (g > bestG) { bestG = g; best = body; }
+        }
+        return best;
+    }
+
+    // ── Nearest orbital body (planets/moons with atmosphere data) ─────────────
+
+    /// <summary>
+    /// Nearest planet or moon with full generation data.
+    /// Returns null if no orbital bodies have been populated yet.
+    /// </summary>
+    public static (OrbitalBody Body, DVec3 Position)? GetNearestBody()
+    {
+        var bodies = World.OrbitalBodies;
+        if (bodies.Count == 0) return null;
+        OrbitalBody? bestBody = null;
+        DVec3        bestPos  = default;
+        double       bestDSq  = double.MaxValue;
+        foreach (var (b, p) in bodies)
+        {
+            double dSq = (p - ShipPosition).LengthSquared;
+            if (dSq < bestDSq) { bestDSq = dSq; bestBody = b; bestPos = p; }
+        }
+        return bestBody == null ? null : (bestBody, bestPos);
+    }
+
+    // ── Body distance queries ─────────────────────────────────────────────────
+
+    public static double DistanceFromCenter(OrbitalBody body, DVec3 bodyPos)
+        => (bodyPos - ShipPosition).Length;
+
+    /// <summary>Distance from ship to body surface in metres. Negative if inside the body.</summary>
+    public static double DistanceFromSurface(OrbitalBody body, DVec3 bodyPos)
+        => DistanceFromCenter(body, bodyPos) - body.RadiusMeters;
+
+    // ── Atmosphere ────────────────────────────────────────────────────────────
+
+    public static double AtmosphericHeight(OrbitalBody body) => body.AtmosphereHeight;
+
+    /// <summary>Approximate surface pressure derived from atmosphere type.</summary>
+    public static double AtmosphericSurfacePressure(OrbitalBody body) => body.AtmosphereType switch
+    {
+        AtmosphereType.Thin       =>   2_000.0,   // ~0.02 atm
+        AtmosphereType.Breathable => 101_325.0,   // 1 atm
+        AtmosphereType.Thick      => 400_000.0,   // ~4 atm
+        AtmosphereType.Toxic      => 200_000.0,   // ~2 atm
+        AtmosphereType.Corrosive  => 800_000.0,   // ~8 atm
+        _                         =>       0.0,
+    };
+
+    /// <summary>
+    /// Atmospheric pressure at the ship's current position relative to <paramref name="bodyPos"/>.
+    /// Linear falloff from surface to AtmosphereHeight; zero above the atmosphere.
+    /// </summary>
+    public static double AtmosphericPressure(OrbitalBody body, DVec3 bodyPos)
+    {
+        double surfaceP = AtmosphericSurfacePressure(body);
+        if (surfaceP <= 0) return 0.0;
+        double h     = DistanceFromSurface(body, bodyPos);
+        double atmH  = body.AtmosphereHeight;
+        if (h <= 0)   return surfaceP;
+        if (h >= atmH) return 0.0;
+        return surfaceP * (1.0 - h / atmH);
+    }
+
+    // ── Solar spectrum ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Centre wavelengths of the 10 spectral bins, in nanometres.
+    /// Range: 150 nm (far UV) → 2000 nm (near IR).
+    /// </summary>
+    public static readonly double[] SpectrumWavelengthsNm =
+        [150, 250, 350, 450, 550, 650, 750, 900, 1200, 2000];
+
+    public const int SpectrumBins = 10;
+
+    // UV: bins 0-2 (150-350 nm); visible: 3-6 (450-750 nm); IR: 7-9 (900-2000 nm)
+    private static readonly double[] _spectrumBandwidthNm =
+        [100, 100, 100, 100, 100, 100, 100, 200, 400, 800];
+
+    // Planck constants
+    private const double C1 = 3.741771852e-16; // 2hc²  W·m²
+    private const double C2 = 1.438776877e-2;  // hc/k  m·K
+
+    /// <summary>
+    /// Fill <paramref name="output"/> (must be ≥ SpectrumBins) with the normalised
+    /// solar spectral irradiance at the ship's current position (0–1 per bin).
+    /// No heap allocation — caller owns the buffer.
+    /// </summary>
+    public static void GetSolarVisibleSpectrum(Span<double> output)
+    {
+        if (output.Length < SpectrumBins) return;
+        double T     = StellarSurfaceTemperatureK(NearestStar.Class);
+        double scale = SolarInvSqScale();
+        double max   = 0;
+        for (int i = 0; i < SpectrumBins; i++)
+        {
+            double v   = Planck(SpectrumWavelengthsNm[i] * 1e-9, T) * scale;
+            output[i]  = v;
+            if (v > max) max = v;
+        }
+        if (max > 0)
+            for (int i = 0; i < SpectrumBins; i++) output[i] /= max;
+    }
+
+    /// <summary>Total integrated solar heat flux at ship position (W/m² integrated across all bins).</summary>
+    public static double GetSolarHeat()
+    {
+        double T = StellarSurfaceTemperatureK(NearestStar.Class);
+        double s = SolarInvSqScale();
+        double total = 0;
+        for (int i = 0; i < SpectrumBins; i++)
+            total += Planck(SpectrumWavelengthsNm[i] * 1e-9, T) * _spectrumBandwidthNm[i];
+        return total * s;
+    }
+
+    /// <summary>UV component (bins 0-2, 150-350 nm) of solar flux at ship position.</summary>
+    public static double GetSolarUV()
+    {
+        double T = StellarSurfaceTemperatureK(NearestStar.Class);
+        double s = SolarInvSqScale();
+        double total = 0;
+        for (int i = 0; i < 3; i++)
+            total += Planck(SpectrumWavelengthsNm[i] * 1e-9, T) * _spectrumBandwidthNm[i];
+        return total * s;
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private static double SolarInvSqScale()
+    {
+        double d = DistanceToNearestStar, r = NearestStar.Radius;
+        return (d > 0 && r > 0) ? (r / d) * (r / d) : 1.0;
+    }
+
+    private static double Planck(double lambdaM, double T)
+    {
+        if (T <= 0) return 0.0;
+        double exp = C2 / (lambdaM * T);
+        if (exp > 700) return 0.0;
+        return C1 / (lambdaM * lambdaM * lambdaM * lambdaM * lambdaM * (Math.Exp(exp) - 1.0));
+    }
+
+    internal static double StellarSurfaceTemperatureK(SpectralClass sc) => sc switch
+    {
+        SpectralClass.O           =>  40_000.0,
+        SpectralClass.B           =>  20_000.0,
+        SpectralClass.A           =>   8_500.0,
+        SpectralClass.F           =>   6_800.0,
+        SpectralClass.G           =>   5_778.0,
+        SpectralClass.K           =>   4_500.0,
+        SpectralClass.M           =>   3_000.0,
+        SpectralClass.WhiteDwarf  =>  25_000.0,
+        SpectralClass.NeutronStar => 1_000_000.0,
+        _                         =>   5_778.0,
+    };
 }
