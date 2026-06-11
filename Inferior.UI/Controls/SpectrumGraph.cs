@@ -153,23 +153,51 @@ public sealed class SpectrumGraph : Control
     }
 
     // ── Wavelength colour gradient ────────────────────────────────────────────
-    // t = 0 → 150 nm (far UV), t = 1 → 2000 nm (near IR).
-    // Visible range is roughly t = 0.17 (400 nm) – 0.38 (700 nm).
+    // The 10 data bins are plotted at equal pixel spacing, but their wavelengths
+    // are NOT linearly spaced (bins jump from 750 → 900 → 1200 → 2000 nm at the IR end).
+    // So we must convert pixel position → actual wavelength in nm, then colour from nm.
 
-    private static Color WavelengthColor(float t, float alpha)
+    /// <summary>
+    /// Wavelengths (nm) corresponding to each data bin, left to right.
+    /// Defaults to Environment.SpectrumWavelengthsNm [150…2000 nm].
+    /// Set this if you drive the graph with a different sensor's bins.
+    /// </summary>
+    public float[] WavelengthsNm { get; set; } =
+        [150f, 250f, 350f, 450f, 550f, 650f, 750f, 900f, 1200f, 2000f];
+
+    private Color WavelengthColor(float tPixel, float alpha)
+    {
+        float nm = PixelToNm(tPixel);
+        return NmToColor(nm, alpha);
+    }
+
+    private float PixelToNm(float tPixel)
+    {
+        var wl   = WavelengthsNm;
+        int last = wl.Length - 1;
+        if (last <= 0) return wl[0];
+        float idx = tPixel * last;
+        int   i0  = System.Math.Clamp((int)idx, 0, last - 1);
+        float f   = idx - i0;
+        return wl[i0] + (wl[i0 + 1] - wl[i0]) * f;
+    }
+
+    private static Color NmToColor(float nm, float alpha)
     {
         Vector3 c;
-        if      (t < 0.13f) c = Lerp3(new(0.50f, 0.00f, 0.80f), new(0.30f, 0.00f, 1.00f), t / 0.13f);
-        else if (t < 0.17f) c = Lerp3(new(0.30f, 0.00f, 1.00f), new(0.00f, 0.25f, 1.00f), (t - 0.13f) / 0.04f);
-        else if (t < 0.22f) c = Lerp3(new(0.00f, 0.25f, 1.00f), new(0.00f, 0.90f, 0.55f), (t - 0.17f) / 0.05f);
-        else if (t < 0.27f) c = Lerp3(new(0.00f, 0.90f, 0.55f), new(0.75f, 0.90f, 0.00f), (t - 0.22f) / 0.05f);
-        else if (t < 0.31f) c = Lerp3(new(0.75f, 0.90f, 0.00f), new(1.00f, 0.20f, 0.00f), (t - 0.27f) / 0.04f);
-        else if (t < 0.38f) c = Lerp3(new(1.00f, 0.20f, 0.00f), new(0.55f, 0.00f, 0.00f), (t - 0.31f) / 0.07f);
-        else                c = Lerp3(new(0.55f, 0.00f, 0.00f), new(0.10f, 0.00f, 0.00f),
-                                      System.Math.Min((t - 0.38f) / 0.62f, 1.0f));
+        if      (nm < 350f) c = Lerp3(new(0.55f, 0.00f, 0.80f), new(0.20f, 0.00f, 0.90f), Unlerp(nm, 150f, 350f));
+        else if (nm < 420f) c = Lerp3(new(0.20f, 0.00f, 0.90f), new(0.05f, 0.05f, 1.00f), Unlerp(nm, 350f, 420f));
+        else if (nm < 490f) c = Lerp3(new(0.05f, 0.05f, 1.00f), new(0.00f, 0.80f, 0.40f), Unlerp(nm, 420f, 490f));
+        else if (nm < 560f) c = Lerp3(new(0.00f, 0.80f, 0.40f), new(0.90f, 0.90f, 0.00f), Unlerp(nm, 490f, 560f));
+        else if (nm < 630f) c = Lerp3(new(0.90f, 0.90f, 0.00f), new(1.00f, 0.10f, 0.00f), Unlerp(nm, 560f, 630f));
+        else if (nm < 750f) c = Lerp3(new(1.00f, 0.10f, 0.00f), new(0.55f, 0.00f, 0.00f), Unlerp(nm, 630f, 750f));
+        else if (nm < 1100f) c = Lerp3(new(0.55f, 0.00f, 0.00f), new(0.20f, 0.00f, 0.00f), Unlerp(nm, 750f, 1100f));
+        else                c = Lerp3(new(0.20f, 0.00f, 0.00f), new(0.04f, 0.00f, 0.00f), MathF.Min(Unlerp(nm, 1100f, 2200f), 1f));
         c = Vector3.Clamp(c, Vector3.Zero, Vector3.One);
         return new Color(c * alpha);
     }
+
+    private static float Unlerp(float x, float a, float b) => (x - a) / (b - a);
 
     private static Vector3 Lerp3(Vector3 a, Vector3 b, float t) => a + (b - a) * t;
 }
