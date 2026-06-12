@@ -49,37 +49,12 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         Window.ClientSizeChanged += (_, _) =>
             _stateMachine.OnResize(GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height);
 
-        // Queue startup window mode — settings are applied when base.Initialize()
-        // creates the graphics device, so ApplyChanges() is not needed here.
-        switch (_windowMode)
-        {
-            case WindowMode.Borderless:
-                _graphics.HardwareModeSwitch = false;
-                _graphics.IsFullScreen       = true;
-                break;
-
-            case WindowMode.Fullscreen:
-            {
-                var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
-                _graphics.HardwareModeSwitch        = true;
-                _graphics.PreferredBackBufferWidth  = dm.Width;
-                _graphics.PreferredBackBufferHeight = dm.Height;
-                _graphics.IsFullScreen              = true;
-                break;
-            }
-
-            case WindowMode.Windowed:
-            default:
-            {
-                var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
-                Window.Position = new Point(
-                    (dm.Width  - DefaultWindowWidth)  / 2,
-                    (dm.Height - DefaultWindowHeight) / 2);
-                break;
-            }
-        }
-
         base.Initialize();
+
+        // Apply startup window mode AFTER base.Initialize() so the graphics device
+        // exists and ApplyChanges() takes effect. base.Initialize() also runs
+        // LoadContent(), so the state machine is live and OnResize() will reflow the UI.
+        ApplyWindowMode();
     }
 
     protected override void LoadContent()
@@ -157,14 +132,18 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
             WindowMode.Fullscreen => WindowMode.Windowed,
             _                     => WindowMode.Borderless,
         };
+        ApplyWindowMode();
+    }
 
+    private void ApplyWindowMode()
+    {
         var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
 
         switch (_windowMode)
         {
             case WindowMode.Windowed:
-                _graphics.IsFullScreen           = false;
-                _graphics.HardwareModeSwitch     = true;
+                _graphics.IsFullScreen              = false;
+                _graphics.HardwareModeSwitch        = true;
                 _graphics.PreferredBackBufferWidth  = DefaultWindowWidth;
                 _graphics.PreferredBackBufferHeight = DefaultWindowHeight;
                 _graphics.ApplyChanges();
@@ -174,16 +153,16 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
                 break;
 
             case WindowMode.Borderless:
-                _graphics.HardwareModeSwitch     = false;
-                _graphics.IsFullScreen           = true;
+                _graphics.HardwareModeSwitch = false;
+                _graphics.IsFullScreen       = true;
                 _graphics.ApplyChanges();
                 break;
 
             case WindowMode.Fullscreen:
-                _graphics.HardwareModeSwitch     = true;
+                _graphics.HardwareModeSwitch        = true;
                 _graphics.PreferredBackBufferWidth  = dm.Width;
                 _graphics.PreferredBackBufferHeight = dm.Height;
-                _graphics.IsFullScreen           = true;
+                _graphics.IsFullScreen              = true;
                 _graphics.ApplyChanges();
                 break;
         }
