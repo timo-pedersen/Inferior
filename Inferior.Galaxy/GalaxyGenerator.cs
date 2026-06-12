@@ -25,7 +25,7 @@ public static class GalaxyGenerator
     public const int   MasterSeed = 19721978; // homage: Elite released 1984, original BBC Micro 1981
 
     // Galaxy geometry (light-years)
-    public  const double GalaxyRadiusLY   = 50_000.0;  // ly — exposed for skybox distance falloff
+    public  const double GalaxyRadiusLY   = 20_000.0;  // ly — exposed for skybox distance falloff
     private const double GalaxyRadius     = GalaxyRadiusLY;
     private const double CoreRadius       = 4_000.0;   // dense core region
     private const double ArmWidth         = 0.21;      // gaussian σ in radians

@@ -1,4 +1,5 @@
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
@@ -46,14 +47,16 @@ public sealed class SystemSpaceState : GameState
     private readonly GraphicsDevice  _gd;
     private readonly SpriteFont      _font;
     private readonly SpaceSimulation _simulation;
+    private readonly ContentManager  _content;
 
     // ── System data ───────────────────────────────────────────────────────────
     private Star       _star   = null!;
     private StarSystem _system = null!;
 
     // ── 3D infrastructure ─────────────────────────────────────────────────────
-    private Camera3D   _camera = null!;
+    private Camera3D    _camera = null!;
     private BasicEffect _effect = null!;
+    private Effect?     _atmosEffect;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
     private VertexBuffer _sphereVb = null!;
@@ -62,6 +65,9 @@ public sealed class SystemSpaceState : GameState
 
     // Reusable ring vertex array — rebuilt each frame per orbit
     private VertexPositionColor[] _ringVerts = null!;
+
+    // Reused per glow billboard draw — avoids per-frame allocation
+    private VertexPositionColorTexture[] _glowVerts = new VertexPositionColorTexture[6];
 
     // Skybox star field — built once on enter, static for the session
     private VertexPositionColor[] _skyboxPoints    = [];  // PointList — one vertex per star
@@ -138,12 +144,13 @@ public sealed class SystemSpaceState : GameState
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
-    public SystemSpaceState(GraphicsDevice gd, SpriteFont font, SpaceSimulation simulation)
+    public SystemSpaceState(GraphicsDevice gd, SpriteFont font, SpaceSimulation simulation, ContentManager content)
         : base(GameStateId.SystemSpace)
     {
         _gd         = gd;
         _font       = font;
         _simulation = simulation;
+        _content    = content;
     }
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -226,6 +233,7 @@ public sealed class SystemSpaceState : GameState
         _pixel.SetData([Color.White]);
 
         _starGlowTex = CreateStarGlowTexture(_gd, 128);
+        _atmosEffect = _content.Load<Effect>("Effects/Atmosphere");
 
         _pendingTransition = null;
         UpdateUI();
@@ -486,6 +494,7 @@ public sealed class SystemSpaceState : GameState
         _sphereIb?.Dispose();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
+        _atmosEffect = null; // owned by ContentManager — do not dispose manually
     }
 
     public override void OnResize(int width, int height)
@@ -638,7 +647,14 @@ public sealed class SystemSpaceState : GameState
         gd.DepthStencilState = DepthStencilState.Default;
         DrawOrbitRings();
 
-        gd.BlendState = BlendState.Opaque;
+        // Star glow — 3D billboard with depth-read so planets drawn opaque afterward
+        // correctly overwrite it on their disc areas (fixes glow bleeding through planets).
+        gd.BlendState        = BlendState.Additive;
+        gd.DepthStencilState = DepthStencilState.DepthRead;
+        DrawStarGlow3D();
+
+        gd.BlendState        = BlendState.Opaque;
+        gd.DepthStencilState = DepthStencilState.Default;
         DrawStarBody();
         foreach (var (body, pos) in _bodyPositions)
             DrawPlanetBody(body, pos);
@@ -651,12 +667,6 @@ public sealed class SystemSpaceState : GameState
 
         // ── 2D overlay ────────────────────────────────────────────────────────
         gd.DepthStencilState = DepthStencilState.None;
-
-        // Star glow — additive so layers accumulate as emitted light.
-        // Drawn after all 3D geometry so it blooms over planets that are in front.
-        sb.Begin(blendState: BlendState.Additive);
-        DrawStarGlow2D(sb);
-        sb.End();
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
@@ -691,44 +701,51 @@ public sealed class SystemSpaceState : GameState
         DrawSphere(renderPos, PlanetApparentRadius(body, renderPos), BodyColor(body), lit: true);
     }
 
-    // ── 2D star glow (screen-space, additive) ────────────────────────────────
+    // ── Star glow (3D billboard, additive) ───────────────────────────────────
 
-    private void DrawStarGlow2D(SpriteBatch sb)
+    private void DrawStarGlow3D()
     {
         Vector3 renderPos = _camera.ToRenderSpace(DVec3.Zero);
+        if (Vector4.Transform(new Vector4(renderPos, 1f),
+                              _camera.ViewMatrix * _camera.ProjectionMatrix).W <= 0f) return;
 
-        // Project star to clip space — bail if behind the camera
-        var clip = Vector4.Transform(new Vector4(renderPos, 1f),
-                                     _camera.ViewMatrix * _camera.ProjectionMatrix);
-        if (clip.W <= 0f) return;
+        float baseRU = StarApparentRadius(renderPos);
+        var   right  = _camera.Right;
+        var   up     = _camera.Up;
 
-        var   vp    = _gd.Viewport;
-        float ndcX  = clip.X / clip.W;
-        float ndcY  = clip.Y / clip.W;
-        var   screen = new Vector2(
-            (ndcX + 1f) * 0.5f * vp.Width,
-            (1f - ndcY) * 0.5f * vp.Height);
+        _effect.TextureEnabled     = true;
+        _effect.VertexColorEnabled = true;
+        _effect.LightingEnabled    = false;
+        _effect.Texture            = _starGlowTex;
+        _effect.World              = Matrix.Identity;
 
-        // Convert the 3D body radius to screen pixels
-        float dist      = MathF.Max(renderPos.Length(), 0.001f);
-        float projScale = vp.Height / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
-        float bodyR     = MathF.Min(StarApparentRadius(renderPos) * projScale / dist, 220f);
+        DrawGlowBillboard(renderPos, baseRU * 14f,  right, up, _star.GlowColor * 0.07f);
+        DrawGlowBillboard(renderPos, baseRU * 6f,   right, up, _star.GlowColor * 0.28f);
+        DrawGlowBillboard(renderPos, baseRU * 2.5f, right, up, _star.GlowColor * 0.65f);
+        DrawGlowBillboard(renderPos, baseRU * 1.1f, right, up, Color.White     * 0.90f);
 
-        // Layers drawn largest→smallest so the bright core paints over the outer halo.
-        // Additive blend: layers accumulate as emitted light, center saturates to white.
-        DrawGlowLayer(sb, screen, bodyR * 14f,  _star.GlowColor * 0.07f); // faint outer corona
-        DrawGlowLayer(sb, screen, bodyR * 6f,   _star.GlowColor * 0.28f); // mid halo
-        DrawGlowLayer(sb, screen, bodyR * 2.5f, _star.GlowColor * 0.65f); // inner corona
-        DrawGlowLayer(sb, screen, bodyR * 1.1f, Color.White     * 0.90f); // white-hot surface
+        _effect.TextureEnabled     = false;
+        _effect.VertexColorEnabled = false;
     }
 
-    private void DrawGlowLayer(SpriteBatch sb, Vector2 center, float radius, Color color)
+    private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
     {
-        if (radius < 1f) return;
-        int r = (int)radius;
-        sb.Draw(_starGlowTex,
-            new Rectangle((int)(center.X - radius), (int)(center.Y - radius), r * 2, r * 2),
-            color);
+        if (radius < 0.0001f) return;
+        var tl = center + (-right + up) * radius;
+        var tr = center + ( right + up) * radius;
+        var bl = center + (-right - up) * radius;
+        var br = center + ( right - up) * radius;
+        _glowVerts[0] = new(tl, color, new Vector2(0, 0));
+        _glowVerts[1] = new(tr, color, new Vector2(1, 0));
+        _glowVerts[2] = new(bl, color, new Vector2(0, 1));
+        _glowVerts[3] = new(tr, color, new Vector2(1, 0));
+        _glowVerts[4] = new(br, color, new Vector2(1, 1));
+        _glowVerts[5] = new(bl, color, new Vector2(0, 1));
+        foreach (var pass in _effect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _glowVerts, 0, 2);
+        }
     }
 
     // Gaussian radial gradient baked into a texture — reused for every glow layer.
@@ -787,15 +804,53 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawAtmosphere(OrbitalBody body, DVec3 universePos)
     {
-        if (body.AtmosphereType == AtmosphereType.None) return;
+        if (body.AtmosphereType == AtmosphereType.None || body.AtmosphereHeight <= 0) return;
 
         Vector3 renderPos = _camera.ToRenderSpace(universePos);
         if (renderPos.Length() > 30_000f) return;
 
-        _effect.LightingEnabled = false;
-        DrawSphere(renderPos, PlanetApparentRadius(body, renderPos) * 1.18f, body.AtmosphereColor * 0.35f, lit: false);
-        _effect.LightingEnabled = true;
+        // Shell is proportional to the body's actual AtmosphereHeight.
+        // Visual scale of 8 keeps thin rocky-planet atmospheres perceptible.
+        const float AtmosVisualScale = 8f;
+        float atmosRatio  = 1f + (float)(body.AtmosphereHeight / body.RadiusMeters) * AtmosVisualScale;
+        float atmosRadius = PlanetApparentRadius(body, renderPos) * atmosRatio;
+
+        if (_atmosEffect == null)
+        {
+            // Fallback if shader isn't loaded: flat semi-transparent sphere
+            DrawSphere(renderPos, atmosRadius, body.AtmosphereColor * 0.35f, lit: false);
+            return;
+        }
+
+        var world = Matrix.CreateScale(atmosRadius) * Matrix.CreateTranslation(renderPos);
+
+        _atmosEffect.Parameters["WorldViewProjection"].SetValue(
+            world * _camera.ViewMatrix * _camera.ProjectionMatrix);
+        _atmosEffect.Parameters["World"].SetValue(world);
+        _atmosEffect.Parameters["AtmosphereColor"].SetValue(body.AtmosphereColor.ToVector3());
+        _atmosEffect.Parameters["Opacity"].SetValue(0.8f);
+        _atmosEffect.Parameters["RimPower"].SetValue(RimPowerFor(body.AtmosphereType));
+        _atmosEffect.Parameters["LightDirection"].SetValue(_effect.DirectionalLight0.Direction);
+
+        _gd.SetVertexBuffer(_sphereVb);
+        _gd.Indices = _sphereIb;
+
+        foreach (var pass in _atmosEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _sphereTriCount);
+        }
     }
+
+    private static float RimPowerFor(AtmosphereType type) => type switch
+    {
+        AtmosphereType.Thin       => 5.0f,  // sharp narrow ring
+        AtmosphereType.Breathable => 3.0f,  // moderate halo
+        AtmosphereType.Thick      => 2.0f,  // broad diffuse glow
+        AtmosphereType.Toxic      => 2.5f,
+        AtmosphereType.Corrosive  => 2.0f,
+        _                         => 3.0f,
+    };
 
     private void DrawSphere(Vector3 renderPos, float radius, Color color, bool lit)
     {

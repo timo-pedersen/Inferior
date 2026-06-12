@@ -64,7 +64,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
         _stateMachine.Register(new GalaxyMapState(GraphicsDevice, _font));
         _stateMachine.Register(new SystemMapState(GraphicsDevice, _font));
-        _stateMachine.Register(new SystemSpaceState(GraphicsDevice, _font, _simulation));
+        _stateMachine.Register(new SystemSpaceState(GraphicsDevice, _font, _simulation, Content));
 
         var galaxy    = GalaxyGenerator.Generate();
         var startStar = FindStartStar(galaxy);
