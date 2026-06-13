@@ -465,7 +465,8 @@ public sealed class SystemMapState : GameState
         int x      = _gd.Viewport.Width - panelW - margin;
         int y      = margin;
         int lineH  = 22;
-        int panelH = (10 + display.Children.Count) * lineH + 24;
+        int atmoExtra = display.AtmosphereType != AtmosphereType.None ? 1 : 0;
+        int panelH    = (10 + atmoExtra + display.Children.Count) * lineH + 24;
 
         DrawRect(sb, new Rectangle(x, y, panelW, panelH), ColPanel);
         DrawRectBorder(sb, new Rectangle(x, y, panelW, panelH), ColPanelBorder, 1);
@@ -483,6 +484,9 @@ public sealed class SystemMapState : GameState
         if (display.AtmosphereType != AtmosphereType.None)
         {
             DrawText(sb, $"Atmosphere: {display.AtmosphereType}", new Vector2(tx, ty), ColText);
+            ty += lineH;
+            double surfaceAtm = Gameplay.SensorData.Environment.AtmosphericSurfacePressure(display) / 101_325.0;
+            DrawText(sb, $"  Pressure: {surfaceAtm:F2} atm", new Vector2(tx, ty), ColTextDim);
             ty += lineH;
         }
 

@@ -179,17 +179,20 @@ public static class Environment
 
     /// <summary>
     /// Atmospheric pressure at the ship's current position relative to <paramref name="bodyPos"/>.
-    /// Linear falloff from surface to AtmosphereHeight; zero above the atmosphere.
+    /// Exponential falloff matching the visual shader: P = surfaceP * exp(-h / scaleHeight),
+    /// where scaleHeight = AtmosphereHeight / 8 (mirrors Earth ~100 km / 8.5 km scale height).
+    /// Clamped to surfaceP at or below the surface; effectively zero above AtmosphereHeight.
     /// </summary>
     public static double AtmosphericPressure(OrbitalBody body, DVec3 bodyPos)
     {
         double surfaceP = AtmosphericSurfacePressure(body);
         if (surfaceP <= 0) return 0.0;
-        double h     = DistanceFromSurface(body, bodyPos);
-        double atmH  = body.AtmosphereHeight;
-        if (h <= 0)   return surfaceP;
-        if (h >= atmH) return 0.0;
-        return surfaceP * (1.0 - h / atmH);
+        double h       = DistanceFromSurface(body, bodyPos);
+        if (h <= 0) return surfaceP;
+        double atmH    = body.AtmosphereHeight;
+        if (atmH <= 0) return 0.0;
+        double scaleH  = atmH / 8.0;
+        return surfaceP * System.Math.Exp(-h / scaleH);
     }
 
     // ── Solar spectrum ────────────────────────────────────────────────────────
