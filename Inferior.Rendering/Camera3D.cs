@@ -47,6 +47,12 @@ public sealed class Camera3D
     // ── Speed ─────────────────────────────────────────────────────────────────
     public double MoveSpeedMs { get; set; } = 5e9;
 
+    /// <summary>
+    /// Proximity-based multiplier set by the owning state each frame.
+    /// 1.0 = unscaled; smaller values near orbital bodies cap actual movement speed.
+    /// </summary>
+    public double ProximitySpeedScale { get; set; } = 1.0;
+
     // ── Mouse look state ──────────────────────────────────────────────────────
     private Point _prevMousePos;
     private bool  _wasRightHeld;
@@ -143,7 +149,7 @@ public sealed class Camera3D
 
     private void HandleMovement(double dt, KeyboardState keys)
     {
-        double speed = MoveSpeedMs;
+        double speed = MoveSpeedMs * ProximitySpeedScale;
         if (keys.IsKeyDown(Keys.LeftShift)   || keys.IsKeyDown(Keys.RightShift))   speed *= 10.0;
         if (keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl)) speed *= 0.1;
 

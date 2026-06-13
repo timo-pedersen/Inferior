@@ -591,6 +591,10 @@ public sealed class SystemSpaceState : GameState
             _bodyPositions[i] = (body, EclipticToGalaxy(pos));
         }
 
+        // Proximity speed scale — applied to debug camera each frame
+        if (_debugCameraMode)
+            _camera.ProximitySpeedScale = ComputeProximityScale();
+
         // Feed world state to simulation — use ship snapshot position in ship mode,
         // camera position in debug mode (sensors track whoever is "there")
         DVec3 refPos = _debugCameraMode
@@ -1322,6 +1326,58 @@ public sealed class SystemSpaceState : GameState
     {
         _rightPanel?.ApplyState(layout.RightActiveTab, layout.RightOpen);
         _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
+    }
+
+    // ── Proximity speed scale ─────────────────────────────────────────────────
+    //
+    // Two independent zones — star and bodies — each with three knobs:
+    //   FarDist  : surface distance where scaling begins (full free speed beyond this)
+    //   NearDist : surface distance where scaling is fully applied
+    //   MinScale : multiplier at NearDist — expressed as (target m/s) / (max scroll step)
+    //              so "top step → X m/s at NearDist" is readable at a glance.
+    //
+    // The most restrictive zone wins each frame.
+
+    // Star — large zone, still fast enough near the star to orbit / escape
+    private const double StarProxFarDist  = 2.25e11;        // 1.5 AU
+    private const double StarProxNearDist = 1e10;            // 10,000,000 km
+    private const double StarProxMinScale = 1e5 / 1e12;     // top step → 100 km/s
+
+    // Planets & moons — tight zone around each body
+    private const double BodyProxFarDist  = 5e8;             // 500,000 km
+    private const double BodyProxNearDist = 1e5;             // 100 km
+    private const double BodyProxMinScale = 100.0 / 1e12;   // top step → 100 m/s
+
+    private double ComputeProximityScale()
+    {
+        // Star.RadiusMeters is double-converted in generation, so use the visual render
+        // radius instead — StarVisualRadius=8 render units = 8/RenderScale = 8e9 m.
+        const double StarVisualRadiusMeters = 8.0 / Camera3D.RenderScale;
+        double starSurf = System.Math.Max(_camera.UniversePosition.Length - StarVisualRadiusMeters, 0.0);
+
+        double starScale = ScaleForDist(starSurf, StarProxNearDist, StarProxFarDist, StarProxMinScale);
+
+        double bodyScale = 1.0;
+        foreach (var (body, pos) in _bodyPositions)
+        {
+            double surf = System.Math.Max((_camera.UniversePosition - pos).Length - body.RadiusMeters, 0.0);
+            double s    = ScaleForDist(surf, BodyProxNearDist, BodyProxFarDist, BodyProxMinScale);
+            if (s < bodyScale) bodyScale = s;
+        }
+
+        return System.Math.Min(starScale, bodyScale);
+    }
+
+    private static double ScaleForDist(double surfDist, double nearDist, double farDist, double minScale)
+    {
+        if (surfDist >= farDist)  return 1.0;
+        if (surfDist <= nearDist) return minScale;
+
+        double t = System.Math.Log(surfDist / nearDist)
+                 / System.Math.Log(farDist  / nearDist);
+        t = t * t * (3.0 - 2.0 * t); // smoothstep
+
+        return System.Math.Exp(t * System.Math.Log(1.0 / minScale)) * minScale;
     }
 
     private const float PlanetVisualScale = 1f;
