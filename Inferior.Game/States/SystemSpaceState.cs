@@ -67,7 +67,9 @@ public sealed class SystemSpaceState : GameState
     private VertexPositionColor[] _ringVerts = null!;
 
     // Reused per glow billboard draw — avoids per-frame allocation
-    private VertexPositionColorTexture[] _glowVerts = new VertexPositionColorTexture[6];
+    private VertexPositionColorTexture[] _glowVerts      = new VertexPositionColorTexture[6];
+    // Reused per atmosphere billboard draw — 6 verts (2 triangles)
+    private VertexPositionTexture[]      _atmosQuadVerts = new VertexPositionTexture[6];
 
     // Skybox star field — built once on enter, static for the session
     private VertexPositionColor[] _skyboxPoints    = [];  // PointList — one vertex per star
@@ -659,9 +661,9 @@ public sealed class SystemSpaceState : GameState
         foreach (var (body, pos) in _bodyPositions)
             DrawPlanetBody(body, pos);
 
-        // Pass 2 — transparent (depth test, no depth writes)
+        // Pass 2 — transparent (no depth write/read — shader ray-sphere handles visibility)
         gd.BlendState        = BlendState.AlphaBlend;
-        gd.DepthStencilState = DepthStencilState.DepthRead;
+        gd.DepthStencilState = DepthStencilState.None;
         foreach (var (body, pos) in _bodyPositions)
             DrawAtmosphere(body, pos);
 
@@ -805,51 +807,82 @@ public sealed class SystemSpaceState : GameState
     private void DrawAtmosphere(OrbitalBody body, DVec3 universePos)
     {
         if (body.AtmosphereType == AtmosphereType.None || body.AtmosphereHeight <= 0) return;
+        if (_atmosEffect == null) return;
 
         Vector3 renderPos = _camera.ToRenderSpace(universePos);
-        if (renderPos.Length() > 30_000f) return;
+        float   camDist   = renderPos.Length();
+        if (camDist > 30_000f) return;
 
-        // Shell is proportional to the body's actual AtmosphereHeight.
-        // Visual scale of 8 keeps thin rocky-planet atmospheres perceptible.
-        const float AtmosVisualScale = 8f;
-        float atmosRatio  = 1f + (float)(body.AtmosphereHeight / body.RadiusMeters) * AtmosVisualScale;
-        float atmosRadius = PlanetApparentRadius(body, renderPos) * atmosRatio;
+        // Physical atmosphere radius preserving the planet/atmosphere ratio under the
+        // per-pixel visual size boost applied to distant planets.
+        float physPlanetR  = VisualRadius(body);
+        float physAtmosR   = (float)((body.RadiusMeters + body.AtmosphereHeight) * Camera3D.RenderScale);
+        float planetRadius = PlanetApparentRadius(body, renderPos);
+        float atmosRadius  = physPlanetR > 0f ? physAtmosR * (planetRadius / physPlanetR) : planetRadius;
 
-        if (_atmosEffect == null)
+        // Minimum visual thickness so the glow gradient is visible even for thin atmospheres.
+        // drawRadius is derived from shaderAtmosRadius so the billboard always exceeds the fade zone.
+        float shaderAtmosRadius = MathF.Max(atmosRadius, planetRadius * 1.05f);
+        float drawRadius        = shaderAtmosRadius * 1.15f;
+
+        // Billboard half-size: cover the draw sphere's projected circle from outside,
+        // or cover the full sky from inside.
+        float billHalf;
+        if (camDist <= drawRadius)
         {
-            // Fallback if shader isn't loaded: flat semi-transparent sphere
-            DrawSphere(renderPos, atmosRadius, body.AtmosphereColor * 0.35f, lit: false);
-            return;
+            // Camera inside — billboard must subtend > 180°, so use 3× the distance
+            // to the planet (or 2× the draw radius if planet is very close).
+            billHalf = MathF.Max(2f * drawRadius, camDist * 3f);
+        }
+        else
+        {
+            // Exact projected angular radius of the draw sphere, 15 % extra margin.
+            float sinHA = drawRadius / camDist;
+            float tanHA = sinHA / MathF.Sqrt(1f - sinHA * sinHA);
+            billHalf    = camDist * tanHA * 1.15f;
         }
 
-        var world = Matrix.CreateScale(atmosRadius) * Matrix.CreateTranslation(renderPos);
+        // Camera-aligned billboard centred at the planet's render-space position.
+        // CW winding (TL→TR→BL, TR→BR→BL) — front faces are CW under CullCounterClockwise.
+        var     right = _camera.Right;
+        var     up    = _camera.Up;
+        Vector3 tl    = renderPos + (-right + up) * billHalf;
+        Vector3 tr    = renderPos + ( right + up) * billHalf;
+        Vector3 bl    = renderPos + (-right - up) * billHalf;
+        Vector3 br    = renderPos + ( right - up) * billHalf;
 
-        _atmosEffect.Parameters["WorldViewProjection"].SetValue(
-            world * _camera.ViewMatrix * _camera.ProjectionMatrix);
-        _atmosEffect.Parameters["World"].SetValue(world);
+        _atmosQuadVerts[0] = new(tl, Vector2.Zero);
+        _atmosQuadVerts[1] = new(tr, Vector2.Zero);
+        _atmosQuadVerts[2] = new(bl, Vector2.Zero);
+        _atmosQuadVerts[3] = new(tr, Vector2.Zero);
+        _atmosQuadVerts[4] = new(br, Vector2.Zero);
+        _atmosQuadVerts[5] = new(bl, Vector2.Zero);
+
+        _atmosEffect.Parameters["ViewProjection"].SetValue(_camera.ViewMatrix * _camera.ProjectionMatrix);
+        _atmosEffect.Parameters["PlanetCenter"].SetValue(renderPos);
+        _atmosEffect.Parameters["PlanetRadius"].SetValue(planetRadius * 0.98f); // slight inset to close gap at limb
+        _atmosEffect.Parameters["AtmosRadius"].SetValue(shaderAtmosRadius);
         _atmosEffect.Parameters["AtmosphereColor"].SetValue(body.AtmosphereColor.ToVector3());
-        _atmosEffect.Parameters["Opacity"].SetValue(0.8f);
-        _atmosEffect.Parameters["RimPower"].SetValue(RimPowerFor(body.AtmosphereType));
+        _atmosEffect.Parameters["Opacity"].SetValue(OpacityFor(body.AtmosphereType));
         _atmosEffect.Parameters["LightDirection"].SetValue(_effect.DirectionalLight0.Direction);
 
-        _gd.SetVertexBuffer(_sphereVb);
-        _gd.Indices = _sphereIb;
-
+        _gd.RasterizerState = RasterizerState.CullNone;
         foreach (var pass in _atmosEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
-            _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _sphereTriCount);
+            _gd.DrawUserPrimitives(PrimitiveType.TriangleList, _atmosQuadVerts, 0, 2);
         }
+        _gd.RasterizerState = RasterizerState.CullCounterClockwise;
     }
 
-    private static float RimPowerFor(AtmosphereType type) => type switch
+    private static float OpacityFor(AtmosphereType type) => type switch
     {
-        AtmosphereType.Thin       => 5.0f,  // sharp narrow ring
-        AtmosphereType.Breathable => 3.0f,  // moderate halo
-        AtmosphereType.Thick      => 2.0f,  // broad diffuse glow
-        AtmosphereType.Toxic      => 2.5f,
-        AtmosphereType.Corrosive  => 2.0f,
-        _                         => 3.0f,
+        AtmosphereType.Thin       => 0.45f,
+        AtmosphereType.Breathable => 0.65f,
+        AtmosphereType.Thick      => 0.85f,
+        AtmosphereType.Toxic      => 0.75f,
+        AtmosphereType.Corrosive  => 0.95f,
+        _                         => 0.65f,
     };
 
     private void DrawSphere(Vector3 renderPos, float radius, Color color, bool lit)
