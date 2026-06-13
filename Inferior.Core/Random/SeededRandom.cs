@@ -38,15 +38,30 @@ public sealed class SeededRandom
     ///   var planetRng = systemRng.Derive(planetIndex);
     /// </summary>
     public SeededRandom Derive(int index)
-        => new(HashCode.Combine(Seed, index));
+        => new(MixSeeds(Seed, index));
 
     /// <summary>Derive from two indices (e.g. grid coordinates).</summary>
     public SeededRandom Derive(int indexA, int indexB)
-        => new(HashCode.Combine(Seed, indexA, indexB));
+        => new(MixSeeds(MixSeeds(Seed, indexA), indexB));
 
     /// <summary>Derive from a string key (e.g. system name).</summary>
     public SeededRandom Derive(string key)
-        => new(HashCode.Combine(Seed, key.GetHashCode()));
+        => new(MixSeeds(Seed, StableStringHash(key)));
+
+    // boost::hash_combine — stable across runs, good avalanche. Never use HashCode.Combine
+    // here: it uses a per-process random salt in .NET and produces different values each run.
+    private static int MixSeeds(int a, int b) =>
+        unchecked(a ^ (b + (int)0x9e3779b9 + (a << 6) + (a >> 2)));
+
+    private static int StableStringHash(string s)
+    {
+        unchecked
+        {
+            int h = 5381;
+            foreach (char c in s) h = ((h << 5) + h) ^ c;
+            return h;
+        }
+    }
 
     // ── Uniform distributions ─────────────────────────────────────────────────
 

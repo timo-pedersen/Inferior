@@ -100,14 +100,21 @@ public static class GalaxyGenerator
     /// </summary>
     public static SeededRandom SystemSeed(Star star, int masterSeed = MasterSeed)
     {
-        int seed = HashCode.Combine(
-            masterSeed,
-            star.GalaxyIndex,
-            System.BitConverter.DoubleToInt64Bits(star.GalacticPos.X),
-            System.BitConverter.DoubleToInt64Bits(star.GalacticPos.Z));
+        // Deterministic stable mix — never use HashCode.Combine (process-randomized in .NET).
+        long xBits = System.BitConverter.DoubleToInt64Bits(star.GalacticPos.X);
+        long zBits = System.BitConverter.DoubleToInt64Bits(star.GalacticPos.Z);
+
+        int seed = Mix(masterSeed, star.GalaxyIndex);
+        seed = Mix(seed, (int)(xBits         & 0xFFFFFFFF));
+        seed = Mix(seed, (int)((xBits >> 32) & 0xFFFFFFFF));
+        seed = Mix(seed, (int)(zBits         & 0xFFFFFFFF));
+        seed = Mix(seed, (int)((zBits >> 32) & 0xFFFFFFFF));
 
         return new SeededRandom(seed);
     }
+
+    private static int Mix(int a, int b) =>
+        unchecked(a ^ (b + (int)0x9e3779b9 + (a << 6) + (a >> 2)));
 
     // ── Position generation ───────────────────────────────────────────────────
 
