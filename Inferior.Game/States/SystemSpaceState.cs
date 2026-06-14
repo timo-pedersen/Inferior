@@ -128,6 +128,10 @@ public sealed class SystemSpaceState : GameState
 
     // ── Targeting ─────────────────────────────────────────────────────────────
     private readonly TargetingSystem _targeting = new();
+    private DirectionBall? _targetingDirBall;
+    private Label?         _targetLineShip;
+    private Label?         _targetLineNav;
+    private Label?         _targetLineHyp;
 
     // ── SCAN tab ──────────────────────────────────────────────────────────────
     private SpectrumGraph?   _spectrumGraph;
@@ -462,6 +466,32 @@ public sealed class SystemSpaceState : GameState
         _cockpitRail.AddCenterTab("LOG",      _console);
         _cockpitRail.RightWing.Add(_shieldToggleButton);
 
+        // ── LeftWing: targeting direction ball + 3-line target readout ────────
+        _targetingDirBall = new DirectionBall
+        {
+            Header = "TARGETS",
+            Bounds = new Rectangle(4, 4, 120, 120),
+        };
+        _targetLineShip = new Label("Target: None", new Rectangle(132, 10, 280, 20))
+        {
+            FontScale = 0.72f,
+            TextColor = ColHUD,
+        };
+        _targetLineNav = new Label("Nav: None", new Rectangle(132, 34, 280, 20))
+        {
+            FontScale = 0.72f,
+            TextColor = ColHUD,
+        };
+        _targetLineHyp = new Label("Hyp: None", new Rectangle(132, 58, 280, 20))
+        {
+            FontScale = 0.72f,
+            TextColor = ColHUD,
+        };
+        _cockpitRail.LeftWing.Add(_targetingDirBall);
+        _cockpitRail.LeftWing.Add(_targetLineShip);
+        _cockpitRail.LeftWing.Add(_targetLineNav);
+        _cockpitRail.LeftWing.Add(_targetLineHyp);
+
         _ui.Add(_cockpitRail);
 
         // Restore panel layout if returning from system map
@@ -636,6 +666,7 @@ public sealed class SystemSpaceState : GameState
         // Update targeting system — uses ship position for distances/directions
         DVec3 shipPosForTargeting = _simulation.ShipState?.Position ?? _camera.UniversePosition;
         _targeting.Update(shipPosForTargeting, _star.GalacticPos, _gameTimeSeconds, _system);
+        UpdateTargetingUI();
 
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)
@@ -1452,6 +1483,51 @@ public sealed class SystemSpaceState : GameState
                 : new Color(100, 200, 160);
 
             ball.SetVector($"body_{i}", dir, color, "", dotR);
+        }
+    }
+
+    private void UpdateTargetingUI()
+    {
+        if (_targetingDirBall == null) return;
+        _targetingDirBall.SetOrientation(_camera.Forward, _camera.Right, _camera.Up);
+
+        // Ship target (red) — stub, no impl yet
+        _targetingDirBall.RemoveVector("ship");
+        if (_targetLineShip != null)
+            _targetLineShip.Text = "Target: None";
+
+        // Nav target (yellow)
+        if (_targeting.HasNavTarget)
+        {
+            var d = _targeting.NavTargetDirection;
+            _targetingDirBall.SetVector("nav",
+                new Vector3((float)d.X, (float)d.Y, (float)d.Z),
+                new Color(255, 200, 50), "N");
+            if (_targetLineNav != null)
+                _targetLineNav.Text = $"Nav: {_targeting.NavTargetName} ({Units.FormatDistance(_targeting.NavTargetDistance)})";
+        }
+        else
+        {
+            _targetingDirBall.RemoveVector("nav");
+            if (_targetLineNav != null)
+                _targetLineNav.Text = "Nav: None";
+        }
+
+        // Hyperspace target (blue)
+        if (_targeting.HasHyperspaceTarget)
+        {
+            var d = _targeting.HyperspaceTargetDirection;
+            _targetingDirBall.SetVector("hyp",
+                new Vector3((float)d.X, (float)d.Y, (float)d.Z),
+                new Color(80, 160, 255), "H");
+            if (_targetLineHyp != null)
+                _targetLineHyp.Text = $"Hyp: {_targeting.HyperspaceTargetName} ({_targeting.HyperspaceTargetDistanceLY:F1} ly)";
+        }
+        else
+        {
+            _targetingDirBall.RemoveVector("hyp");
+            if (_targetLineHyp != null)
+                _targetLineHyp.Text = "Hyp: None";
         }
     }
 
