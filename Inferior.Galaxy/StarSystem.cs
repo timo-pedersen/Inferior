@@ -15,6 +15,7 @@ public sealed class StarSystem
     public Star                    Star    { get; }
     public IReadOnlyList<OrbitalBody> Planets => _planets;
     public IReadOnlyList<OrbitalBody> AsteroidBelt => _asteroidBelt;
+    public IReadOnlyList<Station>  Stations => _stations;
 
     // ── Ecliptic tilt (3D flight view only — system map is unaffected) ────────
     // Angle (radians) and azimuth of the axis around which the orbital plane is tilted
@@ -25,6 +26,7 @@ public sealed class StarSystem
 
     private readonly List<OrbitalBody> _planets      = new();
     private readonly List<OrbitalBody> _asteroidBelt = new();
+    private readonly List<Station>     _stations     = new();
 
     // Used to collect all body positions in one pass for physics / rendering
     private readonly List<(OrbitalBody body, DVec3 pos)> _positionCache = new();
@@ -32,6 +34,36 @@ public sealed class StarSystem
     public StarSystem(Star star) => Star = star;
 
     // ── Positions ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the world-space position of a station at the given game time.
+    /// Resolves parent body position recursively.
+    /// </summary>
+    public DVec3 GetStationPosition(Station station, double gameTime)
+    {
+        if (station.OrbitParent == null)
+            return station.GetPosition(gameTime, DVec3.Zero);
+
+        // Parent is a planet — find it and get its position
+        foreach (var planet in _planets)
+        {
+            if (ReferenceEquals(planet, station.OrbitParent))
+                return station.GetPosition(gameTime, planet.GetPosition(gameTime, DVec3.Zero));
+
+            // Parent might be a moon
+            foreach (var moon in planet.Children)
+            {
+                if (ReferenceEquals(moon, station.OrbitParent))
+                {
+                    var planetPos = planet.GetPosition(gameTime, DVec3.Zero);
+                    return station.GetPosition(gameTime, moon.GetPosition(gameTime, planetPos));
+                }
+            }
+        }
+
+        // Fallback — orbit star
+        return station.GetPosition(gameTime, DVec3.Zero);
+    }
 
     /// <summary>
     /// Returns positions of all bodies (star at origin, then all planets/moons)
@@ -101,6 +133,9 @@ public sealed class StarSystem
         var eclipticRng = rng.Derive(9876);
         system.EclipticTiltRadians        = (float)(eclipticRng.NextDouble(0.0, System.Math.PI / 5.0));
         system.EclipticTiltAzimuthRadians = (float)(eclipticRng.NextAngle());
+
+        // Stations — always at least 1; 50% chance of 2nd, 25% chance of 3rd+
+        GenerateStations(system, star, rng.Derive(7777));
 
         return system;
     }
@@ -179,6 +214,46 @@ public sealed class StarSystem
                 RadiusMeters   = rng.Derive(5000 + i).NextDouble(500, 50_000),
                 ParentMassKg   = star.MassKg,
             });
+        }
+    }
+
+    private static void GenerateStations(StarSystem system, Star star, Core.Random.SeededRandom rng)
+    {
+        // Roll station count: guaranteed 1, 50% for 2nd, 25% for 3rd
+        int count = 1;
+        if (rng.NextBool(0.5)) count++;
+        if (rng.NextBool(0.25)) count++;
+
+        // Collect candidate orbit parents (planets and their moons)
+        var candidates = new List<OrbitalBody>();
+        foreach (var planet in system._planets)
+        {
+            candidates.Add(planet);
+            foreach (var moon in planet.Children)
+                candidates.Add(moon);
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            OrbitalBody? parent;
+            double       parentMass;
+
+            if (candidates.Count == 0 || rng.NextBool(0.1))
+            {
+                // Orbit the star directly (rare, or when no planets exist)
+                parent     = null;
+                parentMass = star.MassKg;
+            }
+            else
+            {
+                // Pick a random planet or moon to orbit
+                int idx = rng.NextInt(0, candidates.Count - 1);
+                parent     = candidates[idx];
+                parentMass = parent.MassKg;
+            }
+
+            var station = Station.Generate(star.Name, parent, parentMass, rng.Derive(i));
+            system._stations.Add(station);
         }
     }
 
