@@ -53,6 +53,13 @@ public sealed class Camera3D
     /// </summary>
     public double ProximitySpeedScale { get; set; } = 1.0;
 
+    /// <summary>
+    /// Reference frame drift velocity (m/s, galaxy space). Applied every frame so
+    /// the camera coasts with the dominant body when no keys are held.
+    /// Set to DVec3.Zero to disable (default).
+    /// </summary>
+    public DVec3 BaseVelocity { get; set; } = DVec3.Zero;
+
     // ── Mouse look state ──────────────────────────────────────────────────────
     private Point _prevMousePos;
     private bool  _wasRightHeld;
@@ -163,6 +170,7 @@ public sealed class Camera3D
         if (keys.IsKeyDown(Keys.F)) move -= ToDVec3(Up);
 
         double len = move.Length;
+        UniversePosition += BaseVelocity * dt;
         if (len > 0.001)
             UniversePosition += (move / len) * speed * dt;
     }

@@ -67,6 +67,14 @@ public sealed class SpaceSimulation : Simulation
     public void SetWorldState(Star star, StarSystem system, DVec3 refPos, double gameTime)
         => _worldSnapshot = new WorldSnapshot(star, system, refPos, gameTime);
 
+    // ── Reference frame velocity (written by main thread, read by sim thread) ─
+    private sealed record RefVelSnapshot(double X, double Y, double Z);
+    private volatile RefVelSnapshot? _refVelSnapshot;
+
+    /// <summary>Sets the flight-assist zero point — ship holds this velocity when not thrusting.</summary>
+    public void SetReferenceVelocity(DVec3 vel)
+        => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z);
+
     // ── Sensors ───────────────────────────────────────────────────────────────
     private readonly GravitySensor              _gravity       = new();
     private readonly AtmosphericPressureSensor  _atmPressure   = new("AtmosphericSensor");
@@ -100,7 +108,9 @@ public sealed class SpaceSimulation : Simulation
 
         // ── Translation (velocity-target stub) ───────────────────────────
         // Replace with force-based Newtonian (F=ma) once engine/power system exists.
-        ship.ApplyVelocityTarget(input.ThrustForward, input.ThrustLateral, input.ThrustVertical);
+        var rv = _refVelSnapshot;
+        var baseVel = rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
+        ship.ApplyVelocityTarget(input.ThrustForward, input.ThrustLateral, input.ThrustVertical, baseVel);
         ship.Position += ship.Velocity * dt;
 
         // ── Publish snapshot for main thread ──────────────────────────────

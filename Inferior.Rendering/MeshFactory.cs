@@ -119,7 +119,7 @@ public static class MeshFactory
         var verts   = new VertexPositionNormalTexture[24];
         var indices = new int[36];
 
-        // Face data: normal, up-right basis, winding (CW under CullCounterClockwise)
+        // Face data: normal, up-right basis, bottom-left corner
         // Each face: BL, BR, TR, TL in the face's local UV space
         (Vector3 n, Vector3 u, Vector3 r, Vector3 bl)[] faces =
         [
@@ -141,9 +141,9 @@ public static class MeshFactory
             verts[v + 2] = new(bl + r + u,        n, new Vector2(1, 0));
             verts[v + 3] = new(bl + u,            n, new Vector2(0, 0));
 
-            // CW winding: BL→BR→TR, BL→TR→TL
-            indices[idx++] = v; indices[idx++] = v+1; indices[idx++] = v+2;
-            indices[idx++] = v; indices[idx++] = v+2; indices[idx++] = v+3;
+            // CW in DirectX screen space (matches sphere — visible with CullCounterClockwise)
+            indices[idx++] = v; indices[idx++] = v+2; indices[idx++] = v+1;
+            indices[idx++] = v; indices[idx++] = v+3; indices[idx++] = v+2;
             v += 4;
         }
 

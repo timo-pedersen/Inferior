@@ -121,7 +121,7 @@ public sealed class SystemSpaceState : GameState
     private ToggleButton?    _shieldToggleButton;
     private Action<double>?  _shieldCapacitorHandler;
     private SystemConsole?   _console;
-    private DirectionBall?   _dirBall;
+    private DirectionBall?   _systemDirBall;
     private DirectionBall?   _cockpitDirBall;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
@@ -364,14 +364,14 @@ public sealed class SystemSpaceState : GameState
         instrPanel.Add(_connectorNeedle);
         instrPanel.Add(_shieldCapacitorMeter);
 
-        _dirBall = new DirectionBall
+        _systemDirBall = new DirectionBall
         {
             Header = "HEADING",
             Bounds = new Rectangle(0, 0, innerW, innerW),
         };
 
         var navPanel = new Panel { DrawBackground = false, DrawBorder = false };
-        navPanel.Add(_dirBall);
+        navPanel.Add(_systemDirBall);
 
         _rightPanel = new EdgePanelHost(PanelEdge.Right)
         {
@@ -672,6 +672,7 @@ public sealed class SystemSpaceState : GameState
         else if (_debugCameraMode)
         {
             // Debug camera — free-look, ship receives no input and stays put
+            _camera.BaseVelocity = _refVelocity;
             _camera.Update(dt, mouse, keys);
             _simulation.SetInput(PlayerInput.Zero);
         }
@@ -685,10 +686,10 @@ public sealed class SystemSpaceState : GameState
         }
 
         _gameTimeSeconds += dt;
-        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.00001f, 50_000f);
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, ComputeNearClip(), 50_000f);
 
         // Update direction balls — both the right-panel ball and the cockpit center ball
-        UpdateDirectionBall(_dirBall);
+        UpdateDirectionBall(_systemDirBall);
         UpdateDirectionBall(_cockpitDirBall);
 
         // Rebuild body positions — collect in ecliptic space then rotate to galaxy space
@@ -719,9 +720,11 @@ public sealed class SystemSpaceState : GameState
         DVec3 shipPosForTargeting = _simulation.ShipState?.Position ?? _camera.UniversePosition;
         _targeting.Update(shipPosForTargeting, _star.GalacticPos, _bodyPositions, _stationPositions);
         UpdateTargetingUI();
+        UpdateLandingRadar();
 
         // Update reference frame (zero-speed object)
-        UpdateReferenceFrame(shipPosForTargeting);
+        UpdateReferenceFrame(_camera.UniversePosition);
+        _simulation.SetReferenceVelocity(_refVelocity);
 
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)
@@ -1541,7 +1544,7 @@ public sealed class SystemSpaceState : GameState
             toStar = toStar / toStar.Length;
             ball.SetVector("star",
                 new Vector3((float)toStar.X, (float)toStar.Y, (float)toStar.Z),
-                new Color(255, 220, 80), "★");
+                new Color(255, 220, 80), "*"); // "★"
         }
 
         var gravEcliptic = new Vector3((float)_gravDirX, (float)_gravDirY, (float)_gravDirZ);
@@ -1576,13 +1579,13 @@ public sealed class SystemSpaceState : GameState
 
     private void UpdateReferenceFrame(DVec3 shipPos)
     {
-        const double RefSwitchDist = 10_000.0; // 10 km
+        const double StationDist = 25_000.0; // 25 km
 
+        // Priority 1: close station
         foreach (var (station, stPos) in _stationPositions)
         {
-            if ((stPos - shipPos).Length < RefSwitchDist)
+            if ((stPos - shipPos).Length < StationDist)
             {
-                // Numerically differentiate station position to get orbital velocity
                 DVec3 p0 = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds));
                 DVec3 p1 = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds + 1.0));
                 _refVelocity = p1 - p0;
@@ -1591,8 +1594,96 @@ public sealed class SystemSpaceState : GameState
             }
         }
 
-        _refVelocity = DVec3.Zero;
-        _refName     = _star.Name;
+        // Priority 2: dominant body via gravity vector + gravitational weighting.
+        //
+        // Score = (m/r²) × cos(angle_between_dir_and_gravity).
+        // Top-3 cull by m/r² first so a tiny distant planet behind the star can
+        // never beat the star itself on angle alone.
+        var gravEcl = new DVec3(_gravDirX, _gravDirY, _gravDirZ);
+        if (gravEcl.Length < 0.01)
+        {
+            _refVelocity = DVec3.Zero;
+            _refName     = _star.Name;
+            return;
+        }
+        DVec3 gravGal = EclipticToGalaxy(gravEcl);
+
+        // Top-3 slots by m/r² (named variables — no heap allocation)
+        OrbitalBody? t0b = null, t1b = null, t2b = null;
+        DVec3 t0p = DVec3.Zero, t1p = DVec3.Zero, t2p = DVec3.Zero;
+        double t0w = 0, t1w = 0, t2w = 0;
+
+        void Keep(OrbitalBody? body, DVec3 pos, double w)
+        {
+            if      (w > t0w) { t2b=t1b; t2p=t1p; t2w=t1w; t1b=t0b; t1p=t0p; t1w=t0w; t0b=body; t0p=pos; t0w=w; }
+            else if (w > t1w) { t2b=t1b; t2p=t1p; t2w=t1w; t1b=body; t1p=pos; t1w=w; }
+            else if (w > t2w) { t2b=body; t2p=pos; t2w=w; }
+        }
+
+        double starDist = shipPos.Length;
+        if (starDist > 100.0) Keep(null, DVec3.Zero, _star.MassKg / (starDist * starDist));
+        foreach (var (body, pos) in _bodyPositions)
+        {
+            double d = (pos - shipPos).Length;
+            if (d > 100.0) Keep(body, pos, body.MassKg / (d * d));
+        }
+
+        OrbitalBody? bestBody = null; DVec3 bestPos = DVec3.Zero;
+        double bestScore = 0.0; double winCos = 1.0;
+
+        void Score(OrbitalBody? body, DVec3 pos, double w)
+        {
+            if (w == 0.0) return;
+            DVec3 to = pos - shipPos; double d = to.Length;
+            if (d < 100.0) return;
+            var dir = new DVec3(to.X / d, to.Y / d, to.Z / d);
+            double cos = dir.X * gravGal.X + dir.Y * gravGal.Y + dir.Z * gravGal.Z;
+            if (cos <= 0.0) return;
+            double s = w * cos;
+            if (s > bestScore) { bestScore = s; winCos = cos; bestBody = body; bestPos = pos; }
+        }
+
+        Score(t0b, t0p, t0w); Score(t1b, t1p, t1w); Score(t2b, t2p, t2w);
+
+        DVec3 domVelocity; string domName;
+        if (bestBody == null)
+        {
+            domVelocity = DVec3.Zero;
+            domName     = _star.Name;
+        }
+        else
+        {
+            DVec3 p1 = GetBodyGalaxyPosition(bestBody, _gameTimeSeconds + 1.0);
+            domVelocity = p1 - bestPos;
+            domName     = bestBody.Name;
+        }
+
+        // Blend: fully locked at ≤ 45°, linear fade to 0 at 90°
+        double angle   = System.Math.Acos(System.Math.Clamp(winCos, -1.0, 1.0));
+        double lockRad = System.Math.PI / 4.0;
+        double zeroRad = System.Math.PI / 2.0;
+        double blend   = angle <= lockRad ? 1.0
+                       : angle <  zeroRad ? 1.0 - (angle - lockRad) / (zeroRad - lockRad)
+                       : 0.0;
+
+        _refVelocity = domVelocity * blend;
+        _refName     = domName;
+    }
+
+    // Returns the galaxy-space position of a planet or moon at the given game time.
+    private DVec3 GetBodyGalaxyPosition(OrbitalBody body, double gameTime)
+    {
+        foreach (var planet in _system.Planets)
+        {
+            if (ReferenceEquals(planet, body))
+                return EclipticToGalaxy(planet.GetPosition(gameTime, DVec3.Zero));
+            foreach (var moon in planet.Children)
+            {
+                if (ReferenceEquals(moon, body))
+                    return EclipticToGalaxy(moon.GetPosition(gameTime, planet.GetPosition(gameTime, DVec3.Zero)));
+            }
+        }
+        return EclipticToGalaxy(body.GetPosition(gameTime, DVec3.Zero));
     }
 
     private void UpdateTargetingUI()
@@ -1637,27 +1728,28 @@ public sealed class SystemSpaceState : GameState
             if (_targetLineHyp != null) _targetLineHyp.Text = "Hyp: None";
         }
 
-        // Landing radar — active when nav target is a station.
-        // Project ship→station relative vector onto ecliptic XZ plane for top-down view.
-        if (_landingRadar != null)
+    }
+
+    private void UpdateLandingRadar()
+    {
+        if (_landingRadar == null) return;
+
+        var navStation = _targeting.NavStationTarget;
+        if (navStation != null)
         {
-            var navStation = _targeting.NavStationTarget;
-            if (navStation != null)
-            {
-                DVec3 relGalaxy   = (_simulation.ShipState?.Position ?? _camera.UniversePosition)
-                                  - _targeting.NavTargetPosition;
-                DVec3 relEcliptic = GalaxyToEcliptic(relGalaxy);
-                _landingRadar.HasStation     = true;
-                _landingRadar.StationName    = navStation.Name;
-                _landingRadar.DistanceMeters = _targeting.NavTargetDistance;
-                _landingRadar.RelX           = (float)relEcliptic.X;
-                _landingRadar.RelZ           = (float)relEcliptic.Z;
-            }
-            else
-            {
-                _landingRadar.HasStation  = false;
-                _landingRadar.StationName = "";
-            }
+            DVec3 relGalaxy   = (_simulation.ShipState?.Position ?? _camera.UniversePosition)
+                              - _targeting.NavTargetPosition;
+            DVec3 relEcliptic = GalaxyToEcliptic(relGalaxy);
+            _landingRadar.HasStation     = true;
+            _landingRadar.StationName    = navStation.Name;
+            _landingRadar.DistanceMeters = _targeting.NavTargetDistance;
+            _landingRadar.RelX           = (float)relEcliptic.X;
+            _landingRadar.RelZ           = (float)relEcliptic.Z;
+        }
+        else
+        {
+            _landingRadar.HasStation  = false;
+            _landingRadar.StationName = "";
         }
     }
 
@@ -1789,6 +1881,40 @@ public sealed class SystemSpaceState : GameState
     {
         _rightPanel?.ApplyState(layout.RightActiveTab, layout.RightOpen);
         _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
+    }
+
+    // ── Near clip ─────────────────────────────────────────────────────────────
+
+    // Near clip is proportional to the distance from the camera to the nearest station surface.
+    // This keeps it large (10 km) in open space — good z-precision at system scale —
+    // and shrinks it as you approach a station, reaching ~1 mm at hull contact.
+    // Far-distance z-precision degrades when up-close, but that's acceptable: nothing
+    // at AU-scale distances competes for depth buffer precision when you're docking.
+    private float ComputeNearClip()
+    {
+        DVec3  camPos        = _camera.UniversePosition;
+        double minSurf       = double.MaxValue;
+        double nearestRadius = 250.0; // fallback: smallest station size
+
+        foreach (var (station, stPos) in _stationPositions)
+        {
+            double r    = StationPhysicalRadius(station);
+            double dist = (stPos - camPos).Length;
+            double surf = System.Math.Max(dist - r, 0.0);
+            if (surf < minSurf) { minSurf = surf; nearestRadius = r; }
+        }
+
+        if (minSurf < 500_000.0) // within 500 km of any station surface
+        {
+            // Floor the reference distance at the station's own radius so Z precision
+            // is preserved even when flying through the interior (where surfDist = 0
+            // would otherwise collapse the depth buffer to a single value).
+            double refDist    = System.Math.Max(minSurf, nearestRadius);
+            double nearMeters = refDist * 0.001;
+            return (float)(nearMeters * Camera3D.RenderScale);
+        }
+
+        return 0.00001f; // default: 10 km near clip
     }
 
     // ── Proximity speed scale ─────────────────────────────────────────────────

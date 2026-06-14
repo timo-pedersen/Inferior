@@ -115,11 +115,11 @@ public sealed class Ship
     /// Set velocity toward the given thrust direction at MoveSpeedMs.
     /// Components are each -1..1. Zero input zeroes velocity (flight-assist-always-on stub).
     /// </summary>
-    public void ApplyVelocityTarget(double fwd, double lat, double vert)
+    public void ApplyVelocityTarget(double fwd, double lat, double vert, DVec3 baseVelocity = default)
     {
         var dir = Forward * fwd + Right * lat + Up * vert;
         double len = dir.Length;
-        Velocity = len > 0.001 ? dir / len * MoveSpeedMs : DVec3.Zero;
+        Velocity = baseVelocity + (len > 0.001 ? dir / len * MoveSpeedMs : DVec3.Zero);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
