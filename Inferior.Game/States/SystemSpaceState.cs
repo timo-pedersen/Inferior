@@ -126,6 +126,9 @@ public sealed class SystemSpaceState : GameState
     private Action<double>?  _gravDirZHandler;
     private double           _gravDirX, _gravDirY, _gravDirZ;
 
+    // ── Targeting ─────────────────────────────────────────────────────────────
+    private readonly TargetingSystem _targeting = new();
+
     // ── SCAN tab ──────────────────────────────────────────────────────────────
     private SpectrumGraph?   _spectrumGraph;
     private Button?          _spectrumScanButton;
@@ -465,6 +468,13 @@ public sealed class SystemSpaceState : GameState
         if (payload is SystemSpacePayload { Layout: { } layout })
             ApplyCockpitLayout(layout);
 
+        // Restore nav target selected in system map
+        if (payload is SystemSpacePayload ssp)
+        {
+            if (ssp.NavBody != null)          _targeting.SetNavTarget(ssp.NavBody);
+            else if (ssp.NavStation != null)  _targeting.SetNavTarget(ssp.NavStation);
+        }
+
         // Start in ship-control mode — panels retracted, handles and buttons hidden
         ApplyUiMode(false);
 
@@ -622,6 +632,10 @@ public sealed class SystemSpaceState : GameState
             DVec3 eclipticPos = _system.GetStationPosition(station, _gameTimeSeconds);
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
+
+        // Update targeting system — uses ship position for distances/directions
+        DVec3 shipPosForTargeting = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+        _targeting.Update(shipPosForTargeting, _star.GalacticPos, _gameTimeSeconds, _system);
 
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)
@@ -1356,7 +1370,9 @@ public sealed class SystemSpaceState : GameState
         {
             var (pos, ori) = CaptureShipState();
             _pendingTransition = StateTransition.To(GameStateId.SystemMap,
-                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout(), pos, ori));
+                new SystemMapPayload(_star, _gameTimeSeconds, CaptureCockpitLayout(), pos, ori,
+                    _targeting.NavBodyTarget,
+                    _targeting.NavStationTarget));
         }
 
         if (nPressed)

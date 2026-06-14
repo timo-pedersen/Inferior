@@ -58,6 +58,10 @@ public sealed class SystemMapState : GameState
     private OrbitalBody?     _hoveredBody;
     private StateTransition? _pendingTransition;
 
+    // ── Nav target (right-click selection, passed back to flight) ─────────────
+    private OrbitalBody? _navBody;
+    private Station?     _navStation;
+
     // Preserved across round-trips to SystemSpace
     private CockpitLayout _cockpitLayout    = CockpitLayout.Default;
     private DVec3?        _spawnPos;
@@ -136,6 +140,8 @@ public sealed class SystemMapState : GameState
             _cockpitLayout    = mp.Layout;
             _spawnPos         = mp.SpawnPos;
             _spawnOrientation = mp.SpawnOrientation;
+            _navBody          = mp.NavBody;
+            _navStation       = mp.NavStation;
         }
         else if (payload is (Star returnStar, double returnTime))
         {
@@ -167,7 +173,8 @@ public sealed class SystemMapState : GameState
 
         _backButton.Clicked += _ =>
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout, _spawnPos, _spawnOrientation));
+                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout, _spawnPos, _spawnOrientation,
+                    _navBody, _navStation));
 
         _timeButton.Clicked += _ =>
         {
@@ -214,6 +221,7 @@ public sealed class SystemMapState : GameState
 
         HandleZoom(mouse);
         HandleLeftButton(mouse, now);
+        HandleRightButton(mouse);
         HandleHover(mouse);
         HandleKeyboard(keys, mouse);
 
@@ -310,7 +318,8 @@ public sealed class SystemMapState : GameState
                 // Launch into system flight near this body (or star)
                 _pendingTransition = StateTransition.To(
                     GameStateId.SystemSpace,
-                    new SystemSpacePayload(_star, hitBody, _gameTimeSeconds, _cockpitLayout));
+                    new SystemSpacePayload(_star, hitBody, _gameTimeSeconds, _cockpitLayout,
+                        NavBody: _navBody, NavStation: _navStation));
                 return;
             }
 
@@ -322,6 +331,43 @@ public sealed class SystemMapState : GameState
 
         if (justReleased)
             _isDragging = false;
+    }
+
+    private void HandleRightButton(MouseState mouse)
+    {
+        bool justReleased = mouse.RightButton == ButtonState.Released
+                         && _prevMouse.RightButton == ButtonState.Pressed;
+        if (!justReleased) return;
+
+        var mousePos = new Vector2(mouse.X, mouse.Y);
+
+        // Check stations first (they're smaller hit targets)
+        foreach (var station in _system.Stations)
+        {
+            DVec3   stationPos = GetStationSystemPos(station);
+            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            float   dx = mousePos.X - screen.X;
+            float   dy = mousePos.Y - screen.Y;
+            if (MathF.Sqrt(dx*dx + dy*dy) <= 10f)
+            {
+                _navBody    = null;
+                _navStation = station;
+                return;
+            }
+        }
+
+        // Then check bodies (planets and moons)
+        OrbitalBody? hitBody = HitTestBody(mousePos);
+        if (hitBody != null)
+        {
+            _navBody    = hitBody;
+            _navStation = null;
+            return;
+        }
+
+        // Right-click on empty space (or star) clears nav target
+        _navBody    = null;
+        _navStation = null;
     }
 
     private void HandleHover(MouseState mouse)
@@ -336,7 +382,8 @@ public sealed class SystemMapState : GameState
         if (escPressed || mPressed)
             // Esc or M = back to flight (M toggles the system map)
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout, _spawnPos, _spawnOrientation));
+                new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout, _spawnPos, _spawnOrientation,
+                    _navBody, _navStation));
         else if (nPressed)
             // N = galaxy map (pass ship position through so galaxy map can hand it back to flight)
             _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
@@ -462,6 +509,9 @@ public sealed class SystemMapState : GameState
                 DrawCircle(sb, screen, radius + 5f, ColSelected, 24);
             else if (hovered)
                 DrawCircle(sb, screen, radius + 4f, ColHovered, 24);
+
+            if (_navBody == body)
+                DrawCircle(sb, screen, radius + 8f, ColNavTarget, 24);
         }
     }
 
@@ -557,6 +607,7 @@ public sealed class SystemMapState : GameState
 
     private static readonly Color ColStation     = new(80, 200, 140);
     private static readonly Color ColStationName = new(80, 180, 120);
+    private static readonly Color ColNavTarget   = new(255, 200, 50);
 
     private void DrawStations(SpriteBatch sb)
     {
@@ -575,10 +626,14 @@ public sealed class SystemMapState : GameState
                 _                         => 4f,
             };
 
-            DrawDot(sb, screen, r, ColStation);
+            bool isNavStation = _navStation == station;
+            Color stColor = isNavStation ? ColNavTarget : ColStation;
+            DrawDot(sb, screen, r, stColor);
             // Cross-hair lines to distinguish from bodies
-            sb.Draw(_pixel, new Rectangle((int)(screen.X - r * 1.8f), (int)screen.Y, (int)(r * 3.6f), 1), ColStation * 0.6f);
-            sb.Draw(_pixel, new Rectangle((int)screen.X, (int)(screen.Y - r * 1.8f), 1, (int)(r * 3.6f)), ColStation * 0.6f);
+            sb.Draw(_pixel, new Rectangle((int)(screen.X - r * 1.8f), (int)screen.Y, (int)(r * 3.6f), 1), stColor * 0.6f);
+            sb.Draw(_pixel, new Rectangle((int)screen.X, (int)(screen.Y - r * 1.8f), 1, (int)(r * 3.6f)), stColor * 0.6f);
+            if (isNavStation)
+                DrawCircle(sb, screen, r + 8f, ColNavTarget, 24);
         }
     }
 
@@ -616,7 +671,7 @@ public sealed class SystemMapState : GameState
     {
         int x = 16;
         int y = _gd.Viewport.Height - 68;
-        DrawText(sb, "Double-click body/star - approach   Scroll - zoom   Home - recentre",
+        DrawText(sb, "Double-click body/star - approach   Right-click - set nav target   Scroll - zoom   Home - recentre",
             new Vector2(x, y), ColTextDim, 0.72f);
         y += 18;
         DrawText(sb, "N - galaxy map   Esc - back to flight",

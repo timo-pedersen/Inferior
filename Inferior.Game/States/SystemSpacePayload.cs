@@ -9,6 +9,7 @@ namespace Inferior.Game.States;
 /// TargetBody  != null  → spawn near that body (approach from system map double-click).
 /// SpawnPos    != null  → restore ship to saved position/orientation (back from maps).
 /// Both null            → default spawn near star (first entry or galaxy-map Esc).
+/// NavBody/NavStation   → nav target selected on system map; applied to TargetingSystem on entry.
 /// </summary>
 public record SystemSpacePayload(
     Star           Star,
@@ -16,4 +17,6 @@ public record SystemSpacePayload(
     double         GameTime,
     CockpitLayout? Layout           = null,
     DVec3?         SpawnPos         = null,
-    Quaternion?    SpawnOrientation = null);
+    Quaternion?    SpawnOrientation = null,
+    OrbitalBody?   NavBody          = null,
+    Station?       NavStation       = null);
