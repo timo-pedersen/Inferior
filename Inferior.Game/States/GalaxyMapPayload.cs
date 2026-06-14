@@ -10,7 +10,9 @@ namespace Inferior.Game.States;
 /// Esc or N can return to flight exactly where the player was.
 /// </summary>
 public record GalaxyMapPayload(
-    Star       CurrentStar,
-    double     GameTime,
-    DVec3?     SpawnPos         = null,
-    Quaternion? SpawnOrientation = null);
+    Star          CurrentStar,
+    double        GameTime,
+    DVec3?        SpawnPos         = null,
+    Quaternion?   SpawnOrientation = null,
+    OrbitalBody?  NavBody          = null,
+    Station?      NavStation       = null);

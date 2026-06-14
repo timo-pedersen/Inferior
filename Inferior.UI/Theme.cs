@@ -51,6 +51,11 @@ public sealed class Theme
     public Color ToggleIndicatorOff     { get; set; }  // small dot/square when off
     public Color ToggleIndicatorOn      { get; set; }  // small dot/square when on
 
+    // ── Targeting ─────────────────────────────────────────────────────────────
+    public Color TargetShip   { get; set; }  // ship target indicator (red)
+    public Color TargetNav    { get; set; }  // nav target indicator (yellow)
+    public Color TargetHyp    { get; set; }  // hyperspace target indicator (blue)
+
     // ── Accent / focus ────────────────────────────────────────────────────────
     public Color Accent       { get; set; }  // focus rings, highlights
 
@@ -121,6 +126,11 @@ public sealed class Theme
         ToggleIndicatorOff  = new Color(60, 65, 80),
         ToggleIndicatorOn   = new Color(80, 210, 100),
 
+        // Targeting
+        TargetShip = new Color(220, 60,  60),
+        TargetNav  = new Color(255, 200, 50),
+        TargetHyp  = new Color(80,  160, 255),
+
         // Accent
         Accent = new Color(80, 160, 220),
 
@@ -177,6 +187,10 @@ public sealed class Theme
         TogglePending       = new Color(240, 215, 120),
         ToggleIndicatorOff  = new Color(170, 175, 185),
         ToggleIndicatorOn   = new Color(50,  180, 80),
+
+        TargetShip = new Color(200, 50,  50),
+        TargetNav  = new Color(200, 150, 20),
+        TargetHyp  = new Color(50,  120, 220),
 
         Accent = new Color(60, 100, 200),
 

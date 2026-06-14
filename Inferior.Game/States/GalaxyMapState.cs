@@ -44,6 +44,8 @@ public sealed class GalaxyMapState : GameState
     private double     _storedGameTime   = 0.0;
     private DVec3?     _spawnPos;
     private Quaternion? _spawnOrientation;
+    private OrbitalBody? _navBody;
+    private Station?     _navStation;
 
     // Pending transition — set in input handlers, consumed in Update
     private StateTransition? _pendingTransition;
@@ -126,6 +128,8 @@ public sealed class GalaxyMapState : GameState
             _storedGameTime   = gmp.GameTime;
             _spawnPos         = gmp.SpawnPos;
             _spawnOrientation = gmp.SpawnOrientation;
+            _navBody          = gmp.NavBody;
+            _navStation       = gmp.NavStation;
             _visitedSystems.Add(_currentSystem.GalaxyIndex);
             _cameraPos = new Vector2(
                 (float)_currentSystem.GalacticPos.X,
@@ -403,7 +407,8 @@ public sealed class GalaxyMapState : GameState
         {
             // Esc or N = back to flight (N toggles the galaxy map)
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_currentSystem, null, _storedGameTime, null, _spawnPos, _spawnOrientation));
+                new SystemSpacePayload(_currentSystem, null, _storedGameTime, null, _spawnPos, _spawnOrientation,
+                    _navBody, _navStation));
         }
         else if (mPressed)
         {

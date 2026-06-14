@@ -233,6 +233,8 @@ public sealed class StarSystem
                 candidates.Add(moon);
         }
 
+        var usedNames = new HashSet<string>();
+
         for (int i = 0; i < count; i++)
         {
             OrbitalBody? parent;
@@ -240,19 +242,23 @@ public sealed class StarSystem
 
             if (candidates.Count == 0 || rng.NextBool(0.1))
             {
-                // Orbit the star directly (rare, or when no planets exist)
                 parent     = null;
                 parentMass = star.MassKg;
             }
             else
             {
-                // Pick a random planet or moon to orbit
                 int idx = rng.NextInt(0, candidates.Count - 1);
                 parent     = candidates[idx];
                 parentMass = parent.MassKg;
             }
 
-            var station = Station.Generate(star.Name, parent, parentMass, rng.Derive(i));
+            // Re-roll up to 8 times to get a unique name within this system
+            var station    = Station.Generate(star.Name, parent, parentMass, rng.Derive(i));
+            int retryBits  = 0;
+            while (usedNames.Contains(station.Name) && retryBits < 8)
+                station = Station.Generate(star.Name, parent, parentMass, rng.Derive(i, ++retryBits));
+
+            usedNames.Add(station.Name);
             system._stations.Add(station);
         }
     }

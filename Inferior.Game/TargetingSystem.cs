@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using System.Collections.Generic;
 
 namespace Inferior.Game;
 
@@ -99,22 +100,26 @@ public sealed class TargetingSystem
 
     /// <summary>
     /// Recomputes all target positions, distances, and directions from ship position.
-    /// currentStarGalPos: galactic position of the current star (light-years) — used for
-    /// hyperspace distance calculation.
+    /// bodyPositions / stationPositions: galaxy-space positions already computed this frame
+    ///   (after ecliptic rotation) — avoids precision loss from double→float→double roundtrip.
+    /// currentStarGalPos: galactic position of the current star (light-years) — for hyperspace.
     /// </summary>
     public void Update(
-        DVec3      shipPos,
-        DVec3      currentStarGalPos,
-        double     gameTime,
-        StarSystem system)
+        DVec3 shipPos,
+        DVec3 currentStarGalPos,
+        IReadOnlyList<(OrbitalBody body, DVec3 galaxyPos)>    bodyPositions,
+        IReadOnlyList<(Station station, DVec3 galaxyPos)>     stationPositions)
     {
-        UpdateNavTarget(shipPos, gameTime, system);
+        UpdateNavTarget(shipPos, bodyPositions, stationPositions);
         UpdateHyperspaceTarget(currentStarGalPos);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private void UpdateNavTarget(DVec3 shipPos, double gameTime, StarSystem system)
+    private void UpdateNavTarget(
+        DVec3 shipPos,
+        IReadOnlyList<(OrbitalBody body, DVec3 galaxyPos)>  bodyPositions,
+        IReadOnlyList<(Station station, DVec3 galaxyPos)>   stationPositions)
     {
         if (!HasNavTarget) return;
 
@@ -122,17 +127,19 @@ public sealed class TargetingSystem
 
         if (_navIsStar)
         {
-            // Star is always at system origin
             targetPos = DVec3.Zero;
         }
         else if (_navBody != null)
         {
-            // Resolve body's current position (handles planets and moons via parent chain)
-            targetPos = ResolveBodyPosition(_navBody, gameTime, system);
+            targetPos = DVec3.Zero; // fallback
+            foreach (var (body, pos) in bodyPositions)
+                if (ReferenceEquals(body, _navBody)) { targetPos = pos; break; }
         }
         else if (_navStation != null)
         {
-            targetPos = system.GetStationPosition(_navStation, gameTime);
+            targetPos = DVec3.Zero; // fallback
+            foreach (var (station, pos) in stationPositions)
+                if (ReferenceEquals(station, _navStation)) { targetPos = pos; break; }
         }
         else
         {
@@ -154,28 +161,5 @@ public sealed class TargetingSystem
         double dist  = delta.Length;
         HyperspaceTargetDistanceLY = dist;
         HyperspaceTargetDirection  = dist > 1e-10 ? delta * (1.0 / dist) : DVec3.Zero;
-    }
-
-    private static DVec3 ResolveBodyPosition(OrbitalBody body, double gameTime, StarSystem system)
-    {
-        // Check if this body is a planet
-        foreach (var planet in system.Planets)
-        {
-            if (ReferenceEquals(planet, body))
-                return planet.GetPosition(gameTime, DVec3.Zero);
-
-            // Check moons of this planet
-            foreach (var moon in planet.Children)
-            {
-                if (ReferenceEquals(moon, body))
-                {
-                    DVec3 planetPos = planet.GetPosition(gameTime, DVec3.Zero);
-                    return moon.GetPosition(gameTime, planetPos);
-                }
-            }
-        }
-
-        // Fallback: treat as orbiting star
-        return body.GetPosition(gameTime, DVec3.Zero);
     }
 }

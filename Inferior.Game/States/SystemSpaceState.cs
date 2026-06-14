@@ -59,6 +59,13 @@ public sealed class SystemSpaceState : GameState
     private Effect?     _atmosEffect;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
+    // Double-precision 3×3 rotation matrix for EclipticToGalaxy.
+    // Avoids float quantisation (~9 km at 1 AU) that caused station jumpiness.
+    // Rows: galaxy-space X/Y/Z expressed in ecliptic basis.
+    private double _er00 = 1, _er01, _er02;
+    private double _er10, _er11 = 1, _er12;
+    private double _er20, _er21, _er22 = 1;
+
     private VertexBuffer _sphereVb = null!;
     private IndexBuffer  _sphereIb = null!;
     private int          _sphereTriCount;
@@ -95,8 +102,8 @@ public sealed class SystemSpaceState : GameState
     // Offset and scale are in units of the station's apparent render radius.
     // Generated once per system entry from station name seed.
     private readonly record struct StationModule(Vector3 Offset, Vector3 Scale, Color Color);
-    private readonly List<(Galaxy.Station station, StationModule[] modules)> _stationGeometry = [];
-    private readonly List<(Galaxy.Station station, DVec3 pos)>               _stationPositions = [];
+    private readonly Dictionary<Galaxy.Station, StationModule[]>    _stationGeometry  = [];
+    private readonly List<(Galaxy.Station station, DVec3 pos)>      _stationPositions = [];
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
@@ -134,6 +141,13 @@ public sealed class SystemSpaceState : GameState
     private Label?              _targetLineHyp;
     private LandingRadarPanel?  _landingRadar;
 
+    // ── Reference frame (zero-speed) tracking ────────────────────────────────
+    private DVec3  _refVelocity;               // current zero-speed velocity in galaxy space
+    private string _refName = "";              // name of the reference object
+    private DVec3  _prevCameraPos;
+    private bool   _prevCameraPosValid;
+    private DVec3  _cameraActualVelocity;      // camera position delta / dt this frame
+
     // ── SCAN tab ──────────────────────────────────────────────────────────────
     private SpectrumGraph?   _spectrumGraph;
     private Button?          _spectrumScanButton;
@@ -146,7 +160,10 @@ public sealed class SystemSpaceState : GameState
     private bool _uiMouseMode;
     private bool _debugCameraMode;
 
-    // Invert blend — used for the crosshair (src - dest = 1 - dest when src is white)
+    // Colour-invert blend for the crosshair: result = src - dest.
+    // With white source this gives (1-R, 1-G, 1-B) — readable against any background.
+    // Static to follow the MonoGame convention for built-in BlendState singletons;
+    // the OS reclaims the GPU resource on application exit.
     private static readonly BlendState _invertBlend = new()
     {
         ColorBlendFunction    = BlendFunction.Subtract,
@@ -266,8 +283,9 @@ public sealed class SystemSpaceState : GameState
         // Station module layouts — generated once from name-derived seed
         _stationGeometry.Clear();
         foreach (var station in _system.Stations)
-            _stationGeometry.Add((station, GenerateStationModules(station)));
+            _stationGeometry[station] = GenerateStationModules(station);
         _stationPositions.Clear();
+        _prevCameraPosValid = false;
 
         // Skybox — galaxy stars projected onto a far sphere around the current system
         (_skyboxPoints, _skyboxGlowVerts) = BuildSkybox(_star, GalaxyGenerator.Generate());
@@ -492,25 +510,28 @@ public sealed class SystemSpaceState : GameState
         _cockpitRail.RightWing.Add(_shieldToggleButton);
 
         // ── LeftWing: targeting direction ball + 3-line target readout ────────
+        // Ball has no header — use all 76px for the sphere so it matches text height.
         _targetingDirBall = new DirectionBall
         {
-            Header = "TARGETS",
-            Bounds = new Rectangle(4, 4, 120, 120),
+            Header = "",
+            Bounds = new Rectangle(4, 6, 76, 76),
         };
-        _targetLineShip = new Label("Target: None", new Rectangle(132, 10, 280, 20))
+        // Labels start just to the right of the ball; colours match DirectionBall dots.
+        var tc = _ui!.Theme;
+        _targetLineShip = new Label("Target: None", new Rectangle(88, 10, 280, 20))
         {
             FontScale = 0.72f,
-            TextColor = ColHUD,
+            TextColor = tc.TargetShip,
         };
-        _targetLineNav = new Label("Nav: None", new Rectangle(132, 34, 280, 20))
+        _targetLineNav = new Label("Nav: None", new Rectangle(88, 34, 280, 20))
         {
             FontScale = 0.72f,
-            TextColor = ColHUD,
+            TextColor = tc.TargetNav,
         };
-        _targetLineHyp = new Label("Hyp: None", new Rectangle(132, 58, 280, 20))
+        _targetLineHyp = new Label("Hyp: None", new Rectangle(88, 58, 280, 20))
         {
             FontScale = 0.72f,
-            TextColor = ColHUD,
+            TextColor = tc.TargetHyp,
         };
         _cockpitRail.LeftWing.Add(_targetingDirBall);
         _cockpitRail.LeftWing.Add(_targetLineShip);
@@ -688,10 +709,19 @@ public sealed class SystemSpaceState : GameState
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
 
-        // Update targeting system — uses ship position for distances/directions
+        // Track camera actual velocity for relative-speed display in debug mode
+        DVec3 camPos = _camera.UniversePosition;
+        _cameraActualVelocity = _prevCameraPosValid ? (camPos - _prevCameraPos) / dt : DVec3.Zero;
+        _prevCameraPos      = camPos;
+        _prevCameraPosValid = true;
+
+        // Update targeting system with pre-computed galaxy-space positions
         DVec3 shipPosForTargeting = _simulation.ShipState?.Position ?? _camera.UniversePosition;
-        _targeting.Update(shipPosForTargeting, _star.GalacticPos, _gameTimeSeconds, _system);
+        _targeting.Update(shipPosForTargeting, _star.GalacticPos, _bodyPositions, _stationPositions);
         UpdateTargetingUI();
+
+        // Update reference frame (zero-speed object)
+        UpdateReferenceFrame(shipPosForTargeting);
 
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)
@@ -842,12 +872,7 @@ public sealed class SystemSpaceState : GameState
             float   rotAngle = (float)(_gameTimeSeconds * 0.05);
             Matrix  rotation = Matrix.CreateRotationY(rotAngle);
 
-            // Find pre-generated modules for this station
-            StationModule[]? modules = null;
-            foreach (var (s, m) in _stationGeometry)
-                if (ReferenceEquals(s, station)) { modules = m; break; }
-
-            if (modules == null) continue;
+            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
             foreach (var mod in modules)
             {
@@ -1395,31 +1420,42 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawCrosshair(SpriteBatch sb)
     {
-        int cx    = _gd.Viewport.Width  / 2;
-        int cy    = _gd.Viewport.Height / 2;
-        int arm   = 10;
-        int gap   = 4;
+        int cx  = _gd.Viewport.Width  / 2;
+        int cy  = _gd.Viewport.Height / 2;
+        int arm = 10;
+        int gap = 4;
 
-        // Horizontal arms
+        // Four arms only — no centre dot (avoids obscuring distant targets)
         sb.Draw(_pixel, new Rectangle(cx - arm - gap, cy, arm, 1), Color.White);
         sb.Draw(_pixel, new Rectangle(cx + gap + 1,   cy, arm, 1), Color.White);
-        // Vertical arms
         sb.Draw(_pixel, new Rectangle(cx, cy - arm - gap, 1, arm), Color.White);
         sb.Draw(_pixel, new Rectangle(cx, cy + gap + 1,   1, arm), Color.White);
-        // Centre dot
-        sb.Draw(_pixel, new Rectangle(cx - 1, cy - 1, 3, 3), Color.White);
     }
 
     private void DrawHUD(SpriteBatch sb)
     {
-        // Speed indicator — ship velocity in ship mode, debug cam setting otherwise
-        double speedMs = _debugCameraMode
-            ? _camera.MoveSpeedMs
-            : _simulation.ShipState?.Velocity.Length ?? 0.0;
-        DrawText(sb, $"Speed: {Units.FormatSpeed(speedMs)}", new Vector2(16, _gd.Viewport.Height - 80), ColHUD);
+        int bottom = _gd.Viewport.Height;
+
+        // Relative speed — velocity relative to the reference frame object.
+        // Debug mode: camera position delta / dt vs reference.
+        // Ship mode: simulation velocity vs reference.
+        DVec3 movingVel = _debugCameraMode
+            ? _cameraActualVelocity
+            : _simulation.ShipState?.Velocity ?? DVec3.Zero;
+        double relSpeedMs = (movingVel - _refVelocity).Length;
+
+        // In debug mode also show the set fly-speed (scroll-adjusted)
+        if (_debugCameraMode)
+        {
+            DrawText(sb, $"Set: {Units.FormatSpeed(_camera.MoveSpeedMs)}",
+                new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
+        }
+
+        DrawText(sb, $"Speed: {Units.FormatSpeed(relSpeedMs)}  (vs {_refName})",
+            new Vector2(16, bottom - 80), ColHUD);
 
         // Game time
-        DrawText(sb, $"T+{Units.FormatTime(_gameTimeSeconds)}", new Vector2(16, _gd.Viewport.Height - 58), ColHUDDim, 0.8f);
+        DrawText(sb, $"T+{Units.FormatTime(_gameTimeSeconds)}", new Vector2(16, bottom - 58), ColHUDDim, 0.8f);
 
         // Controls hint — changes with mode
         if (_uiMouseMode)
@@ -1460,7 +1496,9 @@ public sealed class SystemSpaceState : GameState
         {
             var (pos, ori) = CaptureShipState();
             _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
-                new GalaxyMapPayload(_star, _gameTimeSeconds, pos, ori));
+                new GalaxyMapPayload(_star, _gameTimeSeconds, pos, ori,
+                    _targeting.NavBodyTarget,
+                    _targeting.NavStationTarget));
         }
 
         int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
@@ -1536,12 +1574,35 @@ public sealed class SystemSpaceState : GameState
         }
     }
 
+    private void UpdateReferenceFrame(DVec3 shipPos)
+    {
+        const double RefSwitchDist = 10_000.0; // 10 km
+
+        foreach (var (station, stPos) in _stationPositions)
+        {
+            if ((stPos - shipPos).Length < RefSwitchDist)
+            {
+                // Numerically differentiate station position to get orbital velocity
+                DVec3 p0 = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds));
+                DVec3 p1 = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds + 1.0));
+                _refVelocity = p1 - p0;
+                _refName     = station.Name;
+                return;
+            }
+        }
+
+        _refVelocity = DVec3.Zero;
+        _refName     = _star.Name;
+    }
+
     private void UpdateTargetingUI()
     {
         if (_targetingDirBall == null) return;
         _targetingDirBall.SetOrientation(_camera.Forward, _camera.Right, _camera.Up);
 
-        // Ship target (red) — stub, no impl yet
+        var tc = _ui?.Theme;
+
+        // Ship target (red stub)
         _targetingDirBall.RemoveVector("ship");
         if (_targetLineShip != null)
             _targetLineShip.Text = "Target: None";
@@ -1549,54 +1610,52 @@ public sealed class SystemSpaceState : GameState
         // Nav target (yellow)
         if (_targeting.HasNavTarget)
         {
-            var d = _targeting.NavTargetDirection;
-            _targetingDirBall.SetVector("nav",
-                new Vector3((float)d.X, (float)d.Y, (float)d.Z),
-                new Color(255, 200, 50), "N");
+            var d    = _targeting.NavTargetDirection;
+            var col  = tc?.TargetNav ?? new Color(255, 200, 50);
+            _targetingDirBall.SetVector("nav", new Vector3((float)d.X, (float)d.Y, (float)d.Z), col, "N");
             if (_targetLineNav != null)
                 _targetLineNav.Text = $"Nav: {_targeting.NavTargetName} ({Units.FormatDistance(_targeting.NavTargetDistance)})";
         }
         else
         {
             _targetingDirBall.RemoveVector("nav");
-            if (_targetLineNav != null)
-                _targetLineNav.Text = "Nav: None";
+            if (_targetLineNav != null) _targetLineNav.Text = "Nav: None";
         }
 
         // Hyperspace target (blue)
         if (_targeting.HasHyperspaceTarget)
         {
-            var d = _targeting.HyperspaceTargetDirection;
-            _targetingDirBall.SetVector("hyp",
-                new Vector3((float)d.X, (float)d.Y, (float)d.Z),
-                new Color(80, 160, 255), "H");
+            var d   = _targeting.HyperspaceTargetDirection;
+            var col = tc?.TargetHyp ?? new Color(80, 160, 255);
+            _targetingDirBall.SetVector("hyp", new Vector3((float)d.X, (float)d.Y, (float)d.Z), col, "H");
             if (_targetLineHyp != null)
                 _targetLineHyp.Text = $"Hyp: {_targeting.HyperspaceTargetName} ({_targeting.HyperspaceTargetDistanceLY:F1} ly)";
         }
         else
         {
             _targetingDirBall.RemoveVector("hyp");
-            if (_targetLineHyp != null)
-                _targetLineHyp.Text = "Hyp: None";
+            if (_targetLineHyp != null) _targetLineHyp.Text = "Hyp: None";
         }
 
-        // Landing radar — active when nav target is a station
+        // Landing radar — active when nav target is a station.
+        // Project ship→station relative vector onto ecliptic XZ plane for top-down view.
         if (_landingRadar != null)
         {
             var navStation = _targeting.NavStationTarget;
             if (navStation != null)
             {
-                DVec3 shipPos   = _simulation.ShipState?.Position ?? _camera.UniversePosition;
-                DVec3 relative  = shipPos - _targeting.NavTargetPosition;
+                DVec3 relGalaxy   = (_simulation.ShipState?.Position ?? _camera.UniversePosition)
+                                  - _targeting.NavTargetPosition;
+                DVec3 relEcliptic = GalaxyToEcliptic(relGalaxy);
                 _landingRadar.HasStation     = true;
                 _landingRadar.StationName    = navStation.Name;
                 _landingRadar.DistanceMeters = _targeting.NavTargetDistance;
-                _landingRadar.RelX           = (float)relative.X;
-                _landingRadar.RelZ           = (float)relative.Z;
+                _landingRadar.RelX           = (float)relEcliptic.X;
+                _landingRadar.RelZ           = (float)relEcliptic.Z;
             }
             else
             {
-                _landingRadar.HasStation = false;
+                _landingRadar.HasStation  = false;
                 _landingRadar.StationName = "";
             }
         }
@@ -1611,13 +1670,30 @@ public sealed class SystemSpaceState : GameState
             0f,
             MathF.Sin(_system.EclipticTiltAzimuthRadians));
         _eclipticRotation = Matrix.CreateFromAxisAngle(tiltAxis, _system.EclipticTiltRadians);
+
+        // Build double-precision rotation from the same axis/angle to avoid float
+        // quantisation (~9 km at 1 AU) when transforming large universe coordinates.
+        // Rodrigues formula for axis (ux, 0, uz) — uy = 0 by construction (tilt axis is horizontal).
+        double ux  = tiltAxis.X, uz = tiltAxis.Z;
+        double a   = _system.EclipticTiltRadians;
+        double cos = System.Math.Cos(a), sin = System.Math.Sin(a), ic = 1.0 - cos;
+        _er00 = cos + ux * ux * ic;  _er01 = -uz * sin;       _er02 = ux * uz * ic;
+        _er10 = uz * sin;            _er11 = cos;              _er12 = -ux * sin;
+        _er20 = ux * uz * ic;        _er21 = ux * sin;         _er22 = cos + uz * uz * ic;
     }
 
-    private DVec3 EclipticToGalaxy(DVec3 pos)
-    {
-        var v = Vector3.Transform(new Vector3((float)pos.X, (float)pos.Y, (float)pos.Z), _eclipticRotation);
-        return new DVec3(v.X, v.Y, v.Z);
-    }
+    // Full double-precision ecliptic-to-galaxy rotation.
+    private DVec3 EclipticToGalaxy(DVec3 pos) => new(
+        _er00 * pos.X + _er01 * pos.Y + _er02 * pos.Z,
+        _er10 * pos.X + _er11 * pos.Y + _er12 * pos.Z,
+        _er20 * pos.X + _er21 * pos.Y + _er22 * pos.Z);
+
+    // Inverse rotation (transpose of the rotation matrix — orthogonal matrix property).
+    // Used to convert galaxy-space relative positions back to ecliptic plane for the landing radar.
+    private DVec3 GalaxyToEcliptic(DVec3 pos) => new(
+        _er00 * pos.X + _er10 * pos.Y + _er20 * pos.Z,
+        _er01 * pos.X + _er11 * pos.Y + _er21 * pos.Z,
+        _er02 * pos.X + _er12 * pos.Y + _er22 * pos.Z);
 
     // ── Ship ──────────────────────────────────────────────────────────────────
     // _ship persists between OnEnter/OnExit calls — only recreated for new spawns.

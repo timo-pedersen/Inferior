@@ -113,8 +113,7 @@ public sealed class CockpitRail : Control
     private static int TabToSeg(int tabIdx) => tabIdx < 3 ? tabIdx : tabIdx + 1;
     private static int SegToTab(int seg)    => seg    < 3 ? seg    : seg    - 1;
 
-    private Rectangle PeekTabRect(int tabIdx)  => PeekSegRect(TabToSeg(tabIdx));
-    private Rectangle PeekToggleRect           => PeekSegRect(3);
+    private Rectangle PeekToggleRect => PeekSegRect(3);
 
     private static float EaseOut(double t)
         => 1f - (float)Math.Pow(1.0 - Math.Clamp(t, 0.0, 1.0), 3.0);
