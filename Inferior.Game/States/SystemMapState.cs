@@ -237,7 +237,9 @@ public sealed class SystemMapState : GameState
         DrawAsteroidBelt(sb);
         DrawStar(sb);
         DrawBodies(sb);
+        DrawStations(sb);
         DrawBodyNames(sb);
+        DrawStationNames(sb);
         DrawInfoPanel(sb);
         DrawHints(sb);
 
@@ -379,6 +381,33 @@ public sealed class SystemMapState : GameState
                 if (radiusPx >= MinOrbitRingPixels)
                     DrawCircle(sb, parentScreen, radiusPx, ColMoonOrbit, CircleSegments(radiusPx));
             }
+        }
+
+        // Station orbit rings — drawn around parent body or star
+        var colStationOrbit = new Color(30, 50, 40, 100);
+        foreach (var station in _system.Stations)
+        {
+            float radiusPx = (float)(station.OrbitalRadius / _metersPerPixel);
+            if (radiusPx < MinOrbitRingPixels) continue;
+
+            Vector2 parentScreen;
+            if (station.OrbitParent == null)
+            {
+                parentScreen = SystemToScreen(Vector2.Zero);
+            }
+            else
+            {
+                DVec3 parentPos = station.OrbitParent.GetPosition(_gameTimeSeconds, DVec3.Zero);
+                // Moons need their parent planet's position
+                DVec3 parentOfParent = DVec3.Zero;
+                foreach (var p in _system.Planets)
+                    if (p.Children.Contains(station.OrbitParent))
+                        parentOfParent = p.GetPosition(_gameTimeSeconds, DVec3.Zero);
+                DVec3 resolvedPos = station.OrbitParent.GetPosition(_gameTimeSeconds, parentOfParent);
+                parentScreen = SystemToScreen(new Vector2((float)resolvedPos.X, (float)resolvedPos.Z));
+            }
+
+            DrawCircle(sb, parentScreen, radiusPx, colStationOrbit, CircleSegments(radiusPx));
         }
     }
 
@@ -524,6 +553,63 @@ public sealed class SystemMapState : GameState
         }
 
         DrawText(sb, "Double-click to approach", new Vector2(tx, ty + 4), ColHovered * 0.7f, 0.75f);
+    }
+
+    private static readonly Color ColStation     = new(80, 200, 140);
+    private static readonly Color ColStationName = new(80, 180, 120);
+
+    private void DrawStations(SpriteBatch sb)
+    {
+        foreach (var station in _system.Stations)
+        {
+            DVec3   stationPos = GetStationSystemPos(station);
+            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            if (!IsOnScreen(screen, 20f)) continue;
+
+            // Diamond icon: draw two overlapping 45°-rotated rectangles
+            float r = station.Size switch
+            {
+                Galaxy.StationSize.Small  => 4f,
+                Galaxy.StationSize.Medium => 5f,
+                Galaxy.StationSize.Large  => 7f,
+                _                         => 4f,
+            };
+
+            DrawDot(sb, screen, r, ColStation);
+            // Cross-hair lines to distinguish from bodies
+            sb.Draw(_pixel, new Rectangle((int)(screen.X - r * 1.8f), (int)screen.Y, (int)(r * 3.6f), 1), ColStation * 0.6f);
+            sb.Draw(_pixel, new Rectangle((int)screen.X, (int)(screen.Y - r * 1.8f), 1, (int)(r * 3.6f)), ColStation * 0.6f);
+        }
+    }
+
+    private void DrawStationNames(SpriteBatch sb)
+    {
+        foreach (var station in _system.Stations)
+        {
+            DVec3   stationPos = GetStationSystemPos(station);
+            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            if (!IsOnScreen(screen, 60f)) continue;
+
+            float r = 6f;
+            sb.DrawString(_font, station.Name,
+                screen + new Vector2(r + 4f, -8f),
+                ColStationName * NameAlphaDimmed, 0f, Vector2.Zero, 0.7f,
+                SpriteEffects.None, 0f);
+        }
+    }
+
+    private DVec3 GetStationSystemPos(Galaxy.Station station)
+    {
+        DVec3 parentPos = DVec3.Zero;
+        if (station.OrbitParent != null)
+        {
+            DVec3 grandparent = DVec3.Zero;
+            foreach (var p in _system.Planets)
+                if (p.Children.Contains(station.OrbitParent))
+                    grandparent = p.GetPosition(_gameTimeSeconds, DVec3.Zero);
+            parentPos = station.OrbitParent.GetPosition(_gameTimeSeconds, grandparent);
+        }
+        return station.GetPosition(_gameTimeSeconds, parentPos);
     }
 
     private void DrawHints(SpriteBatch sb)

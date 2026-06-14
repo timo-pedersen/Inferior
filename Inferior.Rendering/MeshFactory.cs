@@ -105,4 +105,56 @@ public static class MeshFactory
         new(new Vector3(-0.5f, -0.5f, 0), Vector3.UnitZ, new Vector2(0, 1)),
         new(new Vector3( 0.5f, -0.5f, 0), Vector3.UnitZ, new Vector2(1, 1)),
     ];
+
+    // ── Box (station modules) ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Axis-aligned unit box (1×1×1) centred at origin with face normals for lighting.
+    /// Scale via <c>BasicEffect.World = Matrix.CreateScale(sx, sy, sz) * ...</c>
+    /// Uses VertexPositionNormalTexture so BasicEffect lighting works.
+    /// </summary>
+    public static (VertexBuffer vb, IndexBuffer ib, int triCount) CreateBox(GraphicsDevice gd)
+    {
+        // 6 faces × 4 verts = 24 verts; 6 faces × 2 tris × 3 idx = 36 indices
+        var verts   = new VertexPositionNormalTexture[24];
+        var indices = new int[36];
+
+        // Face data: normal, up-right basis, winding (CW under CullCounterClockwise)
+        // Each face: BL, BR, TR, TL in the face's local UV space
+        (Vector3 n, Vector3 u, Vector3 r, Vector3 bl)[] faces =
+        [
+            ( Vector3.UnitZ,        Vector3.UnitY,  Vector3.UnitX,  new(-0.5f,-0.5f, 0.5f)), // front  +Z
+            (-Vector3.UnitZ,        Vector3.UnitY, -Vector3.UnitX,  new( 0.5f,-0.5f,-0.5f)), // back   -Z
+            (-Vector3.UnitX,        Vector3.UnitY,  Vector3.UnitZ,  new(-0.5f,-0.5f,-0.5f)), // left   -X
+            ( Vector3.UnitX,        Vector3.UnitY, -Vector3.UnitZ,  new( 0.5f,-0.5f, 0.5f)), // right  +X
+            ( Vector3.UnitY,  -Vector3.UnitZ,  Vector3.UnitX,  new(-0.5f, 0.5f, 0.5f)), // top    +Y
+            (-Vector3.UnitY,   Vector3.UnitZ,  Vector3.UnitX,  new(-0.5f,-0.5f,-0.5f)), // bottom -Y
+        ];
+
+        int v = 0, idx = 0;
+        for (int f = 0; f < 6; f++)
+        {
+            var (n, u, r, bl) = faces[f];
+            // BL, BR, TR, TL
+            verts[v    ] = new(bl,                n, new Vector2(0, 1));
+            verts[v + 1] = new(bl + r,            n, new Vector2(1, 1));
+            verts[v + 2] = new(bl + r + u,        n, new Vector2(1, 0));
+            verts[v + 3] = new(bl + u,            n, new Vector2(0, 0));
+
+            // CW winding: BL→BR→TR, BL→TR→TL
+            indices[idx++] = v; indices[idx++] = v+1; indices[idx++] = v+2;
+            indices[idx++] = v; indices[idx++] = v+2; indices[idx++] = v+3;
+            v += 4;
+        }
+
+        var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration,
+                                  24, BufferUsage.WriteOnly);
+        vb.SetData(verts);
+
+        var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits,
+                                 36, BufferUsage.WriteOnly);
+        ib.SetData(indices);
+
+        return (vb, ib, 12);
+    }
 }
