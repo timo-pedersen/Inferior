@@ -19,7 +19,7 @@ namespace Inferior.UI.Controls;
 /// center bump) remains visible.
 ///
 /// Peek strip layout (left→right):
-///   [Tab0][Tab1]  [toggle▲/▼]  [Tab2][Tab3]
+///   [Tab0][Tab1][Tab2]  [toggle▲/▼]  [Tab3][Tab4][Tab5]
 ///
 /// No separate tab bar — tabs are selected directly from the peek strip.
 /// Add content tabs via AddCenterTab(). Access wing content via LeftWing/RightWing.
@@ -103,18 +103,18 @@ public sealed class CockpitRail : Control
     private Rectangle LeftWingRect  => new(Sx,                                        WingTopY, WingWidth, WingHeight);
     private Rectangle RightWingRect => new(Sx + WingWidth + RampWidth + CenterWidth + RampWidth, WingTopY, WingWidth, WingHeight);
 
-    // Peek strip is divided into 5 equal segments: [Tab0][Tab1][Toggle][Tab2][Tab3]
-    private int PeekSegW => CenterWidth / 5;
+    // Peek strip is divided into 7 equal segments: [Tab0][Tab1][Tab2][Toggle][Tab3][Tab4][Tab5]
+    private int PeekSegW => CenterWidth / 7;
 
     private Rectangle PeekSegRect(int seg) =>
         new(CenterLeft + seg * PeekSegW, CenterTopY, PeekSegW, PeekHeight);
 
-    // Tab index → peek segment (0,1 → 0,1; 2,3 → 3,4; toggle is always seg 2)
-    private static int TabToSeg(int tabIdx) => tabIdx < 2 ? tabIdx : tabIdx + 1;
-    private static int SegToTab(int seg) => seg < 2 ? seg : seg - 1;
+    // Tab index → peek segment (0,1,2 → 0,1,2; 3,4,5 → 4,5,6; toggle is always seg 3)
+    private static int TabToSeg(int tabIdx) => tabIdx < 3 ? tabIdx : tabIdx + 1;
+    private static int SegToTab(int seg)    => seg    < 3 ? seg    : seg    - 1;
 
     private Rectangle PeekTabRect(int tabIdx)  => PeekSegRect(TabToSeg(tabIdx));
-    private Rectangle PeekToggleRect           => PeekSegRect(2);
+    private Rectangle PeekToggleRect           => PeekSegRect(3);
 
     private static float EaseOut(double t)
         => 1f - (float)Math.Pow(1.0 - Math.Clamp(t, 0.0, 1.0), 3.0);
@@ -165,14 +165,14 @@ public sealed class CockpitRail : Control
         if (PeekRect.Contains(mp))
         {
             // Determine which segment is hovered
-            for (int seg = 0; seg < 5; seg++)
+            for (int seg = 0; seg < 7; seg++)
             {
                 if (!PeekSegRect(seg).Contains(mp)) continue;
 
-                if (seg == 2)
+                if (seg == 3)
                 {
                     // Toggle button
-                    _hoveredSeg = 4; // special value for toggle
+                    _hoveredSeg = 6; // special value for toggle (> any tab index)
                     if (input.LeftReleased) { Toggle(); return true; }
                     return input.LeftHeld || input.LeftPressed;
                 }
@@ -269,16 +269,16 @@ public sealed class CockpitRail : Control
         renderer.DrawLine(sb, V(rRampX + rw, wt), V(sx + sw,   wt), border);
         renderer.DrawLine(sb, V(sx + sw,  wt), V(sx + sw,      sh), border);
 
-        // ── Peek strip: [Tab0][Tab1][Toggle][Tab2][Tab3] ──────────────────────
+        // ── Peek strip: [Tab0][Tab1][Tab2][Toggle][Tab3][Tab4][Tab5] ─────────
 
-        for (int seg = 0; seg < 5; seg++)
+        for (int seg = 0; seg < 7; seg++)
         {
             var segRect = PeekSegRect(seg);
 
-            if (seg == 2)
+            if (seg == 3)
             {
                 // Toggle button
-                bool hovToggle = _hoveredSeg == 4;
+                bool hovToggle = _hoveredSeg == 6;
                 Color tBack = hovToggle ? theme.ButtonBackgroundHover : theme.ButtonBackground;
                 renderer.FillRect(sb, segRect, tBack);
                 renderer.DrawRect(sb, segRect, hovToggle ? theme.ButtonBorderHover : border, theme.BorderThickness);

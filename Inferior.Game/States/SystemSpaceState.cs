@@ -128,10 +128,11 @@ public sealed class SystemSpaceState : GameState
 
     // ── Targeting ─────────────────────────────────────────────────────────────
     private readonly TargetingSystem _targeting = new();
-    private DirectionBall? _targetingDirBall;
-    private Label?         _targetLineShip;
-    private Label?         _targetLineNav;
-    private Label?         _targetLineHyp;
+    private DirectionBall?      _targetingDirBall;
+    private Label?              _targetLineShip;
+    private Label?              _targetLineNav;
+    private Label?              _targetLineHyp;
+    private LandingRadarPanel?  _landingRadar;
 
     // ── SCAN tab ──────────────────────────────────────────────────────────────
     private SpectrumGraph?   _spectrumGraph;
@@ -144,6 +145,17 @@ public sealed class SystemSpaceState : GameState
     // F11  — toggles between ship camera (cockpit) and free debug camera.
     private bool _uiMouseMode;
     private bool _debugCameraMode;
+
+    // Invert blend — used for the crosshair (src - dest = 1 - dest when src is white)
+    private static readonly BlendState _invertBlend = new()
+    {
+        ColorBlendFunction    = BlendFunction.Subtract,
+        ColorSourceBlend      = Blend.One,
+        ColorDestinationBlend = Blend.One,
+        AlphaBlendFunction    = BlendFunction.Add,
+        AlphaSourceBlend      = Blend.Zero,
+        AlphaDestinationBlend = Blend.One,
+    };
 
     public override bool WantsCursor => _uiMouseMode;
 
@@ -456,14 +468,27 @@ public sealed class SystemSpaceState : GameState
         };
         DataBus.Instruments.Subscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
 
+        _landingRadar = new LandingRadarPanel
+        {
+            Bounds = new Rectangle(0, 0, 500, 220),
+        };
+        _landingRadar.Released += () =>
+        {
+            _targeting.ClearNavTarget();
+        };
+
         _cockpitRail = new CockpitRail
         {
             Bounds = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
         };
+        // Left side (3 tabs): DIR BALL, RADAR, LANDING
         _cockpitRail.AddCenterTab("DIR BALL", _cockpitDirBall);
         _cockpitRail.AddCenterTab("RADAR",    radarPlaceholder);
+        _cockpitRail.AddCenterTab("LANDING",  _landingRadar);
+        // Right side (3 tabs): ???, LOG, CTRL
         _cockpitRail.AddCenterTab("???",      miscPlaceholder);
         _cockpitRail.AddCenterTab("LOG",      _console);
+        _cockpitRail.AddCenterTab("CTRL",     new Panel { DrawBackground = false, DrawBorder = false });
         _cockpitRail.RightWing.Add(_shieldToggleButton);
 
         // ── LeftWing: targeting direction ball + 3-line target readout ────────
@@ -756,6 +781,14 @@ public sealed class SystemSpaceState : GameState
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
         sb.End();
+
+        // Crosshair — separate pass with colour-invert blend so it's readable against any background
+        if (!_uiMouseMode)
+        {
+            sb.Begin(blendState: _invertBlend);
+            DrawCrosshair(sb);
+            sb.End();
+        }
 
         // UI library draws on top — owns its own SpriteBatch
         _ui?.Draw();
@@ -1360,6 +1393,23 @@ public sealed class SystemSpaceState : GameState
 
     // ── 2D HUD ────────────────────────────────────────────────────────────────
 
+    private void DrawCrosshair(SpriteBatch sb)
+    {
+        int cx    = _gd.Viewport.Width  / 2;
+        int cy    = _gd.Viewport.Height / 2;
+        int arm   = 10;
+        int gap   = 4;
+
+        // Horizontal arms
+        sb.Draw(_pixel, new Rectangle(cx - arm - gap, cy, arm, 1), Color.White);
+        sb.Draw(_pixel, new Rectangle(cx + gap + 1,   cy, arm, 1), Color.White);
+        // Vertical arms
+        sb.Draw(_pixel, new Rectangle(cx, cy - arm - gap, 1, arm), Color.White);
+        sb.Draw(_pixel, new Rectangle(cx, cy + gap + 1,   1, arm), Color.White);
+        // Centre dot
+        sb.Draw(_pixel, new Rectangle(cx - 1, cy - 1, 3, 3), Color.White);
+    }
+
     private void DrawHUD(SpriteBatch sb)
     {
         // Speed indicator — ship velocity in ship mode, debug cam setting otherwise
@@ -1528,6 +1578,27 @@ public sealed class SystemSpaceState : GameState
             _targetingDirBall.RemoveVector("hyp");
             if (_targetLineHyp != null)
                 _targetLineHyp.Text = "Hyp: None";
+        }
+
+        // Landing radar — active when nav target is a station
+        if (_landingRadar != null)
+        {
+            var navStation = _targeting.NavStationTarget;
+            if (navStation != null)
+            {
+                DVec3 shipPos   = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+                DVec3 relative  = shipPos - _targeting.NavTargetPosition;
+                _landingRadar.HasStation     = true;
+                _landingRadar.StationName    = navStation.Name;
+                _landingRadar.DistanceMeters = _targeting.NavTargetDistance;
+                _landingRadar.RelX           = (float)relative.X;
+                _landingRadar.RelZ           = (float)relative.Z;
+            }
+            else
+            {
+                _landingRadar.HasStation = false;
+                _landingRadar.StationName = "";
+            }
         }
     }
 
