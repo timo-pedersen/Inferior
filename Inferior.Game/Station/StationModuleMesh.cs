@@ -121,6 +121,39 @@ public sealed class StationModuleMesh
         return AddOrientedBox(transform, new Vector3(width, depth, length), color);
     }
 
+    // Adds an N-sided prism pipe. Each lateral face is stored as an independent quad
+    // so ApplyLighting computes a distinct outward normal per face — a hexagonal pipe
+    // gets 6 different shading values, simulating roundness with no renderer changes.
+    // No end caps; pipes are always flush against surfaces or continue off-screen.
+    public void AddPrismPipe(Vector3 start, Vector3 end, float radius, int sides, Color color)
+    {
+        Vector3 dir    = end - start;
+        float   length = dir.Length();
+        if (length < 0.01f) return;
+        dir = Vector3.Normalize(dir);
+
+        Vector3 arb   = MathF.Abs(dir.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 right = Vector3.Normalize(Vector3.Cross(dir, arb));
+        Vector3 up    = Vector3.Normalize(Vector3.Cross(right, dir));
+
+        var startRing = new Vector3[sides];
+        var endRing   = new Vector3[sides];
+        for (int i = 0; i < sides; i++)
+        {
+            float   a      = i * MathF.Tau / sides;
+            Vector3 offset = right * (MathF.Cos(a) * radius) + up * (MathF.Sin(a) * radius);
+            startRing[i] = start + offset;
+            endRing[i]   = end   + offset;
+        }
+
+        for (int i = 0; i < sides; i++)
+        {
+            int next = (i + 1) % sides;
+            // Cross(v1-v0, v2-v0) = outward face normal — consistent with AddQuad convention.
+            AddQuad(startRing[i], startRing[next], endRing[next], endRing[i], color);
+        }
+    }
+
     // Adds a thin spike from `basePos` extending in `direction`.
     public void AddSpike(Vector3 basePos, Vector3 direction, float length, float radius, Color color)
     {
