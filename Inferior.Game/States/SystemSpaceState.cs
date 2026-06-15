@@ -1,21 +1,22 @@
-using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Content;
-using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Core.Simulation;
 using Inferior.Galaxy;
+using Inferior.Game.StationGen;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Components;
+using Inferior.Gameplay.Components.Power;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
-using Inferior.Gameplay.Components;
 using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
-using Inferior.Gameplay.Components.Power;
-using Inferior.Game.StationGen;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
+using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
+using System.Reflection.Metadata;
 
 namespace Inferior.Game.States;
 
@@ -105,7 +106,9 @@ public sealed class SystemSpaceState : GameState
     private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
     // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes = [];
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes  = [];
+    // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
@@ -324,11 +327,24 @@ public sealed class SystemSpaceState : GameState
 
         StationTextureRegistry.Initialize(_gd);
 
+        StationTextureRegistry.SetTexture(SurfaceTexture.CleanPanel,
+            _content.Load<Texture2D>("Textures/cleanpanel"));
+        StationTextureRegistry.SetTexture(SurfaceTexture.TechPanel,
+            _content.Load<Texture2D>("Textures/techpanel"));
+        StationTextureRegistry.SetTexture(SurfaceTexture.IndustrialPanel,
+            _content.Load<Texture2D>("Textures/industrialpanel"));
+        StationTextureRegistry.SetTexture(SurfaceTexture.CargoPanel,
+            _content.Load<Texture2D>("Textures/cargopanel"));
+        StationTextureRegistry.SetTexture(SurfaceTexture.WornPanel,
+            _content.Load<Texture2D>("Textures/wornpanel"));
+
         // Station module layouts — generated once from name-derived seed.
         // StationGenerator.Generate also runs StationDecorator internally.
         _stationGeometry.Clear();
-        foreach (var v in _decoMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
+        _glassMeshes.Clear();
         foreach (var station in _system.Stations)
         {
             var modules = StationGenerator.Generate(station);
@@ -338,6 +354,10 @@ public sealed class SystemSpaceState : GameState
                 var gpu = mod.Mesh?.Build(_gd);
                 if (gpu.HasValue)
                     _decoMeshes[mod] = gpu.Value;
+
+                var glassGpu = mod.GlassMesh?.Build(_gd);
+                if (glassGpu.HasValue)
+                    _glassMeshes[mod] = glassGpu.Value;
             }
         }
         _stationPositions.Clear();
@@ -670,8 +690,10 @@ public sealed class SystemSpaceState : GameState
         _sphereIb?.Dispose();
         _boxVb?.Dispose();
         _boxIb?.Dispose();
-        foreach (var v in _decoMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
+        _glassMeshes.Clear();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
         _navGlowTex?.Dispose();
@@ -950,7 +972,8 @@ public sealed class SystemSpaceState : GameState
             {
                 mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
 
-                _effect.DiffuseColor = StationModuleRegistry.CategoryColor(mod.Definition.Category).ToVector3();
+                Vector3 catColor     = StationModuleRegistry.CategoryColor(mod.Definition.Category).ToVector3();
+                _effect.DiffuseColor = catColor * StationTextureRegistry.GetColor(mod.Mesh?.Texture ?? SurfaceTexture.CleanPanel);
 
                 _effect.World =
                     Matrix.CreateScale(mod.Definition.BoundingBox * rs) *
@@ -1007,6 +1030,42 @@ public sealed class SystemSpaceState : GameState
                         PrimitiveType.TriangleList,
                         baseVertex: 0, startIndex: 0,
                         primitiveCount: deco.triCount);
+                }
+            }
+        }
+
+        // Glass pass — windows, portholes; White texture so vertex colours are unmodified.
+        _effect.Texture = StationTextureRegistry.White;
+
+        foreach (var (station, universePos) in _stationPositions)
+        {
+            Vector3 renderPos = _camera.ToRenderSpace(universePos);
+            if (renderPos.Length() > 30_000f) continue;
+
+            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+
+            foreach (var mod in modules)
+            {
+                if (!_glassMeshes.TryGetValue(mod, out var glass)) continue;
+
+                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
+
+                _effect.World =
+                    Matrix.CreateScale(rs) *
+                    Matrix.CreateFromQuaternion(modRot) *
+                    Matrix.CreateTranslation(posMetres * rs) *
+                    Matrix.CreateTranslation(renderPos);
+
+                _gd.SetVertexBuffer(glass.vb);
+                _gd.Indices = glass.ib;
+
+                foreach (var pass in _effect.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawIndexedPrimitives(
+                        PrimitiveType.TriangleList,
+                        baseVertex: 0, startIndex: 0,
+                        primitiveCount: glass.triCount);
                 }
             }
         }
@@ -1332,7 +1391,7 @@ public sealed class SystemSpaceState : GameState
         // projScale converts render-space size at unit distance to screen pixels.
         // For a symmetric frustum: projScale = screenHeight / (2 * tan(halfFov))
         float projScale = _gd.Viewport.Height
-                        / (2f * MathF.Tan(MathHelper.ToRadians(30f))); // half of 60°
+                        / (2f * MathF.Tan(MathHelper.ToRadians(60f))); // half of 60°
 
         float minRenderRadius = StarMinPixels * dist / projScale;
         return System.Math.Max(StarVisualRadius, minRenderRadius);

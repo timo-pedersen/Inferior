@@ -7,4 +7,5 @@ public enum SurfaceTexture
     IndustrialPanel,  // industrial, fuel — dark grey, heavy wear
     CargoPanel,       // cargo — stained, reinforced-looking
     WornPanel,        // aged stations — patched, faded
+    Glass,            // windows, portholes — neutral white (vertex colour passes through)
 }

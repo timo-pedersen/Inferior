@@ -45,5 +45,6 @@ public sealed class PlacedModule
     public          StationPort?            AttachmentPort { get; set; }
     public          List<StationPort>       ChildPorts     { get; } = [];
     public          StationModuleMesh?      Mesh           { get; set; }
+    public          StationModuleMesh?      GlassMesh      { get; set; }
     public          List<StationLightInfo>  GlowLights     { get; } = [];
 }

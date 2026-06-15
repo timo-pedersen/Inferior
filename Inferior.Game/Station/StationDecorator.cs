@@ -27,7 +27,8 @@ public static class StationDecorator
             var ambientLightRng = new System.Random(baseRng.Next());
 
             FaceInfo[] faces = ComputeFaces(mod);
-            var mesh = new StationModuleMesh { Texture = TextureFor(mod.Definition.Category) };
+            var mesh      = new StationModuleMesh { Texture = TextureFor(mod.Definition.Category) };
+            var glassMesh = new StationModuleMesh { Texture = SurfaceTexture.Glass };
 
             // Pass 0: panel seams — flat surface decoration that gets AO applied.
             // Must run first so BaseFaceCount captures only these faces.
@@ -39,7 +40,7 @@ public static class StationDecorator
             foreach (var face in faces)
             {
                 var occupancy = new FaceOccupancy();
-                GenerateWindows     (mod, face, windowRng,      mesh, occupancy);
+                GenerateWindows     (mod, face, windowRng,      mesh, glassMesh, occupancy);
                 GenerateHatches     (mod, face, hatchRng,       mesh, occupancy);
                 GenerateAntennas    (mod, face, antennaRng,     mesh, mod.GlowLights);
                 GenerateChimneys    (mod, face, chimneyRng,     mesh, mod.GlowLights, mod);
@@ -56,6 +57,8 @@ public static class StationDecorator
 
             if (!mesh.IsEmpty)
                 mod.Mesh = mesh;
+            if (!glassMesh.IsEmpty)
+                mod.GlassMesh = glassMesh;
         }
 
         // Station-wide passes that need all modules to be decorated first.
@@ -260,7 +263,8 @@ public static class StationDecorator
     }
 
     private static void GenerateWindows(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
+        System.Random rng, StationModuleMesh mesh, StationModuleMesh glassMesh,
+        FaceOccupancy occupancy)
     {
         if (!face.IsExposed)  return;
         if (face.Width  < 3f) return;
@@ -303,13 +307,13 @@ public static class StationDecorator
             {
                 float portholeSize = MathF.Min(winW, winH);
                 if (rng.NextDouble() < 0.25)
-                    AddCupola(mesh, center, face.LocalNormal, face.LocalUp, portholeSize, winCol);
+                    AddCupola(mesh, glassMesh, center, face.LocalNormal, face.LocalUp, portholeSize, winCol);
                 else
-                    AddOctagonPorthole(mesh, center, face.LocalNormal, face.LocalUp, portholeSize, winCol);
+                    AddOctagonPorthole(glassMesh, center, face.LocalNormal, face.LocalUp, portholeSize, winCol);
             }
             else
             {
-                mesh.AddQuad(center, face.LocalNormal, face.LocalUp, winW, winH, winCol);
+                glassMesh.AddQuad(center, face.LocalNormal, face.LocalUp, winW, winH, winCol);
                 if (rng.NextDouble() < 0.55)
                     AddWindowBraces(mesh, center, face.LocalNormal, face.LocalUp,
                         winW, winH, DarkenColor(winCol, 0.30f));
@@ -317,9 +321,8 @@ public static class StationDecorator
         }
     }
 
-    // 8-sided porthole fan: AddTriangle(center, pts[i], pts[i+1]) with CCW angles.
-    // Index [b,b+2,b+1] renders (center, pts[i+1], pts[i]) → CW in DirectX → visible.
-    private static void AddOctagonPorthole(StationModuleMesh mesh,
+    // 8-sided porthole fan: glass goes into glassMesh so it renders with White texture.
+    private static void AddOctagonPorthole(StationModuleMesh glassMesh,
         Vector3 center, Vector3 normal, Vector3 up, float size, Color color)
     {
         Vector3 right = Vector3.Normalize(Vector3.Cross(up, normal));
@@ -331,7 +334,7 @@ public static class StationDecorator
             pts[i] = center + right * (r * MathF.Cos(angle)) + up * (r * MathF.Sin(angle));
         }
         for (int i = 0; i < 8; i++)
-            mesh.AddTriangle(center, pts[i], pts[(i + 1) % 8], color);
+            glassMesh.AddTriangle(center, pts[i], pts[(i + 1) % 8], color);
     }
 
     // Cross-pane dividers within a window rect.
@@ -345,8 +348,8 @@ public static class StationDecorator
         mesh.AddQuad(pos, normal, up, barThick, winH,     color);
     }
 
-    // Pyramid viewport: 4 triangular glass panels meeting at a raised apex point.
-    private static void AddCupola(StationModuleMesh mesh,
+    // Pyramid viewport: 4 triangular glass panels (glassMesh) + dark recess base (mesh).
+    private static void AddCupola(StationModuleMesh mesh, StationModuleMesh glassMesh,
         Vector3 center, Vector3 normal, Vector3 up, float size, Color glassColor)
     {
         Vector3 right = Vector3.Normalize(Vector3.Cross(up, normal));
@@ -361,8 +364,8 @@ public static class StationDecorator
             center + right * hw - up * hw,  // BR
         ];
         for (int i = 0; i < 4; i++)
-            mesh.AddTriangle(base4[i], apex, base4[(i + 1) % 4], glassColor);
-        // Dark inner base so the opening reads as a recess.
+            glassMesh.AddTriangle(base4[i], apex, base4[(i + 1) % 4], glassColor);
+        // Dark inner base so the opening reads as a recess — not glass, stays in surface mesh.
         mesh.AddQuad(base4[0], base4[3], base4[2], base4[1], new Color(20, 22, 28));
     }
 
