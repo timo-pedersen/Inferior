@@ -25,7 +25,7 @@
 | ShipSizeClass enum | ✓ Stubbed | Exists, not yet enforced |
 | **Power system** | ✓ Done | PowerCore → PowerBus → Connector → Shield chain working; cold start sequence; PowerPriorityManager; instruments reporting to DataBus; CommandBus integration |
 | **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `inferior-design-stations-claude.md` |
-| **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
+| **Directional lighting** | ✓ Done | Hull: real-time `VertexPositionNormalTexture` + `BasicEffect LightingEnabled=true` from actual star pos; Decoration: pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
 | **Surface texture infrastructure** | ✓ Done | `VertexPositionColorTexture` throughout; UV projection in AddQuad/AddTriangle; `SurfaceTexture` enum; `StationTextureRegistry`; separate `GlassMesh` for windows |

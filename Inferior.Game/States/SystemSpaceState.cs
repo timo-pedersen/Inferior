@@ -104,6 +104,8 @@ public sealed class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes  = [];
     // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
+    // GPU-side hull meshes (VertexPositionNormalTexture) for real-time BasicEffect lighting.
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
@@ -335,8 +337,10 @@ public sealed class SystemSpaceState : GameState
         _stationGeometry.Clear();
         foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _hullMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
         _glassMeshes.Clear();
+        _hullMeshes.Clear();
         foreach (var station in _system.Stations)
         {
             var modules = StationGenerator.Generate(station, _gd);
@@ -350,6 +354,8 @@ public sealed class SystemSpaceState : GameState
                 var glassGpu = mod.GlassMesh?.Build(_gd);
                 if (glassGpu.HasValue)
                     _glassMeshes[mod] = glassGpu.Value;
+
+                _hullMeshes[mod] = BuildHullMesh(_gd, mod);
             }
         }
         _stationPositions.Clear();
@@ -682,8 +688,10 @@ public sealed class SystemSpaceState : GameState
         _sphereIb?.Dispose();
         foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _hullMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
         _glassMeshes.Clear();
+        _hullMeshes.Clear();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
         _navGlowTex?.Dispose();
@@ -939,8 +947,51 @@ public sealed class SystemSpaceState : GameState
 
         float rs = (float)Camera3D.RenderScale;
 
-        // Hull + decoration pass — hull faces are now baked into mod.Mesh alongside greebles.
-        // Lighting is pre-baked into vertex colours; texture provides surface colour.
+        // Hull pass — real-time BasicEffect N·L lighting with procedural texture.
+        // Uses VertexPositionNormalTexture so normals are in the vertex data.
+        // DirectionalLight0.Direction is already set from the star position in Draw().
+        _effect.LightingEnabled                = true;
+        _effect.TextureEnabled                 = true;
+        _effect.VertexColorEnabled             = false;
+        _effect.DiffuseColor                   = Vector3.One;
+        _effect.DirectionalLight0.DiffuseColor = SceneLighting.SunColour;
+        _effect.AmbientLightColor              = new Vector3(SceneLighting.Ambient);
+
+        foreach (var (station, universePos) in _stationPositions)
+        {
+            Vector3 renderPos = _camera.ToRenderSpace(universePos);
+            if (renderPos.Length() > 30_000f) continue;
+            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+
+            foreach (var mod in modules)
+            {
+                if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
+                if (mod.TextureInstance == null) continue;
+
+                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
+                _effect.World =
+                    Matrix.CreateScale(rs) *
+                    Matrix.CreateFromQuaternion(modRot) *
+                    Matrix.CreateTranslation(posMetres * rs) *
+                    Matrix.CreateTranslation(renderPos);
+
+                _effect.Texture = mod.TextureInstance;
+
+                _gd.SetVertexBuffer(hull.vb);
+                _gd.Indices = hull.ib;
+
+                foreach (var pass in _effect.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawIndexedPrimitives(
+                        PrimitiveType.TriangleList,
+                        baseVertex: 0, startIndex: 0,
+                        primitiveCount: hull.triCount);
+                }
+            }
+        }
+
+        // Decoration pass — pre-baked lighting in vertex colours; texture modulates.
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = true;
         _effect.TextureEnabled     = true;
@@ -1019,6 +1070,66 @@ public sealed class SystemSpaceState : GameState
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
         _effect.LightingEnabled    = true;
+    }
+
+    // Builds a VertexPositionNormalTexture hull mesh for one module (6 box faces, 24 verts).
+    // Normals are local-space outward per face; BasicEffect transforms them at draw time.
+    // UV uses the same tangent-frame projection as StationModuleMesh.AddQuad (5 m/tile).
+    private static (VertexBuffer vb, IndexBuffer ib, int triCount) BuildHullMesh(
+        GraphicsDevice gd, PlacedModule mod)
+    {
+        const float UvScale = 5.0f;
+        var h = mod.Definition.BoundingBox * 0.5f;
+
+        Span<Vector3> c = stackalloc Vector3[8]
+        {
+            new(-h.X, -h.Y, -h.Z), // 0 BL-back
+            new(+h.X, -h.Y, -h.Z), // 1 BR-back
+            new(+h.X, +h.Y, -h.Z), // 2 TR-back
+            new(-h.X, +h.Y, -h.Z), // 3 TL-back
+            new(-h.X, -h.Y, +h.Z), // 4 BL-front
+            new(+h.X, -h.Y, +h.Z), // 5 BR-front
+            new(+h.X, +h.Y, +h.Z), // 6 TR-front
+            new(-h.X, +h.Y, +h.Z), // 7 TL-front
+        };
+
+        var verts = new VertexPositionNormalTexture[24];
+        var idx   = new int[36];
+
+        static void AddFace(VertexPositionNormalTexture[] v, int[] idx, int face,
+                            Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 n)
+        {
+            Vector3 arb   = MathF.Abs(n.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+            Vector3 uAxis = Vector3.Normalize(Vector3.Cross(n, arb));
+            Vector3 vAxis = Vector3.Normalize(Vector3.Cross(n, uAxis));
+
+            int b = face * 4;
+            v[b    ] = new VertexPositionNormalTexture(v0, n, Vector2.Zero);
+            v[b + 1] = new VertexPositionNormalTexture(v1, n, new Vector2(
+                Vector3.Dot(v1 - v0, uAxis) / UvScale, Vector3.Dot(v1 - v0, vAxis) / UvScale));
+            v[b + 2] = new VertexPositionNormalTexture(v2, n, new Vector2(
+                Vector3.Dot(v2 - v0, uAxis) / UvScale, Vector3.Dot(v2 - v0, vAxis) / UvScale));
+            v[b + 3] = new VertexPositionNormalTexture(v3, n, new Vector2(
+                Vector3.Dot(v3 - v0, uAxis) / UvScale, Vector3.Dot(v3 - v0, vAxis) / UvScale));
+
+            int i = face * 6;
+            idx[i    ] = b;     idx[i + 1] = b + 2; idx[i + 2] = b + 1;
+            idx[i + 3] = b;     idx[i + 4] = b + 3; idx[i + 5] = b + 2;
+        }
+
+        AddFace(verts, idx, 0, c[4], c[5], c[6], c[7],  Vector3.UnitZ);   // +Z
+        AddFace(verts, idx, 1, c[1], c[0], c[3], c[2], -Vector3.UnitZ);   // -Z
+        AddFace(verts, idx, 2, c[0], c[4], c[7], c[3], -Vector3.UnitX);   // -X
+        AddFace(verts, idx, 3, c[5], c[1], c[2], c[6],  Vector3.UnitX);   // +X
+        AddFace(verts, idx, 4, c[7], c[6], c[2], c[3],  Vector3.UnitY);   // +Y
+        AddFace(verts, idx, 5, c[0], c[1], c[5], c[4], -Vector3.UnitY);   // -Y
+
+        var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration,
+                                  24, BufferUsage.WriteOnly);
+        vb.SetData(verts);
+        var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, 36, BufferUsage.WriteOnly);
+        ib.SetData(idx);
+        return (vb, ib, 12);
     }
 
     private void DrawStationOrbitRings()
