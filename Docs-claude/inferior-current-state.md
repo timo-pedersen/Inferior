@@ -26,7 +26,8 @@
 | **Power system** | ✓ Done | PowerCore → PowerBus → Connector → Shield chain working; cold start sequence; PowerPriorityManager; instruments reporting to DataBus; CommandBus integration |
 | **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `inferior-design-stations-claude.md` |
 | **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
-| **Targeting system** | ⚠ Brief written | 'C' key + mouse click targeting; `TargetingSystem` class; HUD brackets; implementation status with Code unknown — verify |
+| **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
+| **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
 
 ---
 
@@ -59,25 +60,6 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ## What is in progress
 
-### Station generation — Session 7 interrupted
-
-Session 7 was cut short by usage limit. **First action in next Code session: ask Code for a status report on what was completed.** Session 7 scope was:
-
-| Item | Expected status |
-|---|---|
-| Ambient reduction (0.18 → 0.09) | Likely done |
-| Panel seam color subtlety (factor 0.48 → 0.72) | Likely done |
-| Panel seam Z-offset (0.012 → 0.028) | Likely done |
-| AO restricted to base mesh faces only (`BaseFaceCount`) | Unknown |
-| `AddOrientedBox` correct per-face normals | Unknown |
-| `StationLightInfo` updated with Rate/Phase/Pattern | Unknown |
-| Blinking glow animation in `DrawStationGlows` | Unknown |
-| Aviation warning lights on antenna/chimney tips | Unknown |
-| Ambient marker lights on modules | Unknown |
-| New vent types (Louvered, ScreenMesh) | Unknown |
-
-Session 7 brief is in docs-claude outputs: `inferior-session7-lighting-refinement.md`.
-
 ### Power system — refinement phase
 
 Core working: reactor, bus, shield startup sequence, instruments. Needs:
@@ -90,11 +72,10 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Complete Session 7** — get status from Code, finish remaining items
-2. **Station text/markings pass** — station name on hull, bay numbers (Session 8 when ready)
-3. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
-4. **Power system refinement** — heat, coolant, more components
-5. **Ship hull implementation** — vertex-first mesh, panel auto-generation
+1. **Station text/markings pass** — station name on hull, bay numbers
+2. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
+3. **Power system refinement** — heat, coolant, more components
+4. **Ship hull implementation** — vertex-first mesh, panel auto-generation
 
 ---
 
@@ -158,7 +139,7 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | Station module shape variety — non-box modules | Design noted, not implemented |
 | Station weathering pass | Not yet designed |
 | Station enclosed archetypes (Sphere, Pyramid, Prism, etc.) | Designed, not implemented |
-| Targeting system implementation status | Verify with Code |
+| Station text/markings pass — font atlas geometry pipeline | Not yet designed |
 
 ---
 
