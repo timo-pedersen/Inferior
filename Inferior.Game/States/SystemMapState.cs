@@ -77,8 +77,9 @@ public sealed class SystemMapState : GameState
     private const float DragThreshold = 5f;
 
     // Double-click detection
-    private double       _lastClickTime  = -1.0;
-    private OrbitalBody? _lastClickBody;          // null means star was clicked
+    private double       _lastClickTime    = -1.0;
+    private OrbitalBody? _lastClickBody;           // null means star or station was clicked
+    private Station?     _lastClickStation;
     private bool         _lastClickWasStar;
     private const double DoubleClickSeconds = 0.35;
 
@@ -305,13 +306,25 @@ public sealed class SystemMapState : GameState
             // Don't body-select if a UI button consumed this click
             if (_ui?.FindAt(new Point(mouse.X, mouse.Y)) != null) return;
 
-            // Hit test: body first, then star
-            OrbitalBody? hitBody = HitTestBody(mousePos);
-            bool         hitStar = hitBody == null && HitTestStarDot(mousePos);
+            // Hit test: stations first (smaller targets), then body, then star
+            Station?     hitStation = HitTestStation(mousePos);
+            OrbitalBody? hitBody    = hitStation == null ? HitTestBody(mousePos) : null;
+            bool         hitStar    = hitBody == null && hitStation == null && HitTestStarDot(mousePos);
 
             bool isDouble = (now - _lastClickTime) < DoubleClickSeconds
-                         && hitBody == _lastClickBody
-                         && hitStar == _lastClickWasStar;
+                         && hitBody    == _lastClickBody
+                         && hitStation == _lastClickStation
+                         && hitStar    == _lastClickWasStar;
+
+            if (isDouble && hitStation != null)
+            {
+                // Launch into system flight near this station
+                _pendingTransition = StateTransition.To(
+                    GameStateId.SystemSpace,
+                    new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout,
+                        NavBody: _navBody, NavStation: _navStation, TargetStation: hitStation));
+                return;
+            }
 
             if (isDouble && (hitBody != null || hitStar))
             {
@@ -326,6 +339,7 @@ public sealed class SystemMapState : GameState
             _selectedBody      = hitBody;
             _lastClickTime     = now;
             _lastClickBody     = hitBody;
+            _lastClickStation  = hitStation;
             _lastClickWasStar  = hitStar;
         }
 
@@ -671,7 +685,7 @@ public sealed class SystemMapState : GameState
     {
         int x = 16;
         int y = _gd.Viewport.Height - 68;
-        DrawText(sb, "Double-click body/star - approach   Right-click - set nav target   Scroll - zoom   Home - recentre",
+        DrawText(sb, "Double-click body/station/star - approach   Right-click - set nav target   Scroll - zoom   Home - recentre",
             new Vector2(x, y), ColTextDim, 0.72f);
         y += 18;
         DrawText(sb, "N - galaxy map   Esc - back to flight",
@@ -718,6 +732,20 @@ public sealed class SystemMapState : GameState
         float   dy         = screenPos.Y - starScreen.Y;
         float   dist       = MathF.Sqrt(dx*dx + dy*dy);
         return dist <= StarVisualRadius + 8f;
+    }
+
+    private Station? HitTestStation(Vector2 screenPos)
+    {
+        foreach (var station in _system.Stations)
+        {
+            DVec3   stationPos = GetStationSystemPos(station);
+            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            float   dx         = screenPos.X - screen.X;
+            float   dy         = screenPos.Y - screen.Y;
+            if (MathF.Sqrt(dx*dx + dy*dy) <= 10f)
+                return station;
+        }
+        return null;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

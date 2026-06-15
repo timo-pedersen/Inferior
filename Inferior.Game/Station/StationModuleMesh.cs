@@ -28,8 +28,12 @@ public sealed class StationModuleMesh
     // Each entry covers one quad (4 consecutive vertices starting at vertexBase).
     private readonly List<(int vertexBase, int count)> _faces = [];
 
-    public bool           IsEmpty  => _verts.Count == 0;
-    public List<AnimTag>  AnimTags { get; } = [];
+    public bool           IsEmpty       => _verts.Count == 0;
+    public List<AnimTag>  AnimTags      { get; } = [];
+
+    // Set after base/seam geometry is added and before raised decoration (greebles, pipes).
+    // ApplyAmbientOcclusion only processes faces 0..BaseFaceCount-1.
+    public int BaseFaceCount { get; set; } = 0;
 
     // Adds a flat quad from four explicit corner vertices (CW from normal side).
     // Returns the index of v0 in the vertex array.
@@ -149,8 +153,7 @@ public sealed class StationModuleMesh
         for (int i = 0; i < sides; i++)
         {
             int next = (i + 1) % sides;
-            // Cross(v1-v0, v2-v0) = outward face normal — consistent with AddQuad convention.
-            AddQuad(startRing[i], startRing[next], endRing[next], endRing[i], color);
+            AddQuad(startRing[next], startRing[i], endRing[i], endRing[next], color);
         }
     }
 

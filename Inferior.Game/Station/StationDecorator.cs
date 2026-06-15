@@ -12,39 +12,47 @@ public static class StationDecorator
     {
         foreach (var mod in modules)
         {
-            var baseRng        = new System.Random(mod.Seed);
-            var windowRng      = new System.Random(baseRng.Next());
-            var hatchRng       = new System.Random(baseRng.Next());
-            var antennaRng     = new System.Random(baseRng.Next());
-            var pipeRng        = new System.Random(baseRng.Next());
-            var lightRng       = new System.Random(baseRng.Next());
-            var chimneyRng     = new System.Random(baseRng.Next());
-            var surfacePipeRng = new System.Random(baseRng.Next());
-            // New passes — appended so existing seeds are unchanged
-            var seamRng        = new System.Random(baseRng.Next());
-            var ventRng        = new System.Random(baseRng.Next());
-            var greebleRng     = new System.Random(baseRng.Next());
-            var edgeTrimRng    = new System.Random(baseRng.Next());
+            var baseRng         = new System.Random(mod.Seed);
+            var windowRng       = new System.Random(baseRng.Next());
+            var hatchRng        = new System.Random(baseRng.Next());
+            var antennaRng      = new System.Random(baseRng.Next());
+            var pipeRng         = new System.Random(baseRng.Next());
+            var lightRng        = new System.Random(baseRng.Next());
+            var chimneyRng      = new System.Random(baseRng.Next());
+            var surfacePipeRng  = new System.Random(baseRng.Next());
+            var seamRng         = new System.Random(baseRng.Next());
+            var ventRng         = new System.Random(baseRng.Next());
+            var greebleRng      = new System.Random(baseRng.Next());
+            var edgeTrimRng     = new System.Random(baseRng.Next());
+            var ambientLightRng = new System.Random(baseRng.Next());
 
             FaceInfo[] faces = ComputeFaces(mod);
             var mesh = new StationModuleMesh();
 
+            // Pass 0: panel seams — flat surface decoration that gets AO applied.
+            // Must run first so BaseFaceCount captures only these faces.
+            foreach (var face in faces)
+                GeneratePanelSeams(mod, face, seamRng, mesh);
+            mesh.BaseFaceCount = mesh.FaceCount;
+
+            // Pass 1-N: raised decoration (not included in AO range).
             foreach (var face in faces)
             {
                 var occupancy = new FaceOccupancy();
-                GeneratePanelSeams   (mod, face, seamRng,        mesh);
-                GenerateWindows      (mod, face, windowRng,      mesh, occupancy);
-                GenerateHatches      (mod, face, hatchRng,       mesh, occupancy);
-                GenerateAntennas     (mod, face, antennaRng,     mesh);
-                GenerateChimneys     (mod, face, chimneyRng,     mesh);
-                GenerateSurfacePipes (mod, face, surfacePipeRng, mesh);
-                GenerateVentGrilles  (mod, face, ventRng,        mesh, occupancy);
-                GenerateGreebles     (mod, face, greebleRng,     mesh, occupancy);
+                GenerateWindows     (mod, face, windowRng,      mesh, occupancy);
+                GenerateHatches     (mod, face, hatchRng,       mesh, occupancy);
+                GenerateAntennas    (mod, face, antennaRng,     mesh, mod.GlowLights);
+                GenerateChimneys    (mod, face, chimneyRng,     mesh, mod.GlowLights, mod);
+                GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
+                GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
+                GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy);
             }
 
-            GeneratePipes          (mod, faces, pipeRng,     mesh);
-            GenerateLights         (mod, faces, lightRng,    mesh);
-            GenerateEdgeTrimStrips (mod, faces, edgeTrimRng, mesh);
+            GeneratePipes         (mod, faces, pipeRng,     mesh);
+            GenerateLights        (mod, faces, lightRng,    mesh);
+            GenerateEdgeTrimStrips(mod, faces, edgeTrimRng, mesh);
+
+            RegisterModuleAmbientLights(mod, faces, ambientLightRng);
 
             if (!mesh.IsEmpty)
                 mod.Mesh = mesh;
@@ -56,29 +64,52 @@ public static class StationDecorator
         RunSolarPanelPass   (modules, new System.Random(stationSeed ^ unchecked((int)0xABCDEF01)));
     }
 
-    // Darkens decoration vertices that are on more-connected (occluded) modules.
+    // Darkens decoration vertices on occluded module faces.
+    // Per-face algorithm: each seam face gets a darkening factor based on how many
+    // of its 4 adjacent face normals are blocked (internal/connected).
+    // Only processes BaseFaceCount faces — not raised decoration geometry.
     // Call after BakeLighting so lighting colours are already baked in.
     public static void ApplyAmbientOcclusion(IReadOnlyList<PlacedModule> modules)
     {
         foreach (var mod in modules)
         {
             if (mod.Mesh == null) continue;
-            FaceInfo[] faces = ComputeFaces(mod);
-            int blockedFaces = 0;
-            foreach (var f in faces) if (!f.IsExposed) blockedFaces++;
 
-            float factor = blockedFaces switch
+            var internalNormals = BuildInternalNormalSet(mod);
+            int limit = mod.Mesh.BaseFaceCount;
+
+            for (int faceIdx = 0; faceIdx < limit; faceIdx++)
             {
-                0 => 1.00f,
-                1 => 0.92f,
-                2 => 0.82f,
-                _ => 0.70f,
-            };
-            if (factor >= 1.0f) continue;
+                Vector3 faceNormal = mod.Mesh.LocalFaceNormal(faceIdx);
+                if (internalNormals.Contains(faceNormal)) continue;
 
-            for (int i = 0; i < mod.Mesh.FaceCount; i++)
-                mod.Mesh.MultiplyFaceColor(i, factor);
+                int enclosed = AdjacentNormalsFor(faceNormal)
+                    .Count(n => internalNormals.Contains(n));
+
+                float aoFactor = enclosed switch { 1 => 0.90f, 2 => 0.76f, 3 => 0.60f, _ => 1.00f };
+                if (aoFactor >= 1.0f) continue;
+                mod.Mesh.MultiplyFaceColor(faceIdx, aoFactor);
+            }
         }
+    }
+
+    // Returns the local-space normals for all blocked (internal/connected) faces.
+    private static HashSet<Vector3> BuildInternalNormalSet(PlacedModule mod)
+    {
+        var result = new HashSet<Vector3>();
+        foreach (var face in ComputeFaces(mod))
+            if (!face.IsExposed) result.Add(face.LocalNormal);
+        return result;
+    }
+
+    // Returns the 4 axis-aligned normals adjacent to a given face normal.
+    private static Vector3[] AdjacentNormalsFor(Vector3 n)
+    {
+        if (MathF.Abs(n.X) > 0.9f)
+            return [Vector3.UnitY, -Vector3.UnitY, Vector3.UnitZ, -Vector3.UnitZ];
+        if (MathF.Abs(n.Y) > 0.9f)
+            return [Vector3.UnitX, -Vector3.UnitX, Vector3.UnitZ, -Vector3.UnitZ];
+        return [Vector3.UnitX, -Vector3.UnitX, Vector3.UnitY, -Vector3.UnitY];
     }
 
     // ── Face analysis ─────────────────────────────────────────────────────────
@@ -161,6 +192,11 @@ public static class StationDecorator
          + face.LocalRight  * u
          + face.LocalUp     * v
          + face.LocalNormal * offset;
+
+    // Transforms a module-local face point to station-relative space via mod.Transform.
+    // Used to compute WorldPosition values for StationLightInfo.
+    private static Vector3 StationPoint(PlacedModule mod, FaceInfo face, float u, float v, float offset)
+        => Vector3.Transform(LocalPointAbs(face, u, v, offset), mod.Transform);
 
     // ── Face occupancy ────────────────────────────────────────────────────────
 
@@ -325,7 +361,7 @@ public static class StationDecorator
             center + right * hw - up * hw,  // BR
         ];
         for (int i = 0; i < 4; i++)
-            mesh.AddTriangle(apex, base4[i], base4[(i + 1) % 4], glassColor);
+            mesh.AddTriangle(base4[i], apex, base4[(i + 1) % 4], glassColor);
         // Dark inner base so the opening reads as a recess.
         mesh.AddQuad(base4[0], base4[3], base4[2], base4[1], new Color(20, 22, 28));
     }
@@ -379,7 +415,7 @@ public static class StationDecorator
     }
 
     private static void GenerateAntennas(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh)
+        System.Random rng, StationModuleMesh mesh, List<StationLightInfo> lights)
     {
         if (!face.IsExposed)           return;
         if (face.LocalNormal.Y < -0.3f) return;
@@ -402,6 +438,19 @@ public static class StationDecorator
             float radius = (float)(rng.NextDouble() * 0.12 + 0.04);
 
             mesh.AddSpike(basePos, face.LocalNormal, length, radius, antennaCol);
+
+            if (length > 4f)
+            {
+                Vector3 tipLocal = basePos + face.LocalNormal * length;
+                lights.Add(new StationLightInfo(
+                    WorldPosition: Vector3.Transform(tipLocal, mod.Transform),
+                    Colour:        new Color(220, 25, 25),
+                    Type:          GlowType.AviationWarning,
+                    BaseIntensity: 0.70f,
+                    Rate:          0.65f,
+                    Phase:         (float)rng.NextDouble(),
+                    Pattern:       LightPattern.Strobe));
+            }
 
             if (rng.NextDouble() < 0.4)
             {
@@ -452,6 +501,17 @@ public static class StationDecorator
         bestMod.Mesh.AddOrientedBox(stemCenter, f.LocalNormal, stemLen, 0.25f, 0.25f, antennaCol);
         Vector3 tipCenter = f.LocalCenter + f.LocalNormal * (height + stemLen + 0.3f);
         bestMod.Mesh.AddBox(tipCenter, new Vector3(2.0f, 0.6f, 2.0f), antennaCol);
+
+        // Aviation warning light — landmark antennas are always tall enough to warrant it.
+        Vector3 tipLocal = f.LocalCenter + f.LocalNormal * (height + stemLen + 0.6f);
+        bestMod.GlowLights.Add(new StationLightInfo(
+            WorldPosition: Vector3.Transform(tipLocal, bestMod.Transform),
+            Colour:        new Color(220, 25, 25),
+            Type:          GlowType.AviationWarning,
+            BaseIntensity: 0.70f,
+            Rate:          0.65f,
+            Phase:         (float)rng.NextDouble(),
+            Pattern:       LightPattern.Strobe));
     }
 
     // ── Solar panels ─────────────────────────────────────────────────────────
@@ -547,7 +607,8 @@ public static class StationDecorator
     // ── Pass 4: Chimneys & Exhausts ──────────────────────────────────────────
 
     private static void GenerateChimneys(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh)
+        System.Random rng, StationModuleMesh mesh, List<StationLightInfo> lights,
+        PlacedModule owner)
     {
         if (!face.IsExposed) return;
         float prob = mod.Definition.Category switch
@@ -567,19 +628,21 @@ public static class StationDecorator
             Vector3 basePos = face.LocalCenter
                 + face.LocalRight * u
                 + face.LocalUp    * v;
-            AddChimney(mesh, basePos, face.LocalNormal, rng, baseCol);
+            AddChimney(mesh, basePos, face.LocalNormal, rng, baseCol, owner, lights);
         }
     }
 
     private static void AddChimney(StationModuleMesh mesh, Vector3 basePos,
-        Vector3 normal, System.Random rng, Color baseCol)
+        Vector3 normal, System.Random rng, Color baseCol,
+        PlacedModule mod, List<StationLightInfo> lights)
     {
         Color chimCol = DarkenColor(baseCol, 0.55f);
         Color tipCol  = new(50, 45, 40);
 
+        float height;
         if (rng.NextDouble() < 0.55)
         {
-            float height = (float)(rng.NextDouble() * 4.0 + 2.5);
+            height = (float)(rng.NextDouble() * 4.0 + 2.5);
             float radius = (float)(rng.NextDouble() * 0.2  + 0.15);
             mesh.AddOrientedBox(basePos + normal * (height * 0.5f),
                 normal, height, radius * 2, radius * 2, chimCol);
@@ -590,12 +653,22 @@ public static class StationDecorator
         {
             float baseR  = (float)(rng.NextDouble() * 0.4 + 0.4);
             float exitR  = baseR * 0.5f;
-            float height = (float)(rng.NextDouble() * 1.5 + 1.0);
+            height = (float)(rng.NextDouble() * 1.5 + 1.0);
             mesh.AddOrientedBox(basePos + normal * (height * 0.3f),
                 normal, height * 0.6f, baseR * 2, baseR * 2, chimCol);
             mesh.AddOrientedBox(basePos + normal * (height * 0.8f),
                 normal, height * 0.4f, exitR * 2, exitR * 2, tipCol);
         }
+
+        Vector3 chimTip = basePos + normal * (height + 0.15f);
+        lights.Add(new StationLightInfo(
+            WorldPosition: Vector3.Transform(chimTip, mod.Transform),
+            Colour:        new Color(210, 30, 20),
+            Type:          GlowType.AviationWarning,
+            BaseIntensity: 0.60f,
+            Rate:          0.65f,
+            Phase:         (float)rng.NextDouble(),
+            Pattern:       LightPattern.Strobe));
     }
 
     // ── Pass 5: Pipes & Conduits ──────────────────────────────────────────────
@@ -829,10 +902,10 @@ public static class StationDecorator
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 25f) return;
 
-        Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
-        Color seamColor = DarkenColor(baseCol, 0.48f);
+        Color baseCol   = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color seamColor = DarkenColor(baseCol, 0.72f);
         const float seamWidth  = 0.038f;
-        const float seamOffset = 0.012f;
+        const float seamOffset = 0.028f;
 
         float hw = face.Width  * 0.5f;
         float hh = face.Height * 0.5f;
@@ -910,6 +983,15 @@ public static class StationDecorator
 
     // ── Pass 6c: Vent grilles ─────────────────────────────────────────────────
 
+    private enum VentStyle { HorizontalBars, Louvered, ScreenMesh }
+
+    private static VentStyle SelectVentStyle(System.Random rng) => rng.NextDouble() switch
+    {
+        < 0.45 => VentStyle.HorizontalBars,
+        < 0.80 => VentStyle.Louvered,
+        _      => VentStyle.ScreenMesh,
+    };
+
     private static void GenerateVentGrilles(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
     {
@@ -940,62 +1022,87 @@ public static class StationDecorator
             if (!occupancy.TryOccupy(cu, cv, ventW * 0.5f, ventH * 0.5f)) continue;
             remaining--;
 
-            AddVentGrille(mod, face, cu, cv, ventW, ventH, rng, mesh);
+            switch (SelectVentStyle(rng))
+            {
+                case VentStyle.HorizontalBars:
+                    AddHBarVentGrille(mod, face, cu, cv, ventW, ventH, rng, mesh);
+                    break;
+                case VentStyle.Louvered:
+                    AddLouVentGrille(mod, face, cu, cv, ventW, ventH, rng, mesh);
+                    break;
+                case VentStyle.ScreenMesh:
+                    AddScreenVentGrille(mod, face, cu, cv, ventW, ventH, rng, mesh);
+                    break;
+            }
         }
     }
 
-    private static void AddVentGrille(PlacedModule mod, FaceInfo face,
-        float cu, float cv, float ventW, float ventH, System.Random rng,
-        StationModuleMesh mesh)
+    // Shared: dark recess behind grille opening.
+    private static void AddVentBacking(FaceInfo face, float cu, float cv,
+        float ventW, float ventH, Color col, StationModuleMesh mesh)
     {
-        Color baseCol   = StationModuleRegistry.CategoryColor(mod.Definition.Category);
-        Color frameCol  = DarkenColor(baseCol, 0.58f);
-        Color shadowCol = new Color(12, 12, 14);
-        Color barCol    = DarkenColor(baseCol, 0.45f);
-
-        float hw = ventW * 0.5f;
-        float hh = ventH * 0.5f;
-        const float frameW   = 0.12f;
-        const float frameOff = 0.025f;
         const float shadowOff = 0.018f;
-        const float barOff   = 0.030f;
-
-        // Frame — top, bottom, left, right bars
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw - frameW, cv + hh,          frameOff),
-            LocalPointAbs(face, cu + hw + frameW, cv + hh,          frameOff),
-            LocalPointAbs(face, cu + hw + frameW, cv + hh + frameW, frameOff),
-            LocalPointAbs(face, cu - hw - frameW, cv + hh + frameW, frameOff), frameCol);
-
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw - frameW, cv - hh - frameW, frameOff),
-            LocalPointAbs(face, cu + hw + frameW, cv - hh - frameW, frameOff),
-            LocalPointAbs(face, cu + hw + frameW, cv - hh,          frameOff),
-            LocalPointAbs(face, cu - hw - frameW, cv - hh,          frameOff), frameCol);
-
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw - frameW, cv - hh, frameOff),
-            LocalPointAbs(face, cu - hw,          cv - hh, frameOff),
-            LocalPointAbs(face, cu - hw,          cv + hh, frameOff),
-            LocalPointAbs(face, cu - hw - frameW, cv + hh, frameOff), frameCol);
-
-        mesh.AddQuad(
-            LocalPointAbs(face, cu + hw,          cv - hh, frameOff),
-            LocalPointAbs(face, cu + hw + frameW, cv - hh, frameOff),
-            LocalPointAbs(face, cu + hw + frameW, cv + hh, frameOff),
-            LocalPointAbs(face, cu + hw,          cv + hh, frameOff), frameCol);
-
-        // Dark recess
+        float hw = ventW * 0.5f, hh = ventH * 0.5f;
         mesh.AddQuad(
             LocalPointAbs(face, cu - hw, cv - hh, shadowOff),
             LocalPointAbs(face, cu + hw, cv - hh, shadowOff),
             LocalPointAbs(face, cu + hw, cv + hh, shadowOff),
-            LocalPointAbs(face, cu - hw, cv + hh, shadowOff), shadowCol);
+            LocalPointAbs(face, cu - hw, cv + hh, shadowOff), col);
+    }
 
-        // Grille bars
+    // Shared: thin raised border around a vent opening.
+    private static void AddVentFrame(PlacedModule mod, FaceInfo face,
+        float cu, float cv, float ventW, float ventH, StationModuleMesh mesh)
+    {
+        Color frameCol  = DarkenColor(StationModuleRegistry.CategoryColor(mod.Definition.Category), 0.58f);
+        float hw = ventW * 0.5f, hh = ventH * 0.5f;
+        const float fw = 0.12f;   // frame width
+        const float fo = 0.025f;  // frame Z offset
+
+        // Top bar
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw - fw, cv + hh,      fo),
+            LocalPointAbs(face, cu + hw + fw, cv + hh,      fo),
+            LocalPointAbs(face, cu + hw + fw, cv + hh + fw, fo),
+            LocalPointAbs(face, cu - hw - fw, cv + hh + fw, fo), frameCol);
+
+        // Bottom bar
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw - fw, cv - hh - fw, fo),
+            LocalPointAbs(face, cu + hw + fw, cv - hh - fw, fo),
+            LocalPointAbs(face, cu + hw + fw, cv - hh,      fo),
+            LocalPointAbs(face, cu - hw - fw, cv - hh,      fo), frameCol);
+
+        // Left bar
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw - fw, cv - hh, fo),
+            LocalPointAbs(face, cu - hw,      cv - hh, fo),
+            LocalPointAbs(face, cu - hw,      cv + hh, fo),
+            LocalPointAbs(face, cu - hw - fw, cv + hh, fo), frameCol);
+
+        // Right bar
+        mesh.AddQuad(
+            LocalPointAbs(face, cu + hw,      cv - hh, fo),
+            LocalPointAbs(face, cu + hw + fw, cv - hh, fo),
+            LocalPointAbs(face, cu + hw + fw, cv + hh, fo),
+            LocalPointAbs(face, cu + hw,      cv + hh, fo), frameCol);
+    }
+
+    // Existing grille style: horizontal or vertical bars.
+    private static void AddHBarVentGrille(PlacedModule mod, FaceInfo face,
+        float cu, float cv, float ventW, float ventH, System.Random rng,
+        StationModuleMesh mesh)
+    {
+        Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color barCol   = DarkenColor(baseCol, 0.45f);
+
+        AddVentBacking(face, cu, cv, ventW, ventH, new Color(12, 12, 14), mesh);
+
         bool horizontal = rng.NextDouble() < 0.6;
         int  barCount   = rng.Next(3, 8);
+        float hw = ventW * 0.5f, hh = ventH * 0.5f;
         const float barThick = 0.04f;
+        const float barOff   = 0.030f;
 
         for (int b = 0; b < barCount; b++)
         {
@@ -1015,6 +1122,84 @@ public static class StationDecorator
                 LocalPointAbs(face, b1u, b1v, barOff),
                 LocalPointAbs(face, b0u, b1v, barOff), barCol);
         }
+
+        AddVentFrame(mod, face, cu, cv, ventW, ventH, mesh);
+    }
+
+    // Louvered vent: angled slats like venetian blinds.
+    private static void AddLouVentGrille(PlacedModule mod, FaceInfo face,
+        float cu, float cv, float ventW, float ventH, System.Random rng,
+        StationModuleMesh mesh)
+    {
+        Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color slatCol  = DarkenColor(baseCol, 0.50f);
+
+        AddVentBacking(face, cu, cv, ventW, ventH, new Color(10, 10, 12), mesh);
+
+        int   slats     = rng.Next(4, 8);
+        float slatsH    = ventH / slats;
+        const float slabThick = 0.045f;
+        float hh = ventH * 0.5f, hw = ventW * 0.5f;
+
+        for (int s = 0; s < slats; s++)
+        {
+            float vCentre = cv - hh + slatsH * (s + 0.5f);
+            float vBot    = vCentre - slatsH * 0.3f;
+            float vTop    = vCentre + slatsH * 0.3f;
+
+            // Slat slopes in the normal direction from bottom to top — gives angled appearance.
+            Vector3 s0 = LocalPointAbs(face, cu - hw, vBot, 0.022f);
+            Vector3 s1 = LocalPointAbs(face, cu + hw, vBot, 0.022f);
+            Vector3 s2 = LocalPointAbs(face, cu + hw, vTop, 0.022f + slabThick);
+            Vector3 s3 = LocalPointAbs(face, cu - hw, vTop, 0.022f + slabThick);
+            mesh.AddQuad(s0, s1, s2, s3, slatCol);
+        }
+
+        AddVentFrame(mod, face, cu, cv, ventW, ventH, mesh);
+    }
+
+    // Screen mesh vent: fine grid of thin bars in both directions.
+    private static void AddScreenVentGrille(PlacedModule mod, FaceInfo face,
+        float cu, float cv, float ventW, float ventH, System.Random rng,
+        StationModuleMesh mesh)
+    {
+        Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color wireCol  = DarkenColor(baseCol, 0.45f);
+
+        AddVentBacking(face, cu, cv, ventW, ventH, new Color(8, 8, 10), mesh);
+
+        const float wireThick = 0.025f;
+        const float wireOff   = 0.026f;
+        float hw = ventW * 0.5f, hh = ventH * 0.5f;
+
+        int hCount = Math.Max(1, (int)(ventW / 0.35f));
+        int vCount = Math.Max(1, (int)(ventH / 0.35f));
+
+        // Horizontal wires
+        for (int i = 1; i < vCount; i++)
+        {
+            float vPos = cv - hh + ventH * ((float)i / vCount);
+            float hs   = wireThick * 0.5f;
+            mesh.AddQuad(
+                LocalPointAbs(face, cu - hw, vPos - hs, wireOff),
+                LocalPointAbs(face, cu + hw, vPos - hs, wireOff),
+                LocalPointAbs(face, cu + hw, vPos + hs, wireOff),
+                LocalPointAbs(face, cu - hw, vPos + hs, wireOff), wireCol);
+        }
+
+        // Vertical wires (offset slightly forward so they cross over horizontals)
+        for (int i = 1; i < hCount; i++)
+        {
+            float uPos = cu - hw + ventW * ((float)i / hCount);
+            float hs   = wireThick * 0.5f;
+            mesh.AddQuad(
+                LocalPointAbs(face, uPos - hs, cv - hh, wireOff + 0.005f),
+                LocalPointAbs(face, uPos + hs, cv - hh, wireOff + 0.005f),
+                LocalPointAbs(face, uPos + hs, cv + hh, wireOff + 0.005f),
+                LocalPointAbs(face, uPos - hs, cv + hh, wireOff + 0.005f), wireCol);
+        }
+
+        AddVentFrame(mod, face, cu, cv, ventW, ventH, mesh);
     }
 
     // ── Pass 6d: Greeble boxes ────────────────────────────────────────────────
@@ -1102,12 +1287,10 @@ public static class StationDecorator
         {
             case GreebleType.JunctionBox:
             {
-                // Small box with lid seam
                 float boxH = 0.30f + (float)rng.NextDouble() * 0.15f;
                 var t = FaceLocalTransform(face,
                     LocalPointAbs(face, cu, cv, boxH * 0.5f));
                 mesh.AddOrientedBox(t, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
-                // Lid seam (thin strip across middle)
                 mesh.AddQuad(
                     LocalPointAbs(face, cu - hw, cv - 0.02f, boxH + 0.005f),
                     LocalPointAbs(face, cu + hw, cv - 0.02f, boxH + 0.005f),
@@ -1118,7 +1301,6 @@ public static class StationDecorator
 
             case GreebleType.EquipmentHousing:
             {
-                // Large base box with a smaller raised top section
                 float baseH = 0.40f + (float)rng.NextDouble() * 0.15f;
                 float topH  = 0.20f;
                 float topW  = hw * 0.6f;
@@ -1136,12 +1318,10 @@ public static class StationDecorator
 
             case GreebleType.ConduitEntry:
             {
-                // Box with a pipe stub entering from the side
                 float boxH = 0.35f;
                 var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, boxH * 0.5f));
                 mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
 
-                // Short pipe stub along the face
                 float pipeLen = hw * 1.4f;
                 Vector3 stubStart = LocalPointAbs(face, cu - pipeLen, cv, boxH * 0.5f);
                 Vector3 stubEnd   = LocalPointAbs(face, cu,           cv, boxH * 0.5f);
@@ -1151,12 +1331,10 @@ public static class StationDecorator
 
             case GreebleType.SensorPod:
             {
-                // Tall box with a small disc "lens" on top
                 float podH = 0.50f + (float)rng.NextDouble() * 0.15f;
                 var pt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, podH * 0.5f));
                 mesh.AddOrientedBox(pt, new Vector3(hw * 2, hh * 2, podH), greebleCol);
 
-                // Lens: very flat box on top
                 float lensR = MathF.Min(hw, hh) * 0.5f;
                 var lt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, podH + 0.04f));
                 mesh.AddOrientedBox(lt, new Vector3(lensR * 2, lensR * 2, 0.08f),
@@ -1166,12 +1344,10 @@ public static class StationDecorator
 
             case GreebleType.TechPanel:
             {
-                // Thin flat panel with two sub-boxes implying controls
                 float panH = 0.12f + (float)rng.NextDouble() * 0.06f;
                 var pt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, panH * 0.5f));
                 mesh.AddOrientedBox(pt, new Vector3(hw * 2, hh * 2, panH), greebleCol);
 
-                // Two small raised buttons
                 for (int b = 0; b < 2; b++)
                 {
                     float btnU  = cu + (b == 0 ? -hw * 0.4f : hw * 0.4f);
@@ -1186,7 +1362,6 @@ public static class StationDecorator
 
             case GreebleType.ValveAssembly:
             {
-                // Box with a cross-shaped handle on top
                 float boxH = 0.38f;
                 var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, boxH * 0.5f));
                 mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
@@ -1195,12 +1370,10 @@ public static class StationDecorator
                 float armW   = 0.06f;
                 float armH   = boxH + 0.10f;
 
-                // Horizontal arm
                 Vector3 hArmA = LocalPointAbs(face, cu - armLen, cv, armH);
                 Vector3 hArmB = LocalPointAbs(face, cu + armLen, cv, armH);
                 mesh.AddPrismPipe(hArmA, hArmB, armW, 4, darkCol);
 
-                // Vertical arm
                 Vector3 vArmA = LocalPointAbs(face, cu, cv - armLen, armH);
                 Vector3 vArmB = LocalPointAbs(face, cu, cv + armLen, armH);
                 mesh.AddPrismPipe(vArmA, vArmB, armW, 4, darkCol);
@@ -1244,9 +1417,9 @@ public static class StationDecorator
 
         (Vector3 normal, Vector3 pos, Color lens)[] navLights =
         [
-            ( Vector3.UnitX,  new Vector3(+half.X, 0, 0),  new Color(  0, 220,  80)),
-            (-Vector3.UnitX,  new Vector3(-half.X, 0, 0),  new Color(220,  30,  30)),
-            (-Vector3.UnitZ,  new Vector3(0, half.Y * 0.5f, -half.Z), new Color(230, 230, 230)),
+            ( Vector3.UnitX,  new Vector3(+half.X, 0, 0),  new Color( 60, 230,  80)),
+            (-Vector3.UnitX,  new Vector3(-half.X, 0, 0),  new Color(230,  55,  55)),
+            (-Vector3.UnitZ,  new Vector3(0, half.Y * 0.5f, -half.Z), new Color(210, 220, 255)),
         ];
 
         Color housing = new(40, 40, 40);
@@ -1262,7 +1435,14 @@ public static class StationDecorator
                 OffColor   = DarkenColor(lens, 0.1f),
                 Period     = 1f,
             });
-            mod.GlowLights.Add(new StationLightInfo(pos, lens, GlowType.NavigationLight));
+            mod.GlowLights.Add(new StationLightInfo(
+                WorldPosition: Vector3.Transform(pos, mod.Transform),
+                Colour:        lens,
+                Type:          GlowType.NavigationLight,
+                BaseIntensity: 0.55f,
+                Rate:          0f,
+                Phase:         0f,
+                Pattern:       LightPattern.Continuous));
         }
     }
 
@@ -1291,7 +1471,14 @@ public static class StationDecorator
                 Period     = 1.4f,
                 Phase      = phase,
             });
-            mod.GlowLights.Add(new StationLightInfo(pos, amber, GlowType.WarningStrobe));
+            mod.GlowLights.Add(new StationLightInfo(
+                WorldPosition: Vector3.Transform(pos, mod.Transform),
+                Colour:        amber,
+                Type:          GlowType.WarningStrobe,
+                BaseIntensity: 0.55f,
+                Rate:          1f / 1.4f,
+                Phase:         phase,
+                Pattern:       LightPattern.Strobe));
             phase += 0.5f;
         }
     }
@@ -1365,6 +1552,58 @@ public static class StationDecorator
                 });
             }
         }
+    }
+
+    // ── Pass 8: Ambient position markers ─────────────────────────────────────
+
+    private static void RegisterModuleAmbientLights(PlacedModule mod, FaceInfo[] faces,
+        System.Random rng)
+    {
+        if (rng.NextDouble() > 0.60) return;
+
+        int count    = rng.Next(1, 3);
+        var eligible = faces.Where(f => f.IsExposed).ToList();
+        if (eligible.Count == 0) return;
+
+        for (int i = 0; i < count && i < eligible.Count; i++)
+        {
+            var face  = eligible[rng.Next(eligible.Count)];
+            float cu  = ((float)rng.NextDouble() - 0.5f) * face.Width  * 0.6f;
+            float cv  = ((float)rng.NextDouble() - 0.5f) * face.Height * 0.6f;
+            Color col = PickMarkerColour(mod.Definition.Category, rng);
+            float intensity = 0.18f + (float)rng.NextDouble() * 0.14f;
+
+            mod.GlowLights.Add(new StationLightInfo(
+                WorldPosition: StationPoint(mod, face, cu, cv, 0.05f),
+                Colour:        col,
+                Type:          GlowType.AmbientMarker,
+                BaseIntensity: intensity,
+                Rate:          0f,
+                Phase:         0f,
+                Pattern:       LightPattern.Continuous));
+        }
+    }
+
+    private static Color PickMarkerColour(string category, System.Random rng)
+    {
+        double r = rng.NextDouble();
+        return category switch
+        {
+            "science"  => r < 0.50 ? new Color(150, 200, 255)
+                        : r < 0.80 ? new Color(200, 240, 255)
+                        :            new Color(130, 255, 160),
+            "docking"  => r < 0.60 ? new Color(255, 200, 80)
+                        :            new Color(200, 220, 255),
+            "military" => r < 0.70 ? new Color(255, 80, 80)
+                        :            new Color(200, 200, 200),
+            "hab" or "luxury"
+                       => r < 0.50 ? new Color(255, 240, 200)
+                        : r < 0.75 ? new Color(255, 220, 140)
+                        :            new Color(200, 220, 255),
+            _          => r < 0.40 ? new Color(255, 220, 140)
+                        : r < 0.70 ? new Color(220, 225, 255)
+                        :            new Color(255, 255, 240),
+        };
     }
 
     // ── Colour helpers ────────────────────────────────────────────────────────

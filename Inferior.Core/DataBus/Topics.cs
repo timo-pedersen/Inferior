@@ -137,6 +137,11 @@ public static class Topics
         public const string Data = "Data";  // double[] — 10-bin normalised Planck spectrum (0-1 per bin)
     }
 
+    public static class Target
+    {
+        public const string Changed = "Target.Changed";   // RadarContact; empty Id = cleared
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {

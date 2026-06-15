@@ -29,6 +29,9 @@ public static class DataBus
     // Spectrum scan results — published on demand by active SolarSpectrumSensor
     public static readonly Bus<double[]>     Spectra          = new();
 
+    // Selected target changed — published by TargetingSystem; null-sentinel has empty Id
+    public static readonly Bus<RadarContact> Target           = new();
+
     // Called once per frame from Game.Update() on main thread
     public static void Drain()
     {
@@ -39,5 +42,6 @@ public static class DataBus
         Radar.Drain();
         RadarLost.Drain();
         Spectra.Drain();
+        Target.Drain();
     }
 }

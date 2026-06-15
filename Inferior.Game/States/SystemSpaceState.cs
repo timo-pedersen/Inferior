@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
+using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Sensors;
@@ -1250,36 +1251,50 @@ public sealed class SystemSpaceState : GameState
             {
                 foreach (var light in mod.GlowLights)
                 {
-                    Vector3 relPos   = stationRel + Vector3.Transform(light.LocalPosition, mod.Transform);
+                    Vector3 relPos   = stationRel + light.WorldPosition;
                     float   distance = relPos.Length();
                     if (distance < 0.1f) continue;
 
                     Vector2? screen = TargetingSystem.ProjectToScreen(relPos, viewProj, viewport);
                     if (screen == null) continue;
 
+                    float intensity = ComputeGlowIntensity(light);
+                    if (intensity < 0.01f) continue;
+
                     float baseSize = light.Type switch
                     {
                         StationGen.GlowType.NavigationLight => 900f,
                         StationGen.GlowType.WarningStrobe   => 550f,
-                        _                                   => 300f,
+                        StationGen.GlowType.AviationWarning => 500f,
+                        StationGen.GlowType.AmbientMarker   => 350f,
+                        _                                   => 400f,
                     };
-                    float size      = MathHelper.Clamp(baseSize / distance, 8f, 90f);
-                    float intensity = light.Type == StationGen.GlowType.NavigationLight ? 0.55f : 0.38f;
+                    float size  = MathHelper.Clamp(baseSize / distance, 6f, 100f);
+                    float scale = size / _navGlowTex.Width;
 
-                    sb.Draw(
-                        _navGlowTex,
-                        screen.Value,
-                        null,
-                        light.Colour * intensity,
-                        rotation:   0f,
-                        origin:     texCentre,
-                        scale:      size / _navGlowTex.Width,
-                        effects:    SpriteEffects.None,
-                        layerDepth: 0f);
+                    sb.Draw(_navGlowTex, screen.Value, null,
+                            light.Colour * intensity, 0f, texCentre, scale,
+                            SpriteEffects.None, 0f);
                 }
             }
         }
         sb.End();
+    }
+
+    private static float ComputeGlowIntensity(StationLightInfo light)
+    {
+        if (light.Rate <= 0f) return light.BaseIntensity;
+        float t = (float)((GameClock.SimTime * light.Rate + light.Phase) % 1.0);
+        return light.Pattern switch
+        {
+            LightPattern.Strobe    => t < 0.12f ? light.BaseIntensity : 0.03f,
+            LightPattern.SlowPulse => (MathF.Sin(t * MathF.Tau) * 0.5f + 0.5f) * light.BaseIntensity,
+            LightPattern.Heartbeat => t < 0.10f ? light.BaseIntensity
+                                    : t < 0.22f ? 0.08f
+                                    : t < 0.32f ? light.BaseIntensity * 0.65f
+                                    : 0.03f,
+            _ => light.BaseIntensity,
+        };
     }
 
     /// <summary>

@@ -15,7 +15,7 @@ public static class SceneLighting
     public static Vector3 SunDirection { get; set; } = Vector3.Normalize(new Vector3(0.5f, 1f, 0.3f));
 
     // Minimum light factor on the shadow side — keeps un-lit faces from going pure black.
-    public static float Ambient { get; set; } = 0.18f;
+    public static float Ambient { get; set; } = 0.09f;
 
     // Slightly warm sun tint — multiplied into the diffuse colour.
     public static Vector3 SunColour { get; set; } = new Vector3(1.0f, 0.97f, 0.88f);
