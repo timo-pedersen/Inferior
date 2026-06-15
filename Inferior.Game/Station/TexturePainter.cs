@@ -41,7 +41,7 @@ public static class TexturePainter
                 for (int sx = 0; sx < pixelScale; sx++)
                 {
                     int px = cx + col * pixelScale + sx;
-                    int py = y  + row * pixelScale + sy;
+                    int py = (y + BitmapFonts.CharH * pixelScale) - (row * pixelScale + sy);
                     if ((uint)px < (uint)bufferWidth && (uint)py < (uint)bufferHeight)
                     {
                         int idx = py * bufferWidth + px;
