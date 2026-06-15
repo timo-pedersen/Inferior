@@ -86,6 +86,7 @@ public sealed class SystemSpaceState : GameState
     // ── 2D overlay (SpriteBatch for HUD) ──────────────────────────────────────
     private Texture2D _pixel       = null!;
     private Texture2D _starGlowTex = null!;  // soft radial gradient — reused for all glow layers
+    private Texture2D _navGlowTex  = null!;  // cubic-falloff radial gradient for nav/strobe light glow
 
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
@@ -127,11 +128,13 @@ public sealed class SystemSpaceState : GameState
     private EdgePanelHost?   _leftPanel;
     private CockpitRail?     _cockpitRail;
     // Stored so we can unsubscribe on OnExit
-    private Action<string>?  _systemHandler;
-    private Action<double>?  _gravDirXHandler;
-    private Action<double>?  _gravDirYHandler;
-    private Action<double>?  _gravDirZHandler;
-    private double           _gravDirX, _gravDirY, _gravDirZ;
+    private Action<string>?       _systemHandler;
+    private Action<double>?       _gravDirXHandler;
+    private Action<double>?       _gravDirYHandler;
+    private Action<double>?       _gravDirZHandler;
+    private double                _gravDirX, _gravDirY, _gravDirZ;
+    private Action<RadarContact>? _radarContactHandler;
+    private Action<string>?       _radarLostHandler;
 
     // ── Targeting ─────────────────────────────────────────────────────────────
     private readonly TargetingSystem _targeting = new();
@@ -225,6 +228,44 @@ public sealed class SystemSpaceState : GameState
                 _camera = new Camera3D(startPos, AspectRatio);
                 SpawnShip(startPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
             }
+            else if (p.TargetStation != null)
+            {
+                // Approach a station from system map double-click — spawn 2 km away, facing it
+                _ship = null;
+                DVec3 parentEcliptic = DVec3.Zero;
+                if (p.TargetStation.OrbitParent != null)
+                {
+                    DVec3 grandparent = DVec3.Zero;
+                    foreach (var planet in _system.Planets)
+                        if (planet.Children.Contains(p.TargetStation.OrbitParent))
+                            grandparent = planet.GetPosition(p.GameTime, DVec3.Zero);
+                    parentEcliptic = p.TargetStation.OrbitParent.GetPosition(p.GameTime, grandparent);
+                }
+                DVec3 stationEcliptic = p.TargetStation.GetPosition(p.GameTime, parentEcliptic);
+                DVec3 stationGalaxy   = EclipticToGalaxy(stationEcliptic);
+
+                // Place spawn 2 km above the ecliptic plane relative to the station
+                DVec3 eclipticUp = new DVec3(_er01, _er11, _er21); // ecliptic +Y in galaxy space
+                DVec3 spawnPos   = stationGalaxy + eclipticUp * 2000.0;
+
+                // Orient ship to face toward the station
+                Vector3 toStation = Vector3.Normalize(new Vector3(
+                    (float)(stationGalaxy.X - spawnPos.X),
+                    (float)(stationGalaxy.Y - spawnPos.Y),
+                    (float)(stationGalaxy.Z - spawnPos.Z)));
+                Vector3 cross = Vector3.Cross(-Vector3.UnitZ, toStation);
+                float   dot   = Vector3.Dot(-Vector3.UnitZ, toStation);
+                Quaternion spawnOri;
+                if (cross.LengthSquared() < 1e-10f)
+                    spawnOri = dot > 0f ? Quaternion.Identity
+                                        : Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
+                else
+                    spawnOri = Quaternion.CreateFromAxisAngle(Vector3.Normalize(cross),
+                                   MathF.Acos(MathHelper.Clamp(dot, -1f, 1f)));
+
+                _camera = new Camera3D(spawnPos, AspectRatio);
+                SpawnShip(spawnPos, spawnOri);
+            }
             else if (_ship != null)
             {
                 // Returning from a map — ship instance is already alive in the simulation
@@ -306,6 +347,7 @@ public sealed class SystemSpaceState : GameState
         _pixel.SetData([Color.White]);
 
         _starGlowTex = CreateStarGlowTexture(_gd, 128);
+        _navGlowTex  = CreateNavGlowTexture(_gd, 64);
         _atmosEffect = _content.Load<Effect>("Effects/Atmosphere");
 
         _pendingTransition = null;
@@ -578,6 +620,11 @@ public sealed class SystemSpaceState : GameState
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         DataBus.System.Subscribe(Topics.System.All, _systemHandler);
 
+        _radarContactHandler = c  => _targeting.OnContactUpdated(c);
+        _radarLostHandler    = id => _targeting.OnContactLost(id);
+        DataBus.Radar.Subscribe(Topics.Radar.All,     _radarContactHandler);
+        DataBus.RadarLost.Subscribe(Topics.Radar.All, _radarLostHandler);
+
         // First system message — confirms state entry
         DataBus.System.Publish(Topics.System.All, $"Entered {_star.Name}");
     }
@@ -605,6 +652,10 @@ public sealed class SystemSpaceState : GameState
             DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         if (_systemHandler != null)
             DataBus.System.Unsubscribe(Topics.System.All, _systemHandler);
+        if (_radarContactHandler != null)
+            DataBus.Radar.Unsubscribe(Topics.Radar.All, _radarContactHandler);
+        if (_radarLostHandler != null)
+            DataBus.RadarLost.Unsubscribe(Topics.Radar.All, _radarLostHandler);
         if (_shieldCapacitorHandler != null)
             DataBus.Instruments.Unsubscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
 
@@ -620,6 +671,7 @@ public sealed class SystemSpaceState : GameState
         _decoMeshes.Clear();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
+        _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
     }
 
@@ -682,6 +734,13 @@ public sealed class SystemSpaceState : GameState
             if (_debugCameraMode)
                 _camera.Update(dt, new MouseState(), new KeyboardState()); // clear any held drag
             _simulation.SetInput(PlayerInput.Zero);
+
+            // Click-to-target — left click selects the nearest radar contact bracket
+            if (mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released)
+            {
+                var vp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+                _targeting.SelectAtCursor(new Vector2(mouse.X, mouse.Y), vp, _gd.Viewport);
+            }
         }
         else if (_debugCameraMode)
         {
@@ -793,6 +852,9 @@ public sealed class SystemSpaceState : GameState
         _effect.DirectionalLight0.DiffuseColor = _star.LightColor.ToVector3() * 3.0f;
         _effect.AmbientLightColor              = _star.GlowColor.ToVector3() * _star.AmbientIntensity;
 
+        // SunDirection = from scene toward star = opposite of "light travels" direction
+        SceneLighting.SunDirection = -lightDir;
+
         // Pass 0 — skybox (drawn before depth buffer has any data, so geometry always wins)
         gd.DepthStencilState = DepthStencilState.None;
         DrawSkybox();
@@ -815,6 +877,7 @@ public sealed class SystemSpaceState : GameState
         foreach (var (body, pos) in _bodyPositions)
             DrawPlanetBody(body, pos);
         DrawStations();
+        DrawStationGlows(sb);
 
         // Pass 2 — transparent (no depth write/read — shader ray-sphere handles visibility)
         gd.BlendState        = BlendState.AlphaBlend;
@@ -828,6 +891,7 @@ public sealed class SystemSpaceState : GameState
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
         DrawStationDots(sb);
+        DrawTargetingHUD(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
@@ -861,6 +925,11 @@ public sealed class SystemSpaceState : GameState
         _effect.LightingEnabled    = true;
         _effect.VertexColorEnabled = false;
         _effect.TextureEnabled     = false;
+
+        // Use SceneLighting params for station modules — not the planet-boosted ones.
+        // Direction is already correct (lightDir set in Draw); only colour/ambient differ.
+        _effect.DirectionalLight0.DiffuseColor = SceneLighting.SunColour;
+        _effect.AmbientLightColor              = new Vector3(SceneLighting.Ambient);
 
         _gd.SetVertexBuffer(_boxVb);
         _gd.Indices = _boxIb;
@@ -996,6 +1065,64 @@ public sealed class SystemSpaceState : GameState
         }
     }
 
+    // ── Targeting HUD ────────────────────────────────────────────────────────
+
+    private void DrawTargetingHUD(SpriteBatch sb)
+    {
+        var vp       = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+        var viewport = _gd.Viewport;
+
+        foreach (var contact in _targeting.AllContacts)
+        {
+            Vector2? screen = TargetingSystem.ProjectToScreen(contact.RelativePosition, vp, viewport);
+            if (screen == null) continue;
+
+            bool  isTarget = _targeting.CurrentRadarTarget?.Id == contact.Id;
+            float dist     = contact.RelativePosition.Length();
+            float size     = MathHelper.Clamp(3e6f / dist, 8f, 44f);
+            float arm      = size * 0.40f;
+
+            Color bracketColor = isTarget
+                ? new Color(0, 220, 220)
+                : new Color(100, 100, 100);
+
+            DrawBracket(sb, screen.Value, size, arm, 2, bracketColor);
+
+            if (isTarget)
+            {
+                string distStr = dist < 1000f
+                    ? $"{dist:F0} m"
+                    : $"{dist / 1000f:F1} km";
+                Vector2 labelPos = screen.Value + new Vector2(-40f, size + 6f);
+                sb.DrawString(_font, contact.DisplayName, labelPos,                        new Color(0, 220, 220));
+                sb.DrawString(_font, distStr,             labelPos + new Vector2(0f, 18f), new Color(0, 180, 180));
+            }
+        }
+    }
+
+    // Four L-shaped corner brackets centred on `centre`.
+    private void DrawBracket(SpriteBatch sb, Vector2 centre, float size, float arm, int thickness, Color color)
+    {
+        int s  = (int)size;
+        int al = (int)arm;
+        int t  = thickness;
+        int cx = (int)centre.X;
+        int cy = (int)centre.Y;
+
+        // Top-left
+        sb.Draw(_pixel, new Rectangle(cx - s,      cy - s,      al, t),  color);
+        sb.Draw(_pixel, new Rectangle(cx - s,      cy - s,      t,  al), color);
+        // Top-right
+        sb.Draw(_pixel, new Rectangle(cx + s - al, cy - s,      al, t),  color);
+        sb.Draw(_pixel, new Rectangle(cx + s - t,  cy - s,      t,  al), color);
+        // Bottom-left
+        sb.Draw(_pixel, new Rectangle(cx - s,      cy + s - t,  al, t),  color);
+        sb.Draw(_pixel, new Rectangle(cx - s,      cy + s - al, t,  al), color);
+        // Bottom-right
+        sb.Draw(_pixel, new Rectangle(cx + s - al, cy + s - t,  al, t),  color);
+        sb.Draw(_pixel, new Rectangle(cx + s - t,  cy + s - al, t,  al), color);
+    }
+
     // ── Opaque pass ───────────────────────────────────────────────────────────
 
     private void DrawStarBody()
@@ -1083,6 +1210,76 @@ public sealed class SystemSpaceState : GameState
 
         tex.SetData(data);
         return tex;
+    }
+
+    // Cubic-falloff radial gradient for nav light / strobe glow — bright centre, soft edge.
+    private static Texture2D CreateNavGlowTexture(GraphicsDevice gd, int size = 64)
+    {
+        var   tex  = new Texture2D(gd, size, size);
+        var   data = new Color[size * size];
+        float r    = size * 0.5f;
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float dist  = MathF.Sqrt((x - r) * (x - r) + (y - r) * (y - r));
+            float t     = MathF.Max(0f, 1f - dist / r);
+            float alpha = t * t * t;  // cubic: full brightness at centre, zero at rim
+            data[y * size + x] = Color.White * alpha;
+        }
+        tex.SetData(data);
+        return tex;
+    }
+
+    // Draws additive screen-space glow sprites over all station nav lights and warning strobes.
+    // Must be called after DrawStations() so the additive blend brightens visible geometry.
+    private void DrawStationGlows(SpriteBatch sb)
+    {
+        if (_stationPositions.Count == 0) return;
+
+        Matrix   viewProj  = _camera.ViewMatrix * _camera.ProjectionMatrix;
+        Viewport viewport  = _gd.Viewport;
+        Vector2  texCentre = new(_navGlowTex.Width * 0.5f, _navGlowTex.Height * 0.5f);
+
+        sb.Begin(SpriteSortMode.Deferred, BlendState.Additive);
+        foreach (var (station, universePos) in _stationPositions)
+        {
+            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+            Vector3 stationRel = (universePos - _camera.UniversePosition).ToVector3(); // metres
+
+            foreach (var mod in modules)
+            {
+                foreach (var light in mod.GlowLights)
+                {
+                    Vector3 relPos   = stationRel + Vector3.Transform(light.LocalPosition, mod.Transform);
+                    float   distance = relPos.Length();
+                    if (distance < 0.1f) continue;
+
+                    Vector2? screen = TargetingSystem.ProjectToScreen(relPos, viewProj, viewport);
+                    if (screen == null) continue;
+
+                    float baseSize = light.Type switch
+                    {
+                        StationGen.GlowType.NavigationLight => 900f,
+                        StationGen.GlowType.WarningStrobe   => 550f,
+                        _                                   => 300f,
+                    };
+                    float size      = MathHelper.Clamp(baseSize / distance, 8f, 90f);
+                    float intensity = light.Type == StationGen.GlowType.NavigationLight ? 0.55f : 0.38f;
+
+                    sb.Draw(
+                        _navGlowTex,
+                        screen.Value,
+                        null,
+                        light.Colour * intensity,
+                        rotation:   0f,
+                        origin:     texCentre,
+                        scale:      size / _navGlowTex.Width,
+                        effects:    SpriteEffects.None,
+                        layerDepth: 0f);
+                }
+            }
+        }
+        sb.End();
     }
 
     /// <summary>
@@ -1466,7 +1663,14 @@ public sealed class SystemSpaceState : GameState
     {
         bool mPressed    = keys.IsKeyDown(Keys.M)    && !_prevKeys.IsKeyDown(Keys.M);
         bool nPressed    = keys.IsKeyDown(Keys.N)    && !_prevKeys.IsKeyDown(Keys.N);
+        bool cPressed    = keys.IsKeyDown(Keys.C)    && !_prevKeys.IsKeyDown(Keys.C);
         bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
+
+        if (cPressed)
+        {
+            var vp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+            _targeting.SelectClosestToReticle(vp, _gd.Viewport);
+        }
 
         if (mPressed)
         {
@@ -1675,10 +1879,23 @@ public sealed class SystemSpaceState : GameState
 
         var tc = _ui?.Theme;
 
-        // Ship target (red stub)
-        _targetingDirBall.RemoveVector("ship");
-        if (_targetLineShip != null)
-            _targetLineShip.Text = "Target: None";
+        // Radar target (ship/station contact)
+        if (_targeting.HasRadarTarget)
+        {
+            var contact = _targeting.CurrentRadarTarget!.Value;
+            float distM = contact.RelativePosition.Length();
+            var col = tc?.TargetShip ?? new Color(0, 220, 220);
+            var dir = Vector3.Normalize(contact.RelativePosition);
+            _targetingDirBall.SetVector("ship", dir, col, "T");
+            if (_targetLineShip != null)
+                _targetLineShip.Text = $"Target: {contact.DisplayName} ({Units.FormatDistance(distM)})";
+        }
+        else
+        {
+            _targetingDirBall.RemoveVector("ship");
+            if (_targetLineShip != null)
+                _targetLineShip.Text = "Target: None";
+        }
 
         // Nav target (yellow)
         if (_targeting.HasNavTarget)

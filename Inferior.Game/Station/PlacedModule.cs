@@ -2,6 +2,14 @@ using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
 
+public enum GlowType { NavigationLight, WarningStrobe }
+
+// Position in local module space — transformed to world at render time via PlacedModule.Transform.
+public sealed record StationLightInfo(
+    Vector3  LocalPosition,
+    Color    Colour,
+    GlowType Type);
+
 public sealed class OpenPort
 {
     public required PlacedModule ParentModule  { get; init; }
@@ -23,4 +31,5 @@ public sealed class PlacedModule
     public          StationPort?            AttachmentPort { get; set; }
     public          List<StationPort>       ChildPorts     { get; } = [];
     public          StationModuleMesh?      Mesh           { get; set; }
+    public          List<StationLightInfo>  GlowLights     { get; } = [];
 }

@@ -654,6 +654,7 @@ public static class StationDecorator
                 OffColor   = DarkenColor(lens, 0.1f),
                 Period     = 1f,
             });
+            mod.GlowLights.Add(new StationLightInfo(pos, lens, GlowType.NavigationLight));
         }
     }
 
@@ -682,6 +683,7 @@ public static class StationDecorator
                 Period     = 1.4f,
                 Phase      = phase,
             });
+            mod.GlowLights.Add(new StationLightInfo(pos, amber, GlowType.WarningStrobe));
             phase += 0.5f;
         }
     }
