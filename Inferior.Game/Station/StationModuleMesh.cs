@@ -20,10 +20,13 @@ public sealed class AnimTag
 // CPU-side mesh accumulator for per-module decoration geometry.
 // Vertices are in local module space (metres). Call Build() to produce GPU buffers.
 // Uses VertexPositionColor — render with LightingEnabled=false, VertexColorEnabled=true.
+// Lighting is baked into vertex colours by ApplyLighting() before Build().
 public sealed class StationModuleMesh
 {
     private readonly List<VertexPositionColor> _verts = [];
     private readonly List<int>                 _idx   = [];
+    // Each entry covers one quad (4 consecutive vertices starting at vertexBase).
+    private readonly List<(int vertexBase, int count)> _faces = [];
 
     public bool           IsEmpty  => _verts.Count == 0;
     public List<AnimTag>  AnimTags { get; } = [];
@@ -38,6 +41,7 @@ public sealed class StationModuleMesh
         _verts.Add(new VertexPositionColor(v2, color));
         _verts.Add(new VertexPositionColor(v3, color));
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
+        _faces.Add((b, 4));
         return b;
     }
 
@@ -63,39 +67,38 @@ public sealed class StationModuleMesh
 
     // Adds a box at an arbitrary transform (orientation + translation in local space).
     // size is the full extents before transform. Returns index of first vertex.
+    // Uses 24 vertices (4 per face, unshared) so each face can be independently lit.
     public int AddOrientedBox(Matrix transform, Vector3 size, Color color)
     {
         Vector3 h = size * 0.5f;
 
         Span<Vector3> c = stackalloc Vector3[8]
         {
-            new(-h.X, -h.Y, -h.Z), // 0
-            new(+h.X, -h.Y, -h.Z), // 1
-            new(+h.X, +h.Y, -h.Z), // 2
-            new(-h.X, +h.Y, -h.Z), // 3
-            new(-h.X, -h.Y, +h.Z), // 4
-            new(+h.X, -h.Y, +h.Z), // 5
-            new(+h.X, +h.Y, +h.Z), // 6
-            new(-h.X, +h.Y, +h.Z), // 7
+            new(-h.X, -h.Y, -h.Z), // 0 BL-back
+            new(+h.X, -h.Y, -h.Z), // 1 BR-back
+            new(+h.X, +h.Y, -h.Z), // 2 TR-back
+            new(-h.X, +h.Y, -h.Z), // 3 TL-back
+            new(-h.X, -h.Y, +h.Z), // 4 BL-front
+            new(+h.X, -h.Y, +h.Z), // 5 BR-front
+            new(+h.X, +h.Y, +h.Z), // 6 TR-front
+            new(-h.X, +h.Y, +h.Z), // 7 TL-front
         };
         for (int i = 0; i < 8; i++)
             c[i] = Vector3.Transform(c[i], transform);
 
-        int b = _verts.Count;
-        for (int i = 0; i < 8; i++)
-            _verts.Add(new VertexPositionColor(c[i], color));
+        int firstBase = _verts.Count;
 
-        ReadOnlySpan<int> faces =
-        [
-            b+4, b+6, b+5,  b+4, b+7, b+6,  // +Z
-            b+1, b+3, b+0,  b+1, b+2, b+3,  // -Z
-            b+0, b+7, b+4,  b+0, b+3, b+7,  // -X
-            b+5, b+2, b+1,  b+5, b+6, b+2,  // +X
-            b+7, b+2, b+6,  b+7, b+3, b+2,  // +Y
-            b+0, b+5, b+1,  b+0, b+4, b+5,  // -Y
-        ];
-        _idx.AddRange(faces);
-        return b;
+        // Six faces — each is an independent quad (4 unique vertices).
+        // Vertex ordering chosen so that cross(v1-v0, v2-v0) gives the outward normal,
+        // and the triangles (v0,v2,v1) and (v0,v3,v2) are CW from outside (not culled).
+        AddQuad(c[4], c[5], c[6], c[7], color); // +Z
+        AddQuad(c[1], c[0], c[3], c[2], color); // -Z
+        AddQuad(c[0], c[4], c[7], c[3], color); // -X
+        AddQuad(c[5], c[1], c[2], c[6], color); // +X
+        AddQuad(c[7], c[6], c[2], c[3], color); // +Y
+        AddQuad(c[0], c[1], c[5], c[4], color); // -Y
+
+        return firstBase;
     }
 
     // Adds a box whose Z axis aligns with `longAxis`.
@@ -106,8 +109,8 @@ public sealed class StationModuleMesh
     {
         longAxis = Vector3.Normalize(longAxis);
         Vector3 hint  = MathF.Abs(longAxis.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX;
-        Vector3 right = Vector3.Normalize(Vector3.Cross(longAxis, hint));
-        Vector3 up    = Vector3.Normalize(Vector3.Cross(right, longAxis));
+        Vector3 right = Vector3.Normalize(Vector3.Cross(hint, longAxis));
+        Vector3 up    = Vector3.Normalize(Vector3.Cross(longAxis, right));
 
         var transform = new Matrix(
             right.X,    right.Y,    right.Z,    0,
@@ -124,6 +127,83 @@ public sealed class StationModuleMesh
         direction = Vector3.Normalize(direction);
         Vector3 mid = basePos + direction * (length * 0.5f);
         AddOrientedBox(mid, direction, length, radius * 2, radius * 2, color);
+    }
+
+    // Adds a single triangle (CW from front). Index [b,b+2,b+1] = CCW in right-handed math → CW in DirectX Y-down.
+    public void AddTriangle(Vector3 v0, Vector3 v1, Vector3 v2, Color color)
+    {
+        int b = _verts.Count;
+        _verts.Add(new VertexPositionColor(v0, color));
+        _verts.Add(new VertexPositionColor(v1, color));
+        _verts.Add(new VertexPositionColor(v2, color));
+        _idx.AddRange([b, b+2, b+1]);
+        _faces.Add((b, 3));
+    }
+
+    public int FaceCount => _faces.Count;
+
+    // Returns the normalised local-space outward normal for the given face index.
+    public Vector3 LocalFaceNormal(int faceIdx)
+    {
+        var (vb, _) = _faces[faceIdx];
+        Vector3 n = Vector3.Cross(
+            _verts[vb + 1].Position - _verts[vb].Position,
+            _verts[vb + 2].Position - _verts[vb].Position);
+        float len = n.Length();
+        return len < 1e-6f ? Vector3.Zero : n / len;
+    }
+
+    // Multiplies the RGB of every vertex in a face by `factor` (clamped to [0,255]).
+    public void MultiplyFaceColor(int faceIdx, float factor)
+    {
+        var (vb, count) = _faces[faceIdx];
+        for (int i = 0; i < count; i++)
+        {
+            var vtx = _verts[vb + i];
+            vtx.Color = new Color(
+                (byte)MathF.Min(vtx.Color.R * factor, 255f),
+                (byte)MathF.Min(vtx.Color.G * factor, 255f),
+                (byte)MathF.Min(vtx.Color.B * factor, 255f),
+                vtx.Color.A);
+            _verts[vb + i] = vtx;
+        }
+    }
+
+    // Bakes directional lighting into vertex colours.
+    // worldRotation: rotation-only part of the module's world transform (no scale/translate).
+    // Emissive faces (R+G+B > 370) are skipped — their colours stay at full brightness.
+    // Must be called after all geometry is added and before Build().
+    public void ApplyLighting(Matrix worldRotation, Vector3 sunDirection, float ambient, Vector3 sunColour)
+    {
+        foreach (var (vb, count) in _faces)
+        {
+            Color orig = _verts[vb].Color;
+            // Emissive heuristic: bright-enough colours are self-lit (windows, light lenses)
+            if ((int)orig.R + orig.G + orig.B > 370) continue;
+
+            // Compute face normal from first three vertices (cross product → outward normal)
+            Vector3 localN = Vector3.Cross(
+                _verts[vb + 1].Position - _verts[vb].Position,
+                _verts[vb + 2].Position - _verts[vb].Position);
+            float len = localN.Length();
+            if (len < 1e-6f) continue;
+            localN /= len;
+
+            // Transform local normal to world space for the N·L calculation
+            Vector3 worldN = Vector3.Normalize(Vector3.TransformNormal(localN, worldRotation));
+            float   factor = MathF.Max(Vector3.Dot(worldN, sunDirection), ambient);
+
+            for (int i = 0; i < count; i++)
+            {
+                var vtx = _verts[vb + i];
+                vtx.Color = new Color(
+                    (byte)MathF.Min(vtx.Color.R * factor * sunColour.X, 255f),
+                    (byte)MathF.Min(vtx.Color.G * factor * sunColour.Y, 255f),
+                    (byte)MathF.Min(vtx.Color.B * factor * sunColour.Z, 255f),
+                    vtx.Color.A);
+                _verts[vb + i] = vtx;
+            }
+        }
     }
 
     // Builds GPU buffers from accumulated geometry. Returns null if the mesh is empty.

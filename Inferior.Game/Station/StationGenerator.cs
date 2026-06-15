@@ -21,7 +21,26 @@ public sealed class StationGenerator
         var modules = gen.Run(station);
         ValidatePlacement(modules);
         StationDecorator.Decorate(modules);
+        BakeLighting(modules);
+        StationDecorator.ApplyAmbientOcclusion(modules);
         return modules;
+    }
+
+    // Bakes SceneLighting into each module's decoration vertex colours.
+    // Must run after Decorate() (so meshes exist) and before Build() (so GPU buffers
+    // pick up the modified colours).
+    private static void BakeLighting(List<PlacedModule> modules)
+    {
+        foreach (var mod in modules)
+        {
+            if (mod.Mesh == null) continue;
+            mod.Transform.Decompose(out _, out Quaternion rot, out _);
+            mod.Mesh.ApplyLighting(
+                Matrix.CreateFromQuaternion(rot),
+                SceneLighting.SunDirection,
+                SceneLighting.Ambient,
+                SceneLighting.SunColour);
+        }
     }
 
     // Asserts that every module except the core (index 0) has a non-null AttachmentPort.
