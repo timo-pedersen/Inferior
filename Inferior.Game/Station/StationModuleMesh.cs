@@ -54,7 +54,7 @@ public sealed class StationModuleMesh
         float   nLen   = normal.Length();
         if (nLen > 1e-6f) normal /= nLen;
         Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
-        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(arb, normal));
+        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
         _verts.Add(new VertexPositionColorTexture(v0, color, Vector2.Zero));
@@ -200,7 +200,7 @@ public sealed class StationModuleMesh
         float   nLen   = normal.Length();
         if (nLen > 1e-6f) normal /= nLen;
         Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
-        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(arb, normal));
+        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
         _verts.Add(new VertexPositionColorTexture(v0, color, Vector2.Zero));
@@ -269,7 +269,7 @@ public sealed class StationModuleMesh
 
             // Transform local normal to world space for the N·L calculation
             Vector3 worldN = Vector3.Normalize(Vector3.TransformNormal(localN, worldRotation));
-            float   factor = MathF.Max(Vector3.Dot(worldN, sunDirection), ambient);
+            float   factor = MathF.Max(Vector3.Dot(worldN, -sunDirection), ambient);
 
             for (int i = 0; i < count; i++)
             {
