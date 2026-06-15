@@ -185,7 +185,7 @@ public sealed class TargetingSystem
     {
         Vector3 renderPos = relPosMetres * (float)Rendering.Camera3D.RenderScale;
         Vector4 clip = Vector4.Transform(new Vector4(renderPos, 1f), viewProjection);
-        if (clip.W <= 0.001f) return null;
+        if (clip.W <= 0f) return null;
 
         float ndcX = clip.X / clip.W;
         float ndcY = clip.Y / clip.W;

@@ -439,7 +439,7 @@ public static class StationDecorator
 
             mesh.AddSpike(basePos, face.LocalNormal, length, radius, antennaCol);
 
-            if (length > 4f)
+            if (length > 2.5f)
             {
                 Vector3 tipLocal = basePos + face.LocalNormal * length;
                 lights.Add(new StationLightInfo(

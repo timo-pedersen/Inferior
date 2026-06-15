@@ -1287,12 +1287,12 @@ public sealed class SystemSpaceState : GameState
         float t = (float)((GameClock.SimTime * light.Rate + light.Phase) % 1.0);
         return light.Pattern switch
         {
-            LightPattern.Strobe    => t < 0.12f ? light.BaseIntensity : 0.03f,
+            LightPattern.Strobe    => t < 0.12f ? light.BaseIntensity : 0f,
             LightPattern.SlowPulse => (MathF.Sin(t * MathF.Tau) * 0.5f + 0.5f) * light.BaseIntensity,
             LightPattern.Heartbeat => t < 0.10f ? light.BaseIntensity
-                                    : t < 0.22f ? 0.08f
+                                    : t < 0.22f ? 0f
                                     : t < 0.32f ? light.BaseIntensity * 0.65f
-                                    : 0.03f,
+                                    : 0f,
             _ => light.BaseIntensity,
         };
     }
