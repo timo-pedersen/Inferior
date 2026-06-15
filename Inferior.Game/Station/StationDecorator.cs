@@ -12,29 +12,39 @@ public static class StationDecorator
     {
         foreach (var mod in modules)
         {
-            var baseRng         = new System.Random(mod.Seed);
-            var windowRng       = new System.Random(baseRng.Next());
-            var hatchRng        = new System.Random(baseRng.Next());
-            var antennaRng      = new System.Random(baseRng.Next());
-            var pipeRng         = new System.Random(baseRng.Next());
-            var lightRng        = new System.Random(baseRng.Next());
-            var chimneyRng      = new System.Random(baseRng.Next());
-            var surfacePipeRng  = new System.Random(baseRng.Next());
+            var baseRng        = new System.Random(mod.Seed);
+            var windowRng      = new System.Random(baseRng.Next());
+            var hatchRng       = new System.Random(baseRng.Next());
+            var antennaRng     = new System.Random(baseRng.Next());
+            var pipeRng        = new System.Random(baseRng.Next());
+            var lightRng       = new System.Random(baseRng.Next());
+            var chimneyRng     = new System.Random(baseRng.Next());
+            var surfacePipeRng = new System.Random(baseRng.Next());
+            // New passes — appended so existing seeds are unchanged
+            var seamRng        = new System.Random(baseRng.Next());
+            var ventRng        = new System.Random(baseRng.Next());
+            var greebleRng     = new System.Random(baseRng.Next());
+            var edgeTrimRng    = new System.Random(baseRng.Next());
 
             FaceInfo[] faces = ComputeFaces(mod);
             var mesh = new StationModuleMesh();
 
             foreach (var face in faces)
             {
-                GenerateWindows     (mod, face, windowRng,      mesh);
-                GenerateHatches     (mod, face, hatchRng,       mesh);
-                GenerateAntennas    (mod, face, antennaRng,     mesh);
-                GenerateChimneys    (mod, face, chimneyRng,     mesh);
-                GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
+                var occupancy = new FaceOccupancy();
+                GeneratePanelSeams   (mod, face, seamRng,        mesh);
+                GenerateWindows      (mod, face, windowRng,      mesh, occupancy);
+                GenerateHatches      (mod, face, hatchRng,       mesh, occupancy);
+                GenerateAntennas     (mod, face, antennaRng,     mesh);
+                GenerateChimneys     (mod, face, chimneyRng,     mesh);
+                GenerateSurfacePipes (mod, face, surfacePipeRng, mesh);
+                GenerateVentGrilles  (mod, face, ventRng,        mesh, occupancy);
+                GenerateGreebles     (mod, face, greebleRng,     mesh, occupancy);
             }
 
-            GeneratePipes (mod, faces, pipeRng,  mesh);
-            GenerateLights(mod, faces, lightRng, mesh);
+            GeneratePipes          (mod, faces, pipeRng,     mesh);
+            GenerateLights         (mod, faces, lightRng,    mesh);
+            GenerateEdgeTrimStrips (mod, faces, edgeTrimRng, mesh);
 
             if (!mesh.IsEmpty)
                 mod.Mesh = mesh;
@@ -145,6 +155,41 @@ public static class StationDecorator
          + face.LocalUp     * (cv * face.Height)
          + face.LocalNormal * offset;
 
+    // Returns a local-space point on a face using absolute metre offsets from face centre.
+    private static Vector3 LocalPointAbs(FaceInfo face, float u, float v, float offset)
+        => face.LocalCenter
+         + face.LocalRight  * u
+         + face.LocalUp     * v
+         + face.LocalNormal * offset;
+
+    // ── Face occupancy ────────────────────────────────────────────────────────
+
+    // Tracks rectangular regions already occupied on a face (absolute metre offsets).
+    private sealed class FaceOccupancy
+    {
+        private readonly List<(float u0, float v0, float u1, float v1)> _regions = [];
+
+        public bool IsClear(float u0, float v0, float u1, float v1, float margin = 0.15f)
+        {
+            float mu0 = u0 - margin, mv0 = v0 - margin;
+            float mu1 = u1 + margin, mv1 = v1 + margin;
+            return !_regions.Any(r =>
+                mu1 > r.u0 && mu0 < r.u1 &&
+                mv1 > r.v0 && mv0 < r.v1);
+        }
+
+        public void Occupy(float u0, float v0, float u1, float v1)
+            => _regions.Add((u0, v0, u1, v1));
+
+        public bool TryOccupy(float cu, float cv, float halfW, float halfH, float margin = 0.15f)
+        {
+            if (!IsClear(cu - halfW, cv - halfH, cu + halfW, cv + halfH, margin))
+                return false;
+            Occupy(cu - halfW, cv - halfH, cu + halfW, cv + halfH);
+            return true;
+        }
+    }
+
     // ── Pass 1: Windows ───────────────────────────────────────────────────────
 
     private static float WindowProbability(string category) => category switch
@@ -179,7 +224,7 @@ public static class StationDecorator
     }
 
     private static void GenerateWindows(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh)
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
     {
         if (!face.IsExposed)  return;
         if (face.Width  < 3f) return;
@@ -209,15 +254,22 @@ public static class StationDecorator
         {
             if (rng.NextDouble() < 0.20) continue;
 
+            float cu = startU + col * gridW;
+            float cv = startV + row * gridH;
+            if (!occupancy.TryOccupy(cu, cv, winW * 0.5f, winH * 0.5f)) continue;
+
             Vector3 center = face.LocalCenter
-                + face.LocalRight * (startU + col * gridW)
-                + face.LocalUp    * (startV + row * gridH)
+                + face.LocalRight * cu
+                + face.LocalUp    * cv
                 + face.LocalNormal * Z_OFFSET;
 
             if (canPorthole && rng.NextDouble() < 0.20)
             {
-                AddOctagonPorthole(mesh, center, face.LocalNormal, face.LocalUp,
-                    MathF.Min(winW, winH), winCol);
+                float portholeSize = MathF.Min(winW, winH);
+                if (rng.NextDouble() < 0.25)
+                    AddCupola(mesh, center, face.LocalNormal, face.LocalUp, portholeSize, winCol);
+                else
+                    AddOctagonPorthole(mesh, center, face.LocalNormal, face.LocalUp, portholeSize, winCol);
             }
             else
             {
@@ -257,10 +309,31 @@ public static class StationDecorator
         mesh.AddQuad(pos, normal, up, barThick, winH,     color);
     }
 
+    // Pyramid viewport: 4 triangular glass panels meeting at a raised apex point.
+    private static void AddCupola(StationModuleMesh mesh,
+        Vector3 center, Vector3 normal, Vector3 up, float size, Color glassColor)
+    {
+        Vector3 right = Vector3.Normalize(Vector3.Cross(up, normal));
+        float hw = size * 0.5f;
+        Vector3 apex = center + normal * (size * 0.5f);
+        // Base corners in CCW order when viewed from normal side (matches octagon convention).
+        Vector3[] base4 =
+        [
+            center - right * hw - up * hw,  // BL
+            center - right * hw + up * hw,  // TL
+            center + right * hw + up * hw,  // TR
+            center + right * hw - up * hw,  // BR
+        ];
+        for (int i = 0; i < 4; i++)
+            mesh.AddTriangle(apex, base4[i], base4[(i + 1) % 4], glassColor);
+        // Dark inner base so the opening reads as a recess.
+        mesh.AddQuad(base4[0], base4[3], base4[2], base4[1], new Color(20, 22, 28));
+    }
+
     // ── Pass 2: Hatches ───────────────────────────────────────────────────────
 
     private static void GenerateHatches(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh)
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
     {
         if (!face.IsExposed)  return;
         if (face.Width < 2f)  return;
@@ -273,16 +346,17 @@ public static class StationDecorator
         int count = rng.Next(1, 4);
         for (int i = 0; i < count; i++)
         {
-            float u = (float)(rng.NextDouble() - 0.5) * (face.Width  - 1.5f);
-            float v = (float)(rng.NextDouble() - 0.5) * (face.Height - 1.5f);
+            float u  = (float)(rng.NextDouble() - 0.5) * (face.Width  - 1.5f);
+            float v  = (float)(rng.NextDouble() - 0.5) * (face.Height - 1.5f);
+            float hw = (float)(rng.NextDouble() * 0.3f + 0.4f);
+            float hh = (float)(rng.NextDouble() * 0.5f + 0.5f);
+
+            if (!occupancy.TryOccupy(u, v, hw, hh)) continue;
 
             Vector3 center = face.LocalCenter
                 + face.LocalRight  * u
                 + face.LocalUp     * v
                 + face.LocalNormal * 0.3f;
-
-            float hw = (float)(rng.NextDouble() * 0.3f + 0.4f);
-            float hh = (float)(rng.NextDouble() * 0.5f + 0.5f);
 
             var t = new Matrix(
                 face.LocalRight.X,  face.LocalRight.Y,  face.LocalRight.Z,  0,
@@ -533,6 +607,26 @@ public static class StationDecorator
         (0,4),(1,5),(2,6),(3,7),
     ];
 
+    // Per-edge: faceA normal, faceB normal, axis direction, corner signs (0 on axis dimension).
+    private static readonly (Vector3 faceA, Vector3 faceB, Vector3 edgeDir, Vector3 cornerSign)[] BoxEdgeInfos =
+    [
+        // X-axis edges
+        (-Vector3.UnitY, -Vector3.UnitZ,  Vector3.UnitX, new Vector3( 0, -1, -1)),
+        ( Vector3.UnitY, -Vector3.UnitZ,  Vector3.UnitX, new Vector3( 0, +1, -1)),
+        (-Vector3.UnitY,  Vector3.UnitZ,  Vector3.UnitX, new Vector3( 0, -1, +1)),
+        ( Vector3.UnitY,  Vector3.UnitZ,  Vector3.UnitX, new Vector3( 0, +1, +1)),
+        // Y-axis edges
+        ( Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY, new Vector3(+1,  0, -1)),
+        (-Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY, new Vector3(-1,  0, -1)),
+        ( Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY, new Vector3(+1,  0, +1)),
+        (-Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY, new Vector3(-1,  0, +1)),
+        // Z-axis edges
+        ( Vector3.UnitX, -Vector3.UnitY,  Vector3.UnitZ, new Vector3(+1, -1,  0)),
+        (-Vector3.UnitX, -Vector3.UnitY,  Vector3.UnitZ, new Vector3(-1, -1,  0)),
+        ( Vector3.UnitX,  Vector3.UnitY,  Vector3.UnitZ, new Vector3(+1, +1,  0)),
+        (-Vector3.UnitX,  Vector3.UnitY,  Vector3.UnitZ, new Vector3(-1, +1,  0)),
+    ];
+
     private static int PipeSides(System.Random rng) => rng.NextDouble() switch
     {
         < 0.40 => 4,
@@ -727,7 +821,402 @@ public static class StationDecorator
         }
     }
 
-    // ── Pass 6: Lights ────────────────────────────────────────────────────────
+    // ── Pass 6a: Panel seam lines ─────────────────────────────────────────────
+
+    private static void GeneratePanelSeams(PlacedModule mod, FaceInfo face,
+        System.Random rng, StationModuleMesh mesh)
+    {
+        if (!face.IsExposed) return;
+        if (face.Width * face.Height < 25f) return;
+
+        Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color seamColor = DarkenColor(baseCol, 0.48f);
+        const float seamWidth  = 0.038f;
+        const float seamOffset = 0.012f;
+
+        float hw = face.Width  * 0.5f;
+        float hh = face.Height * 0.5f;
+        float hs = seamWidth * 0.5f;
+
+        int hSeams = rng.NextDouble() < 0.55 ? 2 : 1;
+        for (int i = 0; i < hSeams; i++)
+        {
+            float t    = hSeams == 1 ? 0.5f : (i == 0 ? 0.33f : 0.67f);
+            float vOff = -hh + face.Height * t
+                       + ((float)rng.NextDouble() - 0.5f) * face.Height * 0.08f;
+
+            Vector3 v0 = LocalPointAbs(face, -hw,  vOff - hs, seamOffset);
+            Vector3 v1 = LocalPointAbs(face, +hw,  vOff - hs, seamOffset);
+            Vector3 v2 = LocalPointAbs(face, +hw,  vOff + hs, seamOffset);
+            Vector3 v3 = LocalPointAbs(face, -hw,  vOff + hs, seamOffset);
+            mesh.AddQuad(v0, v1, v2, v3, seamColor);
+        }
+
+        int vSeams = face.Width > 20f ? (rng.NextDouble() < 0.6 ? 2 : 1) : 1;
+        for (int i = 0; i < vSeams; i++)
+        {
+            float t    = vSeams == 1 ? 0.5f : (i == 0 ? 0.33f : 0.67f);
+            float uOff = -hw + face.Width * t
+                       + ((float)rng.NextDouble() - 0.5f) * face.Width * 0.08f;
+
+            Vector3 v0 = LocalPointAbs(face, uOff - hs, -hh, seamOffset);
+            Vector3 v1 = LocalPointAbs(face, uOff + hs, -hh, seamOffset);
+            Vector3 v2 = LocalPointAbs(face, uOff + hs, +hh, seamOffset);
+            Vector3 v3 = LocalPointAbs(face, uOff - hs, +hh, seamOffset);
+            mesh.AddQuad(v0, v1, v2, v3, seamColor);
+        }
+    }
+
+    // ── Pass 6b: Edge trim strips ─────────────────────────────────────────────
+
+    private static void GenerateEdgeTrimStrips(PlacedModule mod, FaceInfo[] faces,
+        System.Random rng, StationModuleMesh mesh)
+    {
+        Vector3 half = mod.Definition.BoundingBox * 0.5f;
+
+        // Build a fast set of exposed face normals.
+        var exposed = new HashSet<Vector3>();
+        foreach (var f in faces)
+            if (f.IsExposed) exposed.Add(f.LocalNormal);
+
+        Color trimColor = LightenColor(
+            StationModuleRegistry.CategoryColor(mod.Definition.Category), 1.12f);
+        const float chamferW = 0.38f;
+        float inset = chamferW * 0.707f;
+
+        foreach (var (faceA, faceB, edgeDir, cornerSign) in BoxEdgeInfos)
+        {
+            if (!exposed.Contains(faceA) || !exposed.Contains(faceB)) continue;
+
+            float edgeHalfLen = edgeDir.X != 0 ? half.X
+                              : edgeDir.Y != 0 ? half.Y : half.Z;
+
+            Vector3 edgeMid = new(
+                edgeDir.X != 0 ? 0 : cornerSign.X * half.X,
+                edgeDir.Y != 0 ? 0 : cornerSign.Y * half.Y,
+                edgeDir.Z != 0 ? 0 : cornerSign.Z * half.Z);
+
+            Vector3 intoA = -faceA;
+            Vector3 intoB = -faceB;
+
+            Vector3 a0 = edgeMid - edgeDir * edgeHalfLen + intoA * inset + faceA * 0.01f;
+            Vector3 a1 = edgeMid + edgeDir * edgeHalfLen + intoA * inset + faceA * 0.01f;
+            Vector3 b0 = edgeMid - edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
+            Vector3 b1 = edgeMid + edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
+
+            mesh.AddQuad(a0, a1, b1, b0, trimColor);
+        }
+    }
+
+    // ── Pass 6c: Vent grilles ─────────────────────────────────────────────────
+
+    private static void GenerateVentGrilles(PlacedModule mod, FaceInfo face,
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
+    {
+        if (!face.IsExposed) return;
+        if (face.Width * face.Height < 15f) return;
+
+        float prob = mod.Definition.Category switch
+        {
+            "industrial" or "core" => 0.65f,
+            "cargo"      or "fuel" => 0.45f,
+            "connector"            => 0.35f,
+            _                      => 0.20f,
+        };
+        if (rng.NextDouble() > prob) return;
+
+        int remaining = rng.Next(1, 4);
+        int attempts  = remaining * 4;
+        float margin  = 1.2f;
+
+        for (int i = 0; i < attempts && remaining > 0; i++)
+        {
+            float ventW = 0.8f  + (float)rng.NextDouble() * 1.4f;
+            float ventH = 0.45f + (float)rng.NextDouble() * 0.7f;
+
+            float cu = ((float)rng.NextDouble() - 0.5f) * (face.Width  - margin * 2 - ventW);
+            float cv = ((float)rng.NextDouble() - 0.5f) * (face.Height - margin * 2 - ventH);
+
+            if (!occupancy.TryOccupy(cu, cv, ventW * 0.5f, ventH * 0.5f)) continue;
+            remaining--;
+
+            AddVentGrille(mod, face, cu, cv, ventW, ventH, rng, mesh);
+        }
+    }
+
+    private static void AddVentGrille(PlacedModule mod, FaceInfo face,
+        float cu, float cv, float ventW, float ventH, System.Random rng,
+        StationModuleMesh mesh)
+    {
+        Color baseCol   = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color frameCol  = DarkenColor(baseCol, 0.58f);
+        Color shadowCol = new Color(12, 12, 14);
+        Color barCol    = DarkenColor(baseCol, 0.45f);
+
+        float hw = ventW * 0.5f;
+        float hh = ventH * 0.5f;
+        const float frameW   = 0.12f;
+        const float frameOff = 0.025f;
+        const float shadowOff = 0.018f;
+        const float barOff   = 0.030f;
+
+        // Frame — top, bottom, left, right bars
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw - frameW, cv + hh,          frameOff),
+            LocalPointAbs(face, cu + hw + frameW, cv + hh,          frameOff),
+            LocalPointAbs(face, cu + hw + frameW, cv + hh + frameW, frameOff),
+            LocalPointAbs(face, cu - hw - frameW, cv + hh + frameW, frameOff), frameCol);
+
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw - frameW, cv - hh - frameW, frameOff),
+            LocalPointAbs(face, cu + hw + frameW, cv - hh - frameW, frameOff),
+            LocalPointAbs(face, cu + hw + frameW, cv - hh,          frameOff),
+            LocalPointAbs(face, cu - hw - frameW, cv - hh,          frameOff), frameCol);
+
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw - frameW, cv - hh, frameOff),
+            LocalPointAbs(face, cu - hw,          cv - hh, frameOff),
+            LocalPointAbs(face, cu - hw,          cv + hh, frameOff),
+            LocalPointAbs(face, cu - hw - frameW, cv + hh, frameOff), frameCol);
+
+        mesh.AddQuad(
+            LocalPointAbs(face, cu + hw,          cv - hh, frameOff),
+            LocalPointAbs(face, cu + hw + frameW, cv - hh, frameOff),
+            LocalPointAbs(face, cu + hw + frameW, cv + hh, frameOff),
+            LocalPointAbs(face, cu + hw,          cv + hh, frameOff), frameCol);
+
+        // Dark recess
+        mesh.AddQuad(
+            LocalPointAbs(face, cu - hw, cv - hh, shadowOff),
+            LocalPointAbs(face, cu + hw, cv - hh, shadowOff),
+            LocalPointAbs(face, cu + hw, cv + hh, shadowOff),
+            LocalPointAbs(face, cu - hw, cv + hh, shadowOff), shadowCol);
+
+        // Grille bars
+        bool horizontal = rng.NextDouble() < 0.6;
+        int  barCount   = rng.Next(3, 8);
+        const float barThick = 0.04f;
+
+        for (int b = 0; b < barCount; b++)
+        {
+            float t   = (b + 0.5f) / barCount;
+            float pos = horizontal
+                ? cv - hh + ventH * t
+                : cu - hw + ventW * t;
+
+            float b0u = horizontal ? cu - hw  : pos - barThick * 0.5f;
+            float b0v = horizontal ? pos - barThick * 0.5f : cv - hh;
+            float b1u = horizontal ? cu + hw  : pos + barThick * 0.5f;
+            float b1v = horizontal ? pos + barThick * 0.5f : cv + hh;
+
+            mesh.AddQuad(
+                LocalPointAbs(face, b0u, b0v, barOff),
+                LocalPointAbs(face, b1u, b0v, barOff),
+                LocalPointAbs(face, b1u, b1v, barOff),
+                LocalPointAbs(face, b0u, b1v, barOff), barCol);
+        }
+    }
+
+    // ── Pass 6d: Greeble boxes ────────────────────────────────────────────────
+
+    private enum GreebleType
+    {
+        JunctionBox, EquipmentHousing, ConduitEntry, SensorPod, TechPanel, ValveAssembly
+    }
+
+    private static GreebleType SelectGreebleType(string category, System.Random rng)
+    {
+        return category switch
+        {
+            "industrial" or "core" => (GreebleType)rng.Next(0, 6),
+            "cargo"      or "fuel" => rng.NextDouble() < 0.5
+                ? GreebleType.ValveAssembly : GreebleType.ConduitEntry,
+            "science"              => rng.NextDouble() < 0.6
+                ? GreebleType.SensorPod : GreebleType.TechPanel,
+            "hab"                  => rng.NextDouble() < 0.5
+                ? GreebleType.JunctionBox : GreebleType.TechPanel,
+            _                      => (GreebleType)rng.Next(0, 3),
+        };
+    }
+
+    private static (float halfW, float halfH) GreebleFootprint(GreebleType type, System.Random rng) => type switch
+    {
+        GreebleType.JunctionBox      => (0.40f + (float)rng.NextDouble() * 0.10f,
+                                         0.30f + (float)rng.NextDouble() * 0.10f),
+        GreebleType.EquipmentHousing => (0.75f + (float)rng.NextDouble() * 0.20f,
+                                         0.50f + (float)rng.NextDouble() * 0.15f),
+        GreebleType.ConduitEntry     => (0.35f, 0.35f),
+        GreebleType.SensorPod        => (0.30f, 0.30f),
+        GreebleType.TechPanel        => (0.60f + (float)rng.NextDouble() * 0.20f,
+                                         0.45f + (float)rng.NextDouble() * 0.15f),
+        GreebleType.ValveAssembly    => (0.45f, 0.45f),
+        _                            => (0.35f, 0.35f),
+    };
+
+    private static void GenerateGreebles(PlacedModule mod, FaceInfo face,
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
+    {
+        if (!face.IsExposed) return;
+        if (face.Width * face.Height < 12f) return;
+
+        float prob = mod.Definition.Category switch
+        {
+            "industrial" or "core" => 0.90f,
+            "cargo"      or "fuel" => 0.70f,
+            "science"              => 0.60f,
+            "connector"            => 0.50f,
+            "hab"                  => 0.35f,
+            _                      => 0.20f,
+        };
+        if (rng.NextDouble() > prob) return;
+
+        int count    = rng.Next(2, 7);
+        int attempts = count * 5;
+
+        for (int i = 0; i < attempts && count > 0; i++)
+        {
+            var type       = SelectGreebleType(mod.Definition.Category, rng);
+            var (hw, hh)   = GreebleFootprint(type, rng);
+            const float margin = 0.8f;
+
+            float cu = ((float)rng.NextDouble() - 0.5f) * (face.Width  - margin * 2 - hw * 2);
+            float cv = ((float)rng.NextDouble() - 0.5f) * (face.Height - margin * 2 - hh * 2);
+
+            if (!occupancy.TryOccupy(cu, cv, hw, hh, 0.10f)) continue;
+            count--;
+
+            AddGreeble(mod, face, cu, cv, hw, hh, type, rng, mesh);
+        }
+    }
+
+    private static void AddGreeble(PlacedModule mod, FaceInfo face,
+        float cu, float cv, float hw, float hh,
+        GreebleType type, System.Random rng, StationModuleMesh mesh)
+    {
+        Color baseCol    = StationModuleRegistry.CategoryColor(mod.Definition.Category);
+        Color greebleCol = DarkenColor(baseCol, 0.72f);
+        Color detailCol  = DarkenColor(baseCol, 0.55f);
+        Color darkCol    = DarkenColor(baseCol, 0.38f);
+
+        switch (type)
+        {
+            case GreebleType.JunctionBox:
+            {
+                // Small box with lid seam
+                float boxH = 0.30f + (float)rng.NextDouble() * 0.15f;
+                var t = FaceLocalTransform(face,
+                    LocalPointAbs(face, cu, cv, boxH * 0.5f));
+                mesh.AddOrientedBox(t, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
+                // Lid seam (thin strip across middle)
+                mesh.AddQuad(
+                    LocalPointAbs(face, cu - hw, cv - 0.02f, boxH + 0.005f),
+                    LocalPointAbs(face, cu + hw, cv - 0.02f, boxH + 0.005f),
+                    LocalPointAbs(face, cu + hw, cv + 0.02f, boxH + 0.005f),
+                    LocalPointAbs(face, cu - hw, cv + 0.02f, boxH + 0.005f), darkCol);
+                break;
+            }
+
+            case GreebleType.EquipmentHousing:
+            {
+                // Large base box with a smaller raised top section
+                float baseH = 0.40f + (float)rng.NextDouble() * 0.15f;
+                float topH  = 0.20f;
+                float topW  = hw * 0.6f;
+                float topHH = hh * 0.5f;
+
+                var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, baseH * 0.5f));
+                mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, baseH), greebleCol);
+
+                float topOffset = cu + ((float)rng.NextDouble() - 0.5f) * hw * 0.4f;
+                var tt = FaceLocalTransform(face,
+                    LocalPointAbs(face, topOffset, cv, baseH + topH * 0.5f));
+                mesh.AddOrientedBox(tt, new Vector3(topW * 2, topHH * 2, topH), detailCol);
+                break;
+            }
+
+            case GreebleType.ConduitEntry:
+            {
+                // Box with a pipe stub entering from the side
+                float boxH = 0.35f;
+                var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, boxH * 0.5f));
+                mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
+
+                // Short pipe stub along the face
+                float pipeLen = hw * 1.4f;
+                Vector3 stubStart = LocalPointAbs(face, cu - pipeLen, cv, boxH * 0.5f);
+                Vector3 stubEnd   = LocalPointAbs(face, cu,           cv, boxH * 0.5f);
+                mesh.AddPrismPipe(stubStart, stubEnd, 0.08f, 6, detailCol);
+                break;
+            }
+
+            case GreebleType.SensorPod:
+            {
+                // Tall box with a small disc "lens" on top
+                float podH = 0.50f + (float)rng.NextDouble() * 0.15f;
+                var pt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, podH * 0.5f));
+                mesh.AddOrientedBox(pt, new Vector3(hw * 2, hh * 2, podH), greebleCol);
+
+                // Lens: very flat box on top
+                float lensR = MathF.Min(hw, hh) * 0.5f;
+                var lt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, podH + 0.04f));
+                mesh.AddOrientedBox(lt, new Vector3(lensR * 2, lensR * 2, 0.08f),
+                    new Color(60, 80, 100));
+                break;
+            }
+
+            case GreebleType.TechPanel:
+            {
+                // Thin flat panel with two sub-boxes implying controls
+                float panH = 0.12f + (float)rng.NextDouble() * 0.06f;
+                var pt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, panH * 0.5f));
+                mesh.AddOrientedBox(pt, new Vector3(hw * 2, hh * 2, panH), greebleCol);
+
+                // Two small raised buttons
+                for (int b = 0; b < 2; b++)
+                {
+                    float btnU  = cu + (b == 0 ? -hw * 0.4f : hw * 0.4f);
+                    float btnSz = MathF.Min(hw, hh) * 0.3f;
+                    var bt = FaceLocalTransform(face,
+                        LocalPointAbs(face, btnU, cv, panH + 0.04f));
+                    mesh.AddOrientedBox(bt, new Vector3(btnSz * 2, btnSz * 2, 0.07f),
+                        b == 0 ? new Color(60, 100, 60) : detailCol);
+                }
+                break;
+            }
+
+            case GreebleType.ValveAssembly:
+            {
+                // Box with a cross-shaped handle on top
+                float boxH = 0.38f;
+                var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, boxH * 0.5f));
+                mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
+
+                float armLen = hw * 0.9f;
+                float armW   = 0.06f;
+                float armH   = boxH + 0.10f;
+
+                // Horizontal arm
+                Vector3 hArmA = LocalPointAbs(face, cu - armLen, cv, armH);
+                Vector3 hArmB = LocalPointAbs(face, cu + armLen, cv, armH);
+                mesh.AddPrismPipe(hArmA, hArmB, armW, 4, darkCol);
+
+                // Vertical arm
+                Vector3 vArmA = LocalPointAbs(face, cu, cv - armLen, armH);
+                Vector3 vArmB = LocalPointAbs(face, cu, cv + armLen, armH);
+                mesh.AddPrismPipe(vArmA, vArmB, armW, 4, darkCol);
+                break;
+            }
+        }
+    }
+
+    // Build a transform matrix with Z aligned to face.LocalNormal, positioned at `center`.
+    private static Matrix FaceLocalTransform(FaceInfo face, Vector3 center) => new(
+        face.LocalRight.X,  face.LocalRight.Y,  face.LocalRight.Z,  0,
+        face.LocalUp.X,     face.LocalUp.Y,     face.LocalUp.Z,     0,
+        face.LocalNormal.X, face.LocalNormal.Y, face.LocalNormal.Z, 0,
+        center.X,           center.Y,           center.Z,           1);
+
+    // ── Pass 7: Lights ────────────────────────────────────────────────────────
 
     private static void GenerateLights(PlacedModule mod, FaceInfo[] faces,
         System.Random rng, StationModuleMesh mesh)
@@ -884,5 +1373,11 @@ public static class StationDecorator
         (int)(c.R * factor),
         (int)(c.G * factor),
         (int)(c.B * factor),
+        c.A);
+
+    private static Color LightenColor(Color c, float factor) => new(
+        (byte)Math.Min(c.R * factor, 255),
+        (byte)Math.Min(c.G * factor, 255),
+        (byte)Math.Min(c.B * factor, 255),
         c.A);
 }
