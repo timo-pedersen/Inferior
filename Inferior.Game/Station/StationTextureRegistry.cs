@@ -85,12 +85,82 @@ public static class StationTextureRegistry
         ApplySubPanels(pixels, gridX, gridY, palette, rng);
         ApplySeamLines(pixels, gridX, gridY, palette);
 
+        // Step 4b — weathering streaks (before edge grime)
+        if (palette.GrimeStrength > 0.15f)
+        {
+            int streakCount = 3 + (int)(palette.GrimeStrength * 12f);
+            for (int s = 0; s < streakCount; s++)
+            {
+                int   sx        = rng.Next(Size);
+                int   sy        = rng.Next(Size / 3);
+                int   length    = Size / 3 + rng.Next(Size / 2);
+                int   width     = 1 + rng.Next(3);
+                float alpha     = 0.15f + (float)rng.NextDouble() * 0.30f;
+                Color streakCol = BlendColor(palette.BaseColour, palette.GrimeColour, 0.85f);
+                for (int dy = 0; dy < length; dy++)
+                {
+                    int drift = (int)(MathF.Sin(dy * 0.08f) * 1.5f);
+                    for (int dx = -width; dx <= width; dx++)
+                    {
+                        int px = sx + dx + drift;
+                        int py = sy + dy;
+                        if (px < 0 || px >= Size || py < 0 || py >= Size) continue;
+                        float fade = 1f - (float)dy / length;
+                        pixels[py * Size + px] = BlendColor(
+                            pixels[py * Size + px], streakCol, alpha * fade);
+                    }
+                }
+            }
+        }
+
+        // Step 4c — oxidation patches
+        if (palette.GrimeStrength > 0.40f)
+        {
+            int   patchCount = 2 + rng.Next(5);
+            Color rustCol    = new Color(118, 72, 38);
+            for (int p = 0; p < patchCount; p++)
+            {
+                int   cx    = rng.Next(Size);
+                int   cy    = rng.Next(Size);
+                float rx    = 15f + (float)rng.NextDouble() * 40f;
+                float ry    = 8f  + (float)rng.NextDouble() * 25f;
+                float alpha = 0.20f + (float)rng.NextDouble() * 0.35f;
+                for (int y = Math.Max(0, cy - (int)ry); y < Math.Min(Size, cy + (int)ry); y++)
+                for (int x = Math.Max(0, cx - (int)rx); x < Math.Min(Size, cx + (int)rx); x++)
+                {
+                    float ddx  = (x - cx) / rx;
+                    float ddy  = (y - cy) / ry;
+                    float dist = ddx * ddx + ddy * ddy;
+                    if (dist > 1f) continue;
+                    float fade = 1f - dist;
+                    pixels[y * Size + x] = BlendColor(
+                        pixels[y * Size + x], rustCol, alpha * fade);
+                }
+            }
+        }
+
         // Step 4 — edge grime
         ApplyEdgeGrime(pixels, gridX, gridY, palette);
 
-        // Step 5 — scratch lines (high-wear surfaces only)
+        // Step 5a — scratch lines (high-wear surfaces only)
         if (palette.GrimeStrength > 0.25f)
             AddScratchLines(pixels, palette, rng);
+
+        // Step 5b — military stencil fragments (Military economy only)
+        if (palette.NameFont == FontStyle.Military)
+        {
+            string[] fragments   = ["A7", "R3", "SEC", "RESTRICTED", "ZN4", "06"];
+            int      fragCount   = 2 + rng.Next(3);
+            for (int f = 0; f < fragCount; f++)
+            {
+                string frag  = fragments[rng.Next(fragments.Length)];
+                int    fx    = rng.Next(Size / 4) + (f % 2) * Size / 2;
+                int    fy    = rng.Next(Size / 4) + (f / 2) * Size / 3;
+                float  fa    = 0.25f + (float)rng.NextDouble() * 0.25f;
+                TexturePainter.DrawText(pixels, Size, Size, frag, fx, fy,
+                    palette.TextColour, pixelScale: 3, alpha: fa);
+            }
+        }
 
         var tex = new Texture2D(gd, Size, Size);
         tex.SetData(pixels);
