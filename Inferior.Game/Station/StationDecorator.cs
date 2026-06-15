@@ -27,7 +27,7 @@ public static class StationDecorator
             var ambientLightRng = new System.Random(baseRng.Next());
 
             FaceInfo[] faces = ComputeFaces(mod);
-            var mesh = new StationModuleMesh();
+            var mesh = new StationModuleMesh { Texture = TextureFor(mod.Definition.Category) };
 
             // Pass 0: panel seams — flat surface decoration that gets AO applied.
             // Must run first so BaseFaceCount captures only these faces.
@@ -1605,6 +1605,18 @@ public static class StationDecorator
                         :            new Color(255, 255, 240),
         };
     }
+
+    // ── Texture helpers ───────────────────────────────────────────────────────
+
+    private static SurfaceTexture TextureFor(string category) => category switch
+    {
+        "hab" or "luxury"            => SurfaceTexture.CleanPanel,
+        "science" or "military"
+        or "core"                    => SurfaceTexture.TechPanel,
+        "industrial" or "fuel"       => SurfaceTexture.IndustrialPanel,
+        "cargo"                      => SurfaceTexture.CargoPanel,
+        _                            => SurfaceTexture.CleanPanel,
+    };
 
     // ── Colour helpers ────────────────────────────────────────────────────────
 

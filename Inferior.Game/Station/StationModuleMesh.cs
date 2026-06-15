@@ -19,34 +19,54 @@ public sealed class AnimTag
 
 // CPU-side mesh accumulator for per-module decoration geometry.
 // Vertices are in local module space (metres). Call Build() to produce GPU buffers.
-// Uses VertexPositionColor — render with LightingEnabled=false, VertexColorEnabled=true.
+// Uses VertexPositionColorTexture — render with LightingEnabled=false,
+// VertexColorEnabled=true, TextureEnabled=true.
 // Lighting is baked into vertex colours by ApplyLighting() before Build().
+// UV coordinates are generated automatically from face geometry (5 m per tile).
 public sealed class StationModuleMesh
 {
-    private readonly List<VertexPositionColor> _verts = [];
-    private readonly List<int>                 _idx   = [];
-    // Each entry covers one quad (4 consecutive vertices starting at vertexBase).
-    private readonly List<(int vertexBase, int count)> _faces = [];
+    private readonly List<VertexPositionColorTexture>  _verts = [];
+    private readonly List<int>                          _idx   = [];
+    private readonly List<(int vertexBase, int count)>  _faces = [];
 
     public bool           IsEmpty       => _verts.Count == 0;
     public List<AnimTag>  AnimTags      { get; } = [];
+    public SurfaceTexture Texture       { get; set; } = SurfaceTexture.CleanPanel;
 
     // Set after base/seam geometry is added and before raised decoration (greebles, pipes).
     // ApplyAmbientOcclusion only processes faces 0..BaseFaceCount-1.
     public int BaseFaceCount { get; set; } = 0;
 
     // Adds a flat quad from four explicit corner vertices (CW from normal side).
+    // UV coordinates are projected from the face plane; 1 UV unit = 5 metres.
     // Returns the index of v0 in the vertex array.
     public int AddQuad(Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Color color)
     {
         int b = _verts.Count;
-        _verts.Add(new VertexPositionColor(v0, color));
-        _verts.Add(new VertexPositionColor(v1, color));
-        _verts.Add(new VertexPositionColor(v2, color));
-        _verts.Add(new VertexPositionColor(v3, color));
+
+        Vector3 edge0  = v1 - v0;
+        Vector3 edge1  = v2 - v0;
+        Vector3 normal = Vector3.Cross(edge0, edge1);
+        float   nLen   = normal.Length();
+        if (nLen > 1e-6f) normal /= nLen;
+        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(arb, normal));
+        Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
+
+        _verts.Add(new VertexPositionColorTexture(v0, color, Vector2.Zero));
+        _verts.Add(new VertexPositionColorTexture(v1, color, FaceUV(v1 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionColorTexture(v2, color, FaceUV(v2 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionColorTexture(v3, color, FaceUV(v3 - v0, uAxis, vAxis)));
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
         _faces.Add((b, 4));
         return b;
+    }
+
+    private static Vector2 FaceUV(Vector3 offset, Vector3 uAxis, Vector3 vAxis)
+    {
+        const float UvScale = 5.0f;
+        return new Vector2(Vector3.Dot(offset, uAxis) / UvScale,
+                           Vector3.Dot(offset, vAxis) / UvScale);
     }
 
     // Adds a flat quad centred at `center`. `up` must be perpendicular to `normal`.
@@ -169,9 +189,19 @@ public sealed class StationModuleMesh
     public void AddTriangle(Vector3 v0, Vector3 v1, Vector3 v2, Color color)
     {
         int b = _verts.Count;
-        _verts.Add(new VertexPositionColor(v0, color));
-        _verts.Add(new VertexPositionColor(v1, color));
-        _verts.Add(new VertexPositionColor(v2, color));
+
+        Vector3 edge0  = v1 - v0;
+        Vector3 edge1  = v2 - v0;
+        Vector3 normal = Vector3.Cross(edge0, edge1);
+        float   nLen   = normal.Length();
+        if (nLen > 1e-6f) normal /= nLen;
+        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(arb, normal));
+        Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
+
+        _verts.Add(new VertexPositionColorTexture(v0, color, Vector2.Zero));
+        _verts.Add(new VertexPositionColorTexture(v1, color, FaceUV(edge0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionColorTexture(v2, color, FaceUV(edge1, uAxis, vAxis)));
         _idx.AddRange([b, b+2, b+1]);
         _faces.Add((b, 3));
     }
@@ -195,12 +225,13 @@ public sealed class StationModuleMesh
         var (vb, count) = _faces[faceIdx];
         for (int i = 0; i < count; i++)
         {
-            var vtx = _verts[vb + i];
+            var vtx   = _verts[vb + i];
+            var c     = vtx.Color;
             vtx.Color = new Color(
-                (byte)MathF.Min(vtx.Color.R * factor, 255f),
-                (byte)MathF.Min(vtx.Color.G * factor, 255f),
-                (byte)MathF.Min(vtx.Color.B * factor, 255f),
-                vtx.Color.A);
+                (byte)MathF.Min(c.R * factor, 255f),
+                (byte)MathF.Min(c.G * factor, 255f),
+                (byte)MathF.Min(c.B * factor, 255f),
+                c.A);
             _verts[vb + i] = vtx;
         }
     }
@@ -231,12 +262,13 @@ public sealed class StationModuleMesh
 
             for (int i = 0; i < count; i++)
             {
-                var vtx = _verts[vb + i];
+                var vtx   = _verts[vb + i];
+                var c     = vtx.Color;
                 vtx.Color = new Color(
-                    (byte)MathF.Min(vtx.Color.R * factor * sunColour.X, 255f),
-                    (byte)MathF.Min(vtx.Color.G * factor * sunColour.Y, 255f),
-                    (byte)MathF.Min(vtx.Color.B * factor * sunColour.Z, 255f),
-                    vtx.Color.A);
+                    (byte)MathF.Min(c.R * factor * sunColour.X, 255f),
+                    (byte)MathF.Min(c.G * factor * sunColour.Y, 255f),
+                    (byte)MathF.Min(c.B * factor * sunColour.Z, 255f),
+                    c.A);
                 _verts[vb + i] = vtx;
             }
         }
@@ -250,7 +282,7 @@ public sealed class StationModuleMesh
         var verts   = _verts.ToArray();
         var indices = _idx.ToArray();
 
-        var vb = new VertexBuffer(gd, VertexPositionColor.VertexDeclaration,
+        var vb = new VertexBuffer(gd, VertexPositionColorTexture.VertexDeclaration,
                                   verts.Length, BufferUsage.WriteOnly);
         vb.SetData(verts);
 

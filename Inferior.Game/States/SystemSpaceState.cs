@@ -322,6 +322,8 @@ public sealed class SystemSpaceState : GameState
         // Box mesh — shared by all station module draws
         (_boxVb, _boxIb, _boxTriCount) = MeshFactory.CreateBox(_gd);
 
+        StationTextureRegistry.Initialize(_gd);
+
         // Station module layouts — generated once from name-derived seed.
         // StationGenerator.Generate also runs StationDecorator internally.
         _stationGeometry.Clear();
@@ -972,6 +974,7 @@ public sealed class SystemSpaceState : GameState
         // Decoration pass — per-module meshes (windows, hatches, antennas)
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = true;
+        _effect.TextureEnabled     = true;
 
         foreach (var (station, universePos) in _stationPositions)
         {
@@ -992,6 +995,8 @@ public sealed class SystemSpaceState : GameState
                     Matrix.CreateTranslation(posMetres * rs) *
                     Matrix.CreateTranslation(renderPos);
 
+                _effect.Texture = StationTextureRegistry.Get(mod.Mesh!.Texture);
+
                 _gd.SetVertexBuffer(deco.vb);
                 _gd.Indices = deco.ib;
 
@@ -1006,6 +1011,7 @@ public sealed class SystemSpaceState : GameState
             }
         }
 
+        _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
         _effect.LightingEnabled    = true;
     }
