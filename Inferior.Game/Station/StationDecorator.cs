@@ -26,15 +26,31 @@ public static class StationDecorator
             var edgeTrimRng     = new System.Random(baseRng.Next());
             var ambientLightRng = new System.Random(baseRng.Next());
 
-            FaceInfo[] faces = ComputeFaces(mod);
-            var mesh      = new StationModuleMesh { Texture = TextureFor(mod.Definition.Category) };
+            // If the module has a custom hull factory, seed its mesh now so
+            // ComputeFaces can read the actual face normals and centres.
+            StationModuleMesh mesh;
+            if (mod.Definition.MeshFactory != null)
+            {
+                mesh        = mod.Definition.MeshFactory(mod.Seed);
+                mesh.Texture = TextureFor(mod.Definition.Category);
+                mod.Mesh    = mesh;   // expose early for ComputeFaces
+            }
+            else
+            {
+                mesh = new StationModuleMesh { Texture = TextureFor(mod.Definition.Category) };
+            }
             var glassMesh = new StationModuleMesh { Texture = SurfaceTexture.Glass };
+
+            FaceInfo[] faces = ComputeFaces(mod);
 
             // Pass 0: panel seams — flat surface decoration that gets AO applied.
             // Must run first so BaseFaceCount captures only these faces.
             foreach (var face in faces)
                 GeneratePanelSeams(mod, face, seamRng, mesh);
-            mesh.BaseFaceCount = mesh.FaceCount;
+            // For box modules: advance BaseFaceCount to include panel seams (AO target).
+            // For custom-mesh modules: leave BaseFaceCount = hull face count set by factory.
+            if (mod.Definition.MeshFactory == null)
+                mesh.BaseFaceCount = mesh.FaceCount;
 
             // Pass 1-N: raised decoration (not included in AO range).
             foreach (var face in faces)
@@ -137,6 +153,23 @@ public static class StationDecorator
 
     private static FaceInfo[] ComputeFaces(PlacedModule mod)
     {
+        // Custom-mesh modules: derive face info from the hull mesh geometry.
+        if (mod.Definition.MeshFactory != null && mod.Mesh != null)
+        {
+            int limit  = mod.Mesh.BaseFaceCount;
+            var result = new FaceInfo[limit];
+            for (int i = 0; i < limit; i++)
+            {
+                Vector3 n              = mod.Mesh.LocalFaceNormal(i);
+                var (center, w, h)     = mod.Mesh.GetFaceBounds(i);
+                var (right, up)        = TangentFrame(n);
+                bool blocked           = IsFaceBlocked(mod, n);
+                result[i]              = new FaceInfo(n, center, right, up, w, h, !blocked);
+            }
+            return result;
+        }
+
+        // Default: derive 6 axis-aligned faces from the bounding box.
         Vector3 bb   = mod.Definition.BoundingBox;
         Vector3 half = bb * 0.5f;
 
@@ -150,16 +183,16 @@ public static class StationDecorator
             (-Vector3.UnitZ,  bb.X, bb.Y),
         ];
 
-        var result = new FaceInfo[6];
+        var res = new FaceInfo[6];
         for (int i = 0; i < 6; i++)
         {
             var (n, w, h)   = faceData[i];
             Vector3 center  = new(n.X * half.X, n.Y * half.Y, n.Z * half.Z);
             var (right, up) = TangentFrame(n);
             bool blocked    = IsFaceBlocked(mod, n);
-            result[i]       = new FaceInfo(n, center, right, up, w, h, !blocked);
+            res[i]          = new FaceInfo(n, center, right, up, w, h, !blocked);
         }
-        return result;
+        return res;
     }
 
     private static bool IsFaceBlocked(PlacedModule mod, Vector3 faceNormal)

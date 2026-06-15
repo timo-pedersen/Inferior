@@ -355,7 +355,10 @@ public sealed class SystemSpaceState : GameState
                 if (glassGpu.HasValue)
                     _glassMeshes[mod] = glassGpu.Value;
 
-                _hullMeshes[mod] = BuildHullMesh(_gd, mod);
+                // Custom-mesh modules (MeshFactory) include the hull in mod.Mesh,
+                // rendered by the deco pass with baked lighting — skip box hull.
+                if (mod.Definition.MeshFactory == null)
+                    _hullMeshes[mod] = BuildHullMesh(_gd, mod);
             }
         }
         _stationPositions.Clear();

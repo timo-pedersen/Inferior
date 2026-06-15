@@ -251,6 +251,96 @@ public static class StationModuleRegistry
         ]
     };
 
+    // ── hab-block-octagonal ───────────────────────────────────────────────────
+    // Same footprint as hab-block with an octagonal cross-section.
+    // Lighting shades the 8 side faces differently, simulating roundness.
+    public static readonly StationModuleDefinition HabBlockOctagonal = new()
+    {
+        Id           = "hab-block-octagonal",
+        Category     = "hab",
+        BoundingBox  = new Vector3(18, 14, 18),
+        MinScale     = StationScale.Station,
+        SelectWeight = 0.8f,
+        MeshFactory  = seed =>
+        {
+            var mesh = new StationModuleMesh();
+            AddOctagonalPrism(mesh, radius: 9f, height: 14f, color: new Color(200, 195, 185));
+            mesh.BaseFaceCount = mesh.FaceCount;
+            return mesh;
+        },
+        Ports        =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+9, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Medium },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-9, 0, 0), OutwardNormal = -Vector3.UnitX, Size = PortSize.Medium },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +9), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -9), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +7, 0), OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              AcceptsCategories = ["connector", "science"] },
+        ]
+    };
+
+    // ── science-block-octagonal ───────────────────────────────────────────────
+    public static readonly StationModuleDefinition ScienceBlockOctagonal = new()
+    {
+        Id           = "science-block-octagonal",
+        Category     = "science",
+        BoundingBox  = new Vector3(14, 14, 14),
+        MinScale     = StationScale.Station,
+        SelectWeight = 0.7f,
+        MeshFactory  = seed =>
+        {
+            var mesh = new StationModuleMesh();
+            AddOctagonalPrism(mesh, radius: 7f, height: 14f, color: new Color(155, 165, 175));
+            mesh.BaseFaceCount = mesh.FaceCount;
+            return mesh;
+        },
+        Ports        =
+        [
+            new StationPort { Id = "attach", LocalPosition = new Vector3(0, 0, -7), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Small },
+            new StationPort { Id = "side",   LocalPosition = new Vector3(+7, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Small,
+                              AcceptsCategories = ["connector", "science"] },
+            new StationPort { Id = "top",    LocalPosition = new Vector3(0, +7, 0), OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              IsTerminal = true },
+        ]
+    };
+
+    // ── Octagonal prism mesh factory ──────────────────────────────────────────
+    // 8 quad side faces + top triangle fan. No bottom cap (always internal/terminal).
+    private static void AddOctagonalPrism(StationModuleMesh mesh,
+                                           float radius, float height, Color color,
+                                           float uvScale = 5.0f)
+    {
+        float h     = height * 0.5f;
+        const int sides = 8;
+
+        var topRing = new Vector3[sides];
+        var botRing = new Vector3[sides];
+        for (int i = 0; i < sides; i++)
+        {
+            float angle  = i * MathF.Tau / sides + MathF.PI / sides;
+            float x      = MathF.Cos(angle) * radius;
+            float z      = MathF.Sin(angle) * radius;
+            topRing[i]   = new Vector3(x, +h, z);
+            botRing[i]   = new Vector3(x, -h, z);
+        }
+
+        // Side faces — each is a quad with its own computed outward normal
+        for (int i = 0; i < sides; i++)
+        {
+            int     next      = (i + 1) % sides;
+            float   midAngle  = (i + 0.5f) * MathF.Tau / sides + MathF.PI / sides;
+            Vector3 faceNorm  = new Vector3(MathF.Cos(midAngle), 0, MathF.Sin(midAngle));
+            mesh.AddQuad(botRing[i], botRing[next], topRing[next], topRing[i],
+                         faceNorm, color, uvScale);
+        }
+
+        // Top face — fan of triangles from centre
+        Vector3 topCentre = new Vector3(0, +h, 0);
+        for (int i = 0; i < sides; i++)
+            mesh.AddTriangle(topCentre, topRing[i], topRing[(i + 1) % sides],
+                             Vector3.UnitY, color, uvScale);
+    }
+
     public static IEnumerable<StationModuleDefinition> GetByCategory(string category)
         => All.Where(m => m.Category == category);
 
@@ -259,6 +349,7 @@ public static class StationModuleRegistry
         CoreHub, ConnectorLong, ConnectorShort, HabBlock,
         CargoBay, DockingArm, ScienceBlock, IndustrialBlock,
         CoreHubLarge, ConnectorLongLarge, HabBlockLarge, CargoBayLarge, IndustrialBlockLarge,
+        HabBlockOctagonal, ScienceBlockOctagonal,
     ];
 
     public static Color CategoryColor(string category) => category switch

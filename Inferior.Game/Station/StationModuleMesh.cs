@@ -69,6 +69,18 @@ public sealed class StationModuleMesh
                            Vector3.Dot(offset, vAxis) / UvScale);
     }
 
+    // Overload that accepts an explicit face normal (ignored — winding determines normal)
+    // and a uvScale (currently hardcoded to 5 m/tile, parameter kept for API parity).
+    public int AddQuad(Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
+                       Vector3 _normal, Color color, float _uvScale)
+        => AddQuad(v0, v1, v2, v3, color);
+
+    // Triangle overload with explicit normal and uvScale — both are ignored;
+    // normal is derived from winding and uvScale is hardcoded to 5 m/tile.
+    public void AddTriangle(Vector3 v0, Vector3 v1, Vector3 v2,
+                            Vector3 _normal, Color color, float _uvScale = 5.0f)
+        => AddTriangle(v0, v1, v2, color);
+
     // Adds a flat quad centred at `center`. `up` must be perpendicular to `normal`.
     // Visible from the `normal` side with CW winding. Returns vertex base index.
     public int AddQuad(Vector3 center, Vector3 normal, Vector3 up, float width, float height, Color color)
@@ -207,6 +219,23 @@ public sealed class StationModuleMesh
     }
 
     public int FaceCount => _faces.Count;
+
+    // Returns (localCenter, width, height) for a face.
+    // For triangle faces (count == 3), returns (centroid, 0, 0).
+    public (Vector3 center, float width, float height) GetFaceBounds(int faceIdx)
+    {
+        var (vb, count) = _faces[faceIdx];
+        if (count >= 4)
+        {
+            Vector3 v0 = _verts[vb].Position;
+            Vector3 v1 = _verts[vb + 1].Position;
+            Vector3 v2 = _verts[vb + 2].Position;
+            Vector3 v3 = _verts[vb + 3].Position;
+            return ((v0 + v2) * 0.5f, Vector3.Distance(v0, v1), Vector3.Distance(v0, v3));
+        }
+        var centroid = (_verts[vb].Position + _verts[vb + 1].Position + _verts[vb + 2].Position) / 3f;
+        return (centroid, 0f, 0f);
+    }
 
     // Returns the normalised local-space outward normal for the given face index.
     public Vector3 LocalFaceNormal(int faceIdx)
