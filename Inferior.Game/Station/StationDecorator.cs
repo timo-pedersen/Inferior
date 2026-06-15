@@ -446,7 +446,7 @@ public static class StationDecorator
                     WorldPosition: Vector3.Transform(tipLocal, mod.Transform),
                     Colour:        new Color(220, 25, 25),
                     Type:          GlowType.AviationWarning,
-                    BaseIntensity: 0.70f,
+                    BaseIntensity: 1.0f,
                     Rate:          0.65f,
                     Phase:         (float)rng.NextDouble(),
                     Pattern:       LightPattern.Strobe));
@@ -508,7 +508,7 @@ public static class StationDecorator
             WorldPosition: Vector3.Transform(tipLocal, bestMod.Transform),
             Colour:        new Color(220, 25, 25),
             Type:          GlowType.AviationWarning,
-            BaseIntensity: 0.70f,
+            BaseIntensity: 1.0f,
             Rate:          0.65f,
             Phase:         (float)rng.NextDouble(),
             Pattern:       LightPattern.Strobe));
@@ -665,7 +665,7 @@ public static class StationDecorator
             WorldPosition: Vector3.Transform(chimTip, mod.Transform),
             Colour:        new Color(210, 30, 20),
             Type:          GlowType.AviationWarning,
-            BaseIntensity: 0.60f,
+            BaseIntensity: 1.0f,
             Rate:          0.65f,
             Phase:         (float)rng.NextDouble(),
             Pattern:       LightPattern.Strobe));
@@ -1439,7 +1439,7 @@ public static class StationDecorator
                 WorldPosition: Vector3.Transform(pos, mod.Transform),
                 Colour:        lens,
                 Type:          GlowType.NavigationLight,
-                BaseIntensity: 0.55f,
+                BaseIntensity: 0.80f,
                 Rate:          0f,
                 Phase:         0f,
                 Pattern:       LightPattern.Continuous));
@@ -1475,7 +1475,7 @@ public static class StationDecorator
                 WorldPosition: Vector3.Transform(pos, mod.Transform),
                 Colour:        amber,
                 Type:          GlowType.WarningStrobe,
-                BaseIntensity: 0.55f,
+                BaseIntensity: 0.80f,
                 Rate:          1f / 1.4f,
                 Phase:         phase,
                 Pattern:       LightPattern.Strobe));

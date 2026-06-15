@@ -1263,13 +1263,13 @@ public sealed class SystemSpaceState : GameState
 
                     float baseSize = light.Type switch
                     {
-                        StationGen.GlowType.NavigationLight => 900f,
-                        StationGen.GlowType.WarningStrobe   => 550f,
-                        StationGen.GlowType.AviationWarning => 500f,
-                        StationGen.GlowType.AmbientMarker   => 350f,
+                        StationGen.GlowType.NavigationLight => 1200f,
+                        StationGen.GlowType.WarningStrobe   => 700f,
+                        StationGen.GlowType.AviationWarning => 800f,
+                        StationGen.GlowType.AmbientMarker   => 400f,
                         _                                   => 400f,
                     };
-                    float size  = MathHelper.Clamp(baseSize / distance, 6f, 100f);
+                    float size  = MathHelper.Clamp(baseSize / distance, 6f, 140f);
                     float scale = size / _navGlowTex.Width;
 
                     sb.Draw(_navGlowTex, screen.Value, null,
@@ -1287,7 +1287,7 @@ public sealed class SystemSpaceState : GameState
         float t = (float)((GameClock.SimTime * light.Rate + light.Phase) % 1.0);
         return light.Pattern switch
         {
-            LightPattern.Strobe    => t < 0.12f ? light.BaseIntensity : 0f,
+            LightPattern.Strobe    => t < 0.18f ? light.BaseIntensity : 0f,
             LightPattern.SlowPulse => (MathF.Sin(t * MathF.Tau) * 0.5f + 0.5f) * light.BaseIntensity,
             LightPattern.Heartbeat => t < 0.10f ? light.BaseIntensity
                                     : t < 0.22f ? 0f
