@@ -1,4 +1,5 @@
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace Inferior.Game.StationGen;
 
@@ -44,7 +45,8 @@ public sealed class PlacedModule
     public          List<OpenPort>          OpenPorts      { get; } = [];
     public          StationPort?            AttachmentPort { get; set; }
     public          List<StationPort>       ChildPorts     { get; } = [];
-    public          StationModuleMesh?      Mesh           { get; set; }
-    public          StationModuleMesh?      GlassMesh      { get; set; }
-    public          List<StationLightInfo>  GlowLights     { get; } = [];
+    public          StationModuleMesh?      Mesh            { get; set; }
+    public          StationModuleMesh?      GlassMesh       { get; set; }
+    public          Texture2D?             TextureInstance  { get; set; }
+    public          List<StationLightInfo>  GlowLights      { get; } = [];
 }

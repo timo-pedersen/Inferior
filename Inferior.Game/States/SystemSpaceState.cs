@@ -347,7 +347,7 @@ public sealed class SystemSpaceState : GameState
         _glassMeshes.Clear();
         foreach (var station in _system.Stations)
         {
-            var modules = StationGenerator.Generate(station);
+            var modules = StationGenerator.Generate(station, _gd);
             _stationGeometry[station] = modules;
             foreach (var mod in modules)
             {
@@ -1018,7 +1018,7 @@ public sealed class SystemSpaceState : GameState
                     Matrix.CreateTranslation(posMetres * rs) *
                     Matrix.CreateTranslation(renderPos);
 
-                _effect.Texture = StationTextureRegistry.Get(mod.Mesh!.Texture);
+                _effect.Texture = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
 
                 _gd.SetVertexBuffer(deco.vb);
                 _gd.Indices = deco.ib;

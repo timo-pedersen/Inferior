@@ -1,4 +1,5 @@
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Inferior.Core.Random;
 using Inferior.Galaxy;
 
@@ -15,16 +16,90 @@ public sealed class StationGenerator
 
     private StationGenerator(int seed) { _rng = new SeededRandom(seed); }
 
-    public static List<PlacedModule> Generate(Galaxy.Station station)
+    public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd)
     {
-        var gen = new StationGenerator(NameHash(station.Name));
+        int seed = NameHash(station.Name);
+        var gen  = new StationGenerator(seed);
+
+        StationScale scale = station.Size == StationSize.Small
+            ? StationScale.Outpost
+            : StationScale.Station;
+
         var modules = gen.Run(station);
         ValidatePlacement(modules);
+
+        var profile = StationProfile.Generate(seed, scale);
+        var palette = TexturePalette.From(profile);
+        AssignTextures(modules, gd, palette, station.Name);
+
         StationDecorator.Decorate(modules);
         BakeLighting(modules);
         StationDecorator.ApplyAmbientOcclusion(modules);
         return modules;
     }
+
+    private static void AssignTextures(
+        List<PlacedModule> modules,
+        GraphicsDevice     gd,
+        TexturePalette     palette,
+        string             stationName)
+    {
+        foreach (var mod in modules)
+        {
+            var surface = SurfaceFor(mod.Definition.Category);
+            mod.TextureInstance = StationTextureRegistry.GetOrCreate(gd, surface, palette, mod.Seed);
+        }
+
+        // Overlay the station name on the core module's face texture.
+        if (modules.Count > 0)
+            modules[0].TextureInstance = GenerateNameFaceTexture(gd, modules[0].TextureInstance, stationName, palette);
+    }
+
+    private static Texture2D GenerateNameFaceTexture(
+        GraphicsDevice gd,
+        Texture2D?     baseTex,
+        string         name,
+        TexturePalette palette)
+    {
+        const int Size = 512;
+        var pixels = new Color[Size * Size];
+
+        if (baseTex != null)
+            baseTex.GetData(pixels);
+        else
+            Array.Fill(pixels, palette.BaseColour);
+
+        // Render name in two font scales: large centred, with a backing bar.
+        int scale  = 4;
+        int textW  = TexturePainter.MeasureText(name, scale);
+        int textH  = TexturePainter.MeasureHeight(scale);
+        int startX = Math.Clamp((Size - textW) / 2, 4, Size - textW - 4);
+        int startY = (Size - textH) / 2;
+
+        // Dark backing strip
+        Color barColor = TexturePalette.LerpColor(palette.BaseColour, Color.Black, 0.45f);
+        int pad = 8;
+        for (int y = startY - pad; y < startY + textH + pad; y++)
+        for (int x = 0; x < Size; x++)
+            if ((uint)y < Size)
+                pixels[y * Size + x] = TexturePalette.LerpColor(pixels[y * Size + x], barColor, 0.70f);
+
+        // Name text
+        TexturePainter.DrawText(pixels, Size, Size, name, startX, startY, palette.TextColour, scale, alpha: 0.90f);
+
+        var tex = new Texture2D(gd, Size, Size);
+        tex.SetData(pixels);
+        return tex;
+    }
+
+    private static SurfaceTexture SurfaceFor(string category) => category switch
+    {
+        "hab" or "luxury"                    => SurfaceTexture.CleanPanel,
+        "science" or "military" or "core"    => SurfaceTexture.TechPanel,
+        "industrial" or "fuel"               => SurfaceTexture.IndustrialPanel,
+        "cargo"                              => SurfaceTexture.CargoPanel,
+        _                                    => SurfaceTexture.CleanPanel,
+    };
 
     // Bakes SceneLighting into each module's decoration vertex colours.
     // Must run after Decorate() (so meshes exist) and before Build() (so GPU buffers

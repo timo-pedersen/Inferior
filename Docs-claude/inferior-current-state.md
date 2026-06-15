@@ -28,6 +28,8 @@
 | **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
+| **Surface texture infrastructure** | ✓ Done | `VertexPositionColorTexture` throughout; UV projection in AddQuad/AddTriangle; `SurfaceTexture` enum; `StationTextureRegistry`; separate `GlassMesh` for windows |
+| **Procedural station textures** | ✓ Done | `StationProfile` (economy/age/wealth); `TexturePalette` per economy type; 5-step 512×512 generation (noise → panels → seams → grime → scratches); cache by (surface, paletteHash); station name baked onto core module face; `BitmapFonts` 5×7 + `TexturePainter` |
 
 ---
 
@@ -72,7 +74,7 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Station text/markings pass** — station name on hull, bay numbers
+1. **Station texture quality pass** — replace 5×7 font with larger / higher-res glyphs; add per-economy accent markings, panel rivets, warning stripes
 2. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
 3. **Power system refinement** — heat, coolant, more components
 4. **Ship hull implementation** — vertex-first mesh, panel auto-generation
@@ -135,11 +137,10 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | Shield coverage mapping — which hull faces a given shield covers | Pending |
 | Weapons system | Not yet designed |
 | Multiplayer architecture compatibility | Noted, deferred |
-| Station text/markings pass — font atlas geometry pipeline | Not yet designed |
+| Station texture quality pass — larger glyphs, accent markings, rivets | Deferred (Session C) |
 | Station module shape variety — non-box modules | Design noted, not implemented |
-| Station weathering pass | Not yet designed |
+| Station weathering pass — per-module age overlay | Deferred |
 | Station enclosed archetypes (Sphere, Pyramid, Prism, etc.) | Designed, not implemented |
-| Station text/markings pass — font atlas geometry pipeline | Not yet designed |
 
 ---
 
