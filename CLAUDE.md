@@ -4,9 +4,11 @@ This file provides guidance to You, Claude Code (claude.ai/code) when working wi
 this repository.
 
 Primary documentation is available in the "Docs-claude" folder.
-This includes a file "inferior-current-state.md" which you are solely responsible for.
-It lists current state of development, what area to focus on now, what is postponed, and
+This includes a file "inferior-current-state.md" which you are solely responsible for,
+meaning you edit this whenever you like, and add it to commits.
+It may list current state of development, what area to focus on now, what is postponed, and
 anything else you find useful to work efficiently.
+When updating this doc, give me a note and I will upload it to Claude Projects.
 
 Additional info is available in these two folders:
 - Docs
