@@ -1,0 +1,174 @@
+using Microsoft.Xna.Framework;
+
+namespace Inferior.Game.StationGen;
+
+public static class StationModuleRegistry
+{
+    // ── core-hub ──────────────────────────────────────────────────────────────
+    // 20×20×20 central block. Six-way branching. The station root.
+    public static readonly StationModuleDefinition CoreHub = new()
+    {
+        Id          = "core-hub",
+        Category    = "core",
+        BoundingBox = new Vector3(20, 20, 20),
+        MinScale    = StationScale.Outpost,
+        Ports       =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+10, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Medium },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-10, 0, 0),  OutwardNormal = -Vector3.UnitX, Size = PortSize.Medium },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +10),  OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -10),  OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +10, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              AcceptsCategories = ["connector", "science", "military"] },
+            new StationPort { Id = "ny", LocalPosition = new Vector3(0, -10, 0),  OutwardNormal = -Vector3.UnitY, Size = PortSize.Small,
+                              IsTerminal = true },
+        ]
+    };
+
+    // ── connector-long ────────────────────────────────────────────────────────
+    // 8×8×40 spine segment. Extends along Z. Branching port on top.
+    public static readonly StationModuleDefinition ConnectorLong = new()
+    {
+        Id           = "connector-long",
+        Category     = "connector",
+        BoundingBox  = new Vector3(8, 8, 40),
+        MinScale     = StationScale.Outpost,
+        SelectWeight = 2f,
+        Ports        =
+        [
+            new StationPort { Id = "front", LocalPosition = new Vector3(0, 0, +20), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium },
+            new StationPort { Id = "back",  LocalPosition = new Vector3(0, 0, -20), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+            new StationPort { Id = "top",   LocalPosition = new Vector3(0, +4, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              AcceptsCategories = ["hab", "science", "cargo", "military"] },
+        ]
+    };
+
+    // ── connector-short ───────────────────────────────────────────────────────
+    // 6×6×16 short spine segment. Two ends only.
+    public static readonly StationModuleDefinition ConnectorShort = new()
+    {
+        Id           = "connector-short",
+        Category     = "connector",
+        BoundingBox  = new Vector3(6, 6, 16),
+        MinScale     = StationScale.Outpost,
+        SelectWeight = 1.5f,
+        Ports        =
+        [
+            new StationPort { Id = "front", LocalPosition = new Vector3(0, 0, +8), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium },
+            new StationPort { Id = "back",  LocalPosition = new Vector3(0, 0, -8), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+        ]
+    };
+
+    // ── hab-block ─────────────────────────────────────────────────────────────
+    // 18×14×18 habitation block. Four lateral ports for chaining; top for extras.
+    public static readonly StationModuleDefinition HabBlock = new()
+    {
+        Id           = "hab-block",
+        Category     = "hab",
+        BoundingBox  = new Vector3(18, 14, 18),
+        MinScale     = StationScale.Outpost,
+        SelectWeight = 3f,
+        Ports        =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+9, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Medium },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-9, 0, 0), OutwardNormal = -Vector3.UnitX, Size = PortSize.Medium },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +9), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -9), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +7, 0), OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              AcceptsCategories = ["connector", "science"] },
+        ]
+    };
+
+    // ── cargo-bay ─────────────────────────────────────────────────────────────
+    // 24×12×20 cargo block. Broad faces for container access; side branching.
+    public static readonly StationModuleDefinition CargoBay = new()
+    {
+        Id          = "cargo-bay",
+        Category    = "cargo",
+        BoundingBox = new Vector3(24, 12, 20),
+        MinScale    = StationScale.Station,
+        Ports       =
+        [
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +10),  OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -10),  OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+            new StationPort { Id = "px", LocalPosition = new Vector3(+12, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Medium,
+                              AcceptsCategories = ["connector", "cargo"] },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-12, 0, 0),  OutwardNormal = -Vector3.UnitX, Size = PortSize.Medium,
+                              AcceptsCategories = ["connector", "cargo"] },
+        ]
+    };
+
+    // ── docking-arm ───────────────────────────────────────────────────────────
+    // 5×5×32 thin arm with a landing pad at the far end.
+    public static readonly StationModuleDefinition DockingArm = new()
+    {
+        Id          = "docking-arm",
+        Category    = "docking",
+        BoundingBox = new Vector3(5, 5, 32),
+        MinScale    = StationScale.Outpost,
+        Ports       =
+        [
+            new StationPort { Id = "attach", LocalPosition = new Vector3(0, 0, -16), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Medium },
+            new StationPort { Id = "pad",    LocalPosition = new Vector3(0, 0, +16), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Medium,
+                              IsDocking = true, IsTerminal = true },
+        ]
+    };
+
+    // ── science-block ─────────────────────────────────────────────────────────
+    // 14×14×14 compact science module.
+    public static readonly StationModuleDefinition ScienceBlock = new()
+    {
+        Id          = "science-block",
+        Category    = "science",
+        BoundingBox = new Vector3(14, 14, 14),
+        MinScale    = StationScale.Station,
+        Ports       =
+        [
+            new StationPort { Id = "attach", LocalPosition = new Vector3(0, 0, -7),  OutwardNormal = -Vector3.UnitZ, Size = PortSize.Small },
+            new StationPort { Id = "side",   LocalPosition = new Vector3(+7, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Small,
+                              AcceptsCategories = ["connector", "science"] },
+            new StationPort { Id = "top",    LocalPosition = new Vector3(0, +7, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              IsTerminal = true },
+        ]
+    };
+
+    // ── industrial-block ──────────────────────────────────────────────────────
+    // 22×18×22 large processing block. Full lateral branching; top terminates.
+    public static readonly StationModuleDefinition IndustrialBlock = new()
+    {
+        Id          = "industrial-block",
+        Category    = "industrial",
+        BoundingBox = new Vector3(22, 18, 22),
+        MinScale    = StationScale.Station,
+        Ports       =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+11, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-11, 0, 0), OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +11), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -11), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +9, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              IsTerminal = true },
+        ]
+    };
+
+    public static IEnumerable<StationModuleDefinition> GetByCategory(string category)
+        => All.Where(m => m.Category == category);
+
+    public static readonly StationModuleDefinition[] All =
+    [
+        CoreHub, ConnectorLong, ConnectorShort, HabBlock,
+        CargoBay, DockingArm, ScienceBlock, IndustrialBlock,
+    ];
+
+    public static Color CategoryColor(string category) => category switch
+    {
+        "core"       => new Color(160, 160, 160),
+        "connector"  => new Color(80,  80,  80),
+        "hab"        => new Color(220, 210, 190),
+        "cargo"      => new Color(180, 150, 80),
+        "docking"    => new Color(160, 180, 200),
+        "science"    => new Color(150, 170, 210),
+        "industrial" => new Color(130, 110, 70),
+        _            => new Color(150, 150, 150),
+    };
+}

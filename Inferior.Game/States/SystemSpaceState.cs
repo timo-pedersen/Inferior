@@ -14,6 +14,7 @@ using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Game.StationGen;
 
 namespace Inferior.Game.States;
 
@@ -98,12 +99,11 @@ public sealed class SystemSpaceState : GameState
     private IndexBuffer?  _boxIb;
     private int           _boxTriCount;
 
-    // Per-station module layout: list of (offset, scale, color) in unit-radius space.
-    // Offset and scale are in units of the station's apparent render radius.
-    // Generated once per system entry from station name seed.
-    private readonly record struct StationModule(Vector3 Offset, Vector3 Scale, Color Color);
-    private readonly Dictionary<Galaxy.Station, StationModule[]>    _stationGeometry  = [];
-    private readonly List<(Galaxy.Station station, DVec3 pos)>      _stationPositions = [];
+    // Per-station placed module list — generated once per system entry from name seed.
+    private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
+    private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
+    // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes = [];
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
@@ -280,10 +280,22 @@ public sealed class SystemSpaceState : GameState
         // Box mesh — shared by all station module draws
         (_boxVb, _boxIb, _boxTriCount) = MeshFactory.CreateBox(_gd);
 
-        // Station module layouts — generated once from name-derived seed
+        // Station module layouts — generated once from name-derived seed.
+        // StationGenerator.Generate also runs StationDecorator internally.
         _stationGeometry.Clear();
+        foreach (var v in _decoMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        _decoMeshes.Clear();
         foreach (var station in _system.Stations)
-            _stationGeometry[station] = GenerateStationModules(station);
+        {
+            var modules = StationGenerator.Generate(station);
+            _stationGeometry[station] = modules;
+            foreach (var mod in modules)
+            {
+                var gpu = mod.Mesh?.Build(_gd);
+                if (gpu.HasValue)
+                    _decoMeshes[mod] = gpu.Value;
+            }
+        }
         _stationPositions.Clear();
         _prevCameraPosValid = false;
 
@@ -604,6 +616,8 @@ public sealed class SystemSpaceState : GameState
         _sphereIb?.Dispose();
         _boxVb?.Dispose();
         _boxIb?.Dispose();
+        foreach (var v in _decoMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        _decoMeshes.Clear();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
@@ -813,6 +827,7 @@ public sealed class SystemSpaceState : GameState
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
+        DrawStationDots(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
@@ -831,8 +846,6 @@ public sealed class SystemSpaceState : GameState
 
     // ── Station drawing ───────────────────────────────────────────────────────
 
-    private static readonly Color StationColor = new(180, 190, 200);
-
     private static float StationPhysicalRadius(Galaxy.Station s) => s.Size switch
     {
         Galaxy.StationSize.Small  =>  250f,
@@ -841,17 +854,6 @@ public sealed class SystemSpaceState : GameState
         _                         =>  250f,
     };
 
-    private float StationApparentRadius(Galaxy.Station station, Vector3 renderPos)
-    {
-        float dist       = renderPos.Length();
-        float baseRadius = StationPhysicalRadius(station) * (float)Camera3D.RenderScale;
-        if (dist > PlanetMaxBoostDist) return baseRadius;
-
-        float projScale      = _gd.Viewport.Height / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
-        float minRenderRadius = 2f * dist / projScale;   // minimum 2px
-        return System.Math.Max(baseRadius, minRenderRadius);
-    }
-
     private void DrawStations()
     {
         if (_boxVb == null || _boxIb == null) return;
@@ -859,33 +861,30 @@ public sealed class SystemSpaceState : GameState
         _effect.LightingEnabled    = true;
         _effect.VertexColorEnabled = false;
         _effect.TextureEnabled     = false;
-        _effect.DiffuseColor       = StationColor.ToVector3();
 
         _gd.SetVertexBuffer(_boxVb);
         _gd.Indices = _boxIb;
+
+        float rs = (float)Camera3D.RenderScale;
 
         foreach (var (station, universePos) in _stationPositions)
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
 
-            float radius = StationApparentRadius(station, renderPos);
-
-            // Slow rotation based on game time — makes station feel alive
-            float   rotAngle = (float)(_gameTimeSeconds * 0.05);
-            Matrix  rotation = Matrix.CreateRotationY(rotAngle);
-
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
             foreach (var mod in modules)
             {
-                Vector3 worldOffset = Vector3.Transform(mod.Offset * radius, rotation);
-                Vector3 modScale    = mod.Scale * radius;
+                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
 
-                _effect.DiffuseColor = mod.Color.ToVector3();
-                _effect.World = Matrix.CreateScale(modScale)
-                              * rotation
-                              * Matrix.CreateTranslation(renderPos + worldOffset);
+                _effect.DiffuseColor = StationModuleRegistry.CategoryColor(mod.Definition.Category).ToVector3();
+
+                _effect.World =
+                    Matrix.CreateScale(mod.Definition.BoundingBox * rs) *
+                    Matrix.CreateFromQuaternion(modRot) *
+                    Matrix.CreateTranslation(posMetres * rs) *
+                    Matrix.CreateTranslation(renderPos);
 
                 foreach (var pass in _effect.CurrentTechnique.Passes)
                 {
@@ -899,6 +898,46 @@ public sealed class SystemSpaceState : GameState
         }
 
         _effect.DiffuseColor = Vector3.One;
+
+        // Decoration pass — per-module meshes (windows, hatches, antennas)
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = true;
+
+        foreach (var (station, universePos) in _stationPositions)
+        {
+            Vector3 renderPos = _camera.ToRenderSpace(universePos);
+            if (renderPos.Length() > 30_000f) continue;
+
+            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+
+            foreach (var mod in modules)
+            {
+                if (!_decoMeshes.TryGetValue(mod, out var deco)) continue;
+
+                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
+
+                _effect.World =
+                    Matrix.CreateScale(rs) *
+                    Matrix.CreateFromQuaternion(modRot) *
+                    Matrix.CreateTranslation(posMetres * rs) *
+                    Matrix.CreateTranslation(renderPos);
+
+                _gd.SetVertexBuffer(deco.vb);
+                _gd.Indices = deco.ib;
+
+                foreach (var pass in _effect.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawIndexedPrimitives(
+                        PrimitiveType.TriangleList,
+                        baseVertex: 0, startIndex: 0,
+                        primitiveCount: deco.triCount);
+                }
+            }
+        }
+
+        _effect.VertexColorEnabled = false;
+        _effect.LightingEnabled    = true;
     }
 
     private void DrawStationOrbitRings()
@@ -931,87 +970,30 @@ public sealed class SystemSpaceState : GameState
         _effect.LightingEnabled    = true;
     }
 
-    /// <summary>
-    /// Build the box module layout for a station from a seed derived from the station name.
-    /// Returns modules in "unit-radius" space (positions and sizes are fractions of the
-    /// station's apparent render radius — scaled at draw time).
-    /// </summary>
-    private static StationModule[] GenerateStationModules(Galaxy.Station station)
+    // Station dot icons — 3×3 pixel screen-space marker, visible up to 1 million km.
+    // Drawn on top of all 3D geometry so stations are always locatable.
+    private void DrawStationDots(SpriteBatch sb)
     {
-        // Derive a stable int seed from the station name (not GetHashCode — not stable)
-        int seed = 17;
-        foreach (char c in station.Name) seed = seed * 31 + c;
-        var rng = new Core.Random.SeededRandom(seed);
+        const float MaxDistRU = 1.0f;   // 1 million km → 1.0 render unit
 
-        int moduleCount = station.Size switch
+        var viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+        int w = _gd.Viewport.Width;
+        int h = _gd.Viewport.Height;
+
+        foreach (var (_, universePos) in _stationPositions)
         {
-            Galaxy.StationSize.Small  => rng.NextInt(3, 6),
-            Galaxy.StationSize.Medium => rng.NextInt(4, 8),
-            Galaxy.StationSize.Large  => rng.NextInt(5, 10),
-            _                         => 4,
-        };
+            Vector3 renderPos = _camera.ToRenderSpace(universePos);
+            if (renderPos.Length() > MaxDistRU) continue;
 
-        var modules = new List<StationModule>();
+            Vector4 clip = Vector4.Transform(new Vector4(renderPos, 1f), viewProj);
+            if (clip.W <= 0f) continue;
 
-        // Core/habitat module — always present
-        float coreW = (float)rng.NextDouble(1.4, 2.2);
-        float coreH = (float)rng.NextDouble(0.5, 0.9);
-        float coreD = (float)rng.NextDouble(0.5, 0.9);
-        modules.Add(new StationModule(
-            Vector3.Zero,
-            new Vector3(coreW, coreH, coreD),
-            StationColor));
+            float sx = ( clip.X / clip.W * 0.5f + 0.5f) * w;
+            float sy = (-clip.Y / clip.W * 0.5f + 0.5f) * h;
+            if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
 
-        // Solar panel arms — extend in X direction on both sides
-        float armLen = (float)rng.NextDouble(2.5, 4.5);
-        float armW   = (float)rng.NextDouble(0.06, 0.12);
-        float armH   = (float)rng.NextDouble(0.8, 1.4);
-        var   armColor = new Color(100, 110, 120);
-
-        modules.Add(new StationModule(
-            new Vector3(-(coreW / 2f + armLen / 2f), 0, 0),
-            new Vector3(armLen, armW, armH),
-            armColor));
-        modules.Add(new StationModule(
-            new Vector3( (coreW / 2f + armLen / 2f), 0, 0),
-            new Vector3(armLen, armW, armH),
-            armColor));
-
-        // Additional modules docked fore/aft and top/bottom
-        var attachOffsets = new Vector3[]
-        {
-            new(0, 0, -(coreD / 2f)),
-            new(0, 0,  (coreD / 2f)),
-            new(0,  (coreH / 2f), 0),
-            new(0, -(coreH / 2f), 0),
-        };
-
-        int extra = moduleCount - 1;  // core already counted
-        for (int i = 0; i < extra && i < attachOffsets.Length; i++)
-        {
-            float mw = (float)rng.NextDouble(0.4, 0.9);
-            float mh = (float)rng.NextDouble(0.3, 0.7);
-            float md = (float)rng.NextDouble(0.3, 0.7);
-            var   mc = new Color(
-                rng.NextInt(140, 200),
-                rng.NextInt(150, 210),
-                rng.NextInt(155, 215));
-
-            var offset    = attachOffsets[i];
-            var halfSize  = new Vector3(mw, mh, md) * 0.5f;
-            var adjOffset = offset + Vector3.Normalize(offset) * halfSize.Length();
-
-            // Thin connector between core and this module
-            float connLen = (adjOffset - offset * 0.5f).Length();
-            modules.Add(new StationModule(
-                offset * 0.75f,
-                new Vector3(0.08f, 0.08f, connLen),
-                armColor));
-
-            modules.Add(new StationModule(adjOffset, new Vector3(mw, mh, md), mc));
+            sb.Draw(_pixel, new Rectangle((int)sx - 1, (int)sy - 1, 3, 3), new Color(160, 190, 210, 220));
         }
-
-        return [.. modules];
     }
 
     // ── Opaque pass ───────────────────────────────────────────────────────────
