@@ -33,7 +33,11 @@ public sealed class StationModuleMesh
     public List<AnimTag>  AnimTags      { get; } = [];
     public SurfaceTexture Texture       { get; set; } = SurfaceTexture.CleanPanel;
 
-    // Set after base/seam geometry is added and before raised decoration (greebles, pipes).
+    // Faces 0..HullFaceCount-1 are the 6 module box faces (vertex colour = white).
+    // ApplyLighting never skips these for the emissive check — they must be shaded.
+    public int HullFaceCount { get; set; } = 0;
+
+    // Set after hull + seam geometry is added and before raised decoration (greebles, pipes).
     // ApplyAmbientOcclusion only processes faces 0..BaseFaceCount-1.
     public int BaseFaceCount { get; set; } = 0;
 
@@ -242,11 +246,18 @@ public sealed class StationModuleMesh
     // Must be called after all geometry is added and before Build().
     public void ApplyLighting(Matrix worldRotation, Vector3 sunDirection, float ambient, Vector3 sunColour)
     {
-        foreach (var (vb, count) in _faces)
+        for (int fi = 0; fi < _faces.Count; fi++)
         {
-            Color orig = _verts[vb].Color;
-            // Emissive heuristic: bright-enough colours are self-lit (windows, light lenses)
-            if ((int)orig.R + orig.G + orig.B > 370) continue;
+            var (vb, count) = _faces[fi];
+
+            // Hull faces (fi < HullFaceCount) must always be lit — their vertex colour is
+            // white so the emissive check would otherwise skip them.
+            // Decoration faces skip if emissive (R+G+B > 370 = glowing light lenses).
+            if (fi >= HullFaceCount)
+            {
+                Color orig = _verts[vb].Color;
+                if ((int)orig.R + orig.G + orig.B > 370) continue;
+            }
 
             // Compute face normal from first three vertices (cross product → outward normal)
             Vector3 localN = Vector3.Cross(

@@ -97,11 +97,6 @@ public sealed class SystemSpaceState : GameState
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
 
     // ── Station rendering ─────────────────────────────────────────────────────
-    // Box mesh shared by all station modules
-    private VertexBuffer? _boxVb;
-    private IndexBuffer?  _boxIb;
-    private int           _boxTriCount;
-
     // Per-station placed module list — generated once per system entry from name seed.
     private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
@@ -321,9 +316,6 @@ public sealed class SystemSpaceState : GameState
 
         // Ring vertices reused per orbit ring
         _ringVerts = MeshFactory.CreateRingVertices(128);
-
-        // Box mesh — shared by all station module draws
-        (_boxVb, _boxIb, _boxTriCount) = MeshFactory.CreateBox(_gd);
 
         StationTextureRegistry.Initialize(_gd);
 
@@ -688,8 +680,6 @@ public sealed class SystemSpaceState : GameState
         _effect?.Dispose();
         _sphereVb?.Dispose();
         _sphereIb?.Dispose();
-        _boxVb?.Dispose();
-        _boxIb?.Dispose();
         foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
@@ -945,56 +935,12 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawStations()
     {
-        if (_boxVb == null || _boxIb == null) return;
-
-        _effect.LightingEnabled    = true;
-        _effect.VertexColorEnabled = false;
-        _effect.TextureEnabled     = false;
-
-        // Use SceneLighting params for station modules — not the planet-boosted ones.
-        // Direction is already correct (lightDir set in Draw); only colour/ambient differ.
-        _effect.DirectionalLight0.DiffuseColor = SceneLighting.SunColour;
-        _effect.AmbientLightColor              = new Vector3(SceneLighting.Ambient);
-
-        _gd.SetVertexBuffer(_boxVb);
-        _gd.Indices = _boxIb;
+        if (_stationPositions.Count == 0) return;
 
         float rs = (float)Camera3D.RenderScale;
 
-        foreach (var (station, universePos) in _stationPositions)
-        {
-            Vector3 renderPos = _camera.ToRenderSpace(universePos);
-            if (renderPos.Length() > 30_000f) continue;
-
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
-
-            foreach (var mod in modules)
-            {
-                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-
-                Vector3 catColor     = StationModuleRegistry.CategoryColor(mod.Definition.Category).ToVector3();
-                _effect.DiffuseColor = catColor * StationTextureRegistry.GetColor(mod.Mesh?.Texture ?? SurfaceTexture.CleanPanel);
-
-                _effect.World =
-                    Matrix.CreateScale(mod.Definition.BoundingBox * rs) *
-                    Matrix.CreateFromQuaternion(modRot) *
-                    Matrix.CreateTranslation(posMetres * rs) *
-                    Matrix.CreateTranslation(renderPos);
-
-                foreach (var pass in _effect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    _gd.DrawIndexedPrimitives(
-                        PrimitiveType.TriangleList,
-                        baseVertex: 0, startIndex: 0,
-                        primitiveCount: _boxTriCount);
-                }
-            }
-        }
-
-        _effect.DiffuseColor = Vector3.One;
-
-        // Decoration pass — per-module meshes (windows, hatches, antennas)
+        // Hull + decoration pass — hull faces are now baked into mod.Mesh alongside greebles.
+        // Lighting is pre-baked into vertex colours; texture provides surface colour.
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = true;
         _effect.TextureEnabled     = true;
