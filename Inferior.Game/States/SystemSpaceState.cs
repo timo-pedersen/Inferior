@@ -1096,13 +1096,13 @@ public sealed class SystemSpaceState : GameState
         var verts = new VertexPositionNormalTexture[24];
         var idx   = new int[36];
 
+        // Per-face UV axes chosen so that U and V are always positive (0→4 for a 20 m face).
+        // Cross(normal, arb) produces negative U on several faces of a standard box,
+        // making texture V=0.5 (the name text) only partially sampled. Hardcoded axes avoid this.
         static void AddFace(VertexPositionNormalTexture[] v, int[] idx, int face,
-                            Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 n)
+                            Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 n,
+                            Vector3 uAxis, Vector3 vAxis)
         {
-            Vector3 arb   = MathF.Abs(n.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
-            Vector3 uAxis = Vector3.Normalize(Vector3.Cross(n, arb));
-            Vector3 vAxis = Vector3.Normalize(Vector3.Cross(n, uAxis));
-
             int b = face * 4;
             v[b    ] = new VertexPositionNormalTexture(v0, n, Vector2.Zero);
             v[b + 1] = new VertexPositionNormalTexture(v1, n, new Vector2(
@@ -1117,12 +1117,13 @@ public sealed class SystemSpaceState : GameState
             idx[i + 3] = b;     idx[i + 4] = b + 3; idx[i + 5] = b + 2;
         }
 
-        AddFace(verts, idx, 0, c[4], c[5], c[6], c[7],  Vector3.UnitZ);   // +Z
-        AddFace(verts, idx, 1, c[1], c[0], c[3], c[2], -Vector3.UnitZ);   // -Z
-        AddFace(verts, idx, 2, c[0], c[4], c[7], c[3], -Vector3.UnitX);   // -X
-        AddFace(verts, idx, 3, c[5], c[1], c[2], c[6],  Vector3.UnitX);   // +X
-        AddFace(verts, idx, 4, c[7], c[6], c[2], c[3],  Vector3.UnitY);   // +Y
-        AddFace(verts, idx, 5, c[0], c[1], c[5], c[4], -Vector3.UnitY);   // -Y
+        //                                                                 n               uAxis              vAxis
+        AddFace(verts, idx, 0, c[4], c[5], c[6], c[7],  Vector3.UnitZ,  Vector3.UnitX,  Vector3.UnitY);  // +Z
+        AddFace(verts, idx, 1, c[1], c[0], c[3], c[2], -Vector3.UnitZ, -Vector3.UnitX,  Vector3.UnitY);  // -Z
+        AddFace(verts, idx, 2, c[0], c[4], c[7], c[3], -Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY);  // -X
+        AddFace(verts, idx, 3, c[5], c[1], c[2], c[6],  Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY);  // +X
+        AddFace(verts, idx, 4, c[7], c[6], c[2], c[3],  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);  // +Y
+        AddFace(verts, idx, 5, c[0], c[1], c[5], c[4], -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);  // -Y
 
         var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration,
                                   24, BufferUsage.WriteOnly);
