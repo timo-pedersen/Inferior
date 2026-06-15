@@ -2,7 +2,7 @@ using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
 
-public enum StationScale { Outpost, Station }
+public enum StationScale { Outpost, Station, Port, Megastation }
 
 public sealed class StationModuleDefinition
 {

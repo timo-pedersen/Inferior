@@ -21,9 +21,13 @@ public sealed class StationGenerator
         int seed = NameHash(station.Name);
         var gen  = new StationGenerator(seed);
 
-        StationScale scale = station.Size == StationSize.Small
-            ? StationScale.Outpost
-            : StationScale.Station;
+        StationScale scale = station.Size switch
+        {
+            StationSize.Small  => StationScale.Outpost,
+            StationSize.Medium => StationScale.Station,
+            StationSize.Large  => StationScale.Port,
+            _                  => StationScale.Outpost,
+        };
 
         var modules = gen.Run(station);
         ValidatePlacement(modules);
@@ -140,9 +144,13 @@ public sealed class StationGenerator
 
     private List<PlacedModule> Run(Galaxy.Station station)
     {
-        StationScale stationScale = station.Size == StationSize.Small
-            ? StationScale.Outpost
-            : StationScale.Station;
+        StationScale stationScale = station.Size switch
+        {
+            StationSize.Small  => StationScale.Outpost,
+            StationSize.Medium => StationScale.Station,
+            StationSize.Large  => StationScale.Port,
+            _                  => StationScale.Outpost,
+        };
 
         // "core" category is the station root — never attach a second core as a child module.
         var availableModules = StationModuleRegistry.All
@@ -151,12 +159,13 @@ public sealed class StationGenerator
 
         if (availableModules.Count == 0) return _placed;
 
-        int moduleLimit = station.Size switch
+        int moduleLimit = stationScale switch
         {
-            StationSize.Small  => 8,
-            StationSize.Medium => 18,
-            StationSize.Large  => 35,
-            _                  => 8,
+            StationScale.Outpost     => 8  + _rng.NextInt(12),
+            StationScale.Station     => 15 + _rng.NextInt(20),
+            StationScale.Port        => 25 + _rng.NextInt(35),
+            StationScale.Megastation => 50 + _rng.NextInt(80),
+            _                        => 8,
         };
 
         var archetype = StationArchetypeRegistry.Pick(_rng);
@@ -194,7 +203,7 @@ public sealed class StationGenerator
 
             for (int attempt = 0; attempt < MaxAttemptsPerPort; attempt++)
             {
-                var candidate = WeightedPickModule(availableModules, archetype, port.Depth);
+                var candidate = WeightedPickModule(availableModules, archetype, port.Depth, stationScale);
                 var placed    = TryAttach(candidate, port);
                 if (placed != null)
                 {
@@ -209,21 +218,26 @@ public sealed class StationGenerator
         return _placed;
     }
 
-    // Weighted random module pick factoring in SelectWeight and archetype category bias.
+    // Weighted random module pick factoring in SelectWeight, archetype bias, and station scale.
     private StationModuleDefinition WeightedPickModule(
         List<StationModuleDefinition> candidates,
         IStationArchetype             archetype,
-        int                           depth)
+        int                           depth,
+        StationScale                  stationScale)
     {
         double total = 0;
         foreach (var m in candidates)
-            total += m.SelectWeight * archetype.CategoryBias(m.Category, depth);
+        {
+            float sizeBonus = stationScale >= StationScale.Port && m.Id.EndsWith("-large") ? 2.5f : 1.0f;
+            total += m.SelectWeight * sizeBonus * archetype.CategoryBias(m.Category, depth);
+        }
 
-        double roll = _rng.NextDouble() * total;
+        double roll  = _rng.NextDouble() * total;
         double accum = 0;
         foreach (var m in candidates)
         {
-            accum += m.SelectWeight * archetype.CategoryBias(m.Category, depth);
+            float sizeBonus = stationScale >= StationScale.Port && m.Id.EndsWith("-large") ? 2.5f : 1.0f;
+            accum += m.SelectWeight * sizeBonus * archetype.CategoryBias(m.Category, depth);
             if (roll < accum) return m;
         }
         return candidates[^1];

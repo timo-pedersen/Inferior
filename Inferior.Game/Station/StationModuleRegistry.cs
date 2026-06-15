@@ -151,6 +151,106 @@ public static class StationModuleRegistry
         ]
     };
 
+    // ── core-hub-large ────────────────────────────────────────────────────────
+    // 40×40×40 — twice the standard core. Imposing central mass for Port+ stations.
+    public static readonly StationModuleDefinition CoreHubLarge = new()
+    {
+        Id           = "core-hub-large",
+        Category     = "core",
+        BoundingBox  = new Vector3(40, 40, 40),
+        MinScale     = StationScale.Port,
+        SelectWeight = 1.5f,
+        Ports        =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+20, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-20, 0, 0),  OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +20),  OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -20),  OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +20, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Medium,
+                              AcceptsCategories = ["connector", "science", "military"] },
+            new StationPort { Id = "ny", LocalPosition = new Vector3(0, -20, 0),  OutwardNormal = -Vector3.UnitY, Size = PortSize.Small,
+                              IsTerminal = true },
+        ]
+    };
+
+    // ── connector-long-large ──────────────────────────────────────────────────
+    // 80×16×16 — twice the standard connector. The spine on large linear stations.
+    public static readonly StationModuleDefinition ConnectorLongLarge = new()
+    {
+        Id           = "connector-long-large",
+        Category     = "connector",
+        BoundingBox  = new Vector3(80, 16, 16),
+        MinScale     = StationScale.Port,
+        SelectWeight = 2.0f,
+        Ports        =
+        [
+            new StationPort { Id = "front", LocalPosition = new Vector3(0, 0, +40), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            new StationPort { Id = "back",  LocalPosition = new Vector3(0, 0, -40), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large },
+            new StationPort { Id = "top",   LocalPosition = new Vector3(0, +8, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Medium,
+                              AcceptsCategories = ["hab", "science", "cargo", "military", "industrial"] },
+        ]
+    };
+
+    // ── hab-block-large ───────────────────────────────────────────────────────
+    // 36×28×36 — large residential/commercial block.
+    public static readonly StationModuleDefinition HabBlockLarge = new()
+    {
+        Id           = "hab-block-large",
+        Category     = "hab",
+        BoundingBox  = new Vector3(36, 28, 36),
+        MinScale     = StationScale.Station,
+        SelectWeight = 1.2f,
+        Ports        =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+18, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-18, 0, 0), OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +18), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -18), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +14, 0), OutwardNormal = Vector3.UnitY,  Size = PortSize.Medium,
+                              AcceptsCategories = ["connector", "science"] },
+        ]
+    };
+
+    // ── cargo-bay-large ───────────────────────────────────────────────────────
+    // 48×24×40 — freight handling at scale.
+    public static readonly StationModuleDefinition CargoBayLarge = new()
+    {
+        Id           = "cargo-bay-large",
+        Category     = "cargo",
+        BoundingBox  = new Vector3(48, 24, 40),
+        MinScale     = StationScale.Port,
+        SelectWeight = 1.3f,
+        Ports        =
+        [
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +20),  OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -20),  OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large },
+            new StationPort { Id = "px", LocalPosition = new Vector3(+24, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Large,
+                              AcceptsCategories = ["connector", "cargo"] },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-24, 0, 0),  OutwardNormal = -Vector3.UnitX, Size = PortSize.Large,
+                              AcceptsCategories = ["connector", "cargo"] },
+        ]
+    };
+
+    // ── industrial-block-large ────────────────────────────────────────────────
+    // 44×36×44 — massive processing facility.
+    public static readonly StationModuleDefinition IndustrialBlockLarge = new()
+    {
+        Id           = "industrial-block-large",
+        Category     = "industrial",
+        BoundingBox  = new Vector3(44, 36, 44),
+        MinScale     = StationScale.Port,
+        SelectWeight = 1.2f,
+        Ports        =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+22, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-22, 0, 0), OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +22), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            new StationPort { Id = "nz", LocalPosition = new Vector3(0, 0, -22), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +18, 0), OutwardNormal = Vector3.UnitY,  Size = PortSize.Small,
+                              IsTerminal = true },
+        ]
+    };
+
     public static IEnumerable<StationModuleDefinition> GetByCategory(string category)
         => All.Where(m => m.Category == category);
 
@@ -158,6 +258,7 @@ public static class StationModuleRegistry
     [
         CoreHub, ConnectorLong, ConnectorShort, HabBlock,
         CargoBay, DockingArm, ScienceBlock, IndustrialBlock,
+        CoreHubLarge, ConnectorLongLarge, HabBlockLarge, CargoBayLarge, IndustrialBlockLarge,
     ];
 
     public static Color CategoryColor(string category) => category switch
