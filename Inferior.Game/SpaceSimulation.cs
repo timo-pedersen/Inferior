@@ -75,6 +75,17 @@ public sealed class SpaceSimulation : Simulation
     public void SetReferenceVelocity(DVec3 vel)
         => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z);
 
+    // ── Ship move speed (written by main thread, read by sim thread) ──────────
+    // Interlocked long/double bitcast — avoids volatile double (not legal in C#).
+    private long _shipSpeedBits = BitConverter.DoubleToInt64Bits(5e9);
+
+    /// <summary>
+    /// Sets the ship's effective move speed. Called from the main thread each frame
+    /// with the scroll-adjusted base speed already clamped by proximity scaling.
+    /// </summary>
+    public void SetShipMoveSpeed(double speedMs)
+        => System.Threading.Interlocked.Exchange(ref _shipSpeedBits, BitConverter.DoubleToInt64Bits(speedMs));
+
     // ── Sensors ───────────────────────────────────────────────────────────────
     private readonly GravitySensor              _gravity        = new();
     private readonly AtmosphericPressureSensor  _atmPressure    = new("AtmosphericSensor");
@@ -116,6 +127,8 @@ public sealed class SpaceSimulation : Simulation
         // Replace with force-based Newtonian (F=ma) once engine/power system exists.
         var rv = _refVelSnapshot;
         var baseVel = rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
+        ship.MoveSpeedMs = BitConverter.Int64BitsToDouble(
+            System.Threading.Interlocked.Read(ref _shipSpeedBits));
         ship.ApplyVelocityTarget(input.ThrustForward, input.ThrustLateral, input.ThrustVertical, baseVel);
         ship.Position += ship.Velocity * dt;
 

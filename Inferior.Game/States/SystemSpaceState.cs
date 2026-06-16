@@ -165,6 +165,9 @@ public sealed class SystemSpaceState : GameState
     private InstrumentMeter? _atmPressureMeter;
     private double           _scanCooldown;  // seconds remaining before button re-enables
 
+    // ── Ship fly speed (scroll-adjusted, main thread → sim thread each frame) ──
+    private double _shipBaseSpeed = 5e9;  // same default as camera; proximity scaling clamps it
+
     // ── Camera modes ──────────────────────────────────────────────────────────
     // TAB  — toggles between ship-control and mouse-driven UI interaction.
     // F11  — toggles between ship camera (cockpit) and free debug camera.
@@ -885,6 +888,13 @@ public sealed class SystemSpaceState : GameState
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)
             _camera.ProximitySpeedScale = ComputeProximityScale();
+
+        // Ship fly speed — base speed scaled by proximity, then hard-capped near stations
+        if (!_debugCameraMode)
+        {
+            DVec3 shipPos = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            _simulation.SetShipMoveSpeed(ComputeShipSpeed(shipPos));
+        }
 
         // Feed world state to simulation — use ship snapshot position in ship mode,
         // camera position in debug mode (sensors track whoever is "there")
@@ -1861,11 +1871,20 @@ public sealed class SystemSpaceState : GameState
             : _simulation.ShipState?.Velocity ?? DVec3.Zero;
         double relSpeedMs = (movingVel - _refVelocity).Length;
 
-        // In debug mode also show the set fly-speed (scroll-adjusted)
+        // Show set fly-speed (scroll-adjusted) in both modes
         if (_debugCameraMode)
         {
             DrawText(sb, $"Set: {Units.FormatSpeed(_camera.MoveSpeedMs)}",
                 new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
+        }
+        else
+        {
+            DVec3 shipPos    = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            double effSpeed  = ComputeShipSpeed(shipPos);
+            string setLine   = System.Math.Abs(effSpeed - _shipBaseSpeed) > 0.5
+                ? $"Set: {Units.FormatSpeed(_shipBaseSpeed)}  (cap: {Units.FormatSpeed(effSpeed)})"
+                : $"Set: {Units.FormatSpeed(_shipBaseSpeed)}";
+            DrawText(sb, setLine, new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
         }
 
         DrawText(sb, $"Speed: {Units.FormatSpeed(relSpeedMs)}  (vs {_refName})",
@@ -1948,6 +1967,12 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
+            // Scroll adjusts ship base fly speed (same steps as debug camera)
+            if (scroll != 0)
+            {
+                double factor = scroll > 0 ? 2.0 : 0.5;
+                _shipBaseSpeed = System.Math.Clamp(_shipBaseSpeed * factor, 1.0, 1e12);
+            }
             // Home — snap ship back to near-star (useful during dev)
             if (homePressed)
                 _simulation.RequestSnapToOrigin();
@@ -2577,6 +2602,37 @@ public sealed class SystemSpaceState : GameState
         }
 
         return System.Math.Min(System.Math.Min(starScale, bodyScale), stationScale);
+    }
+
+    // Ship speed uses the same star/body proximity zones as the camera, but the station
+    // zone is a hard cap (2000 m/s max) rather than a proportional scale — so the ship
+    // always has a usable docking speed regardless of the current scroll step.
+    private double ComputeShipSpeed(DVec3 shipPos)
+    {
+        const double StarVisualRadiusMeters = 8.0 / Camera3D.RenderScale;
+        double starSurf  = System.Math.Max(shipPos.Length - StarVisualRadiusMeters, 0.0);
+        double starScale = ScaleForDist(starSurf, StarProxNearDist, StarProxFarDist, StarProxMinScale);
+
+        double bodyScale = 1.0;
+        foreach (var (body, pos) in _bodyPositions)
+        {
+            double surf = System.Math.Max((shipPos - pos).Length - body.RadiusMeters, 0.0);
+            double s    = ScaleForDist(surf, BodyProxNearDist, BodyProxFarDist, BodyProxMinScale);
+            if (s < bodyScale) bodyScale = s;
+        }
+
+        double speed = _shipBaseSpeed * System.Math.Min(starScale, bodyScale);
+
+        // Hard cap near stations — independent of scroll step
+        foreach (var (station, pos) in _stationPositions)
+        {
+            double r    = StationPhysicalRadius(station);
+            double surf = System.Math.Max((shipPos - pos).Length - r, 0.0);
+            if (surf <= StationProxCapDist)
+                speed = System.Math.Min(speed, 2000.0);
+        }
+
+        return speed;
     }
 
     private static double ScaleForDist(double surfDist, double nearDist, double farDist, double minScale)
