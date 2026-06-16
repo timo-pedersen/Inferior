@@ -1,0 +1,143 @@
+using Inferior.Core.DataBus;
+using Inferior.Core.Math;
+using Inferior.Core.Simulation;
+
+namespace Inferior.Gameplay.Sensors;
+
+/// <summary>
+/// Computes and publishes landing approach geometry relative to the targeted pad.
+/// Standalone sensor — not a ShipComponent. Driven from SpaceSimulation.Publish().
+///
+/// Published topics (DataBus.Instruments, double):
+///   LandingSupport.PadTargeted        — 1.0 when active, 0.0 otherwise
+///   LandingSupport.PadSizeClass       — 0.0 = Small, 1.0 = Large
+///   LandingSupport.PadDistance        — metres, Euclidean
+///   LandingSupport.HeightAbovePad     — metres along pad normal; positive = correct approach side
+///   LandingSupport.LateralOffset      — metres along pad short axis
+///   LandingSupport.LongitudinalOffset — metres along pad forward axis
+///   LandingSupport.HeadingDeviation   — degrees; 0 = aligned with pad forward
+///   LandingSupport.PitchDeviation     — degrees; 0 = face-on to pad
+///   LandingSupport.UpsideDown         — 1.0 when ship is inverted relative to pad
+///
+/// Noise model (keyed on Damage 0..1):
+///   0.0–0.3  → clean
+///   0.3–0.7  → linear Gaussian noise ramp (up to ±8%)
+///   0.7–0.9  → heavy noise + occasional dropouts (publish 0 instead)
+///   > 0.9    → system failed; publish 0.0 for PadTargeted (clears HUD)
+/// </summary>
+public sealed class LandingSupportSystem
+{
+    // Written by main thread, read by sim thread — volatile for atomic swap
+    private volatile LandingPadData? _activePad;
+    private bool _wasActive;
+
+    public double Damage { get; set; }
+
+    private const double ApproachNotifyRange = 2000.0;  // metres
+
+    public void SelectPad(LandingPadData? data) => _activePad = data;
+
+    /// <summary>Called once per sim tick from SpaceSimulation.Publish().</summary>
+    public void Tick(Inferior.Gameplay.Ship.Ship ship)
+    {
+        var pad = _activePad;
+
+        if (pad == null || Damage > 0.9)
+        {
+            DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
+            if (_wasActive && pad == null)
+                DataBus.System.Publish(Topics.System.All, $"Landing support: approach aborted");
+            _wasActive = false;
+            return;
+        }
+
+        double t = GameClock.SimTime;
+
+        // ── Geometry ─────────────────────────────────────────────────────────────
+
+        DVec3 delta    = pad.WorldPosition - ship.Position;
+        double dist    = delta.Length;
+
+        DVec3 n   = pad.WorldNormal;
+        DVec3 fwd = pad.ForwardAxis;
+        // right is derived: cross(n, fwd) → pad short axis
+        DVec3 right = DVec3.Normalize(DVec3.Cross(n, fwd));
+
+        double heightAbovePad     = DVec3.Dot(delta, n);
+        double lateralOffset      = DVec3.Dot(delta, right);
+        double longitudinalOffset = DVec3.Dot(delta, fwd);
+
+        // Heading deviation: angle between ship forward projected onto pad plane and pad forward
+        DVec3 shipFwdOnPad = ship.Forward - n * DVec3.Dot(ship.Forward, n);
+        double shipFwdLen  = shipFwdOnPad.Length;
+        double headingDev  = 0.0;
+        if (shipFwdLen > 1e-6)
+        {
+            shipFwdOnPad = shipFwdOnPad / shipFwdLen;
+            double cosH = System.Math.Clamp(DVec3.Dot(shipFwdOnPad, fwd), -1.0, 1.0);
+            headingDev  = System.Math.Acos(cosH) * (180.0 / System.Math.PI);
+        }
+
+        // Pitch deviation: angle between ship forward and pad normal plane; 0 = face-on
+        double sinP  = System.Math.Clamp(DVec3.Dot(ship.Forward, n), -1.0, 1.0);
+        double pitchDev = System.Math.Asin(System.Math.Abs(sinP)) * (180.0 / System.Math.PI);
+
+        // Upside-down: ship up dot pad normal < 0 means inverted
+        double upsideDown = DVec3.Dot(ship.Up, n) < 0.0 ? 1.0 : 0.0;
+
+        // ── Noise ─────────────────────────────────────────────────────────────────
+
+        double noiseFraction = NoiseScale(t);
+        double dropout       = ShouldDropout(t);
+
+        double Apply(double value, double scale)
+        {
+            if (dropout > 0.0) return 0.0;
+            if (noiseFraction <= 0.0) return value;
+            double jitter = Noise.Scale(Noise.White(t * 0.31 + scale), System.Math.Abs(value) + 1.0, noiseFraction);
+            return value + jitter;
+        }
+
+        // ── Captain's log ─────────────────────────────────────────────────────────
+
+        if (!_wasActive)
+        {
+            if (dist <= ApproachNotifyRange)
+                DataBus.System.Publish(Topics.System.All,
+                    $"Landing support: approach initiated — {pad.BayId} on {pad.StationName}");
+        }
+        _wasActive = true;
+
+        // ── Publish ───────────────────────────────────────────────────────────────
+
+        double sizeClass = pad.PadSize == Inferior.Galaxy.PadSize.Large ? 1.0 : 0.0;
+
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}",        1.0);
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadSizeClass}",       sizeClass);
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadDistance}",        Apply(dist,                0.1));
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.HeightAbovePad}",     Apply(heightAbovePad,      0.2));
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.LateralOffset}",      Apply(lateralOffset,       0.3));
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.LongitudinalOffset}", Apply(longitudinalOffset,  0.4));
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.HeadingDeviation}",   Apply(headingDev,          0.5));
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PitchDeviation}",     Apply(pitchDev,            0.6));
+        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.UpsideDown}",         upsideDown);
+    }
+
+    // ── Noise helpers ─────────────────────────────────────────────────────────────
+
+    private double NoiseScale(double t)
+    {
+        if (Damage < 0.3) return 0.0;
+        if (Damage < 0.7) return (Damage - 0.3) / 0.4 * 0.08;  // ramp 0→8%
+        return 0.15;  // heavy noise above 0.7
+    }
+
+    // Returns 1.0 when a dropout occurs (sim value should be replaced with 0)
+    private double ShouldDropout(double t)
+    {
+        if (Damage < 0.7) return 0.0;
+        // Intermittent dropouts: white noise sample — drop out ~20% of ticks
+        double sample = Noise.White(t * 7.3 + Damage * 31.1);
+        return (sample > 0.8) ? 1.0 : 0.0;
+    }
+}

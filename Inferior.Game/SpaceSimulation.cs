@@ -76,9 +76,15 @@ public sealed class SpaceSimulation : Simulation
         => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z);
 
     // ── Sensors ───────────────────────────────────────────────────────────────
-    private readonly GravitySensor              _gravity       = new();
-    private readonly AtmosphericPressureSensor  _atmPressure   = new("AtmosphericSensor");
-    private readonly SolarSpectrumSensor        _solarSpectrum = new("SolarSpectrumSensor");
+    private readonly GravitySensor              _gravity        = new();
+    private readonly AtmosphericPressureSensor  _atmPressure    = new("AtmosphericSensor");
+    private readonly SolarSpectrumSensor        _solarSpectrum  = new("SolarSpectrumSensor");
+    private readonly LandingSupportSystem       _landingSupport = new();
+
+    // ── Pad target (main thread → sim thread) ─────────────────────────────────
+    private volatile LandingPadData? _activePadTarget;
+
+    public void SetPadTarget(LandingPadData? data) => _activePadTarget = data;
 
     // dt stored in TickPhysics for use in Publish (Publish has no dt parameter)
     private double _lastDt;
@@ -218,6 +224,17 @@ public sealed class SpaceSimulation : Simulation
         _gravity.Tick();
         _atmPressure.Tick(_lastDt);
         _solarSpectrum.Tick(_lastDt);
+
+        var ship = _ship;
+        if (ship != null)
+        {
+            _landingSupport.SelectPad(_activePadTarget);
+            _landingSupport.Tick(ship);
+        }
+        else
+        {
+            DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
+        }
 
         if (t >= _nextMessageAt)
         {

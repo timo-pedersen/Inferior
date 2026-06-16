@@ -2299,6 +2299,7 @@ public sealed class SystemSpaceState : GameState
             _padWorldPos  = DVec3.Zero;
             _padDistance  = 0.0;
             _padDirection = DVec3.Zero;
+            _simulation.SetPadTarget(null);
             return;
         }
 
@@ -2310,16 +2311,34 @@ public sealed class SystemSpaceState : GameState
         foreach (var (s, pos) in _stationPositions)
             if (s == station) { stationPos = pos; break; }
 
-        // Transform pad local position by station orientation
-        Quaternion ori    = station.GetOrientation(_gameTimeSeconds);
-        var local         = new Vector3((float)pad.LocalPosition.X, (float)pad.LocalPosition.Y, (float)pad.LocalPosition.Z);
-        var offset        = Vector3.Transform(local, ori);
-        _padWorldPos      = stationPos + new DVec3(offset.X, offset.Y, offset.Z);
+        // Transform pad local position and normal by station orientation
+        Quaternion ori       = station.GetOrientation(_gameTimeSeconds);
+        var localPos         = new Vector3((float)pad.LocalPosition.X, (float)pad.LocalPosition.Y, (float)pad.LocalPosition.Z);
+        var localNrm         = new Vector3((float)pad.LocalNormal.X,   (float)pad.LocalNormal.Y,   (float)pad.LocalNormal.Z);
+        var offset           = Vector3.Transform(localPos, ori);
+        var worldNrmV        = Vector3.Normalize(Vector3.TransformNormal(localNrm, Matrix.CreateFromQuaternion(ori)));
+        _padWorldPos         = stationPos + new DVec3(offset.X, offset.Y, offset.Z);
+        DVec3 worldNormal    = new DVec3(worldNrmV.X, worldNrmV.Y, worldNrmV.Z);
 
-        DVec3 camPos      = _camera.UniversePosition;
-        DVec3 delta       = _padWorldPos - camPos;
-        _padDistance      = delta.Length;
-        _padDirection     = _padDistance > 1.0 ? delta * (1.0 / _padDistance) : DVec3.Zero;
+        DVec3 camPos         = _camera.UniversePosition;
+        DVec3 delta          = _padWorldPos - camPos;
+        _padDistance         = delta.Length;
+        _padDirection        = _padDistance > 1.0 ? delta * (1.0 / _padDistance) : DVec3.Zero;
+
+        // Derive pad forward axis via tangent frame (same logic as StationDecorator)
+        DVec3 hint       = System.Math.Abs(worldNormal.Y) < 0.9 ? DVec3.UnitY : DVec3.UnitZ;
+        DVec3 padRight   = DVec3.Normalize(DVec3.Cross(hint, worldNormal));
+        DVec3 padForward = DVec3.Normalize(DVec3.Cross(worldNormal, padRight));
+
+        // Push to sim thread for LandingSupportSystem
+        var padData = new LandingPadData(
+            WorldPosition: _padWorldPos,
+            WorldNormal:   worldNormal,
+            ForwardAxis:   padForward,
+            PadSize:       pad.PadSize,
+            BayId:         $"PAD {pad.PadIndex + 1:D2}",
+            StationName:   station.Name);
+        _simulation.SetPadTarget(padData);
 
         // Publish to Instruments bus so Step 3 docking instrument can subscribe
         DataBus.Instruments.Publish(Topics.Docking.PadTargeted,   1.0);
