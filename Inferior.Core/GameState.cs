@@ -77,6 +77,12 @@ public abstract class GameState
 {
     public GameStateId Id { get; }
 
+    /// <summary>
+    /// True when the game window has OS focus. Set by GameStateMachine before each Update call.
+    /// Use to suppress mouse capture (Mouse.SetPosition) when the player has alt-tabbed away.
+    /// </summary>
+    public bool IsGameActive { get; set; } = true;
+
     protected GameState(GameStateId id) => Id = id;
 
     /// <summary>
@@ -124,6 +130,12 @@ public sealed class GameStateMachine
     public GameStateId? CurrentId    => _current?.Id;
     public bool CurrentWantsCursor  => _current?.WantsCursor ?? false;
 
+    /// <summary>
+    /// Set to <c>Game.IsActive</c> each frame before calling Update so states can
+    /// suppress mouse capture when the window does not have OS focus.
+    /// </summary>
+    public bool IsActive { get; set; } = true;
+
     public void Register(GameState state)
         => _states[state.Id] = state;
 
@@ -140,6 +152,7 @@ public sealed class GameStateMachine
     {
         if (_current is null) return;
 
+        _current.IsGameActive = IsActive;
         var transition = _current.Update(gameTime);
         if (transition is null) return;
 

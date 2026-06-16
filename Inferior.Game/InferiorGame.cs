@@ -82,6 +82,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         _prevKeys = keys;
 
         Core.DataBus.DataBus.Drain();
+        _stateMachine.IsActive = IsActive;
         _stateMachine.Update(gameTime);
         IsMouseVisible = _stateMachine.CurrentWantsCursor;
         base.Update(gameTime);
