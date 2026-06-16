@@ -330,15 +330,20 @@ public static class StationModuleRegistry
             int     next      = (i + 1) % sides;
             float   midAngle  = (i + 0.5f) * MathF.Tau / sides + MathF.PI / sides;
             Vector3 faceNorm  = new Vector3(MathF.Cos(midAngle), 0, MathF.Sin(midAngle));
-            mesh.AddQuad(botRing[i], botRing[next], topRing[next], topRing[i],
+            mesh.AddQuad(botRing[next], botRing[i], topRing[i], topRing[next],
                          faceNorm, color, uvScale);
         }
 
         // Top face — fan of triangles from centre
         Vector3 topCentre = new Vector3(0, +h, 0);
+        Vector3 botCentre = new Vector3(0, -h, 0);
         for (int i = 0; i < sides; i++)
-            mesh.AddTriangle(topCentre, topRing[i], topRing[(i + 1) % sides],
+        {
+            mesh.AddTriangle(topCentre, topRing[(i + 1) % sides], topRing[i],
                              Vector3.UnitY, color, uvScale);
+            mesh.AddTriangle(botCentre, botRing[i], botRing[(i + 1) % sides],
+                             -Vector3.UnitY, color, uvScale);
+        }
     }
 
     public static IEnumerable<StationModuleDefinition> GetByCategory(string category)
