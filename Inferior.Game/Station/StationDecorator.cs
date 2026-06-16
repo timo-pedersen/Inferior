@@ -560,8 +560,8 @@ public static class StationDecorator
     private static readonly HashSet<string> DishCategories = ["science", "core", "military", "connector"];
 
     private static Color DishSurfaceColor(float radius) => radius > 3f
-        ? new Color(215, 213, 206)
-        : new Color(205, 203, 198);
+        ? new Color(252, 250, 244)   // large: near-white, faint warm tint
+        : new Color(248, 246, 242);  // small/medium: near-white, slightly cooler
 
     private static readonly Color DishStructureColor = new Color(58, 55, 52);
 
