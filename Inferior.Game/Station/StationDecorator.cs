@@ -1016,14 +1016,12 @@ public static class StationDecorator
             Vector3 b0 = edgeMid - edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
             Vector3 b1 = edgeMid + edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
 
-            // Pick winding so the face is visible from the outward (faceA+faceB) direction.
-            // AddQuad makes faces visible from the direction of Cross(v1-v0, v2-v0).
-            Vector3 outward = faceA + faceB;
-            Vector3 nTest   = Vector3.Cross(b0 - a0, b1 - a0);
-            if (Vector3.Dot(nTest, outward) > 0)
-                mesh.AddQuad(a0, b0, b1, a1, trimColor);
-            else
-                mesh.AddQuad(a0, a1, b1, b0, trimColor);
+            // Use the center+normal overload which is documented as "visible from normal side".
+            // This sidesteps any cross-product winding ambiguity entirely.
+            Vector3 outwardNorm = Vector3.Normalize(faceA + faceB);
+            Vector3 stripCenter = (a0 + a1 + b0 + b1) * 0.25f;
+            float   stripWidth  = (b0 - a0).Length();
+            mesh.AddQuad(stripCenter, outwardNorm, edgeDir, stripWidth, edgeHalfLen * 2f, trimColor);
         }
     }
 
