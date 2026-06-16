@@ -221,9 +221,19 @@ public sealed class SystemSpaceState : GameState
 
             if (p.TargetBody != null)
             {
-                // Approach from double-click — force new spawn near the body
+                // Approach from double-click — force new spawn near the body.
+                // Moons orbit a parent planet, not the star, so find the correct parent position.
                 _ship = null;
-                DVec3  bodyEcliptic = p.TargetBody.GetPosition(p.GameTime, DVec3.Zero);
+                DVec3 bodyParentEcliptic = DVec3.Zero;
+                foreach (var planet in _system.Planets)
+                {
+                    if (planet.Children.Contains(p.TargetBody))
+                    {
+                        bodyParentEcliptic = planet.GetPosition(p.GameTime, DVec3.Zero);
+                        break;
+                    }
+                }
+                DVec3  bodyEcliptic = p.TargetBody.GetPosition(p.GameTime, bodyParentEcliptic);
                 double dist         = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
                 var    startPos     = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
                 _camera = new Camera3D(startPos, AspectRatio);
