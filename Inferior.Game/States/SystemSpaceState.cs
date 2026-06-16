@@ -2426,6 +2426,10 @@ public sealed class SystemSpaceState : GameState
     private const double BodyProxNearDist = 1e5;             // 100 km
     private const double BodyProxMinScale = 100.0 / 1e12;   // top step → 100 m/s
 
+    // Stations — flat cap within 10 km of any station surface
+    private const double StationProxCapDist  = 1e4;            // 10 km
+    private const double StationProxMinScale = 2000.0 / 1e12;  // top step → 2000 m/s
+
     private double ComputeProximityScale()
     {
         // Star.RadiusMeters is double-converted in generation, so use the visual render
@@ -2443,7 +2447,15 @@ public sealed class SystemSpaceState : GameState
             if (s < bodyScale) bodyScale = s;
         }
 
-        return System.Math.Min(starScale, bodyScale);
+        double stationScale = 1.0;
+        foreach (var (station, pos) in _stationPositions)
+        {
+            double r    = StationPhysicalRadius(station);
+            double surf = System.Math.Max((_camera.UniversePosition - pos).Length - r, 0.0);
+            if (surf <= StationProxCapDist) stationScale = StationProxMinScale;
+        }
+
+        return System.Math.Min(System.Math.Min(starScale, bodyScale), stationScale);
     }
 
     private static double ScaleForDist(double surfDist, double nearDist, double farDist, double minScale)
