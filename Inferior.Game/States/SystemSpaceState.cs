@@ -1914,8 +1914,15 @@ public sealed class SystemSpaceState : GameState
             ball.SetVector("grav", gravGalaxy, new Color(220, 60, 200), "g", dotRadius: 2.0f);
         }
 
-        // Planet and moon markers — size inversely proportional to distance.
-        // Moons are dimmer; dot radius clamps to 1.5–6 px.
+        // Clear station markers from the previous frame so out-of-range ones don't persist.
+        for (int i = 0; i < _stationPositions.Count; i++)
+            ball.RemoveVector($"station_{i}");
+
+        // Collect all bodies plus stations within 100 km into a ranked list.
+        // Sorting by distance lets us assign the largest dot to the closest object.
+        var ranked = new List<(string key, Vector3 dir, Color color, double dist)>(
+            _bodyPositions.Count + _stationPositions.Count);
+
         for (int i = 0; i < _bodyPositions.Count; i++)
         {
             var (body, bodyPos) = _bodyPositions[i];
@@ -1927,13 +1934,33 @@ public sealed class SystemSpaceState : GameState
                 (float)(toBody.X / dist),
                 (float)(toBody.Y / dist),
                 (float)(toBody.Z / dist));
-
-            float dotR = (float)System.Math.Clamp(1.5e12 / dist, 1.5, 6.0);
-            var color  = body.BodyType == BodyType.Moon
+            var color = body.BodyType == BodyType.Moon
                 ? new Color(100, 130, 150)
                 : new Color(100, 200, 160);
+            ranked.Add(($"body_{i}", dir, color, dist));
+        }
 
-            ball.SetVector($"body_{i}", dir, color, "", dotR);
+        const double StationRange = 100_000.0; // 100 km
+        for (int i = 0; i < _stationPositions.Count; i++)
+        {
+            var (_, stPos) = _stationPositions[i];
+            var toStation  = stPos - _camera.UniversePosition;
+            double dist    = toStation.Length;
+            if (dist > StationRange || dist < 1.0) continue;
+
+            var dir = new Vector3(
+                (float)(toStation.X / dist),
+                (float)(toStation.Y / dist),
+                (float)(toStation.Z / dist));
+            ranked.Add(($"station_{i}", dir, new Color(200, 180, 80), dist));
+        }
+
+        // Sort closest-first; rank 0 = largest dot (8 px), decreasing by 1 per rank, floor 3 px.
+        ranked.Sort(static (a, b) => a.dist.CompareTo(b.dist));
+        for (int i = 0; i < ranked.Count; i++)
+        {
+            var (key, dir, color, _) = ranked[i];
+            ball.SetVector(key, dir, color, "", MathF.Max(3f, 8f - i));
         }
     }
 

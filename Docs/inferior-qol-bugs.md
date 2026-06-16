@@ -192,7 +192,7 @@ to the planet.
 
 ---
 
-## Bug 6 — Chamfer (edge trim) winding bug
+## Bug 6 — Chamfer (edge trim) winding bug [DONE]
 
 **Symptom:** Some chamfer strips visible from inside modules instead of outside.
 Visible as Y-shaped interior geometry when flying inside a module. Octagons show
@@ -224,7 +224,7 @@ cross product for those normals.
 
 ## Bug 7 — Direction ball: station marker and relative dot sizes
 
-**Symptom:** No station marker on direction ball when within range. Distance
+**Symptom:** No station marker on main direction ball when within range. Distance
 dot sizes are absolute rather than relative to distance rank.
 
 ### Part A — Station markers
