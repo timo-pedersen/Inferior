@@ -87,6 +87,7 @@ public static class StationDecorator
         PlaceLandmarkAntenna(modules, new System.Random(stationSeed ^ 0x12345678));
         RunSolarPanelPass   (modules, new System.Random(stationSeed ^ unchecked((int)0xABCDEF01)));
         RunLargeDishPass    (modules, new System.Random(stationSeed ^ 0x44157A3B));
+        GenerateLandingPads (modules, new System.Random(stationSeed ^ 0x3D4E5F60));
     }
 
     // Darkens decoration vertices on occluded module faces.
@@ -810,6 +811,125 @@ public static class StationDecorator
             sides:          13,
             dishColor:      DishSurfaceColor(r),
             structureColor: DishStructureColor);
+    }
+
+    // ── Landing pad geometry ──────────────────────────────────────────────────
+
+    // Adds a flat visual landing pad at each IsDocking port of every docking module.
+    // No physics or interaction — purely cosmetic for Step 1.
+    private static void GenerateLandingPads(IReadOnlyList<PlacedModule> modules, System.Random rng)
+    {
+        int bayNumber = 1;
+        foreach (var mod in modules)
+        {
+            if (mod.Definition.Category != "docking") continue;
+            mod.Mesh ??= new StationModuleMesh { Texture = TextureFor(mod.Definition.Category) };
+            var faces = ComputeFaces(mod);
+            foreach (var port in mod.Definition.Ports)
+            {
+                if (!port.IsDocking) continue;
+                FaceInfo? padFace = null;
+                foreach (var f in faces)
+                {
+                    if (Vector3.Dot(f.LocalNormal, port.OutwardNormal) > 0.9f)
+                    { padFace = f; break; }
+                }
+                if (padFace is not FaceInfo face) continue;
+                AddLandingPadGeometry(mod.Mesh, face, mod, bayNumber++, rng);
+            }
+        }
+    }
+
+    private static void AddLandingPadGeometry(StationModuleMesh mesh, FaceInfo face,
+        PlacedModule mod, int bayNumber, System.Random rng)
+    {
+        float padW = face.Width  - 1.0f;
+        float padH = face.Height - 1.0f;
+        if (padW < 1f || padH < 1f) return;
+
+        const float raise = 0.06f;
+        Vector3 normal = face.LocalNormal;
+        Vector3 up     = face.LocalUp;
+        Vector3 origin = face.LocalCenter + normal * raise;
+
+        Color padColor    = new Color(158, 153, 145);   // concrete grey
+        Color stripeColor = new Color(215, 148, 12);    // amber-yellow
+        Color markColor   = new Color(228, 223, 213);   // off-white
+
+        // Pad surface
+        mesh.AddQuad(origin, normal, up, padW, padH, padColor);
+
+        // Perimeter stripe — 4 border segments at raise + 1 cm
+        float   stripeW = MathF.Max(0.28f, padW * 0.08f);
+        float   innerH  = padH - stripeW * 2f;
+        Vector3 sp      = origin + normal * 0.01f;
+        mesh.AddQuad(sp + up * ( padH * 0.5f - stripeW * 0.5f), normal, up, padW,   stripeW, stripeColor);
+        mesh.AddQuad(sp + up * (-padH * 0.5f + stripeW * 0.5f), normal, up, padW,   stripeW, stripeColor);
+        mesh.AddQuad(sp + face.LocalRight * ( padW * 0.5f - stripeW * 0.5f), normal, up, stripeW, innerH, stripeColor);
+        mesh.AddQuad(sp + face.LocalRight * (-padW * 0.5f + stripeW * 0.5f), normal, up, stripeW, innerH, stripeColor);
+
+        // Central cross marking
+        float crossBarW = padW * 0.11f;
+        float crossBarL = padH * 0.29f;
+        Vector3 cp = origin + normal * 0.02f;
+        mesh.AddQuad(cp, normal, up, crossBarW, crossBarL, markColor);   // vertical bar
+        mesh.AddQuad(cp, normal, up, crossBarL, crossBarW, markColor);   // horizontal bar
+
+        // Direction arrow — stem + head pointing +up, positioned in upper half
+        float   stemW = padW * 0.08f;
+        float   stemH = padH * 0.17f;
+        float   headW = padW * 0.16f;
+        float   headH = padH * 0.09f;
+        Vector3 ap    = origin + normal * 0.025f + up * (padH * 0.15f);
+        mesh.AddQuad(ap + up * (stemH * 0.5f),           normal, up, stemW, stemH, markColor);
+        mesh.AddQuad(ap + up * (stemH + headH * 0.5f),   normal, up, headW, headH, markColor);
+
+        // Corner SlowPulse amber lights — at pad corners
+        Color   amber  = new Color(255, 148, 10);
+        Color   amberH = new Color(40, 30, 8);
+        float   cU     = padW * 0.44f;
+        float   cV     = padH * 0.44f;
+        float   phase0 = (float)rng.NextDouble();
+        (Vector3, float)[] corners =
+        [
+            (face.LocalCenter + face.LocalRight *  cU + face.LocalUp *  cV, phase0),
+            (face.LocalCenter + face.LocalRight * -cU + face.LocalUp *  cV, (phase0 + 0.25f) % 1f),
+            (face.LocalCenter + face.LocalRight * -cU + face.LocalUp * -cV, (phase0 + 0.50f) % 1f),
+            (face.LocalCenter + face.LocalRight *  cU + face.LocalUp * -cV, (phase0 + 0.75f) % 1f),
+        ];
+        foreach (var (lpos, lphase) in corners)
+        {
+            AddLight(mesh, lpos + normal * (raise + 0.10f), normal, 0.22f, amberH, amber);
+            mod.GlowLights.Add(new StationLightInfo(
+                WorldPosition: Vector3.Transform(lpos, mod.Transform),
+                Colour:        amber,
+                Type:          GlowType.AmbientMarker,
+                BaseIntensity: 0.65f,
+                Rate:          0.8f,
+                Phase:         lphase,
+                Pattern:       LightPattern.SlowPulse));
+        }
+
+        // Threshold Strobe white lights — two at the approach end (bottom edge)
+        Color   white  = new Color(228, 238, 255);
+        Color   whiteH = new Color(34, 34, 42);
+        (Vector3, float)[] thresholds =
+        [
+            (face.LocalCenter + face.LocalUp * -cV + face.LocalRight *  (padW * 0.22f), 0.0f),
+            (face.LocalCenter + face.LocalUp * -cV + face.LocalRight * -(padW * 0.22f), 0.5f),
+        ];
+        foreach (var (lpos, lphase) in thresholds)
+        {
+            AddLight(mesh, lpos + normal * (raise + 0.10f), normal, 0.22f, whiteH, white);
+            mod.GlowLights.Add(new StationLightInfo(
+                WorldPosition: Vector3.Transform(lpos, mod.Transform),
+                Colour:        white,
+                Type:          GlowType.WarningStrobe,
+                BaseIntensity: 0.80f,
+                Rate:          1.2f,
+                Phase:         lphase,
+                Pattern:       LightPattern.Strobe));
+        }
     }
 
     // Returns N ring vertices for one concentric band of the parabolic dish.

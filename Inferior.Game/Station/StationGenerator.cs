@@ -1,5 +1,6 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Inferior.Core.Math;
 using Inferior.Core.Random;
 using Inferior.Galaxy;
 
@@ -31,6 +32,7 @@ public sealed class StationGenerator
 
         var modules = gen.Run(station);
         ValidatePlacement(modules);
+        PopulateLandingPads(station, modules);
 
         var profile = StationProfile.Generate(seed, scale);
         var palette = TexturePalette.From(profile);
@@ -405,6 +407,27 @@ public sealed class StationGenerator
                 return true;
         }
         return false;
+    }
+
+    // Fills LocalPosition/LocalNormal on each LandingPad from the matching docking port
+    // in world space. Simple positional mapping — pads assigned in module iteration order.
+    private static void PopulateLandingPads(Galaxy.Station station, List<PlacedModule> modules)
+    {
+        int padIdx = 0;
+        foreach (var mod in modules)
+        {
+            if (mod.Definition.Category != "docking") continue;
+            foreach (var port in mod.Definition.Ports)
+            {
+                if (!port.IsDocking) continue;
+                if (padIdx >= station.LandingPads.Count) return;
+                var pad = station.LandingPads[padIdx++];
+                Vector3 wp = Vector3.Transform(port.LocalPosition, mod.Transform);
+                Vector3 wn = Vector3.Normalize(Vector3.TransformNormal(port.OutwardNormal, mod.Transform));
+                pad.LocalPosition = new DVec3(wp.X, wp.Y, wp.Z);
+                pad.LocalNormal   = new DVec3(wn.X, wn.Y, wn.Z);
+            }
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
