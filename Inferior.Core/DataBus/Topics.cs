@@ -152,6 +152,23 @@ public static class Topics
         public const string PadSizeClass  = "Docking.PadSizeClass";   // 0.0 = Small, 1.0 = Large
     }
 
+    /// <summary>
+    /// LandingSupportSystem component — approach geometry relative to targeted pad.
+    /// All numeric topics published on DataBus.Instruments every sim tick.
+    /// </summary>
+    public static class LandingSupport
+    {
+        public const string PadTargeted        = "LandingSupport.PadTargeted";        // 1.0 when active, 0.0 otherwise
+        public const string PadSizeClass       = "LandingSupport.PadSizeClass";       // 0.0 = Small, 1.0 = Large
+        public const string PadDistance        = "LandingSupport.PadDistance";        // metres, Euclidean
+        public const string HeightAbovePad     = "LandingSupport.HeightAbovePad";     // metres along pad normal; positive = correct side
+        public const string LateralOffset      = "LandingSupport.LateralOffset";      // metres along pad short axis
+        public const string LongitudinalOffset = "LandingSupport.LongitudinalOffset"; // metres along pad forward axis
+        public const string HeadingDeviation   = "LandingSupport.HeadingDeviation";   // degrees; 0 = aligned with pad forward
+        public const string PitchDeviation     = "LandingSupport.PitchDeviation";     // degrees; 0 = face-on
+        public const string UpsideDown         = "LandingSupport.UpsideDown";         // 1.0 = inverted relative to pad
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {
