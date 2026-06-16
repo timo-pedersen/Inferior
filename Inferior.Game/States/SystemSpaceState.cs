@@ -222,20 +222,35 @@ public sealed class SystemSpaceState : GameState
             if (p.TargetBody != null)
             {
                 // Approach from double-click — force new spawn near the body.
-                // Moons orbit a parent planet, not the star, so find the correct parent position.
+                // _system is freshly generated, so p.TargetBody is a different object instance.
+                // Look up by name to find the matching body and its parent in the new system.
                 _ship = null;
-                DVec3 bodyParentEcliptic = DVec3.Zero;
+                OrbitalBody? resolvedBody = null;
+                DVec3        parentPos    = DVec3.Zero;
+
                 foreach (var planet in _system.Planets)
                 {
-                    if (planet.Children.Contains(p.TargetBody))
+                    if (planet.Name == p.TargetBody.Name)
                     {
-                        bodyParentEcliptic = planet.GetPosition(p.GameTime, DVec3.Zero);
+                        resolvedBody = planet;
                         break;
                     }
+                    foreach (var moon in planet.Children)
+                    {
+                        if (moon.Name == p.TargetBody.Name)
+                        {
+                            resolvedBody = moon;
+                            parentPos    = planet.GetPosition(p.GameTime, DVec3.Zero);
+                            break;
+                        }
+                    }
+                    if (resolvedBody != null) break;
                 }
-                DVec3  bodyEcliptic = p.TargetBody.GetPosition(p.GameTime, bodyParentEcliptic);
-                double dist         = System.Math.Max(p.TargetBody.RadiusMeters * 5.0, 1e6);
-                var    startPos     = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
+
+                var    body        = resolvedBody ?? p.TargetBody;
+                DVec3  bodyEcliptic = body.GetPosition(p.GameTime, parentPos);
+                double dist        = System.Math.Max(body.RadiusMeters * 5.0, 1e6);
+                var    startPos    = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
                 _camera = new Camera3D(startPos, AspectRatio);
                 SpawnShip(startPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
             }
