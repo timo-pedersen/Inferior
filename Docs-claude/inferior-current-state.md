@@ -30,6 +30,7 @@
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
 | **Surface texture infrastructure** | ✓ Done | `VertexPositionColorTexture` throughout; UV projection in AddQuad/AddTriangle; `SurfaceTexture` enum; `StationTextureRegistry`; separate `GlassMesh` for windows |
 | **Procedural station textures** | ✓ Done | `StationProfile` (economy/age/wealth); `TexturePalette` per economy type; 5-step 512×512 generation (noise → panels → seams → grime → scratches); cache by (surface, paletteHash); station name baked onto core module face; `BitmapFonts` 5×7 + `TexturePainter` |
+| **Parabolic dishes** | ✓ Done | 3 size classes (9/11/13-sided); per-face small+medium in `GenerateDishes`; station-wide landmark large dish in `RunLargeDishPass` (22% of science/military stations); support arm, diagonal brace, feed mast+box, feed struts |
 
 ---
 
