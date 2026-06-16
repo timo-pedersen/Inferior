@@ -770,18 +770,24 @@ public sealed class SystemSpaceState : GameState
         }
         else if (_debugCameraMode)
         {
-            // Debug camera — free-look, ship receives no input and stays put
+            // Debug camera — free-look, ship receives no input and stays put.
+            // Cursor is locked to window centre (same as ship mode) so look is always-on.
             _camera.BaseVelocity = _refVelocity;
-            _camera.Update(dt, mouse, keys);
+            int dcx = _gd.Viewport.Width  / 2;
+            int dcy = _gd.Viewport.Height / 2;
+            _camera.Update(dt, mouse, keys, new Point(dcx, dcy));
             _simulation.SetInput(PlayerInput.Zero);
+            Mouse.SetPosition(dcx, dcy);
         }
         else
         {
-            // Ship mode — input goes to the simulation; camera follows cockpit
+            // Ship mode — input goes to the simulation; camera follows cockpit.
+            // Cursor is locked to window centre so mouse can't escape the window.
             _simulation.SetInput(BuildShipInput(mouse, keys));
             var snap = _simulation.ShipState;
             if (snap != null)
                 _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
+            Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
         }
 
         _gameTimeSeconds += dt;
@@ -1788,12 +1794,12 @@ public sealed class SystemSpaceState : GameState
         }
         else if (_debugCameraMode)
         {
-            DrawText(sb, "DEBUG CAM  —  Right drag: look   WASD: fwd/strafe   RF: up/down   QE: roll   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
+            DrawText(sb, "DEBUG CAM  —  Mouse: look   WASD: fwd/strafe   RF: up/down   QE: roll   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), new Color(220, 160, 80), 0.72f);
         }
         else
         {
-            DrawText(sb, "Right drag: look   WASD: fwd/strafe   QE: roll   RF: up/down   M: system map   N: galaxy map   F11: debug   TAB: UI",
+            DrawText(sb, "Mouse: look   WASD: fwd/strafe   QE: roll   RF: up/down   M: system map   N: galaxy map   F11: debug   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
         }
     }
@@ -2168,19 +2174,15 @@ public sealed class SystemSpaceState : GameState
         _simulation.SetShip(ship);
     }
 
-    private const float MouseSens = 0.003f;
+    private const float MouseSensitivity = 0.0018f;
 
     private PlayerInput BuildShipInput(MouseState mouse, KeyboardState keys)
     {
-        // Rotation — right-drag maps to pitch/yaw as raw angle deltas (radians)
-        double pitchInput = 0.0, yawInput = 0.0;
-        if (mouse.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Pressed)
-        {
-            int dx = mouse.X - _prevMouse.X;
-            int dy = mouse.Y - _prevMouse.Y;
-            yawInput   = -dx * MouseSens;
-            pitchInput = -dy * MouseSens;
-        }
+        // Rotation — cursor is locked to window centre each frame; accumulate delta from centre.
+        int    cx         = _gd.Viewport.Width  / 2;
+        int    cy         = _gd.Viewport.Height / 2;
+        double yawInput   = -(mouse.X - cx) * MouseSensitivity;
+        double pitchInput = -(mouse.Y - cy) * MouseSensitivity;
 
         // Thrust — keyboard axes, -1..1
         // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = roll

@@ -60,10 +60,6 @@ public sealed class Camera3D
     /// </summary>
     public DVec3 BaseVelocity { get; set; } = DVec3.Zero;
 
-    // ── Mouse look state ──────────────────────────────────────────────────────
-    private Point _prevMousePos;
-    private bool  _wasRightHeld;
-
     // ── Scale ─────────────────────────────────────────────────────────────────
     /// <summary>1 AU ≈ 150 render units.</summary>
     public const double RenderScale = 1e-9;
@@ -86,9 +82,9 @@ public sealed class Camera3D
 
     private const float RollRateRps = 1.2f;  // radians per second
 
-    public void Update(double dt, MouseState mouse, KeyboardState keys)
+    public void Update(double dt, MouseState mouse, KeyboardState keys, Point center = default)
     {
-        HandleMouseLook(mouse);
+        HandleMouseLook(mouse, center);
         HandleMovement(dt, keys);
         HandleRoll(dt, keys);
         RefreshAxes();
@@ -129,29 +125,18 @@ public sealed class Camera3D
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private void HandleMouseLook(MouseState mouse)
+    private void HandleMouseLook(MouseState mouse, Point center)
     {
-        bool rightHeld = mouse.RightButton == ButtonState.Pressed;
+        int dx = mouse.X - center.X;
+        int dy = mouse.Y - center.Y;
 
-        if (rightHeld)
+        if (dx != 0 || dy != 0)
         {
-            if (_wasRightHeld)
-            {
-                int dx = mouse.X - _prevMousePos.X;
-                int dy = mouse.Y - _prevMousePos.Y;
-
-                if (dx != 0 || dy != 0)
-                {
-                    // Rotate around camera's own local axes — no world-up preference
-                    var yawQ   = Quaternion.CreateFromAxisAngle(Up,    -dx * MouseSens);
-                    var pitchQ = Quaternion.CreateFromAxisAngle(Right, -dy * MouseSens);
-                    _orientation = Quaternion.Normalize(pitchQ * yawQ * _orientation);
-                }
-            }
-            _prevMousePos = mouse.Position;
+            // Rotate around camera's own local axes — no world-up preference
+            var yawQ   = Quaternion.CreateFromAxisAngle(Up,    -dx * MouseSens);
+            var pitchQ = Quaternion.CreateFromAxisAngle(Right, -dy * MouseSens);
+            _orientation = Quaternion.Normalize(pitchQ * yawQ * _orientation);
         }
-
-        _wasRightHeld = rightHeld;
     }
 
     private void HandleMovement(double dt, KeyboardState keys)
