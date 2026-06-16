@@ -3,6 +3,24 @@
     <File Path="CLAUDE.md" />
     <File Path="README.md" />
   </Folder>
+  <Folder Name="/Solution Items/Docs-archive/">
+    <File Path="Docs-archive/Hyperspace - Sheet1.csv" />
+    <File Path="Docs-archive/inferior-classes.md" />
+    <File Path="Docs-archive/inferior-components-and-sensors.md" />
+    <File Path="Docs-archive/inferior-design-persistence.md" />
+    <File Path="Docs-archive/inferior-design-ship.md" />
+    <File Path="Docs-archive/inferior-design-ui.md" />
+    <File Path="Docs-archive/inferior-design.md" />
+    <File Path="Docs-archive/inferior-lore.md" />
+  </Folder>
+  <Folder Name="/Solution Items/Docs-claude/">
+    <File Path="Docs-claude/inferior-components-claude.md" />
+    <File Path="Docs-claude/inferior-current-state.md" />
+    <File Path="Docs-claude/inferior-design-claude.md" />
+    <File Path="Docs-claude/inferior-design-ship-claude.md" />
+    <File Path="Docs-claude/inferior-design-stations-claude.md" />
+    <File Path="Docs-claude/inferior-lore-claude.md" />
+  </Folder>
   <Folder Name="/Solution Items/Docs/">
     <File Path="Docs/inferior-classes.md" />
     <File Path="Docs/inferior-components-and-sensors.md" />

@@ -222,12 +222,12 @@ cross product for those normals.
 
 ---
 
-## Bug 7 — Direction ball: station marker and relative dot sizes
+## Bug 7 — Direction ball: station marker and relative dot sizes [DONE]
 
 **Symptom:** No station marker on main direction ball when within range. Distance
 dot sizes are absolute rather than relative to distance rank.
 
-### Part A — Station markers
+### Part A — Station markers [DONE]
 
 Add station markers to the direction ball when within 100km:
 
@@ -248,7 +248,7 @@ foreach (var station in nearbyStations)   // stations within 100km
 Station marker colour: dark yellow `(200, 180, 80)` — distinct from planet
 markers and star marker.
 
-### Part B — Relative dot sizes
+### Part B — Relative dot sizes [DONE]
 
 Replace absolute size calculation with rank-based:
 
@@ -305,7 +305,7 @@ and HUD bracket rendering.
 
 ---
 
-## Bug 9 — Galaxy map too small, missing grid quadrant
+## Bug 9 — Galaxy map too small, missing grid quadrant [DONE]
 
 **Symptom:** Galaxy map appears as a small coin shape. Top-left grid quadrant
 missing lines. Scrolling/zoom doesn't cap at useful limits.
