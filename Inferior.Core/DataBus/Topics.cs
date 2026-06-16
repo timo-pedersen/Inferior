@@ -142,6 +142,16 @@ public static class Topics
         public const string Changed = "Target.Changed";   // RadarContact; empty Id = cleared
     }
 
+    public static class Docking
+    {
+        public const string PadTargeted   = "Docking.PadTargeted";    // 1.0 when a pad is targeted, 0.0 otherwise
+        public const string PadDistance   = "Docking.PadDistance";    // metres to pad world position
+        public const string PadDirectionX = "Docking.PadDirectionX";  // ship-frame direction to pad (normalised)
+        public const string PadDirectionY = "Docking.PadDirectionY";
+        public const string PadDirectionZ = "Docking.PadDirectionZ";
+        public const string PadSizeClass  = "Docking.PadSizeClass";   // 0.0 = Small, 1.0 = Large
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {

@@ -146,6 +146,88 @@ public sealed class TargetingSystem
         HyperspaceTargetDirection  = DVec3.Zero;
     }
 
+    // ── Pad target (independent of radar and nav targets) ─────────────────────
+
+    private Station?    _padTargetStation;
+    private LandingPad? _padTarget;
+
+    public bool        HasPadTarget       => _padTarget != null;
+    public LandingPad? TargetedPad        => _padTarget;
+    public Station?    TargetedPadStation => _padTargetStation;
+
+    public void SetPadTarget(Station station, LandingPad pad)
+    {
+        _padTargetStation = station;
+        _padTarget        = pad;
+        string label = $"PAD {pad.PadIndex + 1:D2} [{pad.PadSize}]";
+        DataBus.System.Publish(Topics.System.All, $"Pad targeted: {label}");
+    }
+
+    public void ClearPadTarget()
+    {
+        if (_padTarget == null) return;
+        _padTargetStation = null;
+        _padTarget        = null;
+        DataBus.System.Publish(Topics.System.All, "Pad target cleared");
+    }
+
+    // L-key: cycles through pads of the nearest station with populated geometry.
+    // First press → nearest pad. Each subsequent press → next pad. Last pad → clear.
+    public void CyclePad(
+        DVec3 shipPos,
+        IReadOnlyList<(Station station, DVec3 worldPos)> stationPositions,
+        double gameTime)
+    {
+        // Find nearest station that has populated landing pads
+        Station? nearest   = null;
+        DVec3    nearestPos = default;
+        double   nearestD  = double.MaxValue;
+        foreach (var (station, pos) in stationPositions)
+        {
+            if (station.LandingPads.Count == 0) continue;
+            // Require at least one pad with populated normal
+            bool hasPads = false;
+            foreach (var p in station.LandingPads)
+                if (p.LocalNormal.Length > 0.5) { hasPads = true; break; }
+            if (!hasPads) continue;
+            double d = (pos - shipPos).Length;
+            if (d < nearestD) { nearestD = d; nearest = station; nearestPos = pos; }
+        }
+        if (nearest == null) return;
+
+        // Build the list of usable pads (populated geometry)
+        var usable = new List<LandingPad>();
+        foreach (var p in nearest.LandingPads)
+            if (p.LocalNormal.Length > 0.5) usable.Add(p);
+        if (usable.Count == 0) return;
+
+        if (_padTargetStation == nearest && _padTarget != null)
+        {
+            // Already targeting a pad on this station — advance or clear
+            int idx = usable.IndexOf(_padTarget);
+            if (idx < 0 || idx == usable.Count - 1)
+                ClearPadTarget();
+            else
+                SetPadTarget(nearest, usable[idx + 1]);
+        }
+        else
+        {
+            // New station — select nearest pad to ship
+            Quaternion ori        = nearest.GetOrientation(gameTime);
+            LandingPad? bestPad  = null;
+            double      bestDist = double.MaxValue;
+            foreach (var pad in usable)
+            {
+                var local  = new Vector3((float)pad.LocalPosition.X, (float)pad.LocalPosition.Y, (float)pad.LocalPosition.Z);
+                var offset = Vector3.Transform(local, ori);
+                var padPos = nearestPos + new DVec3(offset.X, offset.Y, offset.Z);
+                double d   = (padPos - shipPos).Length;
+                if (d < bestDist) { bestDist = d; bestPad = pad; }
+            }
+            if (bestPad != null) SetPadTarget(nearest, bestPad);
+        }
+    }
+
     // ── Accessors for current nav target type ─────────────────────────────────
 
     public OrbitalBody? NavBodyTarget    => _navBody;

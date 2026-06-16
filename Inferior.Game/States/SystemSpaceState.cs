@@ -146,6 +146,11 @@ public sealed class SystemSpaceState : GameState
     private Label?              _targetLineHyp;
     private LandingRadarPanel?  _landingRadar;
 
+    // Pad target — world position and bearing recomputed each frame
+    private DVec3  _padWorldPos;
+    private double _padDistance;
+    private DVec3  _padDirection;
+
     // ── Reference frame (zero-speed) tracking ────────────────────────────────
     private DVec3  _refVelocity;               // current zero-speed velocity in galaxy space
     private string _refName = "";              // name of the reference object
@@ -864,6 +869,7 @@ public sealed class SystemSpaceState : GameState
         // Update targeting system with pre-computed galaxy-space positions
         DVec3 shipPosForTargeting = _simulation.ShipState?.Position ?? _camera.UniversePosition;
         _targeting.Update(shipPosForTargeting, _star.GalacticPos, _bodyPositions, _stationPositions);
+        UpdatePadTargetPosition();
         UpdateTargetingUI();
         UpdateLandingRadar();
 
@@ -1253,6 +1259,7 @@ public sealed class SystemSpaceState : GameState
         var vp       = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
         var viewport = _gd.Viewport;
 
+        // Station / body contacts
         foreach (var contact in _targeting.AllContacts)
         {
             Vector2? screen = TargetingSystem.ProjectToScreen(contact.RelativePosition, vp, viewport);
@@ -1277,6 +1284,31 @@ public sealed class SystemSpaceState : GameState
                 Vector2 labelPos = screen.Value + new Vector2(-40f, size + 6f);
                 sb.DrawString(_font, contact.DisplayName, labelPos,                        new Color(0, 220, 220));
                 sb.DrawString(_font, distStr,             labelPos + new Vector2(0f, 18f), new Color(0, 180, 180));
+            }
+        }
+
+        // Pad target bracket (green, slightly smaller than station brackets)
+        if (_targeting.HasPadTarget && _padDistance > 0.1)
+        {
+            var pad = _targeting.TargetedPad!;
+            DVec3 relPos  = _padWorldPos - _camera.UniversePosition;
+            var   rel3    = new Vector3((float)relPos.X, (float)relPos.Y, (float)relPos.Z);
+            Vector2? screen = TargetingSystem.ProjectToScreen(rel3, vp, viewport);
+            if (screen != null)
+            {
+                Color padColor  = new Color(60, 220, 90);
+                float size      = MathHelper.Clamp(2e6f / (float)_padDistance, 6f, 36f);
+                DrawBracket(sb, screen.Value, size, size * 0.40f, 2, padColor);
+
+                string padId  = $"PAD {pad.PadIndex + 1:D2}";
+                string distStr = _padDistance < 100.0
+                    ? $"{_padDistance:F1} m"
+                    : _padDistance < 1000.0
+                        ? $"{_padDistance:F0} m"
+                        : $"{_padDistance / 1000.0:F1} km";
+                Vector2 labelPos = screen.Value + new Vector2(-30f, size + 6f);
+                sb.DrawString(_font, padId,    labelPos,                        padColor);
+                sb.DrawString(_font, distStr,  labelPos + new Vector2(0f, 18f), new Color(40, 180, 70));
             }
         }
     }
@@ -1862,12 +1894,19 @@ public sealed class SystemSpaceState : GameState
         bool mPressed    = keys.IsKeyDown(Keys.M)    && !_prevKeys.IsKeyDown(Keys.M);
         bool nPressed    = keys.IsKeyDown(Keys.N)    && !_prevKeys.IsKeyDown(Keys.N);
         bool cPressed    = keys.IsKeyDown(Keys.C)    && !_prevKeys.IsKeyDown(Keys.C);
+        bool lPressed    = keys.IsKeyDown(Keys.L)    && !_prevKeys.IsKeyDown(Keys.L);
         bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
 
         if (cPressed)
         {
             var vp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
             _targeting.SelectClosestToReticle(vp, _gd.Viewport);
+        }
+
+        if (lPressed)
+        {
+            DVec3 shipPos = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            _targeting.CyclePad(shipPos, _stationPositions, _gameTimeSeconds);
         }
 
         if (mPressed)
@@ -2208,6 +2247,23 @@ public sealed class SystemSpaceState : GameState
             if (_targetLineHyp != null) _targetLineHyp.Text = "Hyp: None";
         }
 
+        // Pad target (green)
+        if (_targeting.HasPadTarget && _padDirection.Length > 0.5)
+        {
+            var pad    = _targeting.TargetedPad!;
+            string distStr = _padDistance < 100.0
+                ? $"{_padDistance:F1} m"
+                : _padDistance < 1000.0
+                    ? $"{_padDistance:F0} m"
+                    : $"{_padDistance / 1000.0:F1} km";
+            _targetingDirBall.SetVector("pad",
+                new Vector3((float)_padDirection.X, (float)_padDirection.Y, (float)_padDirection.Z),
+                new Color(60, 220, 90), "P");
+        }
+        else
+        {
+            _targetingDirBall.RemoveVector("pad");
+        }
     }
 
     private void UpdateLandingRadar()
@@ -2231,6 +2287,47 @@ public sealed class SystemSpaceState : GameState
             _landingRadar.HasStation  = false;
             _landingRadar.StationName = "";
         }
+    }
+
+    // Computes pad world position from current station orbit + orientation, then
+    // publishes Docking.* topics to the Instruments bus.
+    private void UpdatePadTargetPosition()
+    {
+        if (!_targeting.HasPadTarget)
+        {
+            DataBus.Instruments.Publish(Topics.Docking.PadTargeted, 0.0);
+            _padWorldPos  = DVec3.Zero;
+            _padDistance  = 0.0;
+            _padDirection = DVec3.Zero;
+            return;
+        }
+
+        var station = _targeting.TargetedPadStation!;
+        var pad     = _targeting.TargetedPad!;
+
+        // Find station's current world position
+        DVec3 stationPos = DVec3.Zero;
+        foreach (var (s, pos) in _stationPositions)
+            if (s == station) { stationPos = pos; break; }
+
+        // Transform pad local position by station orientation
+        Quaternion ori    = station.GetOrientation(_gameTimeSeconds);
+        var local         = new Vector3((float)pad.LocalPosition.X, (float)pad.LocalPosition.Y, (float)pad.LocalPosition.Z);
+        var offset        = Vector3.Transform(local, ori);
+        _padWorldPos      = stationPos + new DVec3(offset.X, offset.Y, offset.Z);
+
+        DVec3 camPos      = _camera.UniversePosition;
+        DVec3 delta       = _padWorldPos - camPos;
+        _padDistance      = delta.Length;
+        _padDirection     = _padDistance > 1.0 ? delta * (1.0 / _padDistance) : DVec3.Zero;
+
+        // Publish to Instruments bus so Step 3 docking instrument can subscribe
+        DataBus.Instruments.Publish(Topics.Docking.PadTargeted,   1.0);
+        DataBus.Instruments.Publish(Topics.Docking.PadDistance,   _padDistance);
+        DataBus.Instruments.Publish(Topics.Docking.PadDirectionX, _padDirection.X);
+        DataBus.Instruments.Publish(Topics.Docking.PadDirectionY, _padDirection.Y);
+        DataBus.Instruments.Publish(Topics.Docking.PadDirectionZ, _padDirection.Z);
+        DataBus.Instruments.Publish(Topics.Docking.PadSizeClass,  pad.PadSize == Galaxy.PadSize.Large ? 1.0 : 0.0);
     }
 
     // ── Ecliptic tilt ─────────────────────────────────────────────────────────
