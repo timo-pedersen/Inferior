@@ -75,8 +75,8 @@ public sealed class StationGenerator
 
         // Render name in two font scales: large centred, with a backing bar.
         int scale  = 4;
-        int textW  = TexturePainter.MeasureText(name, scale);
-        int textH  = TexturePainter.MeasureHeight(scale);
+        int textW  = TextPainter.MeasureText(name, scale);
+        int textH  = TextPainter.MeasureHeight(scale);
         int startX = Math.Clamp((Size - textW) / 2, 4, Size - textW - 4);
         int startY = (Size - textH) / 2;
 
@@ -89,7 +89,7 @@ public sealed class StationGenerator
                 pixels[y * Size + x] = TexturePalette.LerpColor(pixels[y * Size + x], barColor, 0.70f);
 
         // Name text
-        TexturePainter.DrawText(pixels, Size, Size, name, startX, startY, palette.TextColour, scale, alpha: 0.90f);
+        TextPainter.DrawText(pixels, Size, Size, name, startX, startY, palette.TextColour, scale, alpha: 0.90f);
 
         var tex = new Texture2D(gd, Size, Size);
         tex.SetData(pixels);

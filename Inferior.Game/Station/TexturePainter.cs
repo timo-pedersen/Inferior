@@ -6,7 +6,7 @@ namespace Inferior.Game.StationGen;
 /// CPU-side pixel painter for drawing text into a Color[] buffer using BitmapFonts.
 /// All coordinates are in pixel space; the caller manages buffer layout (width × height).
 /// </summary>
-public static class TexturePainter
+public static class TextPainter
 {
     private const int Spacing = 1;   // pixels between characters
 

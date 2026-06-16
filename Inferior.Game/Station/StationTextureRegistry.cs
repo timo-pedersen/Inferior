@@ -157,7 +157,7 @@ public static class StationTextureRegistry
                 int    fx    = rng.Next(Size / 4) + (f % 2) * Size / 2;
                 int    fy    = rng.Next(Size / 4) + (f / 2) * Size / 3;
                 float  fa    = 0.25f + (float)rng.NextDouble() * 0.25f;
-                TexturePainter.DrawText(pixels, Size, Size, frag, fx, fy,
+                TextPainter.DrawText(pixels, Size, Size, frag, fx, fy,
                     palette.TextColour, pixelScale: 3, alpha: fa);
             }
         }
