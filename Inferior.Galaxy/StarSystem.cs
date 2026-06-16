@@ -66,6 +66,39 @@ public sealed class StarSystem
     }
 
     /// <summary>
+    /// Returns the instantaneous ecliptic-space velocity of a station (m/s).
+    /// Analytically derived — no finite-difference lag.
+    /// </summary>
+    public DVec3 GetStationVelocity(Station station, double gameTime)
+    {
+        var vel = OrbitalVelocity(gameTime, station.Period, station.PhaseOffset, station.OrbitalRadius);
+        if (station.OrbitParent == null) return vel;
+
+        foreach (var planet in _planets)
+        {
+            if (ReferenceEquals(planet, station.OrbitParent))
+                return OrbitalVelocity(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius) + vel;
+
+            foreach (var moon in planet.Children)
+            {
+                if (ReferenceEquals(moon, station.OrbitParent))
+                    return OrbitalVelocity(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius)
+                         + OrbitalVelocity(gameTime, moon.Period, moon.PhaseOffset, moon.OrbitalRadius)
+                         + vel;
+            }
+        }
+
+        return vel;
+    }
+
+    private static DVec3 OrbitalVelocity(double gameTime, double period, double phaseOffset, double radius)
+    {
+        double angle = DMath.OrbitalAngle(gameTime, period, phaseOffset);
+        double omega = 2.0 * Math.PI / period;
+        return new DVec3(-System.Math.Sin(angle) * radius * omega, 0.0, System.Math.Cos(angle) * radius * omega);
+    }
+
+    /// <summary>
     /// Returns positions of all bodies (star at origin, then all planets/moons)
     /// at the given game time. Result is a flat list suitable for gravity sampling.
     /// Re-uses an internal cache — do not store references across frames.

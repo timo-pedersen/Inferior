@@ -1935,9 +1935,7 @@ public sealed class SystemSpaceState : GameState
         {
             if ((stPos - shipPos).Length < StationDist)
             {
-                DVec3 p0 = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds));
-                DVec3 p1 = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds + 1.0));
-                _refVelocity = p1 - p0;
+                _refVelocity = EclipticToGalaxy(_system.GetStationVelocity(station, _gameTimeSeconds));
                 _refName     = station.Name;
                 return;
             }
@@ -2002,8 +2000,7 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
-            DVec3 p1 = GetBodyGalaxyPosition(bestBody, _gameTimeSeconds + 1.0);
-            domVelocity = p1 - bestPos;
+            domVelocity = GetBodyGalaxyVelocity(bestBody, _gameTimeSeconds);
             domName     = bestBody.Name;
         }
 
@@ -2033,6 +2030,33 @@ public sealed class SystemSpaceState : GameState
             }
         }
         return EclipticToGalaxy(body.GetPosition(gameTime, DVec3.Zero));
+    }
+
+    // Returns the analytically computed galaxy-space velocity of a planet or moon.
+    private DVec3 GetBodyGalaxyVelocity(OrbitalBody body, double gameTime)
+    {
+        foreach (var planet in _system.Planets)
+        {
+            if (ReferenceEquals(planet, body))
+                return EclipticToGalaxy(OrbitalVelocityEcl(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius));
+            foreach (var moon in planet.Children)
+            {
+                if (ReferenceEquals(moon, body))
+                {
+                    var pv = OrbitalVelocityEcl(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius);
+                    var mv = OrbitalVelocityEcl(gameTime, moon.Period, moon.PhaseOffset, moon.OrbitalRadius);
+                    return EclipticToGalaxy(pv + mv);
+                }
+            }
+        }
+        return EclipticToGalaxy(OrbitalVelocityEcl(gameTime, body.Period, body.PhaseOffset, body.OrbitalRadius));
+    }
+
+    private static DVec3 OrbitalVelocityEcl(double gameTime, double period, double phaseOffset, double radius)
+    {
+        double angle = DMath.OrbitalAngle(gameTime, period, phaseOffset);
+        double omega = 2.0 * System.Math.PI / period;
+        return new DVec3(-System.Math.Sin(angle) * radius * omega, 0.0, System.Math.Cos(angle) * radius * omega);
     }
 
     private void UpdateTargetingUI()
