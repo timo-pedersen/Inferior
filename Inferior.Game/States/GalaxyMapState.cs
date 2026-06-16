@@ -31,7 +31,7 @@ public sealed class GalaxyMapState : GameState
     private double  _lyPerPixel   = 800.0;
 
     private const double MinLyPerPixel = 0.5;
-    private const double MaxLyPerPixel = 5_000.0;
+    private double       _maxLyPerPixel = 5_000.0;  // recalculated in UpdateScreenCentre
     private const double ZoomFactor    = 1.15;
 
     // ── Screen ────────────────────────────────────────────────────────────────
@@ -119,7 +119,12 @@ public sealed class GalaxyMapState : GameState
     {
         // Generate galaxy if first entry
         if (_stars.Length == 0)
+        {
             _stars = GalaxyGenerator.Generate();
+            // Fit galaxy diameter (×1.1 margin) to shortest screen dimension.
+            float minDim = MathF.Min(_gd.Viewport.Width, _gd.Viewport.Height);
+            _lyPerPixel  = (GalaxyGenerator.GalaxyRadiusLY * 2.0 * 1.1) / minDim;
+        }
 
         // Arriving from in-flight (N key) or system map (N key)
         if (payload is GalaxyMapPayload gmp)
@@ -315,7 +320,7 @@ public sealed class GalaxyMapState : GameState
         Vector2 mouseWorld  = ScreenToGalaxy(mouseScreen);
 
         _lyPerPixel *= scroll > 0 ? 1.0 / ZoomFactor : ZoomFactor;
-        _lyPerPixel  = System.Math.Clamp(_lyPerPixel, MinLyPerPixel, MaxLyPerPixel);
+        _lyPerPixel  = System.Math.Clamp(_lyPerPixel, MinLyPerPixel, _maxLyPerPixel);
 
         Vector2 mouseWorldAfter = ScreenToGalaxy(mouseScreen);
         _cameraPos -= mouseWorldAfter - mouseWorld;
@@ -505,7 +510,9 @@ public sealed class GalaxyMapState : GameState
         float pixelSpacing = (float)(gridSpacingLY / _lyPerPixel);
         if (pixelSpacing < 20f) return;
 
-        float startX = MathF.Floor(_cameraPos.X / gridSpacingLY) * gridSpacingLY;
+        // Start from the world X that maps to the left edge of the screen.
+        float leftWorldX = (float)(_cameraPos.X - _screenCentre.X * _lyPerPixel);
+        float startX = MathF.Floor(leftWorldX / gridSpacingLY) * gridSpacingLY;
         for (float worldX = startX; ; worldX += gridSpacingLY)
         {
             float sx = GalaxyToScreen(new Vector2(worldX, 0)).X;
@@ -513,7 +520,9 @@ public sealed class GalaxyMapState : GameState
             DrawLine(sb, new Vector2(sx, 0), new Vector2(sx, _gd.Viewport.Height), ColGrid);
         }
 
-        float startZ = MathF.Floor(_cameraPos.Y / gridSpacingLY) * gridSpacingLY;
+        // Start from the world Z that maps to the top edge of the screen.
+        float topWorldZ = (float)(_cameraPos.Y - _screenCentre.Y * _lyPerPixel);
+        float startZ = MathF.Floor(topWorldZ / gridSpacingLY) * gridSpacingLY;
         for (float worldZ = startZ; ; worldZ += gridSpacingLY)
         {
             float sy = GalaxyToScreen(new Vector2(0, worldZ)).Y;
@@ -823,7 +832,11 @@ public sealed class GalaxyMapState : GameState
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void UpdateScreenCentre()
-        => _screenCentre = new Vector2(_gd.Viewport.Width * 0.5f, _gd.Viewport.Height * 0.5f);
+    {
+        _screenCentre  = new Vector2(_gd.Viewport.Width * 0.5f, _gd.Viewport.Height * 0.5f);
+        float minDim   = MathF.Min(_gd.Viewport.Width, _gd.Viewport.Height);
+        _maxLyPerPixel = (GalaxyGenerator.GalaxyRadiusLY * 2.0 * 1.1) / minDim;
+    }
 
     private Star FindStartingSystem()
     {
