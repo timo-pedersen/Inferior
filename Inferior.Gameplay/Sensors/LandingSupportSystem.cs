@@ -67,20 +67,24 @@ public sealed class LandingSupportSystem
         double lateralOffset      = DVec3.Dot(delta, right);
         double longitudinalOffset = DVec3.Dot(delta, fwd);
 
-        // Heading deviation: angle between ship forward projected onto pad plane and pad forward
+        // Heading deviation: signed angle of ship-forward (projected onto pad plane) vs pad forward.
+        // +  = ship nose rotated clockwise  (when viewed from pad normal direction)
+        // −  = ship nose rotated counter-clockwise
+        // 0  = aligned with pad forward axis
         DVec3 shipFwdOnPad = ship.Forward - n * DVec3.Dot(ship.Forward, n);
         double shipFwdLen  = shipFwdOnPad.Length;
         double headingDev  = 0.0;
         if (shipFwdLen > 1e-6)
         {
             shipFwdOnPad = shipFwdOnPad / shipFwdLen;
-            double cosH = System.Math.Clamp(DVec3.Dot(shipFwdOnPad, fwd), -1.0, 1.0);
-            headingDev  = System.Math.Acos(cosH) * (180.0 / System.Math.PI);
+            double cosH = DVec3.Dot(shipFwdOnPad, fwd);
+            double sinH = DVec3.Dot(DVec3.Cross(shipFwdOnPad, fwd), n);  // sign = CW vs CCW around normal
+            headingDev  = System.Math.Atan2(sinH, cosH) * (180.0 / System.Math.PI);
         }
 
-        // Pitch deviation: angle between ship forward and pad normal plane; 0 = face-on
-        double sinP  = System.Math.Clamp(DVec3.Dot(ship.Forward, n), -1.0, 1.0);
-        double pitchDev = System.Math.Asin(System.Math.Abs(sinP)) * (180.0 / System.Math.PI);
+        // Pitch deviation: 0 = face-on (ship forward parallel to pad normal); 90 = sideways
+        double dotFwdN  = System.Math.Clamp(DVec3.Dot(ship.Forward, n), -1.0, 1.0);
+        double pitchDev = System.Math.Asin(System.Math.Abs(dotFwdN)) * (180.0 / System.Math.PI);
 
         // Upside-down: ship up dot pad normal < 0 means inverted
         double upsideDown = DVec3.Dot(ship.Up, n) < 0.0 ? 1.0 : 0.0;

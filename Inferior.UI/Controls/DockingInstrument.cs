@@ -204,8 +204,9 @@ public sealed class DockingInstrument : Control
         var up    = AngleDir(angle);
         var right = AngleDir(angle + MathF.PI * 0.5f);
 
-        Vector2 tipU = centre - up    * armLen;
-        Vector2 tipD = centre + up    * armLen;
+        // centre + up*armLen → tip is at screen-UP direction (Y negative) when angle=0
+        Vector2 tipU = centre + up    * armLen;
+        Vector2 tipD = centre - up    * armLen;
         Vector2 tipR = centre + right * armLen;
         Vector2 tipL = centre - right * armLen;
 
