@@ -1105,20 +1105,8 @@ public sealed class SystemSpaceState : GameState
     {
         const float UvScale      = 5.0f;
         const float ChamferInset = 0.38f * 0.707f;  // matches StationDecorator chamferW * 0.707f
-        var h = mod.Definition.BoundingBox * 0.5f;
+        var h  = mod.Definition.BoundingBox * 0.5f;
         float si = ChamferInset;
-
-        Span<Vector3> c = stackalloc Vector3[8]
-        {
-            new(-h.X+si, -h.Y+si, -h.Z+si), // 0 BL-back
-            new(+h.X-si, -h.Y+si, -h.Z+si), // 1 BR-back
-            new(+h.X-si, +h.Y-si, -h.Z+si), // 2 TR-back
-            new(-h.X+si, +h.Y-si, -h.Z+si), // 3 TL-back
-            new(-h.X+si, -h.Y+si, +h.Z-si), // 4 BL-front
-            new(+h.X-si, -h.Y+si, +h.Z-si), // 5 BR-front
-            new(+h.X-si, +h.Y-si, +h.Z-si), // 6 TR-front
-            new(-h.X+si, +h.Y-si, +h.Z-si), // 7 TL-front
-        };
 
         var verts = new VertexPositionNormalTexture[24];
         var idx   = new int[36];
@@ -1144,13 +1132,16 @@ public sealed class SystemSpaceState : GameState
             idx[i + 3] = b;     idx[i + 4] = b + 3; idx[i + 5] = b + 2;
         }
 
-        //                                                                 n               uAxis              vAxis
-        AddFace(verts, idx, 0, c[4], c[5], c[6], c[7],  Vector3.UnitZ,  Vector3.UnitX,  Vector3.UnitY);  // +Z
-        AddFace(verts, idx, 1, c[1], c[0], c[3], c[2], -Vector3.UnitZ, -Vector3.UnitX,  Vector3.UnitY);  // -Z
-        AddFace(verts, idx, 2, c[0], c[4], c[7], c[3], -Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY);  // -X
-        AddFace(verts, idx, 3, c[5], c[1], c[2], c[6],  Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY);  // +X
-        AddFace(verts, idx, 4, c[7], c[6], c[2], c[3],  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);  // +Y
-        AddFace(verts, idx, 5, c[0], c[1], c[5], c[4], -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);  // -Y
+        // Each face panel is inset by ChamferInset in its two lateral axes so that
+        // the chamfer strip running along each edge is not hidden behind the panel.
+        // The face-normal axis stays at the full surface depth (±h.N unchanged).
+        //                                                                             n               uAxis              vAxis
+        AddFace(verts, idx, 0, new(-h.X+si,-h.Y+si,+h.Z), new(+h.X-si,-h.Y+si,+h.Z), new(+h.X-si,+h.Y-si,+h.Z), new(-h.X+si,+h.Y-si,+h.Z),  Vector3.UnitZ,  Vector3.UnitX,  Vector3.UnitY);  // +Z
+        AddFace(verts, idx, 1, new(+h.X-si,-h.Y+si,-h.Z), new(-h.X+si,-h.Y+si,-h.Z), new(-h.X+si,+h.Y-si,-h.Z), new(+h.X-si,+h.Y-si,-h.Z), -Vector3.UnitZ, -Vector3.UnitX,  Vector3.UnitY);  // -Z
+        AddFace(verts, idx, 2, new(-h.X,-h.Y+si,-h.Z+si), new(-h.X,-h.Y+si,+h.Z-si), new(-h.X,+h.Y-si,+h.Z-si), new(-h.X,+h.Y-si,-h.Z+si), -Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY);  // -X
+        AddFace(verts, idx, 3, new(+h.X,-h.Y+si,+h.Z-si), new(+h.X,-h.Y+si,-h.Z+si), new(+h.X,+h.Y-si,-h.Z+si), new(+h.X,+h.Y-si,+h.Z-si),  Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY);  // +X
+        AddFace(verts, idx, 4, new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,-h.Z+si), new(-h.X+si,+h.Y,-h.Z+si),  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);  // +Y
+        AddFace(verts, idx, 5, new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);  // -Y
 
         var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration,
                                   24, BufferUsage.WriteOnly);
@@ -2229,7 +2220,7 @@ public sealed class SystemSpaceState : GameState
                    MathF.Acos(MathHelper.Clamp(dot, -1f, 1f)));
     }
 
-    private const float MouseSensitivity = 0.0018f;
+    private const float MouseSensitivity = 0.0012f;
 
     private PlayerInput BuildShipInput(MouseState mouse, KeyboardState keys)
     {
