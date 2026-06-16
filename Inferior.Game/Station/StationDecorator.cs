@@ -981,6 +981,9 @@ public static class StationDecorator
     private static void GenerateEdgeTrimStrips(PlacedModule mod, FaceInfo[] faces,
         System.Random rng, StationModuleMesh mesh)
     {
+        // Octagonal and other custom-mesh modules use their own geometry — no box chamfers
+        if (mod.Definition.MeshFactory != null) return;
+
         Vector3 half = mod.Definition.BoundingBox * 0.5f;
 
         // Build a fast set of exposed face normals.
@@ -1013,7 +1016,7 @@ public static class StationDecorator
             Vector3 b0 = edgeMid - edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
             Vector3 b1 = edgeMid + edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
 
-            mesh.AddQuad(a0, a1, b1, b0, trimColor);
+            mesh.AddQuad(a0, b0, b1, a1, trimColor);
         }
     }
 

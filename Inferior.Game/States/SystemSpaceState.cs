@@ -1103,19 +1103,21 @@ public sealed class SystemSpaceState : GameState
     private static (VertexBuffer vb, IndexBuffer ib, int triCount) BuildHullMesh(
         GraphicsDevice gd, PlacedModule mod)
     {
-        const float UvScale = 5.0f;
+        const float UvScale      = 5.0f;
+        const float ChamferInset = 0.38f * 0.707f;  // matches StationDecorator chamferW * 0.707f
         var h = mod.Definition.BoundingBox * 0.5f;
+        float si = ChamferInset;
 
         Span<Vector3> c = stackalloc Vector3[8]
         {
-            new(-h.X, -h.Y, -h.Z), // 0 BL-back
-            new(+h.X, -h.Y, -h.Z), // 1 BR-back
-            new(+h.X, +h.Y, -h.Z), // 2 TR-back
-            new(-h.X, +h.Y, -h.Z), // 3 TL-back
-            new(-h.X, -h.Y, +h.Z), // 4 BL-front
-            new(+h.X, -h.Y, +h.Z), // 5 BR-front
-            new(+h.X, +h.Y, +h.Z), // 6 TR-front
-            new(-h.X, +h.Y, +h.Z), // 7 TL-front
+            new(-h.X+si, -h.Y+si, -h.Z+si), // 0 BL-back
+            new(+h.X-si, -h.Y+si, -h.Z+si), // 1 BR-back
+            new(+h.X-si, +h.Y-si, -h.Z+si), // 2 TR-back
+            new(-h.X+si, +h.Y-si, -h.Z+si), // 3 TL-back
+            new(-h.X+si, -h.Y+si, +h.Z-si), // 4 BL-front
+            new(+h.X-si, -h.Y+si, +h.Z-si), // 5 BR-front
+            new(+h.X-si, +h.Y-si, +h.Z-si), // 6 TR-front
+            new(-h.X+si, +h.Y-si, +h.Z-si), // 7 TL-front
         };
 
         var verts = new VertexPositionNormalTexture[24];
