@@ -218,6 +218,52 @@ public sealed class StationModuleMesh
         _faces.Add((b, 3));
     }
 
+    // Per-vertex colour triangle — used for glass gradients.
+    public void AddTriangleGradient(Vector3 v0, Color c0, Vector3 v1, Color c1, Vector3 v2, Color c2)
+    {
+        int b = _verts.Count;
+
+        Vector3 edge0  = v1 - v0;
+        Vector3 edge1  = v2 - v0;
+        Vector3 normal = Vector3.Cross(edge0, edge1);
+        float   nLen   = normal.Length();
+        if (nLen > 1e-6f) normal /= nLen;
+        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
+        Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
+
+        _verts.Add(new VertexPositionColorTexture(v0, c0, Vector2.Zero));
+        _verts.Add(new VertexPositionColorTexture(v1, c1, FaceUV(edge0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionColorTexture(v2, c2, FaceUV(edge1, uAxis, vAxis)));
+        _idx.AddRange([b, b+2, b+1]);
+        _faces.Add((b, 3));
+    }
+
+    // Per-vertex colour quad — used for glass gradients.
+    // Vertex order: v0=BL, v1=BR, v2=TR, v3=TL (CW from normal side).
+    public int AddQuadGradient(Vector3 v0, Color c0, Vector3 v1, Color c1,
+                                Vector3 v2, Color c2, Vector3 v3, Color c3)
+    {
+        int b = _verts.Count;
+
+        Vector3 edge0  = v1 - v0;
+        Vector3 edge1  = v2 - v0;
+        Vector3 normal = Vector3.Cross(edge0, edge1);
+        float   nLen   = normal.Length();
+        if (nLen > 1e-6f) normal /= nLen;
+        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
+        Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
+
+        _verts.Add(new VertexPositionColorTexture(v0, c0, Vector2.Zero));
+        _verts.Add(new VertexPositionColorTexture(v1, c1, FaceUV(v1 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionColorTexture(v2, c2, FaceUV(v2 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionColorTexture(v3, c3, FaceUV(v3 - v0, uAxis, vAxis)));
+        _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
+        _faces.Add((b, 4));
+        return b;
+    }
+
     public int FaceCount => _faces.Count;
 
     // Returns (localCenter, width, height) for a face.
