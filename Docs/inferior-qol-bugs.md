@@ -47,7 +47,7 @@ If movement "jumps", lower it. The `Mouse.SetPosition` call is what prevents
 the cursor from drifting out of the window.
 
 ---
-## Bug 1b — Mouse now captured even when game does not have focus
+## Bug 1b — Mouse now captured even when game does not have focus [DONE]
 
 Mouse need to be release when game looses focus. And recaptured when game gets focus (when in flight mode / debug cam).
 
@@ -57,7 +57,7 @@ mouse capture by going into UI mode.
 
 
 ---
-## Bug 1c — When going into UI mode, relative speed compared to station changes.
+## Bug 1c — When going into UI mode, relative speed compared to station changes. [DONE]
 
 Relative speed need to stay the same in UI mode as in flight mode and debug cam mode. 
 
@@ -119,7 +119,7 @@ at the station they just teleported to.
 
 ---
 
-## Bug 4 — Nav target ball points at star instead of nav target [??? STILL SEEMS OFF SOMETIMES] 
+## Bug 4 — Nav target ball points at star instead of nav target [STILL SEEMS SOMETIMES - revisit. MainBall works for now.] 
 
 **Symptom:** The direction ball nav marker points toward the star regardless of
 what was selected as nav target in the system map.
@@ -283,7 +283,7 @@ the minimum size. This makes it immediately clear which body is closest.
 
 ---
 
-## Bug 8 — Targeting ('C' key and mouse click)
+## Bug 8 — Targeting ('C' key and mouse click) [Good enough for now!]
 
 **Symptom:** Pressing 'C' does not select the nearest object to reticle.
 Mouse click in UI mode doesn't target objects.
