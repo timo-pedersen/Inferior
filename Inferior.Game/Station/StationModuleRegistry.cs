@@ -174,12 +174,12 @@ public static class StationModuleRegistry
     };
 
     // ── connector-long-large ──────────────────────────────────────────────────
-    // 80×16×16 — twice the standard connector. The spine on large linear stations.
+    // 16×16×80 — twice the standard connector. The spine on large linear stations.
     public static readonly StationModuleDefinition ConnectorLongLarge = new()
     {
         Id           = "connector-long-large",
         Category     = "connector",
-        BoundingBox  = new Vector3(80, 16, 16),
+        BoundingBox  = new Vector3(16, 16, 80),
         MinScale     = StationScale.Port,
         SelectWeight = 2.0f,
         Ports        =
