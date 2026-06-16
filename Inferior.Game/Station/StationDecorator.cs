@@ -1727,8 +1727,12 @@ public static class StationDecorator
     }
 
     // Truncated-pyramid cap for one end of a tank body.
-    // Start cap: pass reversed startRing + flipLaterals=false.
-    // End cap:   pass non-reversed endRing + flipLaterals=true.
+    // Both caps: pass the appropriate ring + flipLaterals=true.
+    //   Start cap: reversed startRing so the tip triangles wind outward toward -axis;
+    //              flipLaterals=true because reversing the ring gives it the same
+    //              winding orientation (CW from outside) as endRing, so the lateral
+    //              quads need the same flip to produce outward-facing normals.
+    //   End cap:   non-reversed endRing + flipLaterals=true.
     // The tip face winding is the same for both ends.
     private static void AddTankCap(StationModuleMesh mesh,
         Vector3[] bodyRing, Vector3 outDir, float tipRadius, float capDepth, Color color,
@@ -1911,16 +1915,16 @@ public static class StationDecorator
 
         var (startRing, endRing) = GetPrismRings(start, end, bodyRadius, sides);
         float   tipRadius = bodyRadius * 0.28f;
-        float   capDepth  = bodyRadius * 0.72f;
+        float   capDepth  = bodyRadius * 0.50f;
         Vector3 axis      = Vector3.Normalize(end - start);
 
-        // Reversed startRing gives correct outward normals for start cap.
-        // End cap uses the same winding formula but flipLaterals=true to compensate for
-        // the opposite ring orientation when viewed from outside.
+        // Reverse startRing so the tip triangles wind outward for the start cap.
+        // Both caps use flipLaterals=true: after reversal, startRingRev is CW from
+        // outside (like endRing from its outside), so the same lateral flip applies.
         var startRingRev = new Vector3[sides];
         for (int i = 0; i < sides; i++) startRingRev[i] = startRing[sides - 1 - i];
 
-        AddTankCap(mesh, startRingRev, -axis, tipRadius, capDepth, bodyColor, flipLaterals: false);
+        AddTankCap(mesh, startRingRev, -axis, tipRadius, capDepth, bodyColor, flipLaterals: true);
         AddTankCap(mesh, endRing,       axis, tipRadius, capDepth, bodyColor, flipLaterals: true);
 
         float stripeW = MathF.Max(bodyRadius * 0.08f, 0.04f);
