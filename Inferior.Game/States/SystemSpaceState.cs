@@ -266,7 +266,7 @@ public sealed class SystemSpaceState : GameState
                 {
                     DVec3 grandparent = DVec3.Zero;
                     foreach (var planet in _system.Planets)
-                        if (planet.Children.Contains(p.TargetStation.OrbitParent))
+                        if (planet.Children.Any(c => c.Name == p.TargetStation.OrbitParent.Name))
                             grandparent = planet.GetPosition(p.GameTime, DVec3.Zero);
                     parentEcliptic = p.TargetStation.OrbitParent.GetPosition(p.GameTime, grandparent);
                 }
@@ -637,11 +637,12 @@ public sealed class SystemSpaceState : GameState
         if (payload is SystemSpacePayload { Layout: { } layout })
             ApplyCockpitLayout(layout);
 
-        // Restore nav target selected in system map
+        // Restore nav target selected in system map; clear if payload carries none
         if (payload is SystemSpacePayload ssp)
         {
             if (ssp.NavBody != null)          _targeting.SetNavTarget(ssp.NavBody);
             else if (ssp.NavStation != null)  _targeting.SetNavTarget(ssp.NavStation);
+            else                              _targeting.ClearNavTarget();
         }
 
         // Start in ship-control mode — panels retracted, handles and buttons hidden

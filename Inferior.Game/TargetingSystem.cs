@@ -77,6 +77,7 @@ public sealed class TargetingSystem
 
     private OrbitalBody? _navBody;
     private Station?     _navStation;
+    private string?      _navStationPersistenceId;
     private bool         _navIsStar;
 
     public string  NavTargetName      { get; private set; } = "";
@@ -95,10 +96,11 @@ public sealed class TargetingSystem
 
     public void SetNavTarget(Station station)
     {
-        _navBody    = null;
-        _navStation = station;
-        _navIsStar  = false;
-        NavTargetName = station.Name;
+        _navBody                 = null;
+        _navStation              = station;
+        _navStationPersistenceId = station.PersistenceId;
+        _navIsStar               = false;
+        NavTargetName            = station.Name;
     }
 
     public void SetNavTargetStar(Star star)
@@ -111,13 +113,14 @@ public sealed class TargetingSystem
 
     public void ClearNavTarget()
     {
-        _navBody           = null;
-        _navStation        = null;
-        _navIsStar         = false;
-        NavTargetName      = "";
-        NavTargetPosition  = DVec3.Zero;
-        NavTargetDistance  = 0;
-        NavTargetDirection = DVec3.Zero;
+        _navBody                 = null;
+        _navStation              = null;
+        _navStationPersistenceId = null;
+        _navIsStar               = false;
+        NavTargetName            = "";
+        NavTargetPosition        = DVec3.Zero;
+        NavTargetDistance        = 0;
+        NavTargetDirection       = DVec3.Zero;
     }
 
     // ── Hyperspace target (galaxy star selection) ──────────────────────────────
@@ -222,8 +225,13 @@ public sealed class TargetingSystem
         else if (_navStation != null)
         {
             targetPos = DVec3.Zero;
+            string matchId = _navStationPersistenceId ?? _navStation.Name;
+            bool byId = _navStationPersistenceId != null;
             foreach (var (station, pos) in stationPositions)
-                if (station.Name == _navStation.Name) { targetPos = pos; break; }
+            {
+                string candidate = byId ? (station.PersistenceId ?? station.Name) : station.Name;
+                if (candidate == matchId) { targetPos = pos; break; }
+            }
         }
         else
         {
