@@ -247,12 +247,15 @@ public sealed class SystemSpaceState : GameState
                     if (resolvedBody != null) break;
                 }
 
-                var    body        = resolvedBody ?? p.TargetBody;
+                var    body         = resolvedBody ?? p.TargetBody;
                 DVec3  bodyEcliptic = body.GetPosition(p.GameTime, parentPos);
-                double dist        = System.Math.Max(body.RadiusMeters * 5.0, 1e6);
-                var    startPos    = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
+                DVec3  bodyGalaxy   = EclipticToGalaxy(bodyEcliptic);
+                double dist         = System.Math.Max(body.RadiusMeters * 5.0, 1e6);
+                var    startPos     = EclipticToGalaxy(bodyEcliptic + new DVec3(0, dist * 0.4, dist));
+                Quaternion bodyOri  = QuatLookAt(bodyGalaxy - startPos);
                 _camera = new Camera3D(startPos, AspectRatio);
-                SpawnShip(startPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
+                _camera.SetPose(startPos, bodyOri);
+                SpawnShip(startPos, bodyOri);
             }
             else if (p.TargetStation != null)
             {
@@ -274,22 +277,9 @@ public sealed class SystemSpaceState : GameState
                 DVec3 eclipticUp = new DVec3(_er01, _er11, _er21); // ecliptic +Y in galaxy space
                 DVec3 spawnPos   = stationGalaxy + eclipticUp * 2000.0;
 
-                // Orient ship to face toward the station
-                Vector3 toStation = Vector3.Normalize(new Vector3(
-                    (float)(stationGalaxy.X - spawnPos.X),
-                    (float)(stationGalaxy.Y - spawnPos.Y),
-                    (float)(stationGalaxy.Z - spawnPos.Z)));
-                Vector3 cross = Vector3.Cross(-Vector3.UnitZ, toStation);
-                float   dot   = Vector3.Dot(-Vector3.UnitZ, toStation);
-                Quaternion spawnOri;
-                if (cross.LengthSquared() < 1e-10f)
-                    spawnOri = dot > 0f ? Quaternion.Identity
-                                        : Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
-                else
-                    spawnOri = Quaternion.CreateFromAxisAngle(Vector3.Normalize(cross),
-                                   MathF.Acos(MathHelper.Clamp(dot, -1f, 1f)));
-
+                Quaternion spawnOri = QuatLookAt(stationGalaxy - spawnPos);
                 _camera = new Camera3D(spawnPos, AspectRatio);
+                _camera.SetPose(spawnPos, spawnOri);
                 SpawnShip(spawnPos, spawnOri);
             }
             else if (_ship != null)
@@ -2197,6 +2187,19 @@ public sealed class SystemSpaceState : GameState
 
         _ship = ship;
         _simulation.SetShip(ship);
+    }
+
+    // Returns the quaternion that rotates the camera's default forward (-UnitZ) to face `dir`.
+    private static Quaternion QuatLookAt(DVec3 dir)
+    {
+        var v = Vector3.Normalize(new Vector3((float)dir.X, (float)dir.Y, (float)dir.Z));
+        Vector3 cross = Vector3.Cross(-Vector3.UnitZ, v);
+        float   dot   = Vector3.Dot(-Vector3.UnitZ, v);
+        if (cross.LengthSquared() < 1e-10f)
+            return dot > 0f ? Quaternion.Identity
+                            : Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI);
+        return Quaternion.CreateFromAxisAngle(Vector3.Normalize(cross),
+                   MathF.Acos(MathHelper.Clamp(dot, -1f, 1f)));
     }
 
     private const float MouseSensitivity = 0.0018f;
