@@ -138,7 +138,8 @@ public sealed class SystemSpaceState : GameState
     private Action<string>?       _radarLostHandler;
 
     // ── Targeting ─────────────────────────────────────────────────────────────
-    private readonly TargetingSystem _targeting = new();
+    private readonly TargetingSystem _targeting       = new();
+    private readonly HashSet<string> _radarContactIds = [];   // IDs fed this session; cleared on exit
     private DirectionBall?      _targetingDirBall;
     private Label?              _targetLineShip;
     private Label?              _targetLineNav;
@@ -699,6 +700,11 @@ public sealed class SystemSpaceState : GameState
         if (_shieldCapacitorHandler != null)
             DataBus.Instruments.Unsubscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
 
+        // Remove all radar contacts fed from this session so TargetingSystem is clean on re-entry
+        foreach (string id in _radarContactIds)
+            _targeting.OnContactLost(id);
+        _radarContactIds.Clear();
+
         _ui?.Dispose();
         _ui = null;
 
@@ -830,6 +836,9 @@ public sealed class SystemSpaceState : GameState
             DVec3 eclipticPos = _system.GetStationPosition(station, _gameTimeSeconds);
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
+
+        // Feed planets, moons, and stations into TargetingSystem so C-key / click-to-target work
+        FeedRadarContacts();
 
         // Track camera actual velocity for relative-speed display in debug mode
         DVec3 camPos = _camera.UniversePosition;
@@ -2068,6 +2077,38 @@ public sealed class SystemSpaceState : GameState
         double angle = DMath.OrbitalAngle(gameTime, period, phaseOffset);
         double omega = 2.0 * System.Math.PI / period;
         return new DVec3(-System.Math.Sin(angle) * radius * omega, 0.0, System.Math.Cos(angle) * radius * omega);
+    }
+
+    // Pushes planets, moons, and stations into TargetingSystem each frame so the
+    // C-key and click-to-target handlers have contacts to work with.
+    // Positions are already galaxy-space from the current frame's _bodyPositions /
+    // _stationPositions.  RelativePosition is the vector from camera to contact in
+    // metres (float precision is fine for screen-space projection).
+    private void FeedRadarContacts()
+    {
+        DVec3 camPos = _camera.UniversePosition;
+
+        foreach (var (body, galaxyPos) in _bodyPositions)
+        {
+            string id  = $"body:{body.Name}";
+            DVec3  del = galaxyPos - camPos;
+            _targeting.OnContactUpdated(new RadarContact(
+                id, body.Name,
+                new Vector3((float)del.X, (float)del.Y, (float)del.Z),
+                Vector3.Zero, ContactType.Unknown));
+            _radarContactIds.Add(id);
+        }
+
+        foreach (var (station, galaxyPos) in _stationPositions)
+        {
+            string id  = $"station:{station.Name}";
+            DVec3  del = galaxyPos - camPos;
+            _targeting.OnContactUpdated(new RadarContact(
+                id, station.Name,
+                new Vector3((float)del.X, (float)del.Y, (float)del.Z),
+                Vector3.Zero, ContactType.Station));
+            _radarContactIds.Add(id);
+        }
     }
 
     private void UpdateTargetingUI()
