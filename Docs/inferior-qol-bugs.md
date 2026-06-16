@@ -51,6 +51,16 @@ the cursor from drifting out of the window.
 
 Mouse need to be release when game looses focus. And recaptured when game gets focus (when in flight mode / debug cam).
 
+Otherwise , if player alt-tabs out of the game, mouse is still captured and will cause issues in other applications,
+ie mouse is centered on screen and can't be used in other applications until player alt-tabs back to the game and releases 
+mouse capture by going into UI mode.
+
+
+---
+## Bug 1c — When going into UI mode, relative speed compared to station changes.
+
+Relative speed need to stay the same in UI mode as in flight mode and debug cam mode. 
+
 ---
 
 ## Bug 2 — Spawning inside planet on teleport [DONE]

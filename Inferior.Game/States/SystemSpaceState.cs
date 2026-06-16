@@ -165,6 +165,9 @@ public sealed class SystemSpaceState : GameState
     private bool _uiMouseMode;
     private bool _debugCameraMode;
 
+    // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
+    private PlayerInput _lastFlightInput = PlayerInput.Zero;
+
     // Colour-invert blend for the crosshair: result = src - dest.
     // With white source this gives (1-R, 1-G, 1-B) — readable against any background.
     // Static to follow the MonoGame convention for built-in BlendState singletons;
@@ -775,13 +778,24 @@ public sealed class SystemSpaceState : GameState
             }
         }
 
+        // When the window has no OS focus, substitute a centred mouse so look-input delta
+        // stays at zero. The real mouse state is still stored in _prevMouse and used for UI
+        // hit-testing so button press/release tracking remains correct.
+        var lookMouse = IsGameActive ? mouse : new MouseState(
+            _gd.Viewport.Width / 2, _gd.Viewport.Height / 2,
+            mouse.ScrollWheelValue,
+            ButtonState.Released, ButtonState.Released, ButtonState.Released,
+            ButtonState.Released, ButtonState.Released);
+
         if (_uiMouseMode)
         {
             // UI mode — UI gets mouse/keyboard; camera and ship are frozen
             _ui?.Update(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
             if (_debugCameraMode)
                 _camera.Update(dt, new MouseState(), new KeyboardState()); // clear any held drag
-            _simulation.SetInput(PlayerInput.Zero);
+            // Preserve the last flight-mode thrust so relative speed is unchanged when
+            // the player opens the UI. Rotation inputs are zeroed to keep the ship still.
+            _simulation.SetInput(_lastFlightInput with { PitchInput = 0, YawInput = 0, RollInput = 0 });
 
             // Click-to-target — left click selects the nearest radar contact bracket
             if (mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released)
@@ -797,19 +811,20 @@ public sealed class SystemSpaceState : GameState
             _camera.BaseVelocity = _refVelocity;
             int dcx = _gd.Viewport.Width  / 2;
             int dcy = _gd.Viewport.Height / 2;
-            _camera.Update(dt, mouse, keys, new Point(dcx, dcy));
+            _camera.Update(dt, lookMouse, keys, new Point(dcx, dcy));
             _simulation.SetInput(PlayerInput.Zero);
-            Mouse.SetPosition(dcx, dcy);
+            if (IsGameActive) Mouse.SetPosition(dcx, dcy);
         }
         else
         {
             // Ship mode — input goes to the simulation; camera follows cockpit.
             // Cursor is locked to window centre so mouse can't escape the window.
-            _simulation.SetInput(BuildShipInput(mouse, keys));
+            _lastFlightInput = BuildShipInput(lookMouse, keys);
+            _simulation.SetInput(_lastFlightInput);
             var snap = _simulation.ShipState;
             if (snap != null)
                 _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
-            Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
+            if (IsGameActive) Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
         }
 
         _gameTimeSeconds += dt;
