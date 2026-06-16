@@ -58,7 +58,32 @@ public sealed class Station
     public double Period        { get; init; }  // seconds for one full orbit
     public double PhaseOffset   { get; init; }  // radians, randomised at generation
 
-    // ── Position ──────────────────────────────────────────────────────────────
+    // ── Orientation ────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fixed axial tilt in radians applied around local X. Randomised at generation.
+    /// </summary>
+    public float AxialTilt    { get; init; }
+
+    /// <summary>
+    /// Slow spin rate in radians/second around local Y.  Deterministic per station.
+    /// Typical range: one full rotation every 5–24 hours.
+    /// </summary>
+    public float SlowRotation { get; init; }
+
+    /// <summary>
+    /// Returns the station's orientation quaternion at a given game time.
+    /// The tilt is fixed; the spin accumulates over time.
+    /// </summary>
+    public System.Numerics.Quaternion GetOrientation(double gameTime)
+    {
+        float spin = (float)(gameTime * SlowRotation);
+        var tilt   = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitX, AxialTilt);
+        var rotate = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitY, spin);
+        return System.Numerics.Quaternion.Normalize(rotate * tilt);
+    }
+
+    // ── Position
 
     /// <summary>
     /// Returns station position in system space (metres from star) at a given game time.
@@ -120,6 +145,14 @@ public sealed class Station
         var (smallPads, largePads) = RollPadCounts(size, rng);
         var services = RollServices(size, rng);
 
+        // Axial tilt: ±15 degrees, randomised per station
+        float axialTilt = (float)rng.NextDouble(-MathF.PI / 12.0, MathF.PI / 12.0);
+
+        // Slow rotation: one revolution every 5–24 hours, sign randomised
+        double hoursPerRev = rng.NextDouble(5.0, 24.0);
+        float  slowRot     = (float)(MathF.Tau / (hoursPerRev * 3600.0))
+                             * (rng.NextBool(0.5) ? 1f : -1f);
+
         var station = new Station
         {
             Name          = name,
@@ -131,6 +164,8 @@ public sealed class Station
             OrbitalRadius = orbitRadius,
             Period        = period,
             PhaseOffset   = rng.NextAngle(),
+            AxialTilt     = axialTilt,
+            SlowRotation  = slowRot,
             PersistenceId = $"{starName}:{orbitParent?.Name ?? "star"}:{name}",
         };
 

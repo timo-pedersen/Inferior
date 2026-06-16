@@ -47,6 +47,11 @@ If movement "jumps", lower it. The `Mouse.SetPosition` call is what prevents
 the cursor from drifting out of the window.
 
 ---
+## Bug 1b — Mouse now captured even when game does not have focus
+
+Mouse need to be release when game looses focus. And recaptured when game gets focus (when in flight mode / debug cam).
+
+---
 
 ## Bug 2 — Spawning inside planet on teleport [DONE]
 
@@ -81,7 +86,7 @@ from the body centre.
 
 ---
 
-## Bug 3 — Wrong view direction on teleport arrival
+## Bug 3 — Wrong view direction on teleport arrival [DONE]
 
 **Symptom:** After teleporting to a station, camera faces a random direction —
 usually toward the star or a planet, not the station.
@@ -104,7 +109,7 @@ at the station they just teleported to.
 
 ---
 
-## Bug 4 — Nav target ball points at star instead of nav target
+## Bug 4 — Nav target ball points at star instead of nav target [??? STILL SEEMS OFF SOMETIMES] 
 
 **Symptom:** The direction ball nav marker points toward the star regardless of
 what was selected as nav target in the system map.
@@ -149,7 +154,7 @@ cyan/green to match the targeting system bracket colour.
 
 ---
 
-## Bug 5 — Station drift at ~1 m/s
+## Bug 5 — Station drift at ~1 m/s [DONE]
 
 **Symptom:** Stations appear to move slowly (~1 m/s) even when player is
 stationary relative to the parent planet. Speed readout shows 0.0 m/s vs planet

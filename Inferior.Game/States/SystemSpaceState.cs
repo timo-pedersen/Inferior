@@ -988,6 +988,10 @@ public sealed class SystemSpaceState : GameState
             if (renderPos.Length() > 30_000f) continue;
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
+            var sysQ   = station.GetOrientation(_gameTimeSeconds);
+            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+
             foreach (var mod in modules)
             {
                 if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
@@ -997,7 +1001,8 @@ public sealed class SystemSpaceState : GameState
                 _effect.World =
                     Matrix.CreateScale(rs) *
                     Matrix.CreateFromQuaternion(modRot) *
-                    Matrix.CreateTranslation(posMetres * rs) *
+                    stationRot *
+                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
                     Matrix.CreateTranslation(renderPos);
 
                 _effect.Texture = mod.TextureInstance;
@@ -1028,6 +1033,10 @@ public sealed class SystemSpaceState : GameState
 
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
+            var sysQ   = station.GetOrientation(_gameTimeSeconds);
+            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+
             foreach (var mod in modules)
             {
                 if (!_decoMeshes.TryGetValue(mod, out var deco)) continue;
@@ -1037,7 +1046,8 @@ public sealed class SystemSpaceState : GameState
                 _effect.World =
                     Matrix.CreateScale(rs) *
                     Matrix.CreateFromQuaternion(modRot) *
-                    Matrix.CreateTranslation(posMetres * rs) *
+                    stationRot *
+                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
                     Matrix.CreateTranslation(renderPos);
 
                 _effect.Texture = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
@@ -1066,6 +1076,10 @@ public sealed class SystemSpaceState : GameState
 
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
+            var sysQ   = station.GetOrientation(_gameTimeSeconds);
+            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+
             foreach (var mod in modules)
             {
                 if (!_glassMeshes.TryGetValue(mod, out var glass)) continue;
@@ -1075,7 +1089,8 @@ public sealed class SystemSpaceState : GameState
                 _effect.World =
                     Matrix.CreateScale(rs) *
                     Matrix.CreateFromQuaternion(modRot) *
-                    Matrix.CreateTranslation(posMetres * rs) *
+                    stationRot *
+                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
                     Matrix.CreateTranslation(renderPos);
 
                 _gd.SetVertexBuffer(glass.vb);
@@ -1388,11 +1403,14 @@ public sealed class SystemSpaceState : GameState
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
             Vector3 stationRel = (universePos - _camera.UniversePosition).ToVector3(); // metres
 
+            var sysQ   = station.GetOrientation(_gameTimeSeconds);
+            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+
             foreach (var mod in modules)
             {
                 foreach (var light in mod.GlowLights)
                 {
-                    Vector3 relPos   = stationRel + light.WorldPosition;
+                    Vector3 relPos   = stationRel + Vector3.Transform(light.WorldPosition, stRotQ);
                     float   distance = relPos.Length();
                     if (distance < 0.1f) continue;
 

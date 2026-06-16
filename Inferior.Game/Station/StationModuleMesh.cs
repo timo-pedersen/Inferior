@@ -274,8 +274,6 @@ public sealed class StationModuleMesh
         foreach (var (vb, count) in _faces)
         {
             Color orig = _verts[vb].Color;
-            // Emissive heuristic: bright-enough colours are self-lit (windows, light lenses)
-            if ((int)orig.R + orig.G + orig.B > 370) continue;
 
             // Compute face normal from first three vertices (cross product → outward normal)
             Vector3 localN = Vector3.Cross(

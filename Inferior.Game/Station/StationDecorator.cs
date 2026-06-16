@@ -67,7 +67,7 @@ public static class StationDecorator
 
             GeneratePipes         (mod, faces, pipeRng,     mesh);
             GenerateLights        (mod, faces, lightRng,    mesh);
-            GenerateEdgeTrimStrips(mod, faces, edgeTrimRng, mesh);
+            GenerateEdgeTrimStrips(mod, mesh);
 
             RegisterModuleAmbientLights(mod, faces, ambientLightRng);
 
@@ -200,9 +200,8 @@ public static class StationDecorator
         foreach (var port in mod.Definition.Ports)
         {
             if (Vector3.Dot(port.OutwardNormal, faceNormal) < 0.9f) continue;
-            if (port.IsTerminal || port.IsDocking)           return true;
-            if (port == mod.AttachmentPort)                  return true;
-            if (mod.ChildPorts.Contains(port))               return true;
+            if (port == mod.AttachmentPort)   return true;
+            if (mod.ChildPorts.Contains(port)) return true;
         }
         return false;
     }
@@ -978,28 +977,24 @@ public static class StationDecorator
 
     // ── Pass 6b: Edge trim strips ─────────────────────────────────────────────
 
-    private static void GenerateEdgeTrimStrips(PlacedModule mod, FaceInfo[] faces,
-        System.Random rng, StationModuleMesh mesh)
+    private static void GenerateEdgeTrimStrips(PlacedModule mod, StationModuleMesh mesh)
     {
         // Octagonal and other custom-mesh modules use their own geometry — no box chamfers
         if (mod.Definition.MeshFactory != null) return;
 
         Vector3 half = mod.Definition.BoundingBox * 0.5f;
 
-        // Build a fast set of exposed face normals.
-        var exposed = new HashSet<Vector3>();
-        foreach (var f in faces)
-            if (f.IsExposed) exposed.Add(f.LocalNormal);
-
         Color trimColor = LightenColor(
             StationModuleRegistry.CategoryColor(mod.Definition.Category), 1.12f);
         const float chamferW = 0.38f;
         float inset = chamferW * 0.707f;
 
+        // Width of each strip = diagonal of the inset square (√2 × inset).
+        // Strips are shortened at both ends by inset so adjacent strips don't overlap at corners.
+        float stripWidth = inset * MathF.Sqrt(2f);
+
         foreach (var (faceA, faceB, edgeDir, cornerSign) in BoxEdgeInfos)
         {
-            if (!exposed.Contains(faceA) || !exposed.Contains(faceB)) continue;
-
             float edgeHalfLen = edgeDir.X != 0 ? half.X
                               : edgeDir.Y != 0 ? half.Y : half.Z;
 
@@ -1008,20 +1003,30 @@ public static class StationDecorator
                 edgeDir.Y != 0 ? 0 : cornerSign.Y * half.Y,
                 edgeDir.Z != 0 ? 0 : cornerSign.Z * half.Z);
 
-            Vector3 intoA = -faceA;
-            Vector3 intoB = -faceB;
-
-            Vector3 a0 = edgeMid - edgeDir * edgeHalfLen + intoA * inset + faceA * 0.01f;
-            Vector3 a1 = edgeMid + edgeDir * edgeHalfLen + intoA * inset + faceA * 0.01f;
-            Vector3 b0 = edgeMid - edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
-            Vector3 b1 = edgeMid + edgeDir * edgeHalfLen + intoB * inset + faceB * 0.01f;
-
-            // Use the center+normal overload which is documented as "visible from normal side".
-            // This sidesteps any cross-product winding ambiguity entirely.
+            // Strip centre sits on the 45° bisector of the two face planes, inset from the edge.
+            // Vertices land exactly on the inset edges of the hull face panels — no gap, no lift needed.
             Vector3 outwardNorm = Vector3.Normalize(faceA + faceB);
-            Vector3 stripCenter = (a0 + a1 + b0 + b1) * 0.25f;
-            float   stripWidth  = (b0 - a0).Length();
-            mesh.AddQuad(stripCenter, outwardNorm, edgeDir, stripWidth, edgeHalfLen * 2f, trimColor);
+            Vector3 stripCenter = edgeMid - (faceA + faceB) * (inset * 0.5f);
+            mesh.AddQuad(stripCenter, outwardNorm, edgeDir, stripWidth, (edgeHalfLen - inset) * 2f, trimColor);
+        }
+
+        // Corner triangles — fill the small triangular hole at each of the 8 corners where
+        // the shortened strips and inset hull face panels leave a gap.
+        (int sx, int sy, int sz)[] corners =
+            [(1,1,1),(1,1,-1),(1,-1,1),(1,-1,-1),(-1,1,1),(-1,1,-1),(-1,-1,1),(-1,-1,-1)];
+
+        foreach (var (sx, sy, sz) in corners)
+        {
+            // One vertex per adjacent edge strip endpoint, coinciding with the hull panel corner.
+            Vector3 c1 = new(sx * (half.X - inset), sy * half.Y,             sz * (half.Z - inset));
+            Vector3 c2 = new(sx * half.X,           sy * (half.Y - inset),    sz * (half.Z - inset));
+            Vector3 c3 = new(sx * (half.X - inset), sy * (half.Y - inset),    sz * half.Z);
+
+            // Cross(c2-c1, c3-c1) is inward when sx*sy*sz > 0 — swap v1/v2 to face outward.
+            if (sx * sy * sz > 0)
+                mesh.AddTriangle(c1, c3, c2, trimColor);
+            else
+                mesh.AddTriangle(c1, c2, c3, trimColor);
         }
     }
 
