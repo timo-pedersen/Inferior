@@ -5,7 +5,7 @@
 
 ---
 
-## Bug 1 — Mouse not captured in flight mode
+## Bug 1 — Mouse not captured in flight mode [DONE]
 
 **Symptom:** Looking around requires holding right mouse button. Mouse escapes
 window, loses focus, right-click menus appear in other apps.
@@ -48,7 +48,7 @@ the cursor from drifting out of the window.
 
 ---
 
-## Bug 2 — Spawning inside planet on teleport
+## Bug 2 — Spawning inside planet on teleport [DONE]
 
 **Symptom:** Teleporting to a moon or station via system map sometimes spawns
 inside a planet. Speed capped at 100 km/s, can't escape.
@@ -328,6 +328,39 @@ for (int y = -gridCount; y <= gridCount; y++)
 ```
 
 ---
+
+# Bug 10 — Disconnected stations (found in home system, middle station)
+
+This disconnection pattern is different from the one fixed earlier. 
+Previously every individual module floated free — this time you have several internally-connected clusters separated from each other. 
+That distinction matters for diagnosis.
+What the image shows:
+
+Top-left: small connected cluster with cylindrical octagonal module
+Center-left: larger connected cluster with window grids (LinearSpine character visible)
+Right: what looks exactly like a connector-long-large (80m) with modules at each end — a perfectly valid H-shape, just not attached to the main structure
+
+This pattern — multiple correct sub-clusters — points to one specific cause: the large connector module's AABB (80×16×16) is 
+being flagged as intersecting the main structure when it shouldn't be, causing TryAttach to reject what should be a valid placement. 
+The growth engine then moves on, and subsequent ports generate a disconnected branch.
+
+The 80m connector is 4× longer than the standard one. Its AABB extends 40m in each direction from centre. If any part of that 
+80m box overlaps with an existing module's AABB — even at the far end, far from any actual geometry — the placement is rejected.
+Diagnostic to give Code:
+Add this temporary print immediately after TryAttach returns null:
+```
+csharpif (placed == null)
+    Debug.WriteLine($"REJECTED: {moduleDef.Id} from port {parentPort.Definition.Id} " +
+                    $"on {parentPort.ParentModule.Definition.Id} depth={parentPort.Depth}");
+```
+
+Run with the home system seed. If you see connector-long-large rejections repeatedly, that's the culprit.
+Likely fix: Increase the AABB intersection margin for the connection axis only, or reduce the large connector's bounding box to exclude 
+the port-face ends (since those faces will be occupied by child modules anyway). The quick fix is simply making connector-long-large 
+slightly narrower in its bounding box — say 76×14×14 instead of 80×16×16 — giving just enough clearance for adjacent modules not to trigger a 
+false intersection.
+
+
 
 ## Deferred — do later
 
