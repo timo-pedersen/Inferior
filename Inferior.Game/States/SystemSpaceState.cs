@@ -145,6 +145,7 @@ public sealed class SystemSpaceState : GameState
     private Label?              _targetLineNav;
     private Label?              _targetLineHyp;
     private LandingRadarPanel?  _landingRadar;
+    private DockingInstrument? _dockingInstrument;
 
     // Pad target — world position and bearing recomputed each frame
     private DVec3  _padWorldPos;
@@ -566,7 +567,6 @@ public sealed class SystemSpaceState : GameState
         };
 
         var radarPlaceholder = new Panel { DrawBackground = false, DrawBorder = false };
-        var miscPlaceholder  = new Panel { DrawBackground = false, DrawBorder = false };
 
         _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28))
         {
@@ -605,8 +605,13 @@ public sealed class SystemSpaceState : GameState
         _cockpitRail.AddCenterTab("DIR BALL", _cockpitDirBall);
         _cockpitRail.AddCenterTab("RADAR",    radarPlaceholder);
         _cockpitRail.AddCenterTab("LANDING",  _landingRadar);
-        // Right side (3 tabs): ???, LOG, CTRL
-        _cockpitRail.AddCenterTab("???",      miscPlaceholder);
+        _dockingInstrument = new DockingInstrument
+        {
+            Bounds = new Rectangle(0, 0, 500, 220),
+        };
+
+        // Right side (3 tabs): DOCK, LOG, CTRL
+        _cockpitRail.AddCenterTab("DOCK",     _dockingInstrument);
         _cockpitRail.AddCenterTab("LOG",      _console);
         _cockpitRail.AddCenterTab("CTRL",     new Panel { DrawBackground = false, DrawBorder = false });
         _cockpitRail.RightWing.Add(_shieldToggleButton);
