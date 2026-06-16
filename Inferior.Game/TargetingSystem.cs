@@ -217,13 +217,13 @@ public sealed class TargetingSystem
         {
             targetPos = DVec3.Zero;
             foreach (var (body, pos) in bodyPositions)
-                if (ReferenceEquals(body, _navBody)) { targetPos = pos; break; }
+                if (body.Name == _navBody.Name) { targetPos = pos; break; }
         }
         else if (_navStation != null)
         {
             targetPos = DVec3.Zero;
             foreach (var (station, pos) in stationPositions)
-                if (ReferenceEquals(station, _navStation)) { targetPos = pos; break; }
+                if (station.Name == _navStation.Name) { targetPos = pos; break; }
         }
         else
         {
