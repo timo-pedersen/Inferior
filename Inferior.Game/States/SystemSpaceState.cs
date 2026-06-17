@@ -179,6 +179,10 @@ public sealed class SystemSpaceState : GameState
     // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
 
+    // Ship snapshot captured once at the top of Update() — all sub-systems use this
+    // single consistent value so no two decisions in the same frame see different positions.
+    private SpaceSimulation.ShipSnapshot? _frameShipSnap;
+
     // Colour-invert blend for the crosshair: result = src - dest.
     // With white source this gives (1-R, 1-G, 1-B) — readable against any background.
     // Static to follow the MonoGame convention for built-in BlendState singletons;
@@ -759,6 +763,7 @@ public sealed class SystemSpaceState : GameState
         var mouse = Mouse.GetState();
         var keys  = Keyboard.GetState();
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
+        _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
@@ -818,9 +823,8 @@ public sealed class SystemSpaceState : GameState
             {
                 // Ship camera must still track the ship — without this the camera freezes
                 // while thrust keeps the ship moving, causing a snap on UI-mode exit.
-                var snap = _simulation.ShipState;
-                if (snap != null)
-                    _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
+                if (_frameShipSnap != null)
+                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
             }
             // Preserve the last flight-mode thrust so relative speed is unchanged when
             // the player opens the UI. Rotation inputs are zeroed to keep the ship still.
@@ -850,18 +854,18 @@ public sealed class SystemSpaceState : GameState
             // Cursor is locked to window centre so mouse can't escape the window.
             _lastFlightInput = BuildShipInput(lookMouse, keys);
             _simulation.SetInput(_lastFlightInput);
-            var snap = _simulation.ShipState;
-            if (snap != null)
-                _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
+            if (_frameShipSnap != null)
+                _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
             if (IsGameActive) Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
         }
 
-        _gameTimeSeconds += dt;
+        // Derive orbital time from the snapshot's bundled SimTime — the pair (Position, SimTime)
+        // was published in a single TickPhysics call, so they always refer to the same tick.
+        // Reading GameClock.SimTime separately races with Advance(), which fires before the
+        // position is updated, producing a 1-tick (≈350 m) station-vs-ship mismatch.
+        if (_frameShipSnap != null)
+            _gameTimeSeconds = _frameShipSnap.SimTime;
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, ComputeNearClip(), 50_000f);
-
-        // Update direction balls — both the right-panel ball and the cockpit center ball
-        UpdateDirectionBall(_systemDirBall);
-        UpdateDirectionBall(_cockpitDirBall);
 
         // Rebuild body positions — collect in ecliptic space then rotate to galaxy space
         _bodyPositions.Clear();
@@ -881,6 +885,12 @@ public sealed class SystemSpaceState : GameState
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
 
+        // Update direction balls — after position rebuild so current-frame station positions
+        // are used, not the previous frame's. Avoids the ~1-frame (~350 m) visual offset
+        // between the dot indicator and the rendered station.
+        UpdateDirectionBall(_systemDirBall);
+        UpdateDirectionBall(_cockpitDirBall);
+
         // Feed planets, moons, and stations into TargetingSystem so C-key / click-to-target work
         FeedRadarContacts();
 
@@ -891,7 +901,7 @@ public sealed class SystemSpaceState : GameState
         _prevCameraPosValid = true;
 
         // Update targeting system with pre-computed galaxy-space positions
-        DVec3 shipPosForTargeting = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+        DVec3 shipPosForTargeting = _frameShipSnap?.Position ?? _camera.UniversePosition;
         _targeting.Update(shipPosForTargeting, _star.GalacticPos, _bodyPositions, _stationPositions);
         UpdatePadTargetPosition();
         UpdateTargetingUI();
@@ -908,7 +918,7 @@ public sealed class SystemSpaceState : GameState
         // Ship fly speed — base speed scaled by proximity, then hard-capped near stations
         if (!_debugCameraMode)
         {
-            DVec3 shipPos = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            DVec3 shipPos = _frameShipSnap?.Position ?? _camera.UniversePosition;
             _simulation.SetShipMoveSpeed(ComputeShipSpeed(shipPos));
         }
 
@@ -916,7 +926,7 @@ public sealed class SystemSpaceState : GameState
         // camera position in debug mode (sensors track whoever is "there")
         DVec3 refPos = _debugCameraMode
             ? _camera.UniversePosition
-            : _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            : _frameShipSnap?.Position ?? _camera.UniversePosition;
         _simulation.SetWorldState(_star, _system, refPos, _gameTimeSeconds);
 
         if (!_uiMouseMode)
@@ -1884,7 +1894,7 @@ public sealed class SystemSpaceState : GameState
         // Ship mode: simulation velocity vs reference.
         DVec3 movingVel = _debugCameraMode
             ? _cameraActualVelocity
-            : _simulation.ShipState?.Velocity ?? DVec3.Zero;
+            : _frameShipSnap?.Velocity ?? DVec3.Zero;
         double relSpeedMs = (movingVel - _refVelocity).Length;
 
         // Show set fly-speed (scroll-adjusted) in both modes
@@ -1895,7 +1905,7 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
-            DVec3 shipPos    = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            DVec3 shipPos    = _frameShipSnap?.Position ?? _camera.UniversePosition;
             double effSpeed  = ComputeShipSpeed(shipPos);
             string setLine   = System.Math.Abs(effSpeed - _shipBaseSpeed) > 0.5
                 ? $"Set: {Units.FormatSpeed(_shipBaseSpeed)}  (cap: {Units.FormatSpeed(effSpeed)})"
@@ -1945,7 +1955,7 @@ public sealed class SystemSpaceState : GameState
 
         if (lPressed)
         {
-            DVec3 shipPos = _simulation.ShipState?.Position ?? _camera.UniversePosition;
+            DVec3 shipPos = _frameShipSnap?.Position ?? _camera.UniversePosition;
             _targeting.CyclePad(shipPos, _stationPositions, _gameTimeSeconds);
         }
 
@@ -2319,7 +2329,7 @@ public sealed class SystemSpaceState : GameState
         var navStation = _targeting.NavStationTarget;
         if (navStation != null)
         {
-            DVec3 relGalaxy   = (_simulation.ShipState?.Position ?? _camera.UniversePosition)
+            DVec3 relGalaxy   = (_frameShipSnap?.Position ?? _camera.UniversePosition)
                               - _targeting.NavTargetPosition;
             DVec3 relEcliptic = GalaxyToEcliptic(relGalaxy);
             _landingRadar.HasStation     = true;
@@ -2366,8 +2376,8 @@ public sealed class SystemSpaceState : GameState
         _padWorldPos         = stationPos + new DVec3(offset.X, offset.Y, offset.Z);
         DVec3 worldNormal    = new DVec3(worldNrmV.X, worldNrmV.Y, worldNrmV.Z);
 
-        DVec3 camPos         = _camera.UniversePosition;
-        DVec3 delta          = _padWorldPos - camPos;
+        DVec3 shipPos        = _frameShipSnap?.Position ?? _camera.UniversePosition;
+        DVec3 delta          = _padWorldPos - shipPos;
         _padDistance         = delta.Length;
         _padDirection        = _padDistance > 1.0 ? delta * (1.0 / _padDistance) : DVec3.Zero;
 

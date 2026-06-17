@@ -39,7 +39,8 @@ public sealed class SpaceSimulation : Simulation
         DVec3      Position,
         DVec3      Velocity,
         Quaternion Orientation,
-        DVec3      CockpitWorldPosition);
+        DVec3      CockpitWorldPosition,
+        double     SimTime);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -133,8 +134,12 @@ public sealed class SpaceSimulation : Simulation
         ship.Position += ship.Velocity * dt;
 
         // ── Publish snapshot for main thread ──────────────────────────────
+        // SimTime is bundled here — same tick, so position and time are always consistent.
+        // Reading GameClock.SimTime separately on the main thread can race with the
+        // Advance() call that precedes this publish, yielding a 1-tick (≈350 m) mismatch.
         _shipSnapshot = new ShipSnapshot(
-            ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition);
+            ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
+            GameClock.SimTime);
     }
 
     // ── Power ─────────────────────────────────────────────────────────────────
