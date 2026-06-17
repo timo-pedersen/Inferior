@@ -12,7 +12,7 @@
 | Galaxy map | ✓ Done | 2048 stars, fixed seed, deterministic |
 | System map | ✓ Done | Bodies, orbits |
 | 3D flight state (`SystemSpaceState`) | ✓ Done | Newtonian, origin-shifting render |
-| UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState |
+| UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState, **RadarDisplay** |
 | DataBus | ✓ Done | 6 buses: System, Instruments, InstrumentState, InstrumentRanges, Radar, RadarLost |
 | **System message priority** | ✓ Done | `SystemMessagePriority` enum (Info→Critical); `SystemMessage` record on System bus; `SystemConsole` coloured prefixes; `HudAlertDisplay` centre-screen overlay (Warning 4 s, ImportantWarning 6 s, Critical until keypress) |
 | CommandBus | ✓ Done | Reverse direction; sim thread drains |
@@ -30,6 +30,7 @@
 | **Directional lighting** | ✓ Done | Hull: real-time `VertexPositionNormalTexture` + `BasicEffect LightingEnabled=true` from actual star pos; Decoration: pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
+| **RadarDisplay** | ✓ Done | Oval disc (scanline fill); range rings; contact markers (diamond/triangle/dot by type); left closing-rate bar; right speed bar; cockpit DirectionBall wired with contact vectors; `MaxRangeMeters`/`MaxSpeedMs` configurable |
 | **Surface texture infrastructure** | ✓ Done | `VertexPositionColorTexture` throughout; UV projection in AddQuad/AddTriangle; `SurfaceTexture` enum; `StationTextureRegistry`; separate `GlassMesh` for windows |
 | **Procedural station textures** | ✓ Done | `StationProfile` (economy/age/wealth); `TexturePalette` per economy type; 5-step 512×512 generation (noise → panels → seams → grime → scratches); cache by (surface, paletteHash); station name baked onto core module face; `BitmapFonts` 5×7 + `TexturePainter` |
 | **Parabolic dishes** | ✓ Done | 3 size classes (9/11/13-sided); per-face small+medium in `GenerateDishes`; station-wide landmark large dish in `RunLargeDishPass` (22% of science/military stations); support arm, diagonal brace, feed mast+box, feed struts |

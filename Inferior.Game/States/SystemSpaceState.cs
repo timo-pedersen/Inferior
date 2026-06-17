@@ -125,6 +125,7 @@ public sealed class SystemSpaceState : GameState
     private SystemConsole?   _console;
     private DirectionBall?   _systemDirBall;
     private DirectionBall?   _cockpitDirBall;
+    private RadarDisplay?    _radarDisplay;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
     private CockpitRail?     _cockpitRail;
@@ -576,7 +577,11 @@ public sealed class SystemSpaceState : GameState
             Bounds = new Rectangle(0, 0, 300, 300),
         };
 
-        var radarPlaceholder = new Panel { DrawBackground = false, DrawBorder = false };
+        _radarDisplay = new RadarDisplay
+        {
+            MaxRangeMeters = 3e12f,   // 3 Gm — inner system bodies visible
+            MaxSpeedMs     = 5e9f,
+        };
 
         _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28))
         {
@@ -613,7 +618,7 @@ public sealed class SystemSpaceState : GameState
         };
         // Left side (3 tabs): DIR BALL, RADAR, LANDING
         _cockpitRail.AddCenterTab("DIR BALL", _cockpitDirBall);
-        _cockpitRail.AddCenterTab("RADAR",    radarPlaceholder);
+        _cockpitRail.AddCenterTab("RADAR",    _radarDisplay);
         _cockpitRail.AddCenterTab("LANDING",  _landingRadar);
         _dockingInstrument = new DockingInstrument
         {
@@ -688,8 +693,16 @@ public sealed class SystemSpaceState : GameState
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         DataBus.System.Subscribe(Topics.System.All, _systemHandler);
 
-        _radarContactHandler = c  => _targeting.OnContactUpdated(c);
-        _radarLostHandler    = id => _targeting.OnContactLost(id);
+        _radarContactHandler = c =>
+        {
+            _targeting.OnContactUpdated(c);
+            UpdateCockpitDirBallContact(c);
+        };
+        _radarLostHandler = id =>
+        {
+            _targeting.OnContactLost(id);
+            _cockpitDirBall?.RemoveVector($"radar_{id}");
+        };
         DataBus.Radar.Subscribe(Topics.Radar.All,     _radarContactHandler);
         DataBus.RadarLost.Subscribe(Topics.Radar.All, _radarLostHandler);
 
@@ -910,6 +923,7 @@ public sealed class SystemSpaceState : GameState
         _targeting.Update(shipPosForTargeting, _star.GalacticPos, _bodyPositions, _stationPositions);
         UpdatePadTargetPosition();
         UpdateTargetingUI();
+        UpdateRadarDisplay();
         UpdateLandingRadar();
 
         // Update reference frame (zero-speed object)
@@ -2244,25 +2258,44 @@ public sealed class SystemSpaceState : GameState
 
         foreach (var (body, galaxyPos) in _bodyPositions)
         {
-            string id  = $"body:{body.Name}";
-            DVec3  del = galaxyPos - camPos;
-            _targeting.OnContactUpdated(new RadarContact(
+            string id      = $"body:{body.Name}";
+            DVec3  del     = galaxyPos - camPos;
+            var    contact = new RadarContact(
                 id, body.Name,
                 new Vector3((float)del.X, (float)del.Y, (float)del.Z),
-                Vector3.Zero, ContactType.Unknown));
+                Vector3.Zero, ContactType.Unknown);
+            _targeting.OnContactUpdated(contact);
+            UpdateCockpitDirBallContact(contact);
             _radarContactIds.Add(id);
         }
 
         foreach (var (station, galaxyPos) in _stationPositions)
         {
-            string id  = $"station:{station.Name}";
-            DVec3  del = galaxyPos - camPos;
-            _targeting.OnContactUpdated(new RadarContact(
+            string id      = $"station:{station.Name}";
+            DVec3  del     = galaxyPos - camPos;
+            var    contact = new RadarContact(
                 id, station.Name,
                 new Vector3((float)del.X, (float)del.Y, (float)del.Z),
-                Vector3.Zero, ContactType.Station));
+                Vector3.Zero, ContactType.Station);
+            _targeting.OnContactUpdated(contact);
+            UpdateCockpitDirBallContact(contact);
             _radarContactIds.Add(id);
         }
+    }
+
+    private void UpdateCockpitDirBallContact(RadarContact c)
+    {
+        if (_cockpitDirBall == null) return;
+        float len = c.RelativePosition.Length();
+        if (len < 1f) return;
+        var dir = c.RelativePosition / len;
+        var col = c.Type switch
+        {
+            ContactType.Station => new Color(80,  200, 140),
+            ContactType.Ship    => new Color(220,  80,  80),
+            _                   => new Color(120, 120, 120),
+        };
+        _cockpitDirBall.SetVector($"radar_{c.Id}", dir, col);
     }
 
     private void UpdateTargetingUI()
@@ -2337,6 +2370,15 @@ public sealed class SystemSpaceState : GameState
         {
             _targetingDirBall.RemoveVector("pad");
         }
+    }
+
+    private void UpdateRadarDisplay()
+    {
+        if (_radarDisplay == null) return;
+        _radarDisplay.Contacts        = _targeting.AllContacts;
+        _radarDisplay.SelectedContact = _targeting.CurrentRadarTarget;
+        var snap = _frameShipSnap;
+        _radarDisplay.LocalFrameSpeedMs = snap != null ? (float)snap.Velocity.Length : 0f;
     }
 
     private void UpdateLandingRadar()
