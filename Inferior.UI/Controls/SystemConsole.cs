@@ -1,3 +1,4 @@
+using Inferior.Core.DataBus;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System.Text;
@@ -25,10 +26,10 @@ public sealed class SystemConsole : Control
     public int           MaxLines  { get; set; } = 6;
     public LineBreakMode LineBreak { get; set; } = LineBreakMode.Clip;
 
-    private readonly List<string> _messages = [];
+    private readonly List<SystemMessage> _messages = [];
 
     /// <summary>Append a message. Oldest dropped when MaxLines is exceeded.</summary>
-    public void AddMessage(string message)
+    public void AddMessage(SystemMessage message)
     {
         _messages.Add(message);
         if (_messages.Count > MaxLines)
@@ -62,22 +63,22 @@ public sealed class SystemConsole : Control
             new Vector2(ab.Right - pad, divY),
             theme.PanelBorder);
 
-        // Available width for text (inside padding, excluding "> " prefix)
-        float prefixW  = theme.Font.MeasureString("> ").X * mScale;
+        // Available width for text (inside padding, excluding widest prefix "▲▲ ")
+        float prefixW  = theme.Font.MeasureString("▲▲ ").X * mScale;
         int   availW   = ab.Width - pad * 2 - (int)prefixW;
-        var   msgColor = TextColor ?? new Color(160, 175, 195);
 
         int y      = divY + 4;
         int bottom = ab.Bottom - pad;
 
         foreach (var msg in _messages)
         {
+            var (msgColor, prefix) = PriorityStyle(msg.Priority, TextColor);
             bool first = true;
-            foreach (var line in VisualLines(msg, theme.Font, mScale, availW))
+            foreach (var line in VisualLines(msg.Text, theme.Font, mScale, availW))
             {
                 if (y + lineH > bottom) goto done;
-                string prefix = first ? "> " : "  ";
-                renderer.DrawText(sb, prefix + line,
+                string linePrefix = first ? prefix : "  ";
+                renderer.DrawText(sb, linePrefix + line,
                     new Vector2(ab.X + pad, y),
                     theme.Font, mScale, msgColor);
                 y += lineH;
@@ -86,6 +87,18 @@ public sealed class SystemConsole : Control
         }
         done:;
     }
+
+    // ── Priority helpers ──────────────────────────────────────────────────────
+
+    private static (Color color, string prefix) PriorityStyle(SystemMessagePriority p, Color? overrideColor)
+        => p switch
+        {
+            SystemMessagePriority.NB              => (new Color(100, 200, 220), "· "),
+            SystemMessagePriority.Warning         => (new Color(220, 180,  40), "▲ "),
+            SystemMessagePriority.ImportantWarning => (new Color(230, 120,  30), "▲▲ "),
+            SystemMessagePriority.Critical        => (new Color(220,  60,  60), "■ "),
+            _                                     => (overrideColor ?? new Color(160, 175, 195), "> "),
+        };
 
     // ── Line-break helpers ────────────────────────────────────────────────────
 

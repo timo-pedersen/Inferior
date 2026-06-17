@@ -46,6 +46,6 @@ public sealed class SolarSpectrumSensor
         _scanCountdown = -1.0;
         SensorEnv.GetSolarVisibleSpectrum(_workBuffer.AsSpan());
         DataBus.Spectra.Publish($"{_name}.{Topics.SolarSpectrum.Data}", (double[])_workBuffer.Clone());
-        DataBus.System.Publish(Topics.System.All, "Solar spectrum scan complete");
+        DataBus.System.Publish(Topics.System.All, new("Solar spectrum scan complete"));
     }
 }

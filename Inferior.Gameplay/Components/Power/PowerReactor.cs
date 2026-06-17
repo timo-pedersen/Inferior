@@ -70,8 +70,8 @@ public sealed class PowerReactor : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {MaxPower / 1e6:F0} MW reactor, " +
-            $"{OutputCapacitor.MaxJ / 1e6:F1} MJ capacitor");
+            new($"{Name}: online — {MaxPower / 1e6:F0} MW reactor, " +
+                $"{OutputCapacitor.MaxJ / 1e6:F1} MJ capacitor"));
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

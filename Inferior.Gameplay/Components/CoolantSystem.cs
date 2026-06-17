@@ -83,7 +83,7 @@ public sealed class CoolantSystem : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {HeatFlowPerComponent / 1e3:F0} kW/node, {Level:P0} coolant");
+            new($"{Name}: online — {HeatFlowPerComponent / 1e3:F0} kW/node, {Level:P0} coolant"));
     }
 
     private void RegisterSensors()

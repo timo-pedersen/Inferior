@@ -64,7 +64,7 @@ public sealed class PowerPriorityManager : ShipComponent
 
             if (delivered < demanded * 0.95)
                 DataBus.System.Publish(Topics.System.All,
-                    $"[POWER] {entry.Name} starved — {delivered / 1e6:F2} / {demanded / 1e6:F2} MW");
+                    new($"[POWER] {entry.Name} starved — {delivered / 1e6:F2} / {demanded / 1e6:F2} MW", SystemMessagePriority.Warning));
         }
     }
 }

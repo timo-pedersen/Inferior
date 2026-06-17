@@ -50,7 +50,7 @@ public sealed class GyroComponent : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {CrystalType} {CrystalQuality} crystal, {AddedTorqueFactor:F2}× torque factor");
+            new($"{Name}: online — {CrystalType} {CrystalQuality} crystal, {AddedTorqueFactor:F2}× torque factor"));
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

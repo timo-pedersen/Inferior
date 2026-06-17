@@ -155,7 +155,7 @@ public abstract class ShipComponent
     // ── Lifecycle hooks ───────────────────────────────────────────────────────
     /// <summary>Called once when the startup timer begins running (StartupTimer > 0 only).</summary>
     protected virtual void OnInitializationStarted()
-        => DataBus.System.Publish(Topics.System.All, $"{Name}: initializing");
+        => DataBus.System.Publish(Topics.System.All, new($"{Name}: initializing"));
 
     /// <summary>
     /// Called every tick while Status == Initializing. Override to run warmup physics
@@ -172,7 +172,7 @@ public abstract class ShipComponent
     protected virtual void OnInitializationComplete()
     {
         PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All, $"{Name}: online");
+        DataBus.System.Publish(Topics.System.All, new($"{Name}: online"));
     }
 
     /// <summary>
@@ -181,7 +181,7 @@ public abstract class ShipComponent
     /// Base publishes the offline message.
     /// </summary>
     protected virtual void OnPowerOff()
-        => DataBus.System.Publish(Topics.System.All, $"{Name}: offline");
+        => DataBus.System.Publish(Topics.System.All, new($"{Name}: offline"));
 
     /// <summary>
     /// Called once when the component is powered on.
@@ -189,7 +189,7 @@ public abstract class ShipComponent
     /// Base publishes the online message.
     /// </summary>
     protected virtual void OnPowerOn()
-        => DataBus.System.Publish(Topics.System.All, $"{Name}: powering up");
+        => DataBus.System.Publish(Topics.System.All, new($"{Name}: powering up"));
 
     /// <summary>
     /// Transitions directly to Started from Initializing. For components that manage

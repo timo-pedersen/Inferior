@@ -36,7 +36,7 @@ public sealed class ExhaustSystem : ShipComponent
     {
         double removed = BuildUp;
         BuildUp = 0.0;
-        DataBus.System.Publish(Topics.System.All, $"{Name}: exhaust cleaned");
+        DataBus.System.Publish(Topics.System.All, new($"{Name}: exhaust cleaned"));
         return removed;
     }
 

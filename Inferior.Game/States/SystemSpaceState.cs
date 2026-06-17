@@ -129,7 +129,8 @@ public sealed class SystemSpaceState : GameState
     private EdgePanelHost?   _leftPanel;
     private CockpitRail?     _cockpitRail;
     // Stored so we can unsubscribe on OnExit
-    private Action<string>?       _systemHandler;
+    private Action<SystemMessage>? _systemHandler;
+    private HudAlertDisplay        _hudAlert = new();
     private Action<double>?       _gravDirXHandler;
     private Action<double>?       _gravDirYHandler;
     private Action<double>?       _gravDirZHandler;
@@ -672,7 +673,11 @@ public sealed class SystemSpaceState : GameState
         ApplyUiMode(false);
 
         // Meters subscribe themselves via Topic — only non-meter handlers need wiring here
-        _systemHandler = msg => _console.AddMessage(msg);
+        _systemHandler = msg =>
+        {
+            _console?.AddMessage(msg);
+            _hudAlert.AddMessage(msg);
+        };
 
         _gravDirXHandler = v => _gravDirX = v;
         _gravDirYHandler = v => _gravDirY = v;
@@ -689,7 +694,7 @@ public sealed class SystemSpaceState : GameState
         DataBus.RadarLost.Subscribe(Topics.Radar.All, _radarLostHandler);
 
         // First system message — confirms state entry
-        DataBus.System.Publish(Topics.System.All, $"Entered {_star.Name}");
+        DataBus.System.Publish(Topics.System.All, new($"Entered {_star.Name}"));
     }
 
     public override void OnExit()
@@ -932,6 +937,10 @@ public sealed class SystemSpaceState : GameState
         if (!_uiMouseMode)
             HandleKeyboard(keys, mouse);
 
+        var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
+        _hudAlert.Update(dt);
+        _hudAlert.HandleInput(inputState);
+
         _prevMouse = mouse;
         _prevKeys  = keys;
 
@@ -1023,6 +1032,14 @@ public sealed class SystemSpaceState : GameState
 
         // UI library draws on top — owns its own SpriteBatch
         _ui?.Draw();
+
+        // HUD alert overlay — drawn after UI so it's always on top
+        if (_ui != null)
+        {
+            sb.Begin(blendState: BlendState.AlphaBlend);
+            _hudAlert.Draw(sb, _ui.Renderer, _font, gd.Viewport.Width, gd.Viewport.Height);
+            sb.End();
+        }
     }
 
     // ── 3D drawing ────────────────────────────────────────────────────────────

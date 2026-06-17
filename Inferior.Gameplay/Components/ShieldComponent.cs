@@ -81,7 +81,7 @@ public sealed class ShieldComponent : ShipComponent
     protected override void OnInitializationStarted()
     {
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging");
+            new($"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging"));
         _progressCooldown = 5.0;
     }
 
@@ -100,7 +100,7 @@ public sealed class ShieldComponent : ShipComponent
         if (_progressCooldown <= 0.0)
         {
             DataBus.System.Publish(Topics.System.All,
-                $"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging");
+                new($"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging"));
             _progressCooldown = 5.0;
         }
     }
@@ -109,7 +109,7 @@ public sealed class ShieldComponent : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {MaxShieldJ / 1e6:F1} MJ shield ready");
+            new($"{Name}: online — {MaxShieldJ / 1e6:F1} MJ shield ready"));
     }
 
     // ── Running ───────────────────────────────────────────────────────────────

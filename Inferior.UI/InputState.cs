@@ -74,6 +74,17 @@ public sealed class InputState
     public bool Ctrl  => _keys.IsKeyDown(Keys.LeftControl) || _keys.IsKeyDown(Keys.RightControl);
     public bool Alt   => _keys.IsKeyDown(Keys.LeftAlt)     || _keys.IsKeyDown(Keys.RightAlt);
 
+    /// <summary>True if any keyboard key was pressed this frame (not held from last frame).</summary>
+    public bool AnyKeyJustPressed
+    {
+        get
+        {
+            foreach (var key in _keys.GetPressedKeys())
+                if (!_prevKeys.IsKeyDown(key)) return true;
+            return false;
+        }
+    }
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public InputState(MouseState mouse, MouseState prevMouse,

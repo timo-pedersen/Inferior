@@ -25,7 +25,8 @@ public sealed class UIManager : IDisposable
     private Control? _focused;
     private Control? _hovered;
 
-    public Theme Theme { get; set; }
+    public Theme      Theme    { get; set; }
+    public UIRenderer Renderer => _renderer;
 
     // ── Constructor ───────────────────────────────────────────────────────────
 

@@ -160,7 +160,7 @@ public sealed class TargetingSystem
         _padTargetStation = station;
         _padTarget        = pad;
         string label = $"PAD {pad.PadIndex + 1:D2} [{pad.PadSize}]";
-        DataBus.System.Publish(Topics.System.All, $"Pad targeted: {label}");
+        DataBus.System.Publish(Topics.System.All, new($"Pad targeted: {label}"));
     }
 
     public void ClearPadTarget()
@@ -168,7 +168,7 @@ public sealed class TargetingSystem
         if (_padTarget == null) return;
         _padTargetStation = null;
         _padTarget        = null;
-        DataBus.System.Publish(Topics.System.All, "Pad target cleared");
+        DataBus.System.Publish(Topics.System.All, new("Pad target cleared"));
     }
 
     // L-key: cycles through pads of the nearest station with populated geometry.
@@ -254,12 +254,12 @@ public sealed class TargetingSystem
         if (contact.HasValue)
         {
             DataBus.Target.Publish(Topics.Target.Changed, contact.Value);
-            DataBus.System.Publish(Topics.System.All, $"Target: {contact.Value.DisplayName}");
+            DataBus.System.Publish(Topics.System.All, new($"Target: {contact.Value.DisplayName}"));
         }
         else
         {
             DataBus.Target.Publish(Topics.Target.Changed, default);
-            DataBus.System.Publish(Topics.System.All, "Target cleared");
+            DataBus.System.Publish(Topics.System.All, new("Target cleared"));
         }
     }
 

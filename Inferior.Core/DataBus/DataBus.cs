@@ -7,7 +7,7 @@ namespace Inferior.Core.DataBus;
 public static class DataBus
 {
     // Device status, cold-start sequence, state changes
-    public static readonly Bus<string>       System           = new();
+    public static readonly Bus<SystemMessage> System           = new();
 
     // Live numeric instrument values — published every sim tick
     // Topic: "ComponentName.ValueName"  e.g. "PowerCore.PowerLoad"

@@ -226,9 +226,9 @@ public sealed class SpaceSimulation : Simulation
 
         if (!_startupPublished)
         {
-            DataBus.System.Publish(Topics.System.All, "Power systems online");
-            DataBus.System.Publish(Topics.System.All, "Navigation ready");
-            DataBus.System.Publish(Topics.System.All, "Sensors nominal");
+            DataBus.System.Publish(Topics.System.All, new("Power systems online"));
+            DataBus.System.Publish(Topics.System.All, new("Navigation ready"));
+            DataBus.System.Publish(Topics.System.All, new("Sensors nominal"));
             _startupPublished = true;
         }
 
@@ -237,9 +237,9 @@ public sealed class SpaceSimulation : Simulation
         DataBus.Instruments.Publish($"Debug.{Topics.Debug.SimTime}", t);
 
         if (_lastHeartbeat < 90.0 && heartbeat >= 90.0)
-            DataBus.System.Publish(Topics.System.All, "Heartbeat threshold exceeded");
+            DataBus.System.Publish(Topics.System.All, new("Heartbeat threshold exceeded"));
         if (_lastHeartbeat > 10.0 && heartbeat <= 10.0)
-            DataBus.System.Publish(Topics.System.All, "Heartbeat below minimum");
+            DataBus.System.Publish(Topics.System.All, new("Heartbeat below minimum"));
         _lastHeartbeat = heartbeat;
 
         _gravity.Tick();
@@ -259,7 +259,7 @@ public sealed class SpaceSimulation : Simulation
 
         if (t >= _nextMessageAt)
         {
-            DataBus.System.Publish(Topics.System.All, $"T+{t:F0}s - all systems nominal");
+            DataBus.System.Publish(Topics.System.All, new($"T+{t:F0}s - all systems nominal"));
             _nextMessageAt += 8.0;
         }
     }

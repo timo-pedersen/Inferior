@@ -44,12 +44,12 @@ public sealed class FlyabilityMonitor : ShipComponent
         {
             var issue = check();
             if (issue == null) continue;
-            DataBus.System.Publish(Topics.System.All, $"[FLY] {name}: {issue}");
+            DataBus.System.Publish(Topics.System.All, new($"[FLY] {name}: {issue}", SystemMessagePriority.NB));
             allClear = false;
         }
 
         if (allClear && _checks.Count > 0)
-            DataBus.System.Publish(Topics.System.All, "[FLY] All checks nominal");
+            DataBus.System.Publish(Topics.System.All, new("[FLY] All checks nominal"));
 
         TickSensors();
     }

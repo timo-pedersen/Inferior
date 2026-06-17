@@ -19,12 +19,12 @@ public sealed class ExternalLightsComponent : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        DataBus.System.Publish(Topics.System.All, $"{Name}: lights on");
+        DataBus.System.Publish(Topics.System.All, new($"{Name}: lights on"));
     }
 
     protected override void OnPowerOff()
     {
-        DataBus.System.Publish(Topics.System.All, $"{Name}: lights off");
+        DataBus.System.Publish(Topics.System.All, new($"{Name}: lights off"));
     }
 
     protected override void OnTick(double dt) { }

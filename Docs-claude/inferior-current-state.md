@@ -14,6 +14,7 @@
 | 3D flight state (`SystemSpaceState`) | ✓ Done | Newtonian, origin-shifting render |
 | UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState |
 | DataBus | ✓ Done | 6 buses: System, Instruments, InstrumentState, InstrumentRanges, Radar, RadarLost |
+| **System message priority** | ✓ Done | `SystemMessagePriority` enum (Info→Critical); `SystemMessage` record on System bus; `SystemConsole` coloured prefixes; `HudAlertDisplay` centre-screen overlay (Warning 4 s, ImportantWarning 6 s, Critical until keypress) |
 | CommandBus | ✓ Done | Reverse direction; sim thread drains |
 | Simulation loop | ✓ Done | 60Hz background thread; PlayerInput immutable snapshot |
 | DVec3 + origin shifting | ✓ Done | Double-precision coordinates throughout |

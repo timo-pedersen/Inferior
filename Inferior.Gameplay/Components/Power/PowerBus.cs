@@ -96,7 +96,7 @@ public sealed class PowerBus : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {Capacitor.MaxJ / 1e6:F1} MJ bus");
+            new($"{Name}: online — {Capacitor.MaxJ / 1e6:F1} MJ bus"));
     }
 
     private void RegisterSensors()

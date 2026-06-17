@@ -21,7 +21,7 @@ public sealed class InternalLightsComponent : ShipComponent
     {
         EmergencyMode = active;
         DataBus.System.Publish(Topics.System.All,
-            active ? $"{Name}: emergency lighting" : $"{Name}: normal lighting");
+            new(active ? $"{Name}: emergency lighting" : $"{Name}: normal lighting"));
     }
 
     protected override void OnTick(double dt) { }

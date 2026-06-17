@@ -82,6 +82,6 @@ public sealed class HyperspaceHeatSink : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {CapacityJ / 1e6:F0} MJ capacity, {HeatDissipation / 1e3:F0} kW dissipation");
+            new($"{Name}: online — {CapacityJ / 1e6:F0} MJ capacity, {HeatDissipation / 1e3:F0} kW dissipation"));
     }
 }

@@ -50,7 +50,7 @@ public sealed class LandingSupportSystem
         {
             DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
             if (_wasActive && pad == null)
-                DataBus.System.Publish(Topics.System.All, $"Landing support: approach aborted");
+                DataBus.System.Publish(Topics.System.All, new("Landing support: approach aborted", SystemMessagePriority.NB));
             _wasActive = false;
             return;
         }
@@ -114,7 +114,7 @@ public sealed class LandingSupportSystem
         {
             if (dist <= ApproachNotifyRange)
                 DataBus.System.Publish(Topics.System.All,
-                    $"Landing support: approach initiated — {pad.BayId} on {pad.StationName}");
+                    new($"Landing support: approach initiated — {pad.BayId} on {pad.StationName}"));
         }
         _wasActive = true;
 

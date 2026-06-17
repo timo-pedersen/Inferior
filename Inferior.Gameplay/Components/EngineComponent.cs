@@ -87,7 +87,7 @@ public sealed class EngineComponent : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {MaxPower / 1e6:F0} MW, {MaxThrust / 1e3:F0} kN max thrust");
+            new($"{Name}: online — {MaxPower / 1e6:F0} MW, {MaxThrust / 1e3:F0} kN max thrust"));
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

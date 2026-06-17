@@ -62,7 +62,7 @@ public sealed class ConnectorComponent : ShipComponent
     {
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
-            $"{Name}: online — {MaxPower / 1e6:F0} MW connector");
+            new($"{Name}: online — {MaxPower / 1e6:F0} MW connector"));
     }
 
     protected override void OnTick(double dt)
