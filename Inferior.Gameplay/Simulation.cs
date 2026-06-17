@@ -52,6 +52,12 @@ public class Simulation
             accumulated += timer.Elapsed.TotalSeconds;
             timer.Restart();
 
+            // Cap catch-up to 3 frames. Without this, OS thread suspension (alt-tab,
+            // screenshot tools, process scheduling) causes a burst of hundreds of ticks
+            // when the thread wakes — the ship jumps while the render camera didn't move.
+            if (accumulated > TickRate * 3)
+                accumulated = TickRate * 3;
+
             while (accumulated >= TickRate)
             {
                 Tick(TickRate);

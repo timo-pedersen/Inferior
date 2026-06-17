@@ -173,6 +173,7 @@ public sealed class SystemSpaceState : GameState
     // F11  — toggles between ship camera (cockpit) and free debug camera.
     private bool _uiMouseMode;
     private bool _debugCameraMode;
+    private bool _prevIsGameActive = true;
 
     // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
@@ -794,7 +795,11 @@ public sealed class SystemSpaceState : GameState
         // When the window has no OS focus, substitute a centred mouse so look-input delta
         // stays at zero. The real mouse state is still stored in _prevMouse and used for UI
         // hit-testing so button press/release tracking remains correct.
-        var lookMouse = IsGameActive ? mouse : new MouseState(
+        // Also suppress look-input on the first frame after focus is regained — the OS
+        // typically delivers a large accumulated delta on that frame (alt-tab / snipping tool).
+        bool focusJustRegained = IsGameActive && !_prevIsGameActive;
+        _prevIsGameActive = IsGameActive;
+        var lookMouse = (IsGameActive && !focusJustRegained) ? mouse : new MouseState(
             _gd.Viewport.Width / 2, _gd.Viewport.Height / 2,
             mouse.ScrollWheelValue,
             ButtonState.Released, ButtonState.Released, ButtonState.Released,
