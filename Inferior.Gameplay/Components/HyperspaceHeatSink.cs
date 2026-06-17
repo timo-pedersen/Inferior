@@ -47,10 +47,21 @@ public sealed class HyperspaceHeatSink : ShipComponent
 
     public HyperspaceHeatSink(string name, double capacityJ, double transferRate, double heatDissipation)
     {
-        Name           = name;
-        CapacityJ      = capacityJ;
-        TransferRate   = transferRate;
+        Name            = name;
+        CapacityJ       = capacityJ;
+        TransferRate    = transferRate;
         HeatDissipation = heatDissipation;
+
+        // Saturation dumps heat to realspace — edge-triggered critical alert
+        OnSaturation += () =>
+        {
+            StoredHeatJ = 0.0;
+            DataBus.System.Publish(Topics.System.All,
+                new($"{Name}: SATURATION — thermal dump to realspace",
+                    SystemMessagePriority.Critical));
+        };
+
+        RegisterSensors();
     }
 
     /// <summary>
@@ -63,7 +74,8 @@ public sealed class HyperspaceHeatSink : ShipComponent
         double net = incomingHeatWatts - CurrentDissipationRate;  // watts
         StoredHeatJ = Math.Clamp(StoredHeatJ + net * dt, 0.0, CapacityJ);
 
-        // Edge-triggered: fires once on transition to saturation, not every tick while saturated
+        // Edge-triggered: fires once on transition to saturation, not every tick while saturated.
+        // The OnSaturation handler resets StoredHeatJ to 0 — check _wasSaturated after possible reset.
         if (IsSaturated && !_wasSaturated)
             OnSaturation?.Invoke();
         _wasSaturated = IsSaturated;
@@ -83,5 +95,20 @@ public sealed class HyperspaceHeatSink : ShipComponent
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
             new($"{Name}: online — {CapacityJ / 1e6:F0} MJ capacity, {HeatDissipation / 1e3:F0} kW dissipation"));
+    }
+
+    private void RegisterSensors()
+    {
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.HeatSink.Fill}",
+            () => StoredHeatJ / CapacityJ,
+            safeRange:  new RangeValue(0.0, 0.7),
+            totalRange: new RangeValue(0.0, 1.0)));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.HeatSink.Dissipation}",
+            () => CurrentDissipationRate,
+            safeRange:  new RangeValue(0.0, HeatDissipation),
+            totalRange: new RangeValue(0.0, HeatDissipation)));
     }
 }

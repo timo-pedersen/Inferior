@@ -2487,11 +2487,25 @@ public sealed class SystemSpaceState : GameState
         var shieldConnector = new ConnectorComponent("ShieldConnector", "MainBus", "Shield", maxPower: 600e3);
         shieldConnector.Connect(powerManager, _shield.DemandWatts, _shield.ReceivePower);
 
+        var heatsink = new HyperspaceHeatSink("HeatSink",
+            capacityJ:      50_000_000,   // 50 MJ thermal mass
+            transferRate:   800_000,      // 800 kW max inflow from coolant
+            heatDissipation: 500_000);    // 500 kW to hyperspace at full load
+
+        var coolant = new CoolantSystem("Coolant",
+            heatFlowPerComponent: 150_000,  // 150 kW max per node
+            coolantLeakage:       0.0002);  // ~0.02 %/s
+        coolant.AttachHeatSink(heatsink);
+        coolant.RegisterThermalNode(reactor.ThermalNode!);
+        coolant.RegisterThermalNode(_shield.ThermalNode!);
+
         ship.Install(reactor);
         ship.Install(bus);
         ship.Install(powerManager);
         ship.Install(_shield);
         ship.Install(shieldConnector);
+        ship.Install(heatsink);
+        ship.Install(coolant);
         _shield.PowerOn = false;  // starts off — player enables via SYS panel
 
         _ship = ship;

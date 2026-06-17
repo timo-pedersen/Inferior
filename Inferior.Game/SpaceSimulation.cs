@@ -246,6 +246,15 @@ public sealed class SpaceSimulation : Simulation
         _atmPressure.Tick(_lastDt);
         _solarSpectrum.Tick(_lastDt);
 
+        // Thermal signature = sum of heat generation rates across all heated components
+        if (_ship != null)
+        {
+            double sig = 0.0;
+            foreach (var c in _ship.Components)
+                if (c.ThermalNode != null) sig += c.ThermalNode.LastHeatInputW;
+            DataBus.Instruments.Publish(Topics.Ship.ThermalSignature, sig);
+        }
+
         var snap = _shipSnapshot;
         if (_ship != null && snap != null)
         {

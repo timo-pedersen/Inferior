@@ -25,6 +25,7 @@
 | Persistence layer | ✓ Partial | Architecture designed; file implementations in progress |
 | ShipSizeClass enum | ✓ Stubbed | Exists, not yet enforced |
 | **Power system** | ✓ Done | PowerCore → PowerBus → Connector → Shield chain working; cold start sequence; PowerPriorityManager; instruments reporting to DataBus; CommandBus integration |
+| **Heat & coolant system** | ✓ Done | `ThermalNode.LastHeatInputW`; `ShipComponent.EffectiveEfficiency` + overtemp damage in Tick; throttle heat curve in `PowerReactor`; `ShieldComponent` ThermalNode added; `HyperspaceHeatSink` resets on saturation + publishes Critical alert; `CoolantSystem` edge-triggered level warnings (NB/Warning/ImportantWarning/Critical); `Topics.Ship.ThermalSignature` published per tick |
 | **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `inferior-design-stations-claude.md` |
 | **Directional lighting** | ✓ Done | Hull: real-time `VertexPositionNormalTexture` + `BasicEffect LightingEnabled=true` from actual star pos; Decoration: pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
@@ -68,11 +69,9 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ### Power system — refinement phase
 
-Core working: reactor, bus, shield startup sequence, instruments. Needs:
+Core working: reactor, bus, shield startup sequence, instruments, full thermal/coolant loop. Needs:
 - More ship components wired in (engine power draw, gyro, artificial gravity)
 - FlyabilityMonitor checks
-- Heat system implementation
-- Coolant loop
 
 ---
 
@@ -80,7 +79,7 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 1. **Station texture quality pass** — replace 5×7 font with larger / higher-res glyphs; add per-economy accent markings, panel rivets, warning stripes
 3. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
-4. **Power system refinement** — heat, coolant, more components
+4. **Power system refinement** — more components (engine, gyro), FlyabilityMonitor
 5. **Ship hull implementation** — vertex-first mesh, panel auto-generation
 
 ### Container deferred work (do not implement until reviewed)

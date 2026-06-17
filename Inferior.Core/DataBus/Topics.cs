@@ -169,6 +169,12 @@ public static class Topics
         public const string UpsideDown         = "LandingSupport.UpsideDown";         // 1.0 = inverted relative to pad
     }
 
+    public static class Ship
+    {
+        /// <summary>Sum of all component ThermalNode.LastHeatInputW — total heat generation rate (watts).</summary>
+        public const string ThermalSignature = "Ship.ThermalSignature";
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {

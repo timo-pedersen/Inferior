@@ -25,6 +25,12 @@ public sealed class ThermalNode
     /// <summary>Current thermal energy stored, in joules.</summary>
     public double CurrentHeat { get; private set; }
 
+    /// <summary>
+    /// Heat generation rate (watts) from the last Update call — positive contributions only.
+    /// Cooling withdrawals are excluded. Used for ThermalSignature summing.
+    /// </summary>
+    public double LastHeatInputW { get; private set; }
+
     /// <summary>Physical temperature in Kelvin — published to DataBus.Instruments for display.</summary>
     public double Temperature => CurrentHeat / HeatCapacity;
 
@@ -47,6 +53,8 @@ public sealed class ThermalNode
     /// </summary>
     public void Update(double netHeatWatts, double dt)
     {
+        if (netHeatWatts > 0.0)
+            LastHeatInputW = netHeatWatts;
         CurrentHeat = Math.Max(0.0, CurrentHeat + netHeatWatts * dt);
     }
 }

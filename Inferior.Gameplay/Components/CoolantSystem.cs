@@ -28,6 +28,12 @@ public sealed class CoolantSystem : ShipComponent
 
     private double _lastFlowRate;
 
+    // Edge-triggered warning flags — set when threshold crossed, cleared when level recovers
+    private bool _sentLow;         // < 50 %
+    private bool _sentCritical;    // < 25 %
+    private bool _sentNearDepleted;// < 10 %
+    private bool _sentDepleted;    // = 0 %
+
     public CoolantSystem(string name,
                          double heatFlowPerComponent,
                          double coolantLeakage = 0.0001)
@@ -51,6 +57,7 @@ public sealed class CoolantSystem : ShipComponent
     {
         // Leakage
         Level = Math.Max(0.0, Level - CoolantLeakage * dt);
+        PublishCoolantWarnings();
 
         if (_sink == null)
         {
@@ -84,6 +91,48 @@ public sealed class CoolantSystem : ShipComponent
         PublishSensorRanges();
         DataBus.System.Publish(Topics.System.All,
             new($"{Name}: online — {HeatFlowPerComponent / 1e3:F0} kW/node, {Level:P0} coolant"));
+    }
+
+    private void PublishCoolantWarnings()
+    {
+        // Depleted (= 0): Critical — edge-triggered, clears when > 0
+        if (Level <= 0.0 && !_sentDepleted)
+        {
+            _sentDepleted = true;
+            DataBus.System.Publish(Topics.System.All,
+                new($"{Name}: coolant depleted — thermal runaway imminent",
+                    SystemMessagePriority.Critical));
+        }
+        else if (Level > 0.0) _sentDepleted = false;
+
+        // Near-depleted (< 10 %): ImportantWarning
+        if (Level < 0.10 && !_sentNearDepleted)
+        {
+            _sentNearDepleted = true;
+            DataBus.System.Publish(Topics.System.All,
+                new($"{Name}: coolant critically low ({Level:P0})",
+                    SystemMessagePriority.ImportantWarning));
+        }
+        else if (Level >= 0.10) _sentNearDepleted = false;
+
+        // Critical (< 25 %): Warning
+        if (Level < 0.25 && !_sentCritical)
+        {
+            _sentCritical = true;
+            DataBus.System.Publish(Topics.System.All,
+                new($"{Name}: coolant low ({Level:P0})",
+                    SystemMessagePriority.Warning));
+        }
+        else if (Level >= 0.25) _sentCritical = false;
+
+        // Low (< 50 %): NB
+        if (Level < 0.50 && !_sentLow)
+        {
+            _sentLow = true;
+            DataBus.System.Publish(Topics.System.All,
+                new($"{Name}: coolant below 50 %", SystemMessagePriority.NB));
+        }
+        else if (Level >= 0.50) _sentLow = false;
     }
 
     private void RegisterSensors()

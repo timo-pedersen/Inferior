@@ -31,7 +31,9 @@ public sealed class ShieldComponent : ShipComponent
     private double _deliveredWatts;
     private double _progressCooldown;
 
-    public ShieldComponent(string name, double maxShieldJ, double chargeRateW)
+    public ShieldComponent(string name, double maxShieldJ, double chargeRateW,
+                           double heatCapacity = 3_000.0,
+                           double maxHeatJ     = 1_800_000.0)
     {
         Name             = name;
         MaxShieldJ       = maxShieldJ;
@@ -39,6 +41,7 @@ public sealed class ShieldComponent : ShipComponent
         PowerConsumption = chargeRateW;
         StartupTimer     = double.PositiveInfinity;  // self-managed — completes when capacitor is full
         _capacitor       = new PowerCapacitor(maxShieldJ);
+        ThermalNode      = new ThermalNode(heatCapacity, maxHeatJ);
 
         RegisterSensors();
     }
@@ -88,6 +91,7 @@ public sealed class ShieldComponent : ShipComponent
     protected override void OnInitializingTick(double dt)
     {
         _capacitor.Charge(_deliveredWatts, dt);
+        ThermalNode?.Update(_deliveredWatts * (1.0 - EffectiveEfficiency), dt);
         DataBus.Instruments.Publish($"{Topics.Shield.Name}.{Topics.Shield.Capacitor}", _capacitor.FillFraction);
 
         if (_capacitor.FillFraction >= 1.0)
@@ -117,6 +121,7 @@ public sealed class ShieldComponent : ShipComponent
     protected override void OnTick(double dt)
     {
         _capacitor.Charge(_deliveredWatts, dt);
+        ThermalNode?.Update(_deliveredWatts * (1.0 - EffectiveEfficiency), dt);
         TickSensors();
     }
 
@@ -146,5 +151,16 @@ public sealed class ShieldComponent : ShipComponent
             () => Damage,
             safeRange:  new RangeValue(0.0, 0.2),
             totalRange: new RangeValue(0.0, 1.0)));
+
+        if (ThermalNode != null)
+        {
+            double maxTempK  = ThermalNode.MaxHeatJ / ThermalNode.HeatCapacity;
+            double safeTempK = maxTempK * 0.7;
+            _sensors.Add(new ComponentSensor(
+                $"{Name}.Temperature",
+                () => ThermalNode.Temperature,
+                safeRange:  new RangeValue(0, safeTempK),
+                totalRange: new RangeValue(0, maxTempK)));
+        }
     }
 }

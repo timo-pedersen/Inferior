@@ -78,7 +78,7 @@ public sealed class EngineComponent : ShipComponent
         CurrentAlphaRedWatts   = CanGenerateAlphaRed ? AlphaRedPower * fraction : 0.0;
 
         if (ThermalNode != null)
-            ThermalNode.Update(_deliveredWatts * 0.15, dt);  // 15% heat stub
+            ThermalNode.Update(_deliveredWatts * (1.0 - EffectiveEfficiency), dt);
 
         TickSensors();
     }
