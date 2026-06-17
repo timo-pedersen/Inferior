@@ -2355,10 +2355,11 @@ public sealed class SystemSpaceState : GameState
         _padDistance         = delta.Length;
         _padDirection        = _padDistance > 1.0 ? delta * (1.0 / _padDistance) : DVec3.Zero;
 
-        // Derive pad forward axis via tangent frame (same logic as StationDecorator)
-        DVec3 hint       = System.Math.Abs(worldNormal.Y) < 0.9 ? DVec3.UnitY : DVec3.UnitZ;
-        DVec3 padRight   = DVec3.Normalize(DVec3.Cross(hint, worldNormal));
-        DVec3 padForward = DVec3.Normalize(DVec3.Cross(worldNormal, padRight));
+        // Rotate the station-local forward axis (stored by StationGenerator to match the visual arrow)
+        // to world space via the station orientation quaternion.
+        var localFwdV = new Vector3((float)pad.LocalForward.X, (float)pad.LocalForward.Y, (float)pad.LocalForward.Z);
+        var worldFwdV = Vector3.Normalize(Vector3.TransformNormal(localFwdV, Matrix.CreateFromQuaternion(ori)));
+        DVec3 padForward = new DVec3(worldFwdV.X, worldFwdV.Y, worldFwdV.Z);
 
         // Push to sim thread for LandingSupportSystem
         var padData = new LandingPadData(

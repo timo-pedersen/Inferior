@@ -35,4 +35,11 @@ public sealed class LandingPad
     /// Zero until geometry is generated.
     /// </summary>
     public DVec3 LocalNormal { get; set; }
+
+    /// <summary>
+    /// Forward axis of the pad in station-local space — matches the visual approach arrow.
+    /// Derived from the module-local tangent frame, same as StationDecorator.TangentFrame.
+    /// Zero until geometry is generated.
+    /// </summary>
+    public DVec3 LocalForward { get; set; }
 }

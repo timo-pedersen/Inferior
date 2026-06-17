@@ -426,6 +426,16 @@ public sealed class StationGenerator
                 Vector3 wn = Vector3.Normalize(Vector3.TransformNormal(port.OutwardNormal, mod.Transform));
                 pad.LocalPosition = new DVec3(wp.X, wp.Y, wp.Z);
                 pad.LocalNormal   = new DVec3(wn.X, wn.Y, wn.Z);
+
+                // Compute pad-forward = visual arrow direction, using module-local normal
+                // (port.OutwardNormal) for the tangent frame — same as StationDecorator.TangentFrame.
+                // Transforming module-local "up" to station-local space gives the correct forward axis.
+                Vector3 localN  = port.OutwardNormal;
+                Vector3 hint    = MathF.Abs(localN.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitZ;
+                Vector3 localR  = Vector3.Normalize(Vector3.Cross(hint, localN));
+                Vector3 localUp = Vector3.Normalize(Vector3.Cross(localN, localR));
+                Vector3 wf      = Vector3.Normalize(Vector3.TransformNormal(localUp, mod.Transform));
+                pad.LocalForward = new DVec3(wf.X, wf.Y, wf.Z);
             }
         }
     }

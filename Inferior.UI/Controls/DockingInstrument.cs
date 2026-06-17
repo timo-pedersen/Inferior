@@ -99,19 +99,21 @@ public sealed class DockingInstrument : Control
         float pixPerMetre   = padR / maxLateralM;
 
         // Ship circle:
-        //   - Radius scales with height: at 0m → padR*0.5, at 50m → padR*1.5
-        //   - Clamps so it never exceeds areaR
-        float heightClamp  = (float)System.Math.Clamp(_heightAbovePad, 0.0, 80.0);
-        float shipR        = padR * (0.5f + heightClamp / 50f);
-        shipR              = MathF.Min(shipR, areaR * 0.85f);
+        //   - Radius matches padR at height=0 (equal size = landed condition)
+        //   - Grows with height; clamped so it never exceeds areaR
+        float heightM = MathF.Max(0f, (float)_heightAbovePad);
+        float shipR   = padR * (1f + heightM / 80f);
+        shipR         = MathF.Min(shipR, areaR * 0.85f);
 
         // Pitch deformation: 0° → shipR (round), 90° → 0 (line)
         float pitchRad     = (float)(_pitchDev * System.Math.PI / 180.0);
         float shipRY       = shipR * MathF.Cos(pitchRad);   // vertical semi-axis
         shipRY             = MathF.Max(shipRY, 1.5f);        // never fully disappears
 
-        // Lateral offset → ship circle X displacement (clamped to visible area)
-        float lateralPx    = (float)System.Math.Clamp(_lateralOffset * pixPerMetre, -(areaR - shipR * 0.5f), areaR - shipR * 0.5f);
+        // Lateral/longitudinal offsets → ship circle displacement (clamped to visible area)
+        float edgeClamp        = areaR - shipR * 0.5f;
+        float lateralPx        = (float)System.Math.Clamp(_lateralOffset      * pixPerMetre, -edgeClamp, edgeClamp);
+        float longitudinalPx   = (float)System.Math.Clamp(_longitudinalOffset * pixPerMetre, -edgeClamp, edgeClamp);
 
         // Heading angle: 0 = nose up (toward pad forward), clockwise positive
         float headingRad   = (float)(_headingDev * System.Math.PI / 180.0);
@@ -147,7 +149,7 @@ public sealed class DockingInstrument : Control
         // ── Draw ship circle + crosshair (only position if not upside down) ───
 
         float shipCx = upsideDown ? cx : cx + lateralPx;
-        float shipCy = cy;  // longitudinal not shown — approach axis assumed
+        float shipCy = upsideDown ? cy : cy + longitudinalPx;  // fwd = up on screen; positive offset = behind pad = below centre
 
         DrawEllipse(sb, renderer, new Vector2(shipCx, shipCy), shipR, shipRY, colShip, 48);
         DrawCrosshair(sb, renderer, new Vector2(shipCx, shipCy),
