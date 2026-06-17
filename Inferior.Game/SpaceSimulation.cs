@@ -40,6 +40,8 @@ public sealed class SpaceSimulation : Simulation
         DVec3      Velocity,
         Quaternion Orientation,
         DVec3      CockpitWorldPosition,
+        DVec3      Forward,
+        DVec3      Up,
         double     SimTime);
 
     private volatile ShipSnapshot? _shipSnapshot;
@@ -139,6 +141,7 @@ public sealed class SpaceSimulation : Simulation
         // Advance() call that precedes this publish, yielding a 1-tick (≈350 m) mismatch.
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
+            ship.Forward, ship.Up,
             GameClock.SimTime);
     }
 
@@ -243,11 +246,11 @@ public sealed class SpaceSimulation : Simulation
         _atmPressure.Tick(_lastDt);
         _solarSpectrum.Tick(_lastDt);
 
-        var ship = _ship;
-        if (ship != null)
+        var snap = _shipSnapshot;
+        if (_ship != null && snap != null)
         {
             _landingSupport.SelectPad(_activePadTarget);
-            _landingSupport.Tick(ship);
+            _landingSupport.Tick(snap.Position, snap.Forward, snap.Up);
         }
         else
         {

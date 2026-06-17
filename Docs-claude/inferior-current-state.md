@@ -32,6 +32,7 @@
 | **Procedural station textures** | ✓ Done | `StationProfile` (economy/age/wealth); `TexturePalette` per economy type; 5-step 512×512 generation (noise → panels → seams → grime → scratches); cache by (surface, paletteHash); station name baked onto core module face; `BitmapFonts` 5×7 + `TexturePainter` |
 | **Parabolic dishes** | ✓ Done | 3 size classes (9/11/13-sided); per-face small+medium in `GenerateDishes`; station-wide landmark large dish in `RunLargeDishPass` (22% of science/military stations); support arm, diagonal brace, feed mast+box, feed struts |
 | **Window enhancements** | ✓ Done | Per-window weighted palette; rectangular/octagon/cupola frames (Lerp blend toward dark neutral); glass gradient (bottom 0.72× + blue nudge → top Lerp→White 0.18); cupola frame per triangle + 3 edge braces per panel; `AddQuadGradient`/`AddTriangleGradient` in StationModuleMesh |
+| **Shipping containers** | ✓ Done (visual pass complete) | `ShippingContainer`, `ContainerContents`, `LockGrade`, `CommodityType` in `Inferior.Game.Containers`; `ShippingContainerFactory` with full chamfered mesh pipeline; `StationModuleMesh.ToArrays()` added; containers as station decoration via `GenerateContainers` in `StationDecorator` — placed on module faces using the same `FaceInfo`/`FaceOccupancy` system as tanks; full chamfer geometry (4 long + 8 short strips + 8 corner triangles, all gap-free); manufacturer label on ±Y faces via `ShippingContainerFactory.GenerateManufacturerName`; handedness fix for vertical/mirrored placements |
 
 ---
 
@@ -77,9 +78,17 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 ## What is next (priority order)
 
 1. **Station texture quality pass** — replace 5×7 font with larger / higher-res glyphs; add per-economy accent markings, panel rivets, warning stripes
-2. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
-3. **Power system refinement** — heat, coolant, more components
-4. **Ship hull implementation** — vertex-first mesh, panel auto-generation
+3. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
+4. **Power system refinement** — heat, coolant, more components
+5. **Ship hull implementation** — vertex-first mesh, panel auto-generation
+
+### Container deferred work (do not implement until reviewed)
+- Station decorator pass placing containers on docking/cargo modules
+- Ship hardpoints and `ShippingModule` component
+- `ShippingContainerStack` (magnetically bonded groups)
+- Parent-relative transform
+- Lock/unlock interaction
+- Cargo simulation / `CommodityType` economy
 
 ---
 

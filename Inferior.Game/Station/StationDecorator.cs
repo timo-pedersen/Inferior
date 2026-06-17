@@ -1,3 +1,4 @@
+using Inferior.Game.Containers;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
@@ -53,11 +54,16 @@ public static class StationDecorator
                 mesh.BaseFaceCount = mesh.FaceCount;
 
             // Pass 1-N: raised decoration (not included in AO range).
-            var tankRng = new System.Random(baseRng.Next());
-            var dishRng = new System.Random(baseRng.Next());
+            var tankRng      = new System.Random(baseRng.Next());
+            var dishRng      = new System.Random(baseRng.Next());
+            var containerRng = new System.Random(baseRng.Next());
 
             foreach (var face in faces)
             {
+                // Landing pad faces must be clear — markings and lights are added by
+                // GenerateLandingPads. Skip all decoration passes so nothing lands on them.
+                if (IsDockingPadFace(mod, face)) continue;
+
                 var occupancy = new FaceOccupancy();
                 GenerateWindows     (mod, face, windowRng,      mesh, glassMesh, occupancy);
                 GenerateHatches     (mod, face, hatchRng,       mesh, occupancy);
@@ -68,6 +74,7 @@ public static class StationDecorator
                 GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
                 GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy);
                 GenerateTanks       (mod, face, mesh, occupancy, new System.Random(tankRng.Next()));
+                GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()));
             }
 
             GeneratePipes         (mod, faces, pipeRng,     mesh);
@@ -210,6 +217,15 @@ public static class StationDecorator
             if (port == mod.AttachmentPort)   return true;
             if (mod.ChildPorts.Contains(port)) return true;
         }
+        return false;
+    }
+
+    // Returns true when the face is a ship-landing surface on a docking module.
+    private static bool IsDockingPadFace(PlacedModule mod, FaceInfo face)
+    {
+        foreach (var port in mod.Definition.Ports)
+            if (port.IsDocking && Vector3.Dot(face.LocalNormal, port.OutwardNormal) > 0.9f)
+                return true;
         return false;
     }
 
@@ -2686,4 +2702,333 @@ public static class StationDecorator
         (byte)Math.Min(c.G * factor, 255),
         (byte)Math.Min(c.B * factor, 255),
         c.A);
+
+    // ── Shipping containers ───────────────────────────────────────────────────
+
+    // Container body: 6.0 × 2.5 × 2.5 m (L × W × H).
+    // Placed flat on module faces, one long side resting on the surface.
+    // Orientation: long axis horizontal (60%) or vertical (40%) relative to face axes.
+
+    private const float ContainerL = 6.0f;
+    private const float ContainerS = 2.5f;  // short dimension (square cross-section)
+
+    // Per-station colour palette derived from station seed; varies by category.
+    private static readonly Color[] ContainerColorsBase =
+    [
+        new Color(180, 55,  40),   // freight red
+        new Color( 40, 80, 160),   // shipping blue
+        new Color( 50,115,  50),   // industrial green
+        new Color(145,120,  40),   // mustard yellow
+        new Color( 90, 90,  90),   // neutral grey
+        new Color(155, 80,  30),   // rust orange
+        new Color( 60,100,130),    // slate blue
+        new Color(100, 55,  55),   // dark red
+    ];
+
+    private static void GenerateContainers(PlacedModule mod, FaceInfo face,
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
+    {
+        if (!face.IsExposed) return;
+        // Need at least enough space for one container laid on its smallest footprint
+        if (face.Width < ContainerS + 0.6f || face.Height < ContainerS + 0.6f) return;
+
+        float prob = mod.Definition.Category switch
+        {
+            "cargo"      => 0.85f,
+            "docking"    => 0.70f,
+            "industrial" => 0.60f,
+            "core"       => 0.40f,
+            "military"   => 0.35f,
+            "fuel"       => 0.20f,
+            "hab"        => 0.15f,
+            "connector"  => 0.08f,
+            _            => 0.12f,
+        };
+        if (rng.NextDouble() > prob) return;
+
+        int maxContainers = (face.Width * face.Height) switch
+        {
+            >= 60f => 4,
+            >= 30f => 3,
+            >= 15f => 2,
+            _      => 1,
+        };
+
+        // Pick 2–3 colours from the palette so containers on the same face have variety
+        Color[] palette = PickContainerPalette(mod.Seed, rng);
+
+        int placed = 0;
+        double nextProb = 1.0;
+        while (placed < maxContainers && rng.NextDouble() < nextProb)
+        {
+            PlaceContainer(mod, face, mesh, occupancy, rng, palette[rng.Next(palette.Length)]);
+            placed++;
+            nextProb = placed == 1 ? 0.60 : 0.35;
+        }
+    }
+
+    private static Color[] PickContainerPalette(int modSeed, System.Random rng)
+    {
+        // 2–3 randomly chosen colours, offset by mod seed so different stations have variety
+        var pool = ContainerColorsBase;
+        int startIdx = (modSeed & 0x7FFF) % pool.Length;
+        return
+        [
+            pool[startIdx % pool.Length],
+            pool[(startIdx + 1 + rng.Next(3)) % pool.Length],
+            pool[(startIdx + 3 + rng.Next(2)) % pool.Length],
+        ];
+    }
+
+    private static void PlaceContainer(PlacedModule mod, FaceInfo face,
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Color color)
+    {
+        // Decide orientation: long axis along Right (horizontal) or Up (vertical)
+        bool longHoriz = rng.NextDouble() < 0.6;
+
+        // Footprint on the face
+        float footRight = longHoriz ? ContainerL : ContainerS;
+        float footUp    = longHoriz ? ContainerS : ContainerL;
+        float halfFR    = footRight * 0.5f;
+        float halfFU    = footUp    * 0.5f;
+
+        // Check it can fit inside the face at all
+        float marginR = face.Width  * 0.5f - halfFR;
+        float marginU = face.Height * 0.5f - halfFU;
+        if (marginR < 0f || marginU < 0f) return;
+
+        // Try a few random positions
+        for (int attempt = 0; attempt < 10; attempt++)
+        {
+            float cu = (float)(rng.NextDouble() * 2 - 1) * MathF.Max(marginR - 0.3f, 0f);
+            float cv = (float)(rng.NextDouble() * 2 - 1) * MathF.Max(marginU - 0.3f, 0f);
+
+            if (!occupancy.TryOccupy(cu, cv, halfFR, halfFU, 0.20f)) continue;
+
+            // Module-local centre of the container
+            // Container sits on the face: stick out ContainerS * 0.5 in normal direction
+            Vector3 centre = face.LocalCenter
+                + face.LocalRight  * cu
+                + face.LocalUp     * cv
+                + face.LocalNormal * (ContainerS * 0.5f);
+
+            // Build the oriented-box transform.
+            // X axis = long axis of container, Z axis = face normal (depth off surface).
+            Matrix t;
+            if (longHoriz)
+            {
+                // Long axis along face.Right
+                t = new Matrix(
+                    face.LocalRight.X,  face.LocalRight.Y,  face.LocalRight.Z,  0,
+                    face.LocalUp.X,     face.LocalUp.Y,     face.LocalUp.Z,     0,
+                    face.LocalNormal.X, face.LocalNormal.Y, face.LocalNormal.Z, 0,
+                    centre.X,           centre.Y,           centre.Z,           1);
+            }
+            else
+            {
+                // Long axis along face.Up
+                t = new Matrix(
+                    face.LocalUp.X,     face.LocalUp.Y,     face.LocalUp.Z,     0,
+                    face.LocalRight.X,  face.LocalRight.Y,  face.LocalRight.Z,  0,
+                    face.LocalNormal.X, face.LocalNormal.Y, face.LocalNormal.Z, 0,
+                    centre.X,           centre.Y,           centre.Z,           1);
+            }
+
+            AddContainerGeometry(mesh, t, color, rng);
+            break;
+        }
+    }
+
+    // Emits one container's geometry into `mesh` using `transform` to orient it.
+    // The container in local transform space: X = long axis (6 m), Y = cross (2.5 m), Z = depth off surface (2.5 m).
+    // This is additive — all faces are added directly to the module mesh, lit by the station pipeline.
+    private static void AddContainerGeometry(StationModuleMesh mesh, Matrix t, Color color, System.Random rng)
+    {
+        float hl = ContainerL * 0.5f;  // 3.0 m half-length
+        float hs = ContainerS * 0.5f;  // 1.25 m half short dimension
+        float c  = 0.20f;              // chamfer
+
+        // Extract the three axis vectors from the transform
+        var axisX = new Vector3(t.M11, t.M12, t.M13); // long
+        var axisY = new Vector3(t.M21, t.M22, t.M23); // cross
+        var axisZ = new Vector3(t.M31, t.M32, t.M33); // depth (face normal)
+        var orig  = new Vector3(t.M41, t.M42, t.M43); // centre
+
+        // Geometry assumes a right-handed frame: cross(axisX,axisY)=axisZ.
+        // Vertical containers swap LocalRight/LocalUp, making the frame left-handed; fix it here.
+        if (Vector3.Dot(Vector3.Cross(axisX, axisY), axisZ) < 0)
+            axisY = -axisY;
+
+        Color sideColor  = color;
+        Color darkColor  = DarkenColor(color, 0.72f);
+        Color chamfColor = DarkenColor(color, 0.88f);
+        Color doorColor  = new Color(
+            (byte)(color.R * 0.85f),
+            (byte)(color.G * 0.85f),
+            (byte)(color.B * 0.85f));
+        Color latchColor = new Color(
+            (byte)Math.Min(color.R * 0.5f + 80, 255),
+            (byte)Math.Min(color.G * 0.5f + 70, 255),
+            (byte)Math.Min(color.B * 0.5f + 50, 255));
+
+        // ── 4 long main faces ─────────────────────────────────────────────────
+        // Winding rule: lighting normal = cross(axisX, faceUp), must equal faceNormal.
+        // cross(axisX, -axisZ) = +axisY  →  +Y face faceUp = -axisZ
+        // cross(axisX,  axisZ) = -axisY  →  -Y face faceUp =  axisZ
+        // cross(axisX,  axisY) = +axisZ  →  +Z face faceUp =  axisY  (already correct)
+        // cross(axisX, -axisY) = -axisZ  →  -Z face faceUp = -axisY  (already correct)
+        AddBoxFace(mesh, orig, axisX,  axisY, -axisZ, hl - c, hs - c, hs, sideColor);  // +Y
+        AddBoxFace(mesh, orig, axisX, -axisY,  axisZ, hl - c, hs - c, hs, darkColor);  // -Y
+        AddBoxFace(mesh, orig, axisX,  axisZ,  axisY, hl - c, hs - c, hs, sideColor);  // +Z
+        AddBoxFace(mesh, orig, axisX, -axisZ, -axisY, hl - c, hs - c, hs, darkColor);  // -Z
+
+        // ── 2 end faces (doors) ───────────────────────────────────────────────
+        AddDoorFace(mesh, orig + axisX * hl, axisX,  axisY, axisZ, hs - c, doorColor, latchColor);
+        AddDoorFace(mesh, orig - axisX * hl, -axisX, axisY, axisZ, hs - c, doorColor, latchColor);
+
+        // ── 4 long chamfer strips (along X) ───────────────────────────────────
+        float lext = hl - c;
+        AddLongChamfStrip(mesh, orig, axisX,  axisY,  axisZ, lext, hs, c, chamfColor);
+        AddLongChamfStrip(mesh, orig, axisX,  axisY, -axisZ, lext, hs, c, chamfColor);
+        AddLongChamfStrip(mesh, orig, axisX, -axisY,  axisZ, lext, hs, c, chamfColor);
+        AddLongChamfStrip(mesh, orig, axisX, -axisY, -axisZ, lext, hs, c, chamfColor);
+
+        // ── 8 short chamfer strips (end × face = 2 × 4) ───────────────────────
+        foreach (float sx in new[] { 1f, -1f })
+        {
+            AddShortChamfStrip(mesh, orig, axisX, sx,  axisY, axisZ, hl, hs, c, chamfColor);
+            AddShortChamfStrip(mesh, orig, axisX, sx, -axisY, axisZ, hl, hs, c, chamfColor);
+            AddShortChamfStrip(mesh, orig, axisX, sx,  axisZ, axisY, hl, hs, c, chamfColor);
+            AddShortChamfStrip(mesh, orig, axisX, sx, -axisZ, axisY, hl, hs, c, chamfColor);
+        }
+
+        // ── 8 corner triangles ─────────────────────────────────────────────────
+        foreach (float sx in new[] { 1f, -1f })
+        foreach (float sy in new[] { 1f, -1f })
+        foreach (float sz in new[] { 1f, -1f })
+            AddCornerTriangle(mesh, orig, axisX, axisY, axisZ, sx, sy, sz, hl, hs, c, chamfColor);
+
+        // ── Manufacturer label on ±Y faces ────────────────────────────────────
+        string label = ShippingContainerFactory.GenerateManufacturerName(rng.Next());
+        Color  textColor = new Color(220, 215, 190);
+        int    cc = Math.Max(1, label.Length);
+        float  ps = Math.Clamp((hl - c) * 2f * 0.80f / (cc * (BitmapFonts.CharW + 1)), 0.022f, 0.072f);
+        float  tw = cc * (BitmapFonts.CharW + 1) * ps;
+        float  th = BitmapFonts.CharH * ps;
+        const float labelRaise = 0.015f;
+
+        // AddQuad(center,normal,up) uses right=cross(up,normal); textUp=-axisZ gives right=+axisX.
+        // +Y face: text reads left→right along axisX
+        AddTextGeometry(mesh, label,
+            orig + axisY * (hs + labelRaise) - axisX * (tw * 0.5f) + axisZ * (th * 0.5f),
+            axisX, -axisZ, axisY, ps, textColor);
+        // -Y face: mirror axisX so the text reads correctly from that side
+        AddTextGeometry(mesh, label,
+            orig - axisY * (hs + labelRaise) + axisX * (tw * 0.5f) + axisZ * (th * 0.5f),
+            -axisX, -axisZ, -axisY, ps, textColor);
+    }
+
+    // A rectangular face of the container body.
+    // `faceNormal` is the outward normal; `faceUp` is the up direction on the face.
+    // The face spans ±halfLen along axisX and ±halfShort along faceUp.
+    // `offset` is the distance from centre in the faceNormal direction.
+    private static void AddBoxFace(StationModuleMesh mesh,
+        Vector3 orig, Vector3 axisX, Vector3 faceNormal, Vector3 faceUp,
+        float halfLen, float halfShort, float offset, Color color)
+    {
+        Vector3 c = orig + faceNormal * offset;
+        Vector3 hl = axisX   * halfLen;
+        Vector3 hs = faceUp  * halfShort;
+
+        // CW from outside (faceNormal points outward): v0=BL, v1=BR, v2=TR, v3=TL
+        mesh.AddQuad(c - hl - hs, c + hl - hs, c + hl + hs, c - hl + hs, color);
+    }
+
+    // Two-panel door face with a thin central latch bar.
+    private static void AddDoorFace(StationModuleMesh mesh,
+        Vector3 faceCenter, Vector3 faceNormal, Vector3 faceUp, Vector3 faceRight,
+        float hs, Color panelColor, Color latchColor)
+    {
+        float gapW = 0.03f;
+        float panW = hs - gapW * 0.5f;
+        const float recess = 0.012f;
+
+        // Left panel
+        Vector3 lCtr = faceCenter + faceRight * (-(panW * 0.5f + gapW * 0.25f));
+        mesh.AddQuad(lCtr - faceNormal * recess, faceNormal, faceUp, panW, hs * 2f, panelColor);
+        // Right panel
+        Vector3 rCtr = faceCenter + faceRight * (panW * 0.5f + gapW * 0.25f);
+        mesh.AddQuad(rCtr - faceNormal * recess, faceNormal, faceUp, panW, hs * 2f, panelColor);
+        // Central latch bar
+        mesh.AddQuad(faceCenter, faceNormal, faceUp, gapW * 1.5f, hs * 1.0f, latchColor);
+        // Horizontal latch bars on each panel
+        float barLen = panW * 0.6f;
+        mesh.AddQuad(lCtr + faceNormal * 0.015f + faceUp * (hs * 0.5f),
+                     faceNormal, faceRight, barLen, 0.06f, latchColor);
+        mesh.AddQuad(lCtr + faceNormal * 0.015f - faceUp * (hs * 0.5f),
+                     faceNormal, faceRight, barLen, 0.06f, latchColor);
+        mesh.AddQuad(rCtr + faceNormal * 0.015f + faceUp * (hs * 0.5f),
+                     faceNormal, faceRight, barLen, 0.06f, latchColor);
+        mesh.AddQuad(rCtr + faceNormal * 0.015f - faceUp * (hs * 0.5f),
+                     faceNormal, faceRight, barLen, 0.06f, latchColor);
+    }
+
+    // Long chamfer strip along the X axis, between axisA face and axisB face.
+    // Vertices are derived from adjacent face corners to avoid gaps.
+    private static void AddLongChamfStrip(StationModuleMesh mesh,
+        Vector3 orig, Vector3 axisX, Vector3 axisA, Vector3 axisB,
+        float halfLen, float hs, float c, Color color)
+    {
+        Vector3 edgeA = axisA * hs       + axisB * (hs - c);  // corner of axisA face
+        Vector3 edgeB = axisA * (hs - c) + axisB * hs;        // corner of axisB face
+
+        var v00 = orig - axisX * halfLen + edgeA;
+        var v10 = orig + axisX * halfLen + edgeA;
+        var v11 = orig + axisX * halfLen + edgeB;
+        var v01 = orig - axisX * halfLen + edgeB;
+
+        var faceNormal = Vector3.Cross(v10 - v00, v01 - v00);
+        if (Vector3.Dot(faceNormal, axisA + axisB) < 0)
+            mesh.AddQuad(v01, v11, v10, v00, color);
+        else
+            mesh.AddQuad(v00, v10, v11, v01, color);
+    }
+
+    // Short chamfer strip at one end of the container, between the end face and a long face.
+    // sx = ±1 selects which end; faceN = outward normal of the long face;
+    // faceU = axis along which the strip runs (the third axis perpendicular to both axisX and faceN).
+    private static void AddShortChamfStrip(StationModuleMesh mesh,
+        Vector3 orig, Vector3 axisX, float sx, Vector3 faceN, Vector3 faceU,
+        float hl, float hs, float c, Color color)
+    {
+        float hsc = hs - c;
+        var v00 = orig + sx * (hl - c) * axisX + faceN * hs  - faceU * hsc;
+        var v10 = orig + sx * (hl - c) * axisX + faceN * hs  + faceU * hsc;
+        var v11 = orig + sx *  hl      * axisX + faceN * hsc + faceU * hsc;
+        var v01 = orig + sx *  hl      * axisX + faceN * hsc - faceU * hsc;
+
+        var faceNormal = Vector3.Cross(v10 - v00, v01 - v00);
+        if (Vector3.Dot(faceNormal, sx * axisX + faceN) < 0)
+            mesh.AddQuad(v01, v11, v10, v00, color);
+        else
+            mesh.AddQuad(v00, v10, v11, v01, color);
+    }
+
+    // Corner triangle closing the gap at one octant of the container.
+    // The three vertices are the shared corners of the three adjacent chamfer strips.
+    // Winding is derived analytically: flipped when sx*sy*sz < 0.
+    private static void AddCornerTriangle(StationModuleMesh mesh,
+        Vector3 orig, Vector3 axisX, Vector3 axisY, Vector3 axisZ,
+        float sx, float sy, float sz, float hl, float hs, float c, Color color)
+    {
+        float hsc = hs - c;
+        var A = orig + sx * (hl - c) * axisX + sy * hs  * axisY + sz * hsc * axisZ;
+        var B = orig + sx * (hl - c) * axisX + sy * hsc * axisY + sz * hs  * axisZ;
+        var C = orig + sx *  hl      * axisX + sy * hsc * axisY + sz * hsc * axisZ;
+
+        if (sx * sy * sz > 0)
+            mesh.AddTriangle(A, B, C, color);
+        else
+            mesh.AddTriangle(A, C, B, color);
+    }
 }

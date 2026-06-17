@@ -347,6 +347,17 @@ public sealed class StationModuleMesh
         }
     }
 
+    // Returns raw CPU-side arrays without requiring a GraphicsDevice.
+    // Indices are converted from int to short (safe up to 32 767 vertices).
+    public (VertexPositionColorTexture[] verts, short[] indices) ToArrays()
+    {
+        var verts   = _verts.ToArray();
+        var indices = new short[_idx.Count];
+        for (int i = 0; i < _idx.Count; i++)
+            indices[i] = (short)_idx[i];
+        return (verts, indices);
+    }
+
     // Builds GPU buffers from accumulated geometry. Returns null if the mesh is empty.
     public (VertexBuffer vb, IndexBuffer ib, int triCount)? Build(GraphicsDevice gd)
     {

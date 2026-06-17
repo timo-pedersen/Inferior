@@ -27,7 +27,8 @@ namespace Inferior.Gameplay.Sensors;
 /// </summary>
 public sealed class LandingSupportSystem
 {
-    // Written by main thread, read by sim thread — volatile for atomic swap
+    // Written and read on sim thread (via SelectPad in SpaceSimulation.Publish).
+    // Volatile is a safety net in case SelectPad is ever called cross-thread.
     private volatile LandingPadData? _activePad;
     private bool _wasActive;
 
@@ -37,8 +38,11 @@ public sealed class LandingSupportSystem
 
     public void SelectPad(LandingPadData? data) => _activePad = data;
 
-    /// <summary>Called once per sim tick from SpaceSimulation.Publish().</summary>
-    public void Tick(Inferior.Gameplay.Ship.Ship ship)
+    /// <summary>
+    /// Called once per sim tick from SpaceSimulation.Publish().
+    /// All ship values come from the tick's snapshot — never from a live Ship reference.
+    /// </summary>
+    public void Tick(DVec3 shipPosition, DVec3 shipForward, DVec3 shipUp)
     {
         var pad = _activePad;
 
@@ -55,23 +59,25 @@ public sealed class LandingSupportSystem
 
         // ── Geometry ─────────────────────────────────────────────────────────────
 
-        DVec3 delta    = pad.WorldPosition - ship.Position;
-        double dist    = delta.Length;
+        // padToShip: vector from pad centre to ship.
+        // Positive projection onto WorldNormal → ship is on the correct approach side.
+        DVec3 padToShip = shipPosition - pad.WorldPosition;
+        double dist     = padToShip.Length;
 
         DVec3 n   = pad.WorldNormal;
         DVec3 fwd = pad.ForwardAxis;
         // right is derived: cross(n, fwd) → pad short axis
         DVec3 right = DVec3.Normalize(DVec3.Cross(n, fwd));
 
-        double heightAbovePad     = DVec3.Dot(delta, n);
-        double lateralOffset      = DVec3.Dot(delta, right);
-        double longitudinalOffset = DVec3.Dot(delta, fwd);
+        double heightAbovePad     = DVec3.Dot(padToShip, n);
+        double lateralOffset      = DVec3.Dot(padToShip, right);
+        double longitudinalOffset = DVec3.Dot(padToShip, fwd);
 
         // Heading deviation: signed angle of ship-forward (projected onto pad plane) vs pad forward.
         // +  = ship nose rotated clockwise  (when viewed from pad normal direction)
         // −  = ship nose rotated counter-clockwise
         // 0  = aligned with pad forward axis
-        DVec3 shipFwdOnPad = ship.Forward - n * DVec3.Dot(ship.Forward, n);
+        DVec3 shipFwdOnPad = shipForward - n * DVec3.Dot(shipForward, n);
         double shipFwdLen  = shipFwdOnPad.Length;
         double headingDev  = 0.0;
         if (shipFwdLen > 1e-6)
@@ -83,11 +89,11 @@ public sealed class LandingSupportSystem
         }
 
         // Pitch deviation: 0 = face-on (ship forward parallel to pad normal); 90 = sideways
-        double dotFwdN  = System.Math.Clamp(DVec3.Dot(ship.Forward, n), -1.0, 1.0);
+        double dotFwdN  = System.Math.Clamp(DVec3.Dot(shipForward, n), -1.0, 1.0);
         double pitchDev = System.Math.Asin(System.Math.Abs(dotFwdN)) * (180.0 / System.Math.PI);
 
         // Upside-down: ship up dot pad normal < 0 means inverted
-        double upsideDown = DVec3.Dot(ship.Up, n) < 0.0 ? 1.0 : 0.0;
+        double upsideDown = DVec3.Dot(shipUp, n) < 0.0 ? 1.0 : 0.0;
 
         // ── Noise ─────────────────────────────────────────────────────────────────
 

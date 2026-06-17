@@ -99,10 +99,12 @@ public sealed class DockingInstrument : Control
         float pixPerMetre   = padR / maxLateralM;
 
         // Ship circle:
-        //   - Radius matches padR at height=0 (equal size = landed condition)
-        //   - Grows with height; clamped so it never exceeds areaR
-        float heightM = MathF.Max(0f, (float)_heightAbovePad);
-        float shipR   = padR * (1f + heightM / 80f);
+        //   - Matches padR when landed (height = 0)
+        //   - Grows linearly with altitude up to MaxTrackingHeightM, then clamps
+        //   - Negative heights (wrong side of pad) clamp to 0 → circle stays at padR
+        const float MaxTrackingHeightM = 150f;
+        float heightM = Math.Clamp((float)_heightAbovePad, 0f, MaxTrackingHeightM);
+        float shipR   = padR * (1f + heightM / MaxTrackingHeightM);
         shipR         = MathF.Min(shipR, areaR * 0.85f);
 
         // Pitch deformation: 0° → shipR (round), 90° → 0 (line)
