@@ -174,6 +174,7 @@ public sealed class SystemSpaceState : GameState
     private bool _uiMouseMode;
     private bool _debugCameraMode;
     private bool _prevIsGameActive = true;
+    private bool _prevUiMouseMode;
 
     // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
@@ -410,7 +411,7 @@ public sealed class SystemSpaceState : GameState
         var theme = Theme.InferiorDark(_font);
         _ui = new UIManager(_gd, theme);
         _uiMouseMode     = false;
-        _debugCameraMode = true;
+        _debugCameraMode = false;
 
         // ── Right panel: INSTR tab (meters) + NAV tab (direction ball) ────────
         const int panelW   = 260;
@@ -799,7 +800,9 @@ public sealed class SystemSpaceState : GameState
         // typically delivers a large accumulated delta on that frame (alt-tab / snipping tool).
         bool focusJustRegained = IsGameActive && !_prevIsGameActive;
         _prevIsGameActive = IsGameActive;
-        var lookMouse = (IsGameActive && !focusJustRegained) ? mouse : new MouseState(
+        bool justExitedUiMode = _prevUiMouseMode && !_uiMouseMode;
+        _prevUiMouseMode = _uiMouseMode;
+        var lookMouse = (IsGameActive && !focusJustRegained && !justExitedUiMode) ? mouse : new MouseState(
             _gd.Viewport.Width / 2, _gd.Viewport.Height / 2,
             mouse.ScrollWheelValue,
             ButtonState.Released, ButtonState.Released, ButtonState.Released,
