@@ -810,10 +810,18 @@ public sealed class SystemSpaceState : GameState
 
         if (_uiMouseMode)
         {
-            // UI mode — UI gets mouse/keyboard; camera and ship are frozen
+            // UI mode — UI gets mouse/keyboard; ship rotation is frozen.
             _ui?.Update(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
             if (_debugCameraMode)
                 _camera.Update(dt, new MouseState(), new KeyboardState()); // clear any held drag
+            else
+            {
+                // Ship camera must still track the ship — without this the camera freezes
+                // while thrust keeps the ship moving, causing a snap on UI-mode exit.
+                var snap = _simulation.ShipState;
+                if (snap != null)
+                    _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
+            }
             // Preserve the last flight-mode thrust so relative speed is unchanged when
             // the player opens the UI. Rotation inputs are zeroed to keep the ship still.
             _simulation.SetInput(_lastFlightInput with { PitchInput = 0, YawInput = 0, RollInput = 0 });
