@@ -101,7 +101,7 @@ public sealed class SystemSpaceState : GameState
     private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
     // TODO: remove test containers — 3–6 debris contacts per station for radar testing
-    private readonly List<(string id, string name, DVec3 pos)>                              _testContainers   = [];
+    private readonly List<TestContainerEntry> _testContainers = [];
     // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes  = [];
     // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
@@ -400,6 +400,7 @@ public sealed class SystemSpaceState : GameState
             }
         }
         _stationPositions.Clear();
+        foreach (var c in _testContainers) { c.Vb.Dispose(); c.Ib.Dispose(); }
         _testContainers.Clear();
         _prevCameraPosValid = false;
 
@@ -753,9 +754,11 @@ public sealed class SystemSpaceState : GameState
         foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _hullMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var c in _testContainers)     { c.Vb.Dispose(); c.Ib.Dispose(); }
         _decoMeshes.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
+        _testContainers.Clear();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
         _navGlowTex?.Dispose();
@@ -1022,6 +1025,7 @@ public sealed class SystemSpaceState : GameState
         foreach (var (body, pos) in _bodyPositions)
             DrawPlanetBody(body, pos);
         DrawStations();
+        DrawTestContainers();
         DrawStationGlows(sb);
 
         // Pass 2 — transparent (no depth write/read — shader ray-sphere handles visibility)
@@ -1209,6 +1213,45 @@ public sealed class SystemSpaceState : GameState
                         baseVertex: 0, startIndex: 0,
                         primitiveCount: glass.triCount);
                 }
+            }
+        }
+
+        _effect.TextureEnabled     = false;
+        _effect.VertexColorEnabled = false;
+        _effect.LightingEnabled    = true;
+    }
+
+    private void DrawTestContainers()
+    {
+        if (_testContainers.Count == 0) return;
+
+        float rs = (float)Camera3D.RenderScale;
+
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = true;
+        _effect.TextureEnabled     = true;
+        _effect.Texture            = StationTextureRegistry.Get(SurfaceTexture.CleanPanel);
+
+        foreach (var tc in _testContainers)
+        {
+            DVec3 stPos = DVec3.Zero;
+            foreach (var (s, sPos) in _stationPositions)
+                if (ReferenceEquals(s, tc.Station)) { stPos = sPos; break; }
+
+            DVec3   universePos = stPos + tc.Offset;
+            Vector3 renderPos   = _camera.ToRenderSpace(universePos);
+            if (renderPos.Length() > 30_000f) continue;
+
+            _effect.World = Matrix.CreateScale(rs) * Matrix.CreateTranslation(renderPos);
+
+            _gd.SetVertexBuffer(tc.Vb);
+            _gd.Indices = tc.Ib;
+
+            foreach (var pass in _effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList,
+                    baseVertex: 0, startIndex: 0, primitiveCount: tc.TriCount);
             }
         }
 
@@ -2285,36 +2328,64 @@ public sealed class SystemSpaceState : GameState
         }
 
         // TODO: remove test containers — debug contacts for radar testing
-        foreach (var (id, name, pos) in _testContainers)
+        foreach (var tc in _testContainers)
         {
-            DVec3 del     = pos - camPos;
+            DVec3 stPos = DVec3.Zero;
+            foreach (var (s, sPos) in _stationPositions)
+                if (ReferenceEquals(s, tc.Station)) { stPos = sPos; break; }
+            DVec3 pos   = stPos + tc.Offset;
+            DVec3 del   = pos - camPos;
             var   contact = new RadarContact(
-                id, name,
+                tc.Id, tc.Name,
                 new Vector3((float)del.X, (float)del.Y, (float)del.Z),
                 Vector3.Zero, ContactType.Debris);
             _targeting.OnContactUpdated(contact);
-            _radarContactIds.Add(id);
+            UpdateCockpitDirBallContact(contact);
+            _radarContactIds.Add(tc.Id);
         }
     }
 
     // TODO: remove SpawnTestContainers — debug helper for radar testing
     private void SpawnTestContainers()
     {
+        Color[] palette = [
+            new Color(180, 60, 50), new Color(50, 100, 180),
+            new Color(60, 160, 80), new Color(180, 140, 50),
+        ];
         int globalIdx = 0;
-        foreach (var (station, stPos) in _stationPositions)
+        foreach (var (station, _) in _stationPositions)
         {
-            // Deterministic offset sequence using station name hash ^ star seed
-            int seed = station.Name.GetHashCode() ^ (int)(_star.GalacticPos.X * 1000.0);
-            var rng  = new Inferior.Core.Random.SeededRandom(seed);
+            int seed  = station.Name.GetHashCode() ^ (int)(_star.GalacticPos.X * 1000.0);
+            var rng   = new Inferior.Core.Random.SeededRandom(seed);
             int count = rng.NextInt(3, 7);  // 3–6 containers per station
 
             for (int i = 0; i < count; i++)
             {
                 double angle  = rng.NextDouble() * System.Math.Tau;
-                double dist   = 20.0 + rng.NextDouble() * 480.0;  // 20–500 m
+                double dist   = 20.0 + rng.NextDouble() * 480.0;  // 20–500 m from station
                 double elevM  = (rng.NextDouble() - 0.5) * 60.0;  // ±30 m vertical
                 var    offset = new DVec3(System.Math.Cos(angle) * dist, elevM, System.Math.Sin(angle) * dist);
-                _testContainers.Add(($"ctn:{globalIdx}", $"Ctn-{globalIdx:D2}", stPos + offset));
+
+                var sc = Inferior.Game.Containers.ShippingContainerFactory.Generate(
+                    rng.Pick(palette), rng.NextFloat(0f, 0.6f), rng.NextInt(int.MinValue, int.MaxValue));
+
+                var vb = new VertexBuffer(_gd, VertexPositionColorTexture.VertexDeclaration,
+                                          sc.Vertices.Length, BufferUsage.WriteOnly);
+                vb.SetData(sc.Vertices);
+                var ib = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
+                                         sc.Indices.Length, BufferUsage.WriteOnly);
+                ib.SetData(sc.Indices);
+
+                _testContainers.Add(new TestContainerEntry
+                {
+                    Id       = $"ctn:{globalIdx}",
+                    Name     = $"Ctn-{globalIdx:D2}",
+                    Station  = station,
+                    Offset   = offset,
+                    Vb       = vb,
+                    Ib       = ib,
+                    TriCount = sc.Indices.Length / 3,
+                });
                 globalIdx++;
             }
         }
@@ -2840,5 +2911,17 @@ public sealed class SystemSpaceState : GameState
         sb.Draw(_pixel, new Rectangle(rect.Left,  rect.Bottom-thickness, rect.Width, thickness), color);
         sb.Draw(_pixel, new Rectangle(rect.Left,  rect.Top,  thickness,  rect.Height),           color);
         sb.Draw(_pixel, new Rectangle(rect.Right-thickness, rect.Top, thickness, rect.Height),   color);
+    }
+
+    // TODO: remove — debug container entry for radar testing
+    private sealed class TestContainerEntry
+    {
+        public required string         Id       { get; init; }
+        public required string         Name     { get; init; }
+        public required Galaxy.Station Station  { get; init; }
+        public required DVec3          Offset   { get; init; }
+        public required VertexBuffer   Vb       { get; init; }
+        public required IndexBuffer    Ib       { get; init; }
+        public required int            TriCount { get; init; }
     }
 }
