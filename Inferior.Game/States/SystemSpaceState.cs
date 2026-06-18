@@ -579,8 +579,8 @@ public sealed class SystemSpaceState : GameState
 
         _radarDisplay = new RadarDisplay
         {
-            MaxRangeMeters = 3e12f,   // 3 Gm — inner system bodies visible
-            MaxSpeedMs     = 5e9f,
+            MaxSpeedMs    = 500f,
+            MaxApproachMs = 500f,
         };
 
         _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28))
@@ -2377,8 +2377,23 @@ public sealed class SystemSpaceState : GameState
         if (_radarDisplay == null) return;
         _radarDisplay.Contacts        = _targeting.AllContacts;
         _radarDisplay.SelectedContact = _targeting.CurrentRadarTarget;
+
         var snap = _frameShipSnap;
         _radarDisplay.LocalFrameSpeedMs = snap != null ? (float)snap.Velocity.Length : 0f;
+
+        // Approach speed — closing rate along selected contact direction
+        float approachMs = 0f;
+        if (_targeting.HasRadarTarget)
+        {
+            var c    = _targeting.CurrentRadarTarget!.Value;
+            float rlen = c.RelativePosition.Length();
+            if (rlen > 1f)
+                approachMs = -Vector3.Dot(c.RelativeVelocity, c.RelativePosition / rlen);
+        }
+        _radarDisplay.ApproachSpeedMs = approachMs;
+
+        // PWR LED — radar is always active while in SystemSpace
+        _radarDisplay.PwrLed = true;
     }
 
     private void UpdateLandingRadar()
