@@ -100,6 +100,8 @@ public sealed class SystemSpaceState : GameState
     // Per-station placed module list — generated once per system entry from name seed.
     private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
+    // TODO: remove test containers — 3–6 debris contacts per station for radar testing
+    private readonly List<(string id, string name, DVec3 pos)>                              _testContainers   = [];
     // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes  = [];
     // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
@@ -398,6 +400,7 @@ public sealed class SystemSpaceState : GameState
             }
         }
         _stationPositions.Clear();
+        _testContainers.Clear();
         _prevCameraPosValid = false;
 
         // Skybox — galaxy stars projected onto a far sphere around the current system
@@ -577,11 +580,7 @@ public sealed class SystemSpaceState : GameState
             Bounds = new Rectangle(0, 0, 300, 300),
         };
 
-        _radarDisplay = new RadarDisplay
-        {
-            MaxSpeedMs    = 500f,
-            MaxApproachMs = 500f,
-        };
+        _radarDisplay = new RadarDisplay();
 
         _shieldToggleButton = new ToggleButton("SHIELD", new Rectangle(4, 4, 120, 28))
         {
@@ -902,6 +901,10 @@ public sealed class SystemSpaceState : GameState
             DVec3 eclipticPos = _system.GetStationPosition(station, _gameTimeSeconds);
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
+
+        // Rebuild test container contacts — if newly populated this frame, repopulate
+        if (_testContainers.Count == 0 && _stationPositions.Count > 0)
+            SpawnTestContainers();
 
         // Update direction balls — after position rebuild so current-frame station positions
         // are used, not the previous frame's. Avoids the ~1-frame (~350 m) visual offset
@@ -2256,17 +2259,16 @@ public sealed class SystemSpaceState : GameState
     {
         DVec3 camPos = _camera.UniversePosition;
 
-        foreach (var (body, galaxyPos) in _bodyPositions)
+        // Remove any stale body:* contacts (planets/moons are not shown on radar)
+        var staleBodyIds = new List<string>();
+        foreach (var id in _radarContactIds)
+            if (id.StartsWith("body:", StringComparison.Ordinal))
+                staleBodyIds.Add(id);
+        foreach (var id in staleBodyIds)
         {
-            string id      = $"body:{body.Name}";
-            DVec3  del     = galaxyPos - camPos;
-            var    contact = new RadarContact(
-                id, body.Name,
-                new Vector3((float)del.X, (float)del.Y, (float)del.Z),
-                Vector3.Zero, ContactType.Unknown);
-            _targeting.OnContactUpdated(contact);
-            UpdateCockpitDirBallContact(contact);
-            _radarContactIds.Add(id);
+            _targeting.OnContactLost(id);
+            _cockpitDirBall?.RemoveVector($"radar_{id}");
+            _radarContactIds.Remove(id);
         }
 
         foreach (var (station, galaxyPos) in _stationPositions)
@@ -2280,6 +2282,41 @@ public sealed class SystemSpaceState : GameState
             _targeting.OnContactUpdated(contact);
             UpdateCockpitDirBallContact(contact);
             _radarContactIds.Add(id);
+        }
+
+        // TODO: remove test containers — debug contacts for radar testing
+        foreach (var (id, name, pos) in _testContainers)
+        {
+            DVec3 del     = pos - camPos;
+            var   contact = new RadarContact(
+                id, name,
+                new Vector3((float)del.X, (float)del.Y, (float)del.Z),
+                Vector3.Zero, ContactType.Debris);
+            _targeting.OnContactUpdated(contact);
+            _radarContactIds.Add(id);
+        }
+    }
+
+    // TODO: remove SpawnTestContainers — debug helper for radar testing
+    private void SpawnTestContainers()
+    {
+        int globalIdx = 0;
+        foreach (var (station, stPos) in _stationPositions)
+        {
+            // Deterministic offset sequence using station name hash ^ star seed
+            int seed = station.Name.GetHashCode() ^ (int)(_star.GalacticPos.X * 1000.0);
+            var rng  = new Inferior.Core.Random.SeededRandom(seed);
+            int count = rng.NextInt(3, 7);  // 3–6 containers per station
+
+            for (int i = 0; i < count; i++)
+            {
+                double angle  = rng.NextDouble() * System.Math.Tau;
+                double dist   = 20.0 + rng.NextDouble() * 480.0;  // 20–500 m
+                double elevM  = (rng.NextDouble() - 0.5) * 60.0;  // ±30 m vertical
+                var    offset = new DVec3(System.Math.Cos(angle) * dist, elevM, System.Math.Sin(angle) * dist);
+                _testContainers.Add(($"ctn:{globalIdx}", $"Ctn-{globalIdx:D2}", stPos + offset));
+                globalIdx++;
+            }
         }
     }
 
@@ -2380,6 +2417,14 @@ public sealed class SystemSpaceState : GameState
 
         var snap = _frameShipSnap;
         _radarDisplay.LocalFrameSpeedMs = snap != null ? (float)snap.Velocity.Length : 0f;
+
+        // Ship-local orientation axes so the radar can project contacts correctly.
+        if (snap != null)
+        {
+            _radarDisplay.ShipForward = new Vector3((float)snap.Forward.X, (float)snap.Forward.Y, (float)snap.Forward.Z);
+            _radarDisplay.ShipUp      = new Vector3((float)snap.Up.X,      (float)snap.Up.Y,      (float)snap.Up.Z);
+            _radarDisplay.ShipRight   = Vector3.Cross(_radarDisplay.ShipForward, _radarDisplay.ShipUp);
+        }
 
         // Approach speed — closing rate along selected contact direction
         float approachMs = 0f;

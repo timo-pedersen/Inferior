@@ -9,9 +9,9 @@ public readonly record struct RadarExclusionZone(Vector3 WorldPosition, float Ra
 
 /// <summary>
 /// Top-down oval radar showing contacts relative to the ship.
-/// Forward direction (−Z) maps to the top of the oval.
-/// The oval represents the ship's horizontal plane seen from ~30° elevation;
-/// vertical axis is compressed by cos(30°) ≈ 0.866.
+/// Ship forward maps to the top of the oval.
+/// The oval represents the ship's horizontal plane seen from above at a perspective angle;
+/// vertical axis is compressed by PerspectiveFactor ≈ 0.65.
 ///
 /// Five hardcoded range steps (500 m → 100 km); player clicks range label to cycle.
 /// Layer toggles (ELEV / TEXT / OOB / RINGS) and LOG mode handled internally.
@@ -25,15 +25,25 @@ public sealed class RadarDisplay : Control
     private int _rangeStep = 2;  // default = 10 km
 
     // ── Data — set each frame by game state ──────────────────────────────────
-    public IEnumerable<RadarContact>?         Contacts        { get; set; }
-    public RadarContact?                      SelectedContact  { get; set; }
-    /// <summary>Ship speed relative to local frame (right bar). Max ≈ MaxSpeedMs.</summary>
+    public IEnumerable<RadarContact>?         Contacts          { get; set; }
+    public RadarContact?                      SelectedContact   { get; set; }
+    /// <summary>Ship speed relative to local frame (right bar). Log-scaled up to SpeedBarMaxMs.</summary>
     public float                              LocalFrameSpeedMs { get; set; }
-    public float                              MaxSpeedMs        { get; set; } = 500f;
     /// <summary>Approach speed relative to selected contact (left bar). Positive = closing.</summary>
     public float                              ApproachSpeedMs   { get; set; }
-    public float                              MaxApproachMs     { get; set; } = 500f;
     public IReadOnlyList<RadarExclusionZone>? ExclusionZones    { get; set; }
+
+    // ── Ship orientation — set each frame so contacts are projected onto ship-local axes ──
+    /// <summary>Ship forward vector in world/galaxy space (normalised).</summary>
+    public Vector3 ShipForward { get; set; } = -Vector3.UnitZ;
+    /// <summary>Ship right vector in world/galaxy space (normalised).</summary>
+    public Vector3 ShipRight   { get; set; } = Vector3.UnitX;
+    /// <summary>Ship up vector in world/galaxy space (normalised).</summary>
+    public Vector3 ShipUp      { get; set; } = Vector3.UnitY;
+
+    // ── Speed bar tuning ─────────────────────────────────────────────────────
+    private const float SpeedBarMaxMs = 500f;
+    private const float LogK          = 0.025f;
 
     // ── LED states — set by game state ────────────────────────────────────────
     /// <summary>PWR: green when radar online.</summary>
@@ -141,10 +151,11 @@ public sealed class RadarDisplay : Control
         int discW    = barRight - SpeedBarGap - discLeft;
         int cx       = discLeft + discW / 2;
         int cy       = mainTop  + mainH  / 2;
+        const float PerspectiveFactor = 0.65f;
         int oobRy    = Math.Max(1, mainH / 2 - DiscInnerPad);
-        int oobRx    = Math.Max(1, (int)(oobRy / 0.866f));
+        int oobRx    = Math.Max(1, (int)(oobRy / PerspectiveFactor));
         int ry       = Math.Max(1, oobRy - OobMarginPx);
-        int rx       = Math.Max(1, (int)(ry / 0.866f));
+        int rx       = Math.Max(1, (int)(ry / PerspectiveFactor));
 
         DrawDisc(sb, renderer, theme, cx, cy, rx, ry, oobRx, oobRy, range);
         DrawSpeedBars(sb, renderer, barLeft, barRight, mainTop, mainH);
@@ -250,7 +261,7 @@ public sealed class RadarDisplay : Control
         int cx, int cy, int rx, int ry, int oobRx, int oobRy, float range)
     {
         // Filled oval (scanlines)
-        var discFill = new Color(10, 28, 14);
+        var discFill = new Color(6, 16, 8);
         for (int dy = -ry; dy <= ry; dy++)
         {
             float t     = (float)dy / ry;
@@ -269,7 +280,7 @@ public sealed class RadarDisplay : Control
         // Range rings
         if (_showRings)
         {
-            var ringCol = new Color(18, 52, 22);
+            var ringCol = new Color(40, 120, 50);
             for (int ring = 1; ring <= 3; ring++)
                 DrawEllipse(sb, renderer, cx, cy, rx * ring / 4f, ry * ring / 4f, ringCol);
         }
@@ -297,14 +308,19 @@ public sealed class RadarDisplay : Control
     private void DrawContact(SpriteBatch sb, UIRenderer renderer, Theme theme,
         RadarContact c, int cx, int cy, int rx, int ry, int oobRx, int oobRy, float range)
     {
-        // Horizontal position (XZ plane)
-        float dx    = c.RelativePosition.X;
-        float dz    = c.RelativePosition.Z;
-        float horiz = MathF.Sqrt(dx * dx + dz * dz);
+        // Project contact's relative position onto ship-local axes.
+        // RelativePosition is in world/galaxy space; ShipForward/Right/Up describe
+        // the ship's orientation in that same space.
+        var   rel     = c.RelativePosition;
+        float rightC  = Vector3.Dot(rel, ShipRight);    // +right  → disc right
+        float fwdC    = Vector3.Dot(rel, ShipForward);  // +forward → disc top
+        float upC     = Vector3.Dot(rel, ShipUp);       // +up     → elevation bar upward
 
-        // Bearing unit vector in XZ plane
-        float bx = horiz > 0f ? dx / horiz : 0f;
-        float bz = horiz > 0f ? dz / horiz : 1f;
+        float horiz = MathF.Sqrt(rightC * rightC + fwdC * fwdC);
+
+        // Bearing unit vector in ship-local horizontal plane
+        float bRight = horiz > 0f ? rightC / horiz : 0f;
+        float bFwd   = horiz > 0f ? fwdC   / horiz : 1f;
 
         bool isOob    = horiz > range;
         bool selected = SelectedContact.HasValue && SelectedContact.Value.Id == c.Id;
@@ -313,8 +329,9 @@ public sealed class RadarDisplay : Control
         if (isOob)
         {
             if (!_showOob) return;
+            // Place on OOB ring at correct bearing (forward = disc top = negative screen-Y)
             renderer.DrawDot(sb,
-                new Vector2(cx + bx * oobRx, cy + bz * oobRy),
+                new Vector2(cx + bRight * oobRx, cy - bFwd * oobRy),
                 1.8f, col);
             return;
         }
@@ -327,16 +344,16 @@ public sealed class RadarDisplay : Control
             : normDist;
         frac = MathF.Min(1f, frac);
 
-        float px = cx + bx * frac * rx;
-        float py = cy + bz * frac * ry;
+        float px = cx + bRight * frac * rx;
+        float py = cy - bFwd   * frac * ry;  // forward = up on disc = negative screen-Y
 
         // Elevation bar
         if (_showElev)
         {
-            float dist = c.RelativePosition.Length();
+            float dist = rel.Length();
             if (dist > 0.1f)
             {
-                float elevSin = c.RelativePosition.Y / dist;
+                float elevSin = upC / dist;
                 float barLen  = ry * elevSin * 0.55f;
                 if (MathF.Abs(barLen) > 1f)
                     renderer.DrawLine(sb,
@@ -395,18 +412,19 @@ public sealed class RadarDisplay : Control
 
     // ── Exclusion zones ───────────────────────────────────────────────────────
 
-    private static void DrawExclusionZone(SpriteBatch sb, UIRenderer renderer,
+    private void DrawExclusionZone(SpriteBatch sb, UIRenderer renderer,
         RadarExclusionZone zone, int cx, int cy, int rx, int ry,
         int oobRx, int oobRy, float range)
     {
-        float dx    = zone.WorldPosition.X;
-        float dz    = zone.WorldPosition.Z;
-        float horiz = MathF.Sqrt(dx * dx + dz * dz);
-        float bx    = horiz > 0f ? dx / horiz : 0f;
-        float bz    = horiz > 0f ? dz / horiz : 1f;
-        float frac  = MathF.Min(1f, horiz / range);
-        float px    = cx + bx * frac * rx;
-        float py    = cy + bz * frac * ry;
+        var   rel    = zone.WorldPosition;
+        float rightC = Vector3.Dot(rel, ShipRight);
+        float fwdC   = Vector3.Dot(rel, ShipForward);
+        float horiz  = MathF.Sqrt(rightC * rightC + fwdC * fwdC);
+        float bRight = horiz > 0f ? rightC / horiz : 0f;
+        float bFwd   = horiz > 0f ? fwdC   / horiz : 1f;
+        float frac   = MathF.Min(1f, horiz / range);
+        float px     = cx + bRight * frac * rx;
+        float py     = cy - bFwd   * frac * ry;
         float zr    = MathF.Max(8f, MathF.Min(zone.Radius / range * rx, rx * 0.5f));
 
         // Dark filled circle
@@ -422,29 +440,34 @@ public sealed class RadarDisplay : Control
 
     // ── Speed bars ────────────────────────────────────────────────────────────
 
+    private static float LogBarFrac(float ms)
+    {
+        float abs  = MathF.Abs(ms);
+        float denom = MathF.Log(1f + SpeedBarMaxMs * LogK);
+        return denom > 0f
+            ? Math.Clamp(MathF.Log(1f + abs * LogK) / denom, 0f, 1f)
+            : 0f;
+    }
+
     private void DrawSpeedBars(SpriteBatch sb, UIRenderer renderer,
         int barLeft, int barRight, int mainTop, int mainH)
     {
-        // Left bar — bidirectional approach speed
+        // Left bar — bidirectional approach speed (log-scaled)
         // Positive = closing (below centre), negative = opening (above centre)
-        float approachFrac = MaxApproachMs > 0f
-            ? Math.Clamp(ApproachSpeedMs / MaxApproachMs, -1f, 1f)
-            : 0f;
+        float signedFrac = ApproachSpeedMs >= 0f
+            ? LogBarFrac(ApproachSpeedMs)
+            : -LogBarFrac(ApproachSpeedMs);
 
         DrawBiBar(sb, renderer,
             barLeft, mainTop, SpeedBarW, mainH,
-            approachFrac,
+            signedFrac,
             new Color(28, 65, 160),   // opening colour (above centre)
             new Color(70, 165, 245)); // closing colour (below centre)
 
-        // Right bar — local frame speed (unidirectional)
-        float speedFrac = MaxSpeedMs > 0f
-            ? Math.Clamp(LocalFrameSpeedMs / MaxSpeedMs, 0f, 1f)
-            : 0f;
-
+        // Right bar — local frame speed (unidirectional, log-scaled)
         DrawUniBar(sb, renderer,
             barRight, mainTop, SpeedBarW, mainH,
-            speedFrac,
+            LogBarFrac(LocalFrameSpeedMs),
             new Color(28, 105, 38),
             new Color(195, 175, 45));
     }
