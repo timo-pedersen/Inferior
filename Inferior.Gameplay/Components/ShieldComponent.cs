@@ -80,6 +80,20 @@ public sealed class ShieldComponent : ShipComponent
         return incomingJ - absorbed;
     }
 
+    /// <summary>
+    /// Drain a fraction of maximum shield capacity (0–1). Used for atmospheric depletion.
+    /// Clamped: will not drain below zero.
+    /// </summary>
+    public void DrainCapacitor(double fraction)
+        => _capacitor.Draw(System.Math.Max(0.0, fraction) * MaxShieldJ);
+
+    /// <summary>
+    /// Inject heat directly into the shield generator's thermal mass.
+    /// Called by atmospheric depletion logic — heat proportional to energy drained.
+    /// </summary>
+    public void AddHeat(double joules)
+        => ThermalNode?.AddHeatJ(joules);
+
     // ── Startup hooks ─────────────────────────────────────────────────────────
 
     protected override void OnInitializationStarted()

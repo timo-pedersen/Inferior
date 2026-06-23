@@ -103,6 +103,9 @@ public sealed class SpaceSimulation : Simulation
     // Glide charge delay: counts down from GlideStartupTime → 0, then sets _glideModeActive = true
     private double _glideChargeTimer;
 
+    // Surface contact state — gating the one-shot "Surface contact." log message
+    private bool _surfaceContact;
+
     // ── Nearest atmospheric body (written by UpdateEnvironment, read by TickPhysics) ──
     // Both run on the sim thread — no cross-thread sync needed.
     private sealed record NearAtmBodyInfo(OrbitalBody Body, DVec3 EclipticPos, double AltitudeM);
@@ -127,7 +130,8 @@ public sealed class SpaceSimulation : Simulation
     private double _lastDt;
 
     // ── Physics constants ─────────────────────────────────────────────────────
-    private const double PhysG           = 6.674e-11;
+    private const double PhysG              = 6.674e-11;
+    private const double ShipCollisionRadius = 5.0;   // metres — ship bounding sphere for surface collision
     private const double GlideMinSpeed   = 1_000.0;  // m/s — minimum forward speed in glide
     private const double GlideMaxSpeed   = 10_000.0; // m/s — maximum forward speed in glide
     private const double GlideMinDensity = 0.05;     // relative density — below this glide unavailable
@@ -376,16 +380,46 @@ public sealed class SpaceSimulation : Simulation
 
         ship.Position += ship.Velocity * dt;
 
-        // Sphere collision
-        const double CollisionRadius = 10.0;
-        double distAfter = (ship.Position - bodyPos).Length;
-        if (distAfter < body.RadiusMeters + CollisionRadius)
+        // ── Shield atmospheric depletion ──────────────────────────────────
+        if (density > 0.0)
         {
-            DVec3  outward   = (ship.Position - bodyPos) / distAfter;
-            ship.Position    = bodyPos + outward * (body.RadiusMeters + CollisionRadius);
-            double radialVel = DVec3.Dot(ship.Velocity, outward);
-            if (radialVel < 0)
-                ship.Velocity -= outward * radialVel;
+            ShieldComponent? shield = null;
+            foreach (var c in ship.Components)
+                if (c is ShieldComponent sc && sc.Status == ComponentStatus.Running)
+                    { shield = sc; break; }
+
+            if (shield != null)
+            {
+                const double AtmosphericDrainRate       = 5.0;      // empties ~100% fill in <1 s at density 1.0
+                const double ShieldAtmosphericHeatFactor = 2_000.0; // J of heat per unit fill drained
+
+                double drain = density * shield.CapacitorFill * AtmosphericDrainRate * dt;
+                drain = System.Math.Min(drain, shield.CapacitorFill);
+                shield.DrainCapacitor(drain);
+                shield.AddHeat(drain * ShieldAtmosphericHeatFactor);
+            }
+        }
+
+        // ── Sphere collision ──────────────────────────────────────────────
+        double minDist   = body.RadiusMeters + ShipCollisionRadius;
+        double distAfter = (ship.Position - bodyPos).Length;
+
+        if (distAfter < minDist && distAfter > 0)
+        {
+            DVec3 surfaceNormal = (ship.Position - bodyPos) / distAfter;
+            ship.Position = bodyPos + surfaceNormal * minDist;
+            ship.Velocity = groundVel;  // inherit ground velocity — no rebound
+
+            if (!_surfaceContact)
+            {
+                _surfaceContact = true;
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage("Surface contact.", SystemMessagePriority.Info));
+            }
+        }
+        else
+        {
+            _surfaceContact = false;
         }
     }
 

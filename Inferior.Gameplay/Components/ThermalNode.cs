@@ -57,4 +57,8 @@ public sealed class ThermalNode
             LastHeatInputW = netHeatWatts;
         CurrentHeat = Math.Max(0.0, CurrentHeat + netHeatWatts * dt);
     }
+
+    /// <summary>Inject heat energy directly in joules (e.g. atmospheric drag on shields).</summary>
+    public void AddHeatJ(double joules)
+        => CurrentHeat = Math.Max(0.0, CurrentHeat + joules);
 }
