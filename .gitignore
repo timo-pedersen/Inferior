@@ -6,6 +6,9 @@
 # Claude
 .claude/settings.local.json
 
+# Other
+dps.txt
+
 # User-specific files
 *.rsuser
 *.suo
