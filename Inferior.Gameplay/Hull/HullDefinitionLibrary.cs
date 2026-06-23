@@ -52,6 +52,12 @@ public static class HullDefinitionLibrary
         HullMass     = 25_000.0,   // kg — 25 tonnes
         CockpitOffset = new DVec3(0, 3, -12),  // nose-mounted, slightly above centreline
 
+        // 25 t hull; 1.2 × 25000 × 9.81 ≈ 294 kN hover margin
+        AerodynamicLift         = 0.8,   // modest lift — not a glider
+        AerodynamicBrakeFront   = 0.15,
+        AerodynamicBrakeLateral = 0.40,  // > 2× front per spec
+        MaxDownThrustN          = 300_000,
+
         Slots =
         [
             new() { SlotId = "reactor",           Label = "Power Reactor",        Category = SlotCategory.PowerReactor,     MaxComponentClass = 2, Required = true  },
@@ -78,6 +84,12 @@ public static class HullDefinitionLibrary
         SizeClass    = ShipSizeClass.Medium,
         HullMass     = 80_000.0,   // kg
         CockpitOffset = new DVec3(0, 4, -18),
+
+        // 80 t hull; 1.2 × 80000 × 9.81 ≈ 941 kN hover margin
+        AerodynamicLift         = 1.4,   // better lift than Sidewinder
+        AerodynamicBrakeFront   = 0.22,
+        AerodynamicBrakeLateral = 0.55,
+        MaxDownThrustN          = 960_000,
 
         Slots =
         [

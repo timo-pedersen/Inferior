@@ -12,9 +12,8 @@
 | Galaxy map | ✓ Done | 2048 stars, fixed seed, deterministic |
 | System map | ✓ Done | Bodies, orbits |
 | 3D flight state (`SystemSpaceState`) | ✓ Done | Newtonian, origin-shifting render |
-| UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState, **RadarDisplay** |
+| UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState |
 | DataBus | ✓ Done | 6 buses: System, Instruments, InstrumentState, InstrumentRanges, Radar, RadarLost |
-| **System message priority** | ✓ Done | `SystemMessagePriority` enum (Info→Critical); `SystemMessage` record on System bus; `SystemConsole` coloured prefixes; `HudAlertDisplay` centre-screen overlay (Warning 4 s, ImportantWarning 6 s, Critical until keypress) |
 | CommandBus | ✓ Done | Reverse direction; sim thread drains |
 | Simulation loop | ✓ Done | 60Hz background thread; PlayerInput immutable snapshot |
 | DVec3 + origin shifting | ✓ Done | Double-precision coordinates throughout |
@@ -25,17 +24,11 @@
 | Persistence layer | ✓ Partial | Architecture designed; file implementations in progress |
 | ShipSizeClass enum | ✓ Stubbed | Exists, not yet enforced |
 | **Power system** | ✓ Done | PowerCore → PowerBus → Connector → Shield chain working; cold start sequence; PowerPriorityManager; instruments reporting to DataBus; CommandBus integration |
-| **Heat & coolant system** | ✓ Done | `ThermalNode.LastHeatInputW`; `ShipComponent.EffectiveEfficiency` + overtemp damage in Tick; throttle heat curve in `PowerReactor`; `ShieldComponent` ThermalNode added; `HyperspaceHeatSink` resets on saturation + publishes Critical alert; `CoolantSystem` edge-triggered level warnings (NB/Warning/ImportantWarning/Critical); `Topics.Ship.ThermalSignature` published per tick |
 | **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `inferior-design-stations-claude.md` |
-| **Directional lighting** | ✓ Done | Hull: real-time `VertexPositionNormalTexture` + `BasicEffect LightingEnabled=true` from actual star pos; Decoration: pre-baked vertex colours |
+| **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
-| **RadarDisplay** | ✓ Done | Oval disc (scanline fill, cos30° foreshortening); 5 linear range steps (500m–100km) with click-to-cycle; LOG mode (log distance mapping); 3 range rings; ELEV/TEXT/OOB/RINGS layer toggles; OOB bearing ring; contact markers by type (diamond/triangle/dash/hollow-circle); elevation bars; text labels; exclusion zone interface; bidirectional left speed bar (approach); unidirectional right speed bar (local frame); 5 LED indicators (PWR wired, others stubbed); cockpit DirectionBall wired with contact vectors |
-| **Surface texture infrastructure** | ✓ Done | `VertexPositionColorTexture` throughout; UV projection in AddQuad/AddTriangle; `SurfaceTexture` enum; `StationTextureRegistry`; separate `GlassMesh` for windows |
-| **Procedural station textures** | ✓ Done | `StationProfile` (economy/age/wealth); `TexturePalette` per economy type; 5-step 512×512 generation (noise → panels → seams → grime → scratches); cache by (surface, paletteHash); station name baked onto core module face; `BitmapFonts` 5×7 + `TexturePainter` |
-| **Parabolic dishes** | ✓ Done | 3 size classes (9/11/13-sided); per-face small+medium in `GenerateDishes`; station-wide landmark large dish in `RunLargeDishPass` (22% of science/military stations); support arm, diagonal brace, feed mast+box, feed struts |
-| **Window enhancements** | ✓ Done | Per-window weighted palette; rectangular/octagon/cupola frames (Lerp blend toward dark neutral); glass gradient (bottom 0.72× + blue nudge → top Lerp→White 0.18); cupola frame per triangle + 3 edge braces per panel; `AddQuadGradient`/`AddTriangleGradient` in StationModuleMesh |
-| **Shipping containers** | ✓ Done (visual pass complete) | `ShippingContainer`, `ContainerContents`, `LockGrade`, `CommodityType` in `Inferior.Game.Containers`; `ShippingContainerFactory` with full chamfered mesh pipeline; `StationModuleMesh.ToArrays()` added; containers as station decoration via `GenerateContainers` in `StationDecorator` — placed on module faces using the same `FaceInfo`/`FaceOccupancy` system as tanks; full chamfer geometry (4 long + 8 short strips + 8 corner triangles, all gap-free); manufacturer label on ±Y faces via `ShippingContainerFactory.GenerateManufacturerName`; handedness fix for vertical/mirrored placements |
+| **Planetary flight (`FlightMode`)** | ✓ Done | `FlightMode { Space, Atmosphere }` in sim; auto-detect via nearest body altitude; force-based physics in atmosphere (gravity, drag, lift); Flight Assist (G key) and Glide Mode (B key) sim-owned; `SystemSpaceState` stays active throughout |
 
 ---
 
@@ -47,20 +40,31 @@ Implemented (3):
 |---|---|---|
 | `GalaxyMap` | `GalaxyMapState` | Top-level galaxy overview, star selection |
 | `SystemMap` | `SystemMapState` | 2D orbital map of selected star system |
-| `SystemSpace` | `SystemSpaceState` | In-system 3D flight |
+| `SystemSpace` | `SystemSpaceState` | In-system 3D flight, including atmospheric flight |
 
-Planned, not yet implemented:
+**Architectural note — FlightMode, not separate states:**
+Atmospheric flight is a `FlightMode` enum within `SystemSpaceState`, not a separate
+`GameState`. The sim thread and all ship state run continuously through the transition.
+`FlightMode` controls which forces the sim applies and which render passes are active.
+
+```csharp
+public enum FlightMode { Space, Atmosphere }
+```
+
+Planned future GameStates (not yet designed or implemented):
 
 ```csharp
 enum GameState
 {
     GalaxyMap, SystemMap,
     HyperspaceEntry, Hyperspace, HyperspaceExit,
-    SystemSpace,
-    PlanetApproach, Atmosphere, Surface,
+    SystemSpace,   // atmospheric flight is FlightMode.Atmosphere within this state
+    Surface,       // on foot — future
     Docked
 }
 ```
+
+`PlanetApproach` and `Atmosphere` have been removed as separate GameStates.
 
 Navigation flow (current): Galaxy map → (double-click star) → System map → (double-click body) → System flight, spawning near the selected body.
 
@@ -70,26 +74,21 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ### Power system — refinement phase
 
-Core working: reactor, bus, shield startup sequence, instruments, full thermal/coolant loop. Needs:
+Core working: reactor, bus, shield startup sequence, instruments. Needs:
 - More ship components wired in (engine power draw, gyro, artificial gravity)
 - FlyabilityMonitor checks
+- Heat system implementation
+- Coolant loop
 
 ---
 
 ## What is next (priority order)
 
-1. **Station texture quality pass** — replace 5×7 font with larger / higher-res glyphs; add per-economy accent markings, panel rivets, warning stripes
-3. **Station module shape variety** — octagonal/hexagonal module cross-sections; requires updating decoration passes to use general face list rather than BoxEdges lookup
-4. **Power system refinement** — more components (engine, gyro), FlyabilityMonitor
-5. **Ship hull implementation** — vertex-first mesh, panel auto-generation
-
-### Container deferred work (do not implement until reviewed)
-- Station decorator pass placing containers on docking/cargo modules
-- Ship hardpoints and `ShippingModule` component
-- `ShippingContainerStack` (magnetically bonded groups)
-- Parent-relative transform
-- Lock/unlock interaction
-- Cargo simulation / `CommodityType` economy
+1. **Planetary flight HUD** — altitude, ground speed, density overlay in SystemSpaceState when `FlightMode == Atmosphere`
+2. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
+3. **Station text/markings pass** — station name on hull, bay numbers
+4. **Station module shape variety** — octagonal/hexagonal module cross-sections
+5. **Power system refinement** — heat, coolant, more components
 
 ---
 
@@ -149,10 +148,13 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | Shield coverage mapping — which hull faces a given shield covers | Pending |
 | Weapons system | Not yet designed |
 | Multiplayer architecture compatibility | Noted, deferred |
-| Station texture quality pass — larger glyphs, accent markings, rivets | Deferred (Session C) |
+| Station text/markings pass — font atlas geometry pipeline | Not yet designed |
 | Station module shape variety — non-box modules | Design noted, not implemented |
-| Station weathering pass — per-module age overlay | Deferred |
+| Station weathering pass | Not yet designed |
 | Station enclosed archetypes (Sphere, Pyramid, Prism, etc.) | Designed, not implemented |
+| Planetary terrain rendering | Deferred — separate brief required |
+| Landing radar instrument | Deferred — requires design doc with sketches |
+| Atmospheric visual effects (clouds, haze, re-entry glow) | Not yet designed |
 
 ---
 
@@ -166,6 +168,7 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | `inferior-components-claude.md` | docs-claude | Component specs, properties, units |
 | `inferior-design-ship-claude.md` | docs-claude | Ship classes, roles, hull system |
 | `inferior-design-stations-claude.md` | docs-claude | Station generation — architecture, modules, decoration |
+| `inferior-design-planetary-claude.md` | docs-claude | Planetary flight — FlightMode, forces, glide, Flight Assist |
 | `inferior-design.md` | docs | Full design doc with rationale |
 | `inferior-lore.md` | docs | Full lore with narrative |
 | `inferior-classes.md` | docs-archive | Class sketches — may be stale; repo is authoritative |

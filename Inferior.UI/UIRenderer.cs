@@ -1,6 +1,5 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using System.Linq;
 
 namespace Inferior.UI;
 
@@ -69,27 +68,14 @@ public sealed class UIRenderer : IDisposable
 
     // ── Text ──────────────────────────────────────────────────────────────────
 
-    // Strip characters outside the font's glyph range to prevent ArgumentException.
-    // DefaultCharacter does NOT suppress throws for truly absent codepoints in MonoGame,
-    // so we always filter regardless of whether it is set.
-    private static string SanitizeText(SpriteFont font, string text)
-        => new string(text.Where(c => IsInFont(font, c)).ToArray());
-
-    private static bool IsInFont(SpriteFont font, char c)
-        => font.Characters.Contains(c);
-
     public void DrawText(SpriteBatch sb, string text, Vector2 pos,
         SpriteFont font, float scale, Color color)
-    {
-        var safe = SanitizeText(font, text);
-        if (safe.Length > 0)
-            sb.DrawString(font, safe, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-    }
+        => FontHelper.Draw(sb, font, text, pos, color, scale);
 
     public void DrawTextCentred(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color)
     {
-        var safe = SanitizeText(font, text);
+        var safe = FontHelper.Sanitize(font, text);
         if (safe.Length == 0) return;
         var size = font.MeasureString(safe) * scale;
         var pos  = new Vector2(
@@ -101,7 +87,7 @@ public sealed class UIRenderer : IDisposable
     public void DrawTextLeft(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color, int padding = 0)
     {
-        var safe = SanitizeText(font, text);
+        var safe = FontHelper.Sanitize(font, text);
         if (safe.Length == 0) return;
         var size = font.MeasureString(safe) * scale;
         var pos  = new Vector2(
@@ -111,7 +97,7 @@ public sealed class UIRenderer : IDisposable
     }
 
     public Vector2 MeasureText(string text, SpriteFont font, float scale)
-        => font.MeasureString(SanitizeText(font, text)) * scale;
+        => FontHelper.Measure(font, text, scale);
 
     // ── Control drawing ───────────────────────────────────────────────────────
 

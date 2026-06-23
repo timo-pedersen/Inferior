@@ -29,6 +29,10 @@ public sealed class Ship
     public DVec3      Velocity    { get; set; }
     public Quaternion Orientation { get; private set; } = Quaternion.Identity;
 
+    // TODO: angular velocity for proper tumble physics (needed by glide exit tumble)
+    // When implemented, ApplyAngularImpulse should add to it and ApplyRotation should integrate it.
+    public void ApplyAngularImpulse(DVec3 axisRadPerSec2) { /* stub */ }
+
     // ── Components ────────────────────────────────────────────────────────────
     private readonly List<ShipComponent> _components = new();
     public IReadOnlyList<ShipComponent> Components => _components;
@@ -46,6 +50,9 @@ public sealed class Ship
         foreach (var c in _components)
             c.Tick(dt);
     }
+
+    /// <summary>True when at least one GyroComponent is running. Reduces glide exit tumble.</summary>
+    public bool HasGyro => _components.Any(c => c is GyroComponent { Status: ComponentStatus.Running });
 
     // ── Mass ──────────────────────────────────────────────────────────────────
     public double HullMass      { get; init; } = 50_000.0;  // kg, hull only
@@ -87,6 +94,19 @@ public sealed class Ship
     // Velocity-target model: ship snaps to MoveSpeedMs in the thrust direction.
     // Replace with force-based Newtonian (F=ma) once the engine/power system exists.
     public double MoveSpeedMs { get; set; } = 5e9;  // m/s — tuned to match debug camera feel
+
+    // ── Atmosphere / aerodynamics ──────────────────────────────────────────────
+    // Set from HullDefinition at ship construction.
+
+    /// <summary>Maximum downward (gravity-opposing) engine thrust in newtons.</summary>
+    public double MaxDownThrustN          { get; init; } = 300_000.0;
+
+    /// <summary>Maximum forward thrust ≈ 3× down thrust (engines more efficient forward).</summary>
+    public double MaxForwardThrustN       => MaxDownThrustN * 3.0;
+
+    public double AerodynamicLift         { get; init; } = 0.0;
+    public double AerodynamicBrakeFront   { get; init; } = 0.0;
+    public double AerodynamicBrakeLateral { get; init; } = 0.0;
 
     // ── Orientation API ───────────────────────────────────────────────────────
 

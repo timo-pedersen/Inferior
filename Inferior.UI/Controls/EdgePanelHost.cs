@@ -310,10 +310,8 @@ public sealed class EdgePanelHost : Control
         if (Edge is PanelEdge.Left or PanelEdge.Right)
         {
             float rotation = Edge == PanelEdge.Right ? -MathF.PI * 0.5f : MathF.PI * 0.5f;
-            var   textSize = font.MeasureString(label) * scale;
             var   center   = new Vector2(rect.X + rect.Width * 0.5f, rect.Y + rect.Height * 0.5f);
-            sb.DrawString(font, label, center, tcol,
-                rotation, textSize * 0.5f, scale, SpriteEffects.None, 0f);
+            FontHelper.DrawRotated(sb, font, label, center, tcol, rotation, scale);
         }
         else
         {

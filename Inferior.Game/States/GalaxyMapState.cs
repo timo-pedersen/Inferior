@@ -827,7 +827,7 @@ public sealed class GalaxyMapState : GameState
     }
 
     private void DrawText(SpriteBatch sb, string text, Vector2 pos, Color color, float scale = 1.0f)
-        => sb.DrawString(_font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        => FontHelper.Draw(sb, _font, text, pos, color, scale);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

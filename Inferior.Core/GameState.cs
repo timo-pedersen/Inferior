@@ -22,14 +22,8 @@ public enum GameStateId
     /// <summary>2D orbital map of a star system — select a body to approach.</summary>
     SystemMap,
 
-    /// <summary>Flying freely within a star system.</summary>
+    /// <summary>Flying freely within a star system (including atmospheric flight).</summary>
     SystemSpace,
-
-    /// <summary>Close approach to a planet — atmosphere entry possible.</summary>
-    PlanetApproach,
-
-    /// <summary>Inside an atmosphere — aerodynamic drag, heat, visual effects.</summary>
-    Atmosphere,
 
     /// <summary>On a planet or moon surface.</summary>
     Surface,

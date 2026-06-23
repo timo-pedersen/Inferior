@@ -30,6 +30,7 @@
     <File Path="Docs/inferior-design.md" />
     <File Path="Docs/inferior-lore.md" />
     <File Path="Docs/inferior-qol-bugs.md" />
+    <File Path="Docs/media/radarMockup.xcf" />
   </Folder>
   <Project Path="Inferior.Core/Inferior.Core.csproj" />
   <Project Path="Inferior.Galaxy/Inferior.Galaxy.csproj" />

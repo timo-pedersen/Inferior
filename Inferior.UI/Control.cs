@@ -196,7 +196,7 @@ public abstract class Control
     /// <summary>Centred text position within a rectangle.</summary>
     protected static Vector2 CentreText(string text, SpriteFont font, float scale, Rectangle bounds)
     {
-        var size = font.MeasureString(text) * scale;
+        var size = FontHelper.Measure(font, text, scale);
         return new Vector2(
             bounds.X + (bounds.Width  - size.X) * 0.5f,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);
@@ -206,7 +206,7 @@ public abstract class Control
     protected static Vector2 LeftAlignText(string text, SpriteFont font, float scale,
         Rectangle bounds, int padding)
     {
-        var size = font.MeasureString(text) * scale;
+        var size = FontHelper.Measure(font, text, scale);
         return new Vector2(
             bounds.X + padding,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);
@@ -216,7 +216,7 @@ public abstract class Control
     protected static Vector2 RightAlignText(string text, SpriteFont font, float scale,
         Rectangle bounds, int padding)
     {
-        var size = font.MeasureString(text) * scale;
+        var size = FontHelper.Measure(font, text, scale);
         return new Vector2(
             bounds.X + bounds.Width - size.X - padding,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);

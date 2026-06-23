@@ -79,7 +79,7 @@ public sealed class HudAlertDisplay
         var (color, text) = DisplayFor(active.Value.Message);
 
         const float scale = 0.85f;
-        var size = font.MeasureString(text) * scale;
+        var size = FontHelper.Measure(font, text, scale);
         var pos  = new Vector2(
             (viewportWidth  - size.X) * 0.5f,
             viewportHeight  * 0.55f);
@@ -108,9 +108,9 @@ public sealed class HudAlertDisplay
     {
         var (color, prefix) = msg.Priority switch
         {
-            SystemMessagePriority.Warning          => (new Color(220, 180,  40), "▲ "),
-            SystemMessagePriority.ImportantWarning => (new Color(230, 120,  30), "▲▲ "),
-            SystemMessagePriority.Critical         => (new Color(220,  60,  60), "■ "),
+            SystemMessagePriority.Warning          => (new Color(220, 180,  40), "! "),
+            SystemMessagePriority.ImportantWarning => (new Color(230, 120,  30), "!! "),
+            SystemMessagePriority.Critical         => (new Color(220,  60,  60), "! "),
             _                                      => (new Color(160, 175, 195), ""),
         };
         return (color, prefix + msg.Text);

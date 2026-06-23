@@ -543,8 +543,8 @@ public sealed class SystemMapState : GameState
             float  alpha   = hovered ? NameAlphaHovered : NameAlphaDimmed;
             float  scale   = body.BodyType == BodyType.Moon ? 0.65f : 0.8f;
 
-            sb.DrawString(_font, body.Name, screen + new Vector2(radius + 4f, -8f),
-                ColText * alpha, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            FontHelper.Draw(sb, _font, body.Name, screen + new Vector2(radius + 4f, -8f),
+                ColText * alpha, scale);
         }
     }
 
@@ -660,10 +660,9 @@ public sealed class SystemMapState : GameState
             if (!IsOnScreen(screen, 60f)) continue;
 
             float r = 6f;
-            sb.DrawString(_font, station.Name,
+            FontHelper.Draw(sb, _font, station.Name,
                 screen + new Vector2(r + 4f, -8f),
-                ColStationName * NameAlphaDimmed, 0f, Vector2.Zero, 0.7f,
-                SpriteEffects.None, 0f);
+                ColStationName * NameAlphaDimmed, 0.7f);
         }
     }
 
@@ -898,5 +897,5 @@ public sealed class SystemMapState : GameState
     }
 
     private void DrawText(SpriteBatch sb, string text, Vector2 pos, Color color, float scale = 1.0f)
-        => sb.DrawString(_font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        => FontHelper.Draw(sb, _font, text, pos, color, scale);
 }

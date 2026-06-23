@@ -57,10 +57,47 @@ public sealed class OrbitalBody
     public double RadiusMeters  { get; init; }
     public double SurfaceGravity => Units.SurfaceGravity(MassKg, RadiusMeters);
 
+    // Rotation
+    public double RotationPeriod { get; init; } // seconds per full rotation; 0 = tidally locked
+    public DVec3  RotationAxis   { get; init; } = new(0, 1, 0); // unit vector, polar axis
+
     // Atmosphere
     public AtmosphereType AtmosphereType { get; init; }
-    public double         AtmosphereHeight { get; init; } // meters above surface
+    public double         AtmosphereHeight { get; init; } // meters above surface (ceiling)
     public Microsoft.Xna.Framework.Color AtmosphereColor { get; init; }
+
+    /// <summary>Relative atmospheric density at surface (1.0 = Earth sea level). 0 for airless bodies.</summary>
+    public double AtmosphereSurfaceDensity => AtmosphereType switch
+    {
+        AtmosphereType.Thin       => 0.1,
+        AtmosphereType.Breathable => 1.0,
+        AtmosphereType.Thick      => 4.0,
+        AtmosphereType.Toxic      => 2.0,
+        AtmosphereType.Corrosive  => 8.0,
+        _                         => 0.0,
+    };
+
+    /// <summary>Altitude at which density falls to 1/e of surface value (metres).</summary>
+    public double AtmosphereScaleHeight => AtmosphereHeight > 0 ? AtmosphereHeight / 8.0 : 0.0;
+
+    /// <summary>
+    /// Threshold altitude for entering/exiting Atmosphere state.
+    /// For bodies with atmosphere: equals AtmosphereHeight.
+    /// For airless bodies: 50 km hardcoded placeholder.
+    /// </summary>
+    public double AtmosphereCeilingAltitude =>
+        AtmosphereType != AtmosphereType.None ? AtmosphereHeight : 50_000.0;
+
+    /// <summary>Relative atmospheric density at the given altitude above the surface (metres).</summary>
+    public double DensityAtAltitude(double altitudeAboveSurface)
+    {
+        double surf = AtmosphereSurfaceDensity;
+        if (surf <= 0) return 0.0;
+        if (altitudeAboveSurface <= 0) return surf;
+        double scaleH = AtmosphereScaleHeight;
+        if (scaleH <= 0) return 0.0;
+        return surf * System.Math.Exp(-altitudeAboveSurface / scaleH);
+    }
 
     // Children (moons orbit planets, satellites orbit planets/moons)
     public IReadOnlyList<OrbitalBody> Children => _children;
@@ -119,6 +156,10 @@ public sealed class OrbitalBody
         var atmosphere = GetAtmosphere(bodyType, rng);
         var period     = Units.OrbitalPeriod(orbitalRadius, parentMassKg);
 
+        double rotPeriod = bodyType == BodyType.Moon
+            ? period  // moons are tidally locked — rotation equals orbital period
+            : RollRotationPeriod(bodyType, rng);
+
         return new OrbitalBody
         {
             BodyIndex       = index,
@@ -134,10 +175,25 @@ public sealed class OrbitalBody
             AtmosphereType  = atmosphere.type,
             AtmosphereHeight= atmosphere.height,
             AtmosphereColor = atmosphere.color,
+            RotationPeriod  = rotPeriod,
+            RotationAxis    = new DVec3(0, 1, 0),  // polar axis; axial tilt not yet applied
         };
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    private static double RollRotationPeriod(BodyType type, Core.Random.SeededRandom rng) => type switch
+    {
+        BodyType.GasGiant    => rng.NextDouble(36_000,    72_000),    //  10–20 hours
+        BodyType.IceGiant    => rng.NextDouble(50_000,   100_000),    //  14–28 hours
+        BodyType.EarthLike   => rng.NextDouble(72_000,   172_800),    //  20–48 hours
+        BodyType.OceanPlanet => rng.NextDouble(72_000,   172_800),    //  20–48 hours
+        BodyType.Desert      => rng.NextDouble(86_400,   259_200),    //  24–72 hours
+        BodyType.Volcanic    => rng.NextDouble(720_000, 1_800_000),   // 200–500 hours (slow)
+        BodyType.RockyPlanet => rng.NextDouble(86_400,   432_000),    //  24–120 hours
+        BodyType.IcePlanet   => rng.NextDouble(86_400,   360_000),    //  24–100 hours
+        _                    => 86_400,
+    };
 
     private static BodyType RollBodyType(
         double orbitalRadius, double parentMassKg, Core.Random.SeededRandom rng, bool isMoon)

@@ -957,6 +957,7 @@ public sealed class SystemSpaceState : GameState
         if (!_uiMouseMode)
             HandleKeyboard(keys, mouse);
 
+
         var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
         _hudAlert.Update(dt);
         _hudAlert.HandleInput(inputState);
@@ -1400,8 +1401,8 @@ public sealed class SystemSpaceState : GameState
                     ? $"{dist:F0} m"
                     : $"{dist / 1000f:F1} km";
                 Vector2 labelPos = screen.Value + new Vector2(-40f, size + 6f);
-                sb.DrawString(_font, contact.DisplayName, labelPos,                        new Color(0, 220, 220));
-                sb.DrawString(_font, distStr,             labelPos + new Vector2(0f, 18f), new Color(0, 180, 180));
+                FontHelper.Draw(sb, _font, contact.DisplayName, labelPos,                        new Color(0, 220, 220));
+                FontHelper.Draw(sb, _font, distStr,             labelPos + new Vector2(0f, 18f), new Color(0, 180, 180));
             }
         }
 
@@ -1425,8 +1426,8 @@ public sealed class SystemSpaceState : GameState
                         ? $"{_padDistance:F0} m"
                         : $"{_padDistance / 1000.0:F1} km";
                 Vector2 labelPos = screen.Value + new Vector2(-30f, size + 6f);
-                sb.DrawString(_font, padId,    labelPos,                        padColor);
-                sb.DrawString(_font, distStr,  labelPos + new Vector2(0f, 18f), new Color(40, 180, 70));
+                FontHelper.Draw(sb, _font, padId,    labelPos,                        padColor);
+                FontHelper.Draw(sb, _font, distStr,  labelPos + new Vector2(0f, 18f), new Color(40, 180, 70));
             }
         }
     }
@@ -2246,8 +2247,11 @@ public sealed class SystemSpaceState : GameState
                        : angle <  zeroRad ? 1.0 - (angle - lockRad) / (zeroRad - lockRad)
                        : 0.0;
 
-        _refVelocity = domVelocity * blend;
-        _refName     = domName;
+        // In atmosphere mode, skip blend so ground-relative drag uses the full orbital velocity
+        _refVelocity = _simulation.CurrentFlightMode == FlightMode.Atmosphere
+            ? domVelocity
+            : domVelocity * blend;
+        _refName = domName;
     }
 
     // Returns the galaxy-space position of a planet or moon at the given game time.
@@ -2715,7 +2719,12 @@ public sealed class SystemSpaceState : GameState
         double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
         double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
 
-        return new PlayerInput(fwd, lat, vert, roll, pitchInput, yawInput, false, true);
+        // V = Flight Assist toggle, G = Glide Mode toggle (rising-edge sent to sim)
+        bool faToggle    = keys.IsKeyDown(Keys.V) && !_prevKeys.IsKeyDown(Keys.V);
+        bool glideToggle = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
+
+        return new PlayerInput(fwd, lat, vert, roll, pitchInput, yawInput, false,
+            FlightAssistToggle: faToggle, GlideModeToggle: glideToggle);
     }
 
     // ── UI mode ───────────────────────────────────────────────────────────────
@@ -2798,10 +2807,12 @@ public sealed class SystemSpaceState : GameState
     private const double StarProxNearDist = 1e10;            // 10,000,000 km
     private const double StarProxMinScale = 1e5 / 1e12;     // top step → 100 km/s
 
-    // Planets & moons — tight zone around each body
-    private const double BodyProxFarDist  = 5e8;             // 500,000 km
-    private const double BodyProxNearDist = 1e5;             // 100 km
-    private const double BodyProxMinScale = 100.0 / 1e12;   // top step → 100 m/s
+    // Planets & moons — zone around each body
+    // Floor is 100 km/s at 1 km from surface. Atmosphere state takes over well above that,
+    // so this only matters for airless bodies; atmospheric bodies transition at ~80 km altitude.
+    private const double BodyProxFarDist  = 5e8;               // 500,000 km
+    private const double BodyProxNearDist = 1e3;               // 1 km
+    private const double BodyProxMinScale = 1e5 / 1e12;        // top step → 100 km/s
 
     // Stations — flat cap within 10 km of any station surface
     private const double StationProxCapDist  = 1e4;            // 10 km
@@ -2900,7 +2911,7 @@ public sealed class SystemSpaceState : GameState
     // ── 2D primitives (same as other states) ──────────────────────────────────
 
     private void DrawText(SpriteBatch sb, string text, Vector2 pos, Color color, float scale = 1.0f)
-        => sb.DrawString(_font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        => FontHelper.Draw(sb, _font, text, pos, color, scale);
 
     private void DrawRect(SpriteBatch sb, Rectangle rect, Color color)
         => sb.Draw(_pixel, rect, color);
