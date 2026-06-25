@@ -135,7 +135,9 @@ public sealed class StarSystem
         {
             double orbitalRadius = orbits[i];
             string name   = $"{star.Name} {ToRoman(i + 1)}";
-            var    planet = OrbitalBody.Generate(i, name, orbitalRadius, star.MassKg, rng.Derive(i));
+            var    planet = PlanetFactory.Generate(
+                i, name, rng.Derive(i),
+                orbitalRadius, star.MassKg, star.RadiusMeters, star.Temperature);
 
             planet.ParentMassKg = star.MassKg;
 

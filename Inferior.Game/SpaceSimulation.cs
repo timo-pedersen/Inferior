@@ -515,6 +515,7 @@ public sealed class SpaceSimulation : Simulation
     private static void CollectBody(SimWorld world, OrbitalBody body, DVec3 parentPos, double gameTime)
     {
         DVec3 pos = body.GetPosition(gameTime, parentPos);
+        UpdatePlanetOrientation(body, gameTime);
         world.MassiveBodies.Add(new CelestialBody
         {
             Position = pos,
@@ -524,6 +525,18 @@ public sealed class SpaceSimulation : Simulation
         world.OrbitalBodies.Add((body, pos));
         foreach (var child in body.Children)
             CollectBody(world, child, pos, gameTime);
+    }
+
+    private static void UpdatePlanetOrientation(OrbitalBody body, double simTime)
+    {
+        if (body.Planet is null) return;
+        PlanetData p      = body.Planet;
+        double period     = System.Math.Abs(p.RotationPeriod);
+        if (period < 1.0) return;
+        double direction  = p.RotationPeriod >= 0.0 ? 1.0 : -1.0;
+        double angle      = (direction * (2.0 * System.Math.PI * simTime / period) + p.RotationEpoch)
+                            % (2.0 * System.Math.PI);
+        body.Orientation  = Quaternion.CreateFromAxisAngle(p.PoleDirection, (float)angle);
     }
 
     // ── Publish ───────────────────────────────────────────────────────────────

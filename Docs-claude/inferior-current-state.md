@@ -28,7 +28,9 @@
 | **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
-| **Planetary flight (`FlightMode`)** | ✓ Done | `FlightMode { Space, Atmosphere }` in sim; auto-detect via nearest body altitude; force-based physics in atmosphere (gravity, drag, lift); Flight Assist (G key) and Glide Mode (B key) sim-owned; `SystemSpaceState` stays active throughout |
+| **Planetary flight (`FlightMode`)** | ✓ Done | `FlightMode { Space, Atmosphere }` in sim; auto-detect via nearest body altitude; force-based physics in atmosphere (gravity, drag, lift); Flight Assist (V key) and Glide Mode (G key) sim-owned; `SystemSpaceState` stays active throughout |
+| **Keplerian orbital mechanics** | ✓ Done | Full orbital elements (`e`, `i`, `Ω`, `ω`, `M₀`) on `OrbitalBody`; `ComputePosition` + `ComputeVelocity`; Newton solver for eccentric anomaly; moons/asteroids/stations keep circular rail |
+| **PlanetData + PlanetFactory** | ✓ Done | `PlanetType`, `AtmosphereCompositionType` enums; `PlanetData` record with physical/atmosphere/surface data; `PlanetFactory` procedural generation; per-tick planet orientation update in sim |
 
 ---
 
@@ -84,10 +86,10 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Planetary flight HUD** — altitude, ground speed, density overlay in SystemSpaceState when `FlightMode == Atmosphere`
-2. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
-3. **Station text/markings pass** — station name on hull, bay numbers
-4. **Station module shape variety** — octagonal/hexagonal module cross-sections
+1. **Brief B** — atmospheric instruments (lat/lon, ground radar HUD panel, checkerboard surface mesh, temperature map); reads `OrbitalBody.Orientation` and `PlanetData` set by Brief A
+2. **Planetary flight HUD** — altitude, ground speed, density overlay in SystemSpaceState when `FlightMode == Atmosphere`
+3. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
+4. **Station text/markings pass** — station name on hull, bay numbers
 5. **Power system refinement** — heat, coolant, more components
 
 ---
