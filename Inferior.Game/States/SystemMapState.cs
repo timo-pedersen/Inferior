@@ -420,13 +420,38 @@ public sealed class SystemMapState : GameState
 
     private void DrawOrbitRings(SpriteBatch sb)
     {
+        Vector2 starScreen = SystemToScreen(Vector2.Zero);
         foreach (var planet in _system.Planets)
         {
             float radiusPx = (float)(planet.OrbitalRadius / _metersPerPixel);
             if (radiusPx < MinOrbitRingPixels) continue;
 
-            Vector2 centre = SystemToScreen(Vector2.Zero);
-            DrawCircle(sb, centre, radiusPx, ColOrbitRing, CircleSegments(radiusPx));
+            int segs = CircleSegments(radiusPx);
+            if (planet.SemiMajorAxis > 0.0 && planet.Eccentricity > 0.001)
+            {
+                // Keplerian orbit: draw ellipse with correct centre offset and rotation
+                float a_px = radiusPx;
+                float b_px = (float)(planet.SemiMajorAxis * System.Math.Sqrt(1.0 - planet.Eccentricity * planet.Eccentricity) / _metersPerPixel);
+                float c_px = (float)(planet.SemiMajorAxis * planet.Eccentricity / _metersPerPixel);
+
+                // Periapsis direction projected onto ecliptic XZ plane
+                var ascNode  = new Vector2(MathF.Cos((float)planet.AscendingNode), MathF.Sin((float)planet.AscendingNode));
+                var ascNode3 = new Vector3(ascNode.X, 0f, ascNode.Y);
+                var orbNorm  = Vector3.Transform(Vector3.UnitY, Quaternion.CreateFromAxisAngle(ascNode3, (float)planet.Inclination));
+                var periDir3 = Vector3.Normalize(Vector3.Transform(ascNode3, Quaternion.CreateFromAxisAngle(orbNorm, (float)planet.PeriapsisArgument)));
+                var periXZ   = new Vector2(periDir3.X, periDir3.Z);
+                if (periXZ.LengthSquared() < 1e-6f) periXZ = Vector2.UnitX;
+                else periXZ = Vector2.Normalize(periXZ);
+
+                // Ellipse centre: displaced from star opposite to periapsis by c
+                Vector2 centrePx = starScreen - periXZ * c_px;
+                float   rotation = MathF.Atan2(periXZ.Y, periXZ.X);
+                DrawEllipse(sb, centrePx, a_px, b_px, rotation, ColOrbitRing, segs);
+            }
+            else
+            {
+                DrawCircle(sb, starScreen, radiusPx, ColOrbitRing, segs);
+            }
         }
 
         foreach (var planet in _system.Planets)
@@ -590,7 +615,10 @@ public sealed class SystemMapState : GameState
 
         double periodDays = display.Period / Units.DayInSeconds;
         double orbitAU    = Units.MetersToAU(display.OrbitalRadius);
-        DrawText(sb, $"Orbit: {orbitAU:F3} AU", new Vector2(tx, ty), ColTextDim); ty += lineH;
+        string orbitLine  = display.SemiMajorAxis > 0.0 && display.Eccentricity > 0.001
+            ? $"Orbit: {orbitAU:F3} AU  e={display.Eccentricity:F3}"
+            : $"Orbit: {orbitAU:F3} AU";
+        DrawText(sb, orbitLine, new Vector2(tx, ty), ColTextDim); ty += lineH;
 
         if (periodDays < 1.0)
             DrawText(sb, $"Period: {display.Period / Units.HourInSeconds:F1} h",
@@ -881,6 +909,21 @@ public sealed class SystemMapState : GameState
             float   a1 = (i + 1) * step;
             Vector2 p0 = centre + new Vector2(MathF.Cos(a0), MathF.Sin(a0)) * radius;
             Vector2 p1 = centre + new Vector2(MathF.Cos(a1), MathF.Sin(a1)) * radius;
+            DrawLine(sb, p0, p1, color);
+        }
+    }
+
+    private void DrawEllipse(SpriteBatch sb, Vector2 centre, float a, float b, float rotation, Color color, int segments)
+    {
+        float step = MathF.PI * 2f / segments;
+        float cosR = MathF.Cos(rotation), sinR = MathF.Sin(rotation);
+        for (int i = 0; i < segments; i++)
+        {
+            float t0 = i * step, t1 = (i + 1) * step;
+            float lx0 = a * MathF.Cos(t0), ly0 = b * MathF.Sin(t0);
+            float lx1 = a * MathF.Cos(t1), ly1 = b * MathF.Sin(t1);
+            Vector2 p0 = centre + new Vector2(lx0 * cosR - ly0 * sinR, lx0 * sinR + ly0 * cosR);
+            Vector2 p1 = centre + new Vector2(lx1 * cosR - ly1 * sinR, lx1 * sinR + ly1 * cosR);
             DrawLine(sb, p0, p1, color);
         }
     }

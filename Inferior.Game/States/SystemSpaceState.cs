@@ -2276,12 +2276,12 @@ public sealed class SystemSpaceState : GameState
         foreach (var planet in _system.Planets)
         {
             if (ReferenceEquals(planet, body))
-                return EclipticToGalaxy(OrbitalVelocityEcl(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius));
+                return EclipticToGalaxy(PlanetVelocityEcl(planet, gameTime));
             foreach (var moon in planet.Children)
             {
                 if (ReferenceEquals(moon, body))
                 {
-                    var pv = OrbitalVelocityEcl(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius);
+                    var pv = PlanetVelocityEcl(planet, gameTime);
                     var mv = OrbitalVelocityEcl(gameTime, moon.Period, moon.PhaseOffset, moon.OrbitalRadius);
                     return EclipticToGalaxy(pv + mv);
                 }
@@ -2289,6 +2289,12 @@ public sealed class SystemSpaceState : GameState
         }
         return EclipticToGalaxy(OrbitalVelocityEcl(gameTime, body.Period, body.PhaseOffset, body.OrbitalRadius));
     }
+
+    // Keplerian velocity for planets, circular fallback for legacy bodies.
+    private static DVec3 PlanetVelocityEcl(OrbitalBody planet, double gameTime)
+        => planet.SemiMajorAxis > 0.0 && planet.ParentMassKg > 0.0
+            ? planet.ComputeVelocity(gameTime, Units.G * planet.ParentMassKg, DVec3.Zero)
+            : OrbitalVelocityEcl(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius);
 
     private static DVec3 OrbitalVelocityEcl(double gameTime, double period, double phaseOffset, double radius)
     {

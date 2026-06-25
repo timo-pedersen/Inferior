@@ -77,12 +77,12 @@ public sealed class StarSystem
         foreach (var planet in _planets)
         {
             if (ReferenceEquals(planet, station.OrbitParent))
-                return OrbitalVelocity(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius) + vel;
+                return KeplerianOrCircularVelocity(planet, gameTime) + vel;
 
             foreach (var moon in planet.Children)
             {
                 if (ReferenceEquals(moon, station.OrbitParent))
-                    return OrbitalVelocity(gameTime, planet.Period, planet.PhaseOffset, planet.OrbitalRadius)
+                    return KeplerianOrCircularVelocity(planet, gameTime)
                          + OrbitalVelocity(gameTime, moon.Period, moon.PhaseOffset, moon.OrbitalRadius)
                          + vel;
             }
@@ -90,6 +90,12 @@ public sealed class StarSystem
 
         return vel;
     }
+
+    // Use Keplerian velocity for planets with full orbital elements; fall back to circular for moons.
+    private static DVec3 KeplerianOrCircularVelocity(OrbitalBody body, double gameTime)
+        => body.SemiMajorAxis > 0.0 && body.ParentMassKg > 0.0
+            ? body.ComputeVelocity(gameTime, Units.G * body.ParentMassKg, DVec3.Zero)
+            : OrbitalVelocity(gameTime, body.Period, body.PhaseOffset, body.OrbitalRadius);
 
     private static DVec3 OrbitalVelocity(double gameTime, double period, double phaseOffset, double radius)
     {
