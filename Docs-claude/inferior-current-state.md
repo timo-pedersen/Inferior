@@ -28,9 +28,16 @@
 | **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
-| **Planetary flight (`FlightMode`)** | ✓ Done | `FlightMode { Space, Atmosphere }` in sim; auto-detect via nearest body altitude; force-based physics in atmosphere (gravity, drag, lift); Flight Assist (V key) and Glide Mode (G key) sim-owned; `SystemSpaceState` stays active throughout |
+| **Planetary flight (`FlightMode`)** | ✓ Done | `FlightMode { Space, Atmosphere }` in sim; auto-detect via nearest body altitude; force-based physics in atmosphere (gravity, drag, lift); Flight Assist (V key) and Slipstream (G key) sim-owned; `SystemSpaceState` stays active throughout |
 | **Keplerian orbital mechanics** | ✓ Done | Full orbital elements (`e`, `i`, `Ω`, `ω`, `M₀`) on `OrbitalBody`; `ComputePosition` + `ComputeVelocity`; Newton solver for eccentric anomaly; moons/asteroids/stations keep circular rail |
 | **PlanetData + PlanetFactory** | ✓ Done | `PlanetType`, `AtmosphereCompositionType` enums; `PlanetData` record with physical/atmosphere/surface data; `PlanetFactory` procedural generation; per-tick planet orientation update in sim |
+| **Reference frame fix** | ✓ Done | On atmosphere entry, planet orbital velocity subtracted from `ship.Velocity` (→ planet-relative); position integration adds `_atmosphericPlanetVelocity` to keep galaxy position tracking. Restored on exit. `UpdateReferenceFrame` sends `DVec3.Zero` in atmosphere. |
+| **PlanetaryCoordinateSensor** | ✓ Done | `Inferior.Gameplay/Sensors/`; publishes `PlanetCoord.*` topics each tick in atmosphere: Altitude, Latitude, Longitude, Heading, GroundSpeed, VerticalSpeed, Temperature. Topics added to `Inferior.Core/DataBus/Topics.cs`. |
+| **Ground radar HUD panel** | ✓ Done | 7-line panel (ALT/VS/LAT/LON/HDG/GS/TEMP) drawn in `DrawAtmosPanel()`; visible only in `FlightMode.Atmosphere`; subscribes/unsubscribes to `PlanetCoord.*` on state enter/exit. |
+| **Checkerboard planet sphere** | ✓ Done | Per-planet `VertexPositionColor` sphere (128×64 segments) built in `BuildPlanetSphere()`; 5°×5° cells with type-specific colour pairs (7 `PlanetType`s); pole caps; equator stripe; pre-baked directional lighting; rotates via `body.Orientation`. |
+| **GeometryBuilder** | ✓ Done | `Inferior.Rendering/GeometryBuilder.cs`; `AddConvexFace` / `AddFace(outwardNormal)`; winding auto-corrected from centroid or explicit normal; `BuildDynamic` (VertexPositionNormalTexture, flat normals) and `BuildBaked` (VertexPositionColor). |
+| **MeshRenderer** | ✓ Done | `Inferior.Rendering/MeshRenderer.cs`; `DrawBaked` (VertexPositionColorTexture, no lighting) and `DrawDynamic` (VertexPositionNormalTexture, BasicEffect star light); explicit `CullCounterClockwiseFace`. |
+| **Container rendering** | ✓ Done | Single shared chamfered-box mesh (2.5×2.5×6 m, 0.1 m chamfer) via `GeometryBuilder`; per-lock-grade colour at draw time; seeded angular velocity tumble updated per frame; drawn through `MeshRenderer.DrawDynamic`. |
 
 ---
 
@@ -86,11 +93,9 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Brief B** — atmospheric instruments (lat/lon, ground radar HUD panel, checkerboard surface mesh, temperature map); reads `OrbitalBody.Orientation` and `PlanetData` set by Brief A
-2. **Planetary flight HUD** — altitude, ground speed, density overlay in SystemSpaceState when `FlightMode == Atmosphere`
-3. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
-4. **Station text/markings pass** — station name on hull, bay numbers
-5. **Power system refinement** — heat, coolant, more components
+1. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
+2. **Station text/markings pass** — station name on hull, bay numbers
+3. **Power system refinement** — heat, coolant, more components
 
 ---
 
@@ -152,6 +157,7 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | Multiplayer architecture compatibility | Noted, deferred |
 | Station text/markings pass — font atlas geometry pipeline | Not yet designed |
 | Station module shape variety — non-box modules | Design noted, not implemented |
+| Antenna dish interior winding | Needs `AddFace(outwardNormal)` in `GeometryBuilder` when antenna geometry is revisited — concave interior faces point back toward stem, not away from mesh origin |
 | Station weathering pass | Not yet designed |
 | Station enclosed archetypes (Sphere, Pyramid, Prism, etc.) | Designed, not implemented |
 | Planetary terrain rendering | Deferred — separate brief required |
@@ -170,7 +176,7 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | `inferior-components-claude.md` | docs-claude | Component specs, properties, units |
 | `inferior-design-ship-claude.md` | docs-claude | Ship classes, roles, hull system |
 | `inferior-design-stations-claude.md` | docs-claude | Station generation — architecture, modules, decoration |
-| `inferior-design-planetary-claude.md` | docs-claude | Planetary flight — FlightMode, forces, glide, Flight Assist |
+| `inferior-design-planetary-claude.md` | docs-claude | Planetary flight — FlightMode, forces, Slipstream, Flight Assist |
 | `inferior-design.md` | docs | Full design doc with rationale |
 | `inferior-lore.md` | docs | Full lore with narrative |
 | `inferior-classes.md` | docs-archive | Class sketches — may be stale; repo is authoritative |

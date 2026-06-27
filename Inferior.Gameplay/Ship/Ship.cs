@@ -29,7 +29,7 @@ public sealed class Ship
     public DVec3      Velocity    { get; set; }
     public Quaternion Orientation { get; private set; } = Quaternion.Identity;
 
-    // TODO: angular velocity for proper tumble physics (needed by glide exit tumble)
+    // TODO: angular velocity for proper tumble physics (needed by slipstream exit tumble)
     // When implemented, ApplyAngularImpulse should add to it and ApplyRotation should integrate it.
     public void ApplyAngularImpulse(DVec3 axisRadPerSec2) { /* stub */ }
 
@@ -51,7 +51,7 @@ public sealed class Ship
             c.Tick(dt);
     }
 
-    /// <summary>True when at least one GyroComponent is running. Reduces glide exit tumble.</summary>
+    /// <summary>True when at least one GyroComponent is running. Reduces slipstream exit tumble.</summary>
     public bool HasGyro => _components.Any(c => c is GyroComponent { Status: ComponentStatus.Running });
 
     // ── Mass ──────────────────────────────────────────────────────────────────

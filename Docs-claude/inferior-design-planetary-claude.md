@@ -151,7 +151,7 @@ when stationary.
 
 ---
 
-## Glide mode
+## Slipstream mode
 
 **Key: G**
 
@@ -159,7 +159,7 @@ when stationary.
 
 A hyperspace cocoon is generated around the hull. Atmosphere molecules along the
 ship's leading edges are compactified into a hyperspace plane, then un-compactified
-at the rear. Air behaves as though nothing passed — zero drag. Glide and shields
+at the rear. Air behaves as though nothing passed — zero drag. Slipstream and shields
 cannot coexist: both are hyperspace field emitters occupying the same spatial envelope.
 (V-band proximity provides a secondary lore justification.)
 
@@ -167,42 +167,42 @@ cannot coexist: both are hyperspace field emitters occupying the same spatial en
 
 | Constraint | Value |
 |---|---|
-| Shields active | Glide unavailable |
+| Shields active | Slipstream unavailable |
 | Atmospheric density | Must be ≥ 0.05 (5% of reference pressure); below this the cocoon cannot form |
-| Minimum entry speed | None — glide can engage at any speed and accelerates to minimum |
+| Minimum entry speed | None — slipstream can engage at any speed and accelerates to minimum |
 
 ### Activation sequence
 
 1. Player presses G
-2. Glide module charges (startup timer; system log message on completion)
-3. Cocoon forms; ship accelerates automatically to minimum glide speed in current forward direction
+2. Slipstream module charges (startup timer; system log message on completion)
+3. Cocoon forms; ship accelerates automatically to minimum slipstream speed in current forward direction
 4. Atmospheric drag drops to zero; lift also drops to zero
 
-### Speed in glide
+### Speed in slipstream
 
-Glide operates in a defined speed window. Placeholder values — tune for feel:
+Slipstream operates in a defined speed window. Placeholder values — tune for feel:
 
 | Parameter | Placeholder |
 |---|---|
-| Minimum glide speed | 1 000 m/s |
-| Maximum glide speed | 10 000 m/s |
+| Minimum slipstream speed | 1 000 m/s |
+| Maximum slipstream speed | 10 000 m/s |
 
-Normal engine thrust does not apply in glide. Speed within the window is managed
-by the glide system. Higher altitude may permit higher maximum speed — to be tuned.
+Normal engine thrust does not apply in slipstream. Speed within the window is managed
+by the slipstream system. Higher altitude may permit higher maximum speed — to be tuned.
 
-### Turning in glide
+### Turning in slipstream
 
 Angular authority is heavily reduced. All three axes (pitch/yaw/roll) are available
-but slow. Gyro component improves turning rate in glide.
+but slow. Gyro component improves turning rate in slipstream.
 
-### Exiting glide
+### Exiting slipstream
 
 Press G to exit. Full atmospheric drag resumes immediately.
 
-**High-speed exit tumble:** exiting at or near maximum glide speed imposes a violent
+**High-speed exit tumble:** exiting at or near maximum slipstream speed imposes a violent
 aerodynamic event — asymmetric drag forces produce large uncontrolled torques until
 speed falls to a range where the ship can recover. This is **explicit design**, not
-an emergent edge case. The pilot must manage glide entry and exit speed deliberately.
+an emergent edge case. The pilot must manage slipstream entry and exit speed deliberately.
 Gyro quality determines recovery time.
 
 ---
@@ -277,7 +277,7 @@ cockpit rail central panel, tab "Landing".
 | Key | Action |
 |---|---|
 | V | Toggle Flight Assist |
-| G | Toggle Glide mode |
+| G | Toggle Slipstream |
 
 ---
 

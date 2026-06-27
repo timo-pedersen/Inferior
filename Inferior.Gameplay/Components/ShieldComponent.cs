@@ -26,7 +26,7 @@ public sealed class ShieldComponent : ShipComponent
 {
     public double MaxShieldJ    { get; }  // maximum shield energy (joules)
     public double ChargeRateW   { get; }  // maximum charge rate, also peak power demand (watts)
-    public double CapacitorFill => _capacitor.FillFraction;  // 0–1; readable by sim for glide guard
+    public double CapacitorFill => _capacitor.FillFraction;  // 0–1; readable by sim for slipstream guard
 
     private readonly PowerCapacitor _capacitor;
     private double _deliveredWatts;

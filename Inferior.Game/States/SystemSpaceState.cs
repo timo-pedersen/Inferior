@@ -108,6 +108,14 @@ public sealed class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
     // GPU-side hull meshes (VertexPositionNormalTexture) for real-time BasicEffect lighting.
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
+    // Per-planet checkerboard sphere meshes (VertexPositionColor, pre-baked lighting)
+    private readonly Dictionary<OrbitalBody, (VertexBuffer vb, IndexBuffer ib, int triCount)> _planetSpheres = [];
+
+    // ── Container rendering ───────────────────────────────────────────────────
+    // One shared mesh (all containers identical geometry; colour from lock grade per draw call).
+    private MeshRenderer?  _meshRenderer;
+    private VertexBuffer?  _containerVb;
+    private IndexBuffer?   _containerIb;
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
@@ -138,6 +146,11 @@ public sealed class SystemSpaceState : GameState
     private Action<double>?       _gravDirYHandler;
     private Action<double>?       _gravDirZHandler;
     private double                _gravDirX, _gravDirY, _gravDirZ;
+
+    // ── Ground radar (atmosphere-only instrument panel) ───────────────────────
+    private Action<double>? _pcAltHandler, _pcVsHandler, _pcLatHandler,
+                            _pcLonHandler, _pcHdgHandler, _pcGsHandler, _pcTempHandler;
+    private double _pcAlt, _pcVs, _pcLat, _pcLon, _pcHdg, _pcGs, _pcTemp;
     private Action<RadarContact>? _radarContactHandler;
     private Action<string>?       _radarLostHandler;
 
@@ -348,11 +361,20 @@ public sealed class SystemSpaceState : GameState
         _effect.DirectionalLight1.Enabled = false;
         _effect.DirectionalLight2.Enabled = false;
 
-        // Sphere mesh — shared by all planets, scaled per draw
+        // Shared sphere mesh for moons/asteroids (no PlanetData)
         var (vb, ib) = MeshFactory.CreateSphere(_gd, rings: 24, segments: 24);
         _sphereVb        = vb;
         _sphereIb        = ib;
         _sphereTriCount  = 24 * 24 * 2;
+
+        // Per-planet checkerboard sphere meshes
+        foreach (var planet in _system.Planets)
+            if (planet.Planet != null)
+                _planetSpheres[planet] = BuildPlanetSphere(planet);
+
+        // Container renderer and shared mesh (one geometry; colour from lock grade per draw call)
+        _meshRenderer = new MeshRenderer(_gd);
+        (_containerVb, _containerIb) = BuildContainerMesh(_gd);
 
         // Ring vertices reused per orbit ring
         _ringVerts = MeshFactory.CreateRingVertices(128);
@@ -400,7 +422,6 @@ public sealed class SystemSpaceState : GameState
             }
         }
         _stationPositions.Clear();
-        foreach (var c in _testContainers) { c.Vb.Dispose(); c.Ib.Dispose(); }
         _testContainers.Clear();
         _prevCameraPosValid = false;
 
@@ -693,6 +714,21 @@ public sealed class SystemSpaceState : GameState
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         DataBus.System.Subscribe(Topics.System.All, _systemHandler);
 
+        _pcAltHandler  = v => _pcAlt  = v;
+        _pcVsHandler   = v => _pcVs   = v;
+        _pcLatHandler  = v => _pcLat  = v;
+        _pcLonHandler  = v => _pcLon  = v;
+        _pcHdgHandler  = v => _pcHdg  = v;
+        _pcGsHandler   = v => _pcGs   = v;
+        _pcTempHandler = v => _pcTemp  = v;
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Altitude,      _pcAltHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.VerticalSpeed, _pcVsHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Latitude,      _pcLatHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Longitude,     _pcLonHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Heading,       _pcHdgHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.GroundSpeed,   _pcGsHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Temperature,   _pcTempHandler);
+
         _radarContactHandler = c =>
         {
             _targeting.OnContactUpdated(c);
@@ -739,6 +775,13 @@ public sealed class SystemSpaceState : GameState
             DataBus.RadarLost.Unsubscribe(Topics.Radar.All, _radarLostHandler);
         if (_shieldCapacitorHandler != null)
             DataBus.Instruments.Unsubscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
+        if (_pcAltHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Altitude,      _pcAltHandler);
+        if (_pcVsHandler   != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.VerticalSpeed, _pcVsHandler);
+        if (_pcLatHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Latitude,      _pcLatHandler);
+        if (_pcLonHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Longitude,     _pcLonHandler);
+        if (_pcHdgHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Heading,       _pcHdgHandler);
+        if (_pcGsHandler   != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.GroundSpeed,   _pcGsHandler);
+        if (_pcTempHandler != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Temperature,   _pcTempHandler);
 
         // Remove all radar contacts fed from this session so TargetingSystem is clean on re-entry
         foreach (string id in _radarContactIds)
@@ -751,14 +794,19 @@ public sealed class SystemSpaceState : GameState
         _effect?.Dispose();
         _sphereVb?.Dispose();
         _sphereIb?.Dispose();
-        foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var c in _testContainers)     { c.Vb.Dispose(); c.Ib.Dispose(); }
+        foreach (var v in _decoMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _glassMeshes.Values)   { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _hullMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _planetSpheres.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
+        _planetSpheres.Clear();
         _testContainers.Clear();
+        _meshRenderer?.Dispose();
+        _meshRenderer = null;
+        _containerVb?.Dispose();
+        _containerIb?.Dispose();
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
         _navGlowTex?.Dispose();
@@ -908,6 +956,19 @@ public sealed class SystemSpaceState : GameState
         // Rebuild test container contacts — if newly populated this frame, repopulate
         if (_testContainers.Count == 0 && _stationPositions.Count > 0)
             SpawnTestContainers();
+
+        // Update container orientations (slow seeded tumble)
+        foreach (var tc in _testContainers)
+        {
+            double rate = tc.AngularVelocity.Length;
+            if (rate > 1e-10)
+            {
+                DVec3 axis  = tc.AngularVelocity / rate;
+                var   delta = Quaternion.CreateFromAxisAngle(
+                    new Vector3((float)axis.X, (float)axis.Y, (float)axis.Z), (float)(rate * dt));
+                tc.Orientation = Quaternion.Normalize(delta * tc.Orientation);
+            }
+        }
 
         // Update direction balls — after position rebuild so current-frame station positions
         // are used, not the previous frame's. Avoids the ~1-frame (~350 m) visual offset
@@ -1224,14 +1285,12 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawTestContainers()
     {
-        if (_testContainers.Count == 0) return;
+        if (_testContainers.Count == 0 || _meshRenderer == null
+            || _containerVb == null || _containerIb == null) return;
 
-        float rs = (float)Camera3D.RenderScale;
-
-        _effect.LightingEnabled    = false;
-        _effect.VertexColorEnabled = true;
-        _effect.TextureEnabled     = true;
-        _effect.Texture            = StationTextureRegistry.Get(SurfaceTexture.CleanPanel);
+        float  rs   = (float)Camera3D.RenderScale;
+        Matrix view = _camera.ViewMatrix;
+        Matrix proj = _camera.ProjectionMatrix;
 
         foreach (var tc in _testContainers)
         {
@@ -1243,23 +1302,30 @@ public sealed class SystemSpaceState : GameState
             Vector3 renderPos   = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
 
-            _effect.World = Matrix.CreateScale(rs) * Matrix.CreateTranslation(renderPos);
+            Matrix world = Matrix.CreateScale(rs)
+                         * Matrix.CreateFromQuaternion(tc.Orientation)
+                         * Matrix.CreateTranslation(renderPos);
 
-            _gd.SetVertexBuffer(tc.Vb);
-            _gd.Indices = tc.Ib;
-
-            foreach (var pass in _effect.CurrentTechnique.Passes)
-            {
-                pass.Apply();
-                _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList,
-                    baseVertex: 0, startIndex: 0, primitiveCount: tc.TriCount);
-            }
+            _meshRenderer.DrawDynamic(
+                _containerVb, _containerIb,
+                world, view, proj,
+                GetContainerLockColour(tc.LockGrade),
+                SceneLighting.SunDirection,
+                new Color(SceneLighting.SunColour));
         }
 
-        _effect.TextureEnabled     = false;
-        _effect.VertexColorEnabled = false;
-        _effect.LightingEnabled    = true;
+        // Restore effect state expected by subsequent draw calls
+        _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
+        _gd.DepthStencilState = DepthStencilState.Default;
     }
+
+    private static Color GetContainerLockColour(Containers.LockGrade grade) => grade switch
+    {
+        Containers.LockGrade.Civilian => new Color( 80, 100, 145),
+        Containers.LockGrade.Military => new Color( 75,  95,  60),
+        Containers.LockGrade.Vault    => new Color(160, 135,  45),
+        _                             => new Color(150, 148, 142),  // None
+    };
 
     // Builds a VertexPositionNormalTexture hull mesh for one module (6 box faces, 24 verts).
     // Normals are local-space outward per face; BasicEffect transforms them at draw time.
@@ -1475,7 +1541,34 @@ public sealed class SystemSpaceState : GameState
         Vector3 renderPos = _camera.ToRenderSpace(universePos);
         if (renderPos.Length() > 30_000f) return;
 
-        DrawSphere(renderPos, PlanetApparentRadius(body, renderPos), BodyColor(body), lit: true);
+        float radius = PlanetApparentRadius(body, renderPos);
+
+        if (_planetSpheres.TryGetValue(body, out var cbSphere))
+        {
+            _effect.LightingEnabled    = false;
+            _effect.VertexColorEnabled = true;
+            _effect.DiffuseColor       = Vector3.One;
+            _effect.Alpha              = 1f;
+
+            _effect.World = Matrix.CreateScale(radius)
+                          * Matrix.CreateFromQuaternion(body.Orientation)
+                          * Matrix.CreateTranslation(renderPos);
+
+            _gd.SetVertexBuffer(cbSphere.vb);
+            _gd.Indices = cbSphere.ib;
+            foreach (var pass in _effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, cbSphere.triCount);
+            }
+
+            _effect.VertexColorEnabled = false;
+            _effect.LightingEnabled    = true;
+        }
+        else
+        {
+            DrawSphere(renderPos, radius, BodyColor(body), lit: true);
+        }
     }
 
     // ── Star glow (3D billboard, additive) ───────────────────────────────────
@@ -1997,6 +2090,8 @@ public sealed class SystemSpaceState : GameState
         // Game time
         DrawText(sb, $"T+{Units.FormatTime(_gameTimeSeconds)}", new Vector2(16, bottom - 58), ColHUDDim, 0.8f);
 
+        DrawAtmosPanel(sb);
+
         // Controls hint — changes with mode
         if (_uiMouseMode)
         {
@@ -2247,9 +2342,9 @@ public sealed class SystemSpaceState : GameState
                        : angle <  zeroRad ? 1.0 - (angle - lockRad) / (zeroRad - lockRad)
                        : 0.0;
 
-        // In atmosphere mode, skip blend so ground-relative drag uses the full orbital velocity
+        // In atmosphere: ship.Velocity is planet-relative (zero reference).
         _refVelocity = _simulation.CurrentFlightMode == FlightMode.Atmosphere
-            ? domVelocity
+            ? DVec3.Zero
             : domVelocity * blend;
         _refName = domName;
     }
@@ -2358,10 +2453,6 @@ public sealed class SystemSpaceState : GameState
     // TODO: remove SpawnTestContainers — debug helper for radar testing
     private void SpawnTestContainers()
     {
-        Color[] palette = [
-            new Color(180, 60, 50), new Color(50, 100, 180),
-            new Color(60, 160, 80), new Color(180, 140, 50),
-        ];
         int globalIdx = 0;
         foreach (var (station, _) in _stationPositions)
         {
@@ -2376,25 +2467,26 @@ public sealed class SystemSpaceState : GameState
                 double elevM  = (rng.NextDouble() - 0.5) * 60.0;  // ±30 m vertical
                 var    offset = new DVec3(System.Math.Cos(angle) * dist, elevM, System.Math.Sin(angle) * dist);
 
-                var sc = Inferior.Game.Containers.ShippingContainerFactory.Generate(
-                    rng.Pick(palette), rng.NextFloat(0f, 0.6f), rng.NextInt(int.MinValue, int.MaxValue));
+                // Lock grade — seeded so the same system always produces the same containers
+                var grade = (Containers.LockGrade)rng.NextInt(0, 3);
 
-                var vb = new VertexBuffer(_gd, VertexPositionColorTexture.VertexDeclaration,
-                                          sc.Vertices.Length, BufferUsage.WriteOnly);
-                vb.SetData(sc.Vertices);
-                var ib = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
-                                         sc.Indices.Length, BufferUsage.WriteOnly);
-                ib.SetData(sc.Indices);
+                // Angular velocity — seeded slow tumble
+                var    tumbleRng = new Inferior.Core.Random.SeededRandom(globalIdx + 1);
+                double rate      = 0.01 + tumbleRng.NextDouble() * 0.04;
+                var    axis      = new DVec3(
+                    tumbleRng.NextDouble() * 2.0 - 1.0,
+                    tumbleRng.NextDouble() * 2.0 - 1.0,
+                    tumbleRng.NextDouble() * 2.0 - 1.0).Normalized();
+                DVec3 angVel = axis * rate;
 
                 _testContainers.Add(new TestContainerEntry
                 {
-                    Id       = $"ctn:{globalIdx}",
-                    Name     = $"Ctn-{globalIdx:D2}",
-                    Station  = station,
-                    Offset   = offset,
-                    Vb       = vb,
-                    Ib       = ib,
-                    TriCount = sc.Indices.Length / 3,
+                    Id              = $"ctn:{globalIdx}",
+                    Name            = $"Ctn-{globalIdx:D2}",
+                    Station         = station,
+                    Offset          = offset,
+                    LockGrade       = grade,
+                    AngularVelocity = angVel,
                 });
                 globalIdx++;
             }
@@ -2725,12 +2817,12 @@ public sealed class SystemSpaceState : GameState
         double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
         double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
 
-        // V = Flight Assist toggle, G = Glide Mode toggle (rising-edge sent to sim)
-        bool faToggle    = keys.IsKeyDown(Keys.V) && !_prevKeys.IsKeyDown(Keys.V);
-        bool glideToggle = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
+        // V = Flight Assist toggle, G = Slipstream toggle (rising-edge sent to sim)
+        bool faToggle         = keys.IsKeyDown(Keys.V) && !_prevKeys.IsKeyDown(Keys.V);
+        bool slipstreamToggle = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
 
         return new PlayerInput(fwd, lat, vert, roll, pitchInput, yawInput, false,
-            FlightAssistToggle: faToggle, GlideModeToggle: glideToggle);
+            FlightAssistToggle: faToggle, SlipstreamToggle: slipstreamToggle);
     }
 
     // ── UI mode ───────────────────────────────────────────────────────────────
@@ -2914,6 +3006,228 @@ public sealed class SystemSpaceState : GameState
         _                    => new Color(150, 150, 150),
     };
 
+    // ── Ground radar panel (atmosphere-only) ──────────────────────────────────
+
+    private void DrawAtmosPanel(SpriteBatch sb)
+    {
+        if (_frameShipSnap?.FlightMode != FlightMode.Atmosphere) return;
+
+        string altStr  = _pcAlt < 10_000.0
+            ? $"{_pcAlt:N0} m"
+            : $"{_pcAlt / 1000.0:F1} km";
+        string vsStr   = (_pcVs >= 0 ? "+" : "") + $"{_pcVs:F0} m/s";
+        string latStr  = $"{System.Math.Abs(_pcLat):F1}° {(_pcLat >= 0 ? "N" : "S")}";
+        string lonStr  = $"{System.Math.Abs(_pcLon):F1}° {(_pcLon >= 0 ? "E" : "W")}";
+        string hdgStr  = $"{(int)System.Math.Round(_pcHdg):D3}°";
+        string gsStr   = $"{(int)_pcGs} m/s";
+        string tempStr = $"{(int)_pcTemp} K";
+
+        (string label, string value)[] rows =
+        [
+            ("ALT",  altStr),
+            ("VS",   vsStr),
+            ("LAT",  latStr),
+            ("LON",  lonStr),
+            ("HDG",  hdgStr),
+            ("GS",   gsStr),
+            ("TEMP", tempStr),
+        ];
+
+        const int ColW  = 200;
+        const int LineH = 20;
+        const float S   = 0.8f;
+        int x = _gd.Viewport.Width - ColW - 12;
+        int y = 10;
+
+        var bgRect = new Rectangle(x - 6, y - 4, ColW + 10, rows.Length * LineH + 8);
+        DrawRect(sb, bgRect, new Color(8, 12, 25, 190));
+        DrawRectBorder(sb, bgRect, ColBorder);
+
+        for (int i = 0; i < rows.Length; i++)
+        {
+            int ly = y + i * LineH;
+            DrawText(sb, rows[i].label, new Vector2(x, ly), ColHUDDim, S);
+            // Right-align value
+            Vector2 valSize = FontHelper.Measure(_font, rows[i].value, S);
+            DrawText(sb, rows[i].value, new Vector2(x + ColW - valSize.X, ly), ColHUD, S);
+        }
+    }
+
+    // ── Container mesh builder ────────────────────────────────────────────────
+
+    private static (VertexBuffer vb, IndexBuffer ib) BuildContainerMesh(GraphicsDevice gd)
+    {
+        // 2.5 × 2.5 × 6.0 m container centred at origin, 0.1 m chamfer on all edges/corners.
+        const float hx = 1.25f, hy = 1.25f, hz = 3.0f;   // half-extents
+        const float c  = 0.10f;                            // chamfer width
+        float ix = hx - c, iy = hy - c, iz = hz - c;      // inner half-extents (main face corners)
+
+        var gb = new GeometryBuilder();
+
+        // 6 main faces
+        gb.AddConvexFace(new( hx,  iy,  iz), new( hx, -iy,  iz), new( hx, -iy, -iz), new( hx,  iy, -iz)); // +X
+        gb.AddConvexFace(new(-hx,  iy,  iz), new(-hx,  iy, -iz), new(-hx, -iy, -iz), new(-hx, -iy,  iz)); // -X
+        gb.AddConvexFace(new( ix,  hy,  iz), new(-ix,  hy,  iz), new(-ix,  hy, -iz), new( ix,  hy, -iz)); // +Y
+        gb.AddConvexFace(new( ix, -hy,  iz), new( ix, -hy, -iz), new(-ix, -hy, -iz), new(-ix, -hy,  iz)); // -Y
+        gb.AddConvexFace(new( ix,  iy,  hz), new(-ix,  iy,  hz), new(-ix, -iy,  hz), new( ix, -iy,  hz)); // +Z
+        gb.AddConvexFace(new( ix,  iy, -hz), new( ix, -iy, -hz), new(-ix, -iy, -hz), new(-ix,  iy, -hz)); // -Z
+
+        // 12 edge chamfer strips (4 along each axis)
+        // Z-axis edges (XY corners)
+        gb.AddConvexFace(new( hx,  iy,  iz), new( hx,  iy, -iz), new( ix,  hy, -iz), new( ix,  hy,  iz)); // +X+Y
+        gb.AddConvexFace(new(-ix,  hy,  iz), new(-ix,  hy, -iz), new(-hx,  iy, -iz), new(-hx,  iy,  iz)); // -X+Y
+        gb.AddConvexFace(new( hx, -iy,  iz), new( ix, -hy,  iz), new( ix, -hy, -iz), new( hx, -iy, -iz)); // +X-Y
+        gb.AddConvexFace(new(-hx, -iy,  iz), new(-hx, -iy, -iz), new(-ix, -hy, -iz), new(-ix, -hy,  iz)); // -X-Y
+        // X-axis edges (YZ corners)
+        gb.AddConvexFace(new( ix,  hy,  iz), new(-ix,  hy,  iz), new(-ix,  iy,  hz), new( ix,  iy,  hz)); // +Y+Z
+        gb.AddConvexFace(new( ix, -iy,  hz), new(-ix, -iy,  hz), new(-ix, -hy,  iz), new( ix, -hy,  iz)); // -Y+Z
+        gb.AddConvexFace(new( ix,  iy, -hz), new(-ix,  iy, -hz), new(-ix,  hy, -iz), new( ix,  hy, -iz)); // +Y-Z
+        gb.AddConvexFace(new( ix, -hy, -iz), new(-ix, -hy, -iz), new(-ix, -iy, -hz), new( ix, -iy, -hz)); // -Y-Z
+        // Y-axis edges (XZ corners)
+        gb.AddConvexFace(new( hx,  iy,  iz), new( ix,  iy,  hz), new( ix, -iy,  hz), new( hx, -iy,  iz)); // +X+Z
+        gb.AddConvexFace(new(-ix,  iy,  hz), new(-hx,  iy,  iz), new(-hx, -iy,  iz), new(-ix, -iy,  hz)); // -X+Z
+        gb.AddConvexFace(new( hx,  iy, -iz), new( hx, -iy, -iz), new( ix, -iy, -hz), new( ix,  iy, -hz)); // +X-Z
+        gb.AddConvexFace(new(-hx,  iy, -iz), new(-ix,  iy, -hz), new(-ix, -iy, -hz), new(-hx, -iy, -iz)); // -X-Z
+
+        // 8 corner triangles
+        gb.AddConvexFace(new( hx,  iy,  iz), new( ix,  hy,  iz), new( ix,  iy,  hz)); // +X+Y+Z
+        gb.AddConvexFace(new(-ix,  hy,  iz), new(-hx,  iy,  iz), new(-ix,  iy,  hz)); // -X+Y+Z
+        gb.AddConvexFace(new( hx, -iy,  iz), new( ix, -iy,  hz), new( ix, -hy,  iz)); // +X-Y+Z
+        gb.AddConvexFace(new(-hx, -iy,  iz), new(-ix, -hy,  iz), new(-ix, -iy,  hz)); // -X-Y+Z
+        gb.AddConvexFace(new( hx,  iy, -iz), new( ix,  iy, -hz), new( ix,  hy, -iz)); // +X+Y-Z
+        gb.AddConvexFace(new(-ix,  hy, -iz), new(-ix,  iy, -hz), new(-hx,  iy, -iz)); // -X+Y-Z
+        gb.AddConvexFace(new( hx, -iy, -iz), new( ix, -hy, -iz), new( ix, -iy, -hz)); // +X-Y-Z
+        gb.AddConvexFace(new(-hx, -iy, -iz), new(-ix, -iy, -hz), new(-ix, -hy, -iz)); // -X-Y-Z
+
+        return gb.BuildDynamic(gd);
+    }
+
+    // ── Planet checkerboard sphere builder ────────────────────────────────────
+
+    private (VertexBuffer vb, IndexBuffer ib, int triCount) BuildPlanetSphere(OrbitalBody body)
+    {
+        const int Rings    = 64;
+        const int Segments = 128;
+
+        PlanetType type    = body.Planet!.Type;
+        bool       gasMode = type == PlanetType.GasGiant || type == PlanetType.IceGiant;
+        Vector3    sunDir  = SceneLighting.SunDirection;
+        float      ambient = SceneLighting.Ambient;
+
+        int vertCount  = (Rings + 1) * (Segments + 1);
+        int indexCount = Rings * Segments * 6;
+        int triCount   = Rings * Segments * 2;
+
+        var verts   = new VertexPositionColor[vertCount];
+        var indices = new int[indexCount];
+
+        int v = 0;
+        for (int ring = 0; ring <= Rings; ring++)
+        {
+            float phi = MathF.PI * ring / Rings;
+            for (int seg = 0; seg <= Segments; seg++)
+            {
+                float   theta  = MathF.PI * 2f * seg / Segments;
+                float   nx     = MathF.Sin(phi) * MathF.Cos(theta);
+                float   ny     = MathF.Cos(phi);
+                float   nz     = MathF.Sin(phi) * MathF.Sin(theta);
+                Vector3 normal = new(nx, ny, nz);
+
+                double lat = System.Math.Asin(System.Math.Clamp(ny, -1f, 1f)) * (180.0 / System.Math.PI);
+                double lon = System.Math.Atan2(nz, nx) * (180.0 / System.Math.PI);
+
+                Color baseColor = GetSphereVertexColor(lat, lon, type, gasMode);
+
+                float lightFactor = MathF.Max(Vector3.Dot(normal, sunDir), ambient);
+                Color litColor    = new(
+                    (byte)MathF.Min(baseColor.R * lightFactor, 255f),
+                    (byte)MathF.Min(baseColor.G * lightFactor, 255f),
+                    (byte)MathF.Min(baseColor.B * lightFactor, 255f));
+
+                verts[v++] = new VertexPositionColor(normal, litColor);
+            }
+        }
+
+        int idx = 0;
+        for (int ring = 0; ring < Rings; ring++)
+        for (int seg  = 0; seg  < Segments; seg++)
+        {
+            int a = ring       * (Segments + 1) + seg;
+            int b = (ring + 1) * (Segments + 1) + seg;
+            int c = (ring + 1) * (Segments + 1) + seg + 1;
+            int d = ring       * (Segments + 1) + seg + 1;
+            indices[idx++] = a; indices[idx++] = b; indices[idx++] = c;
+            indices[idx++] = a; indices[idx++] = c; indices[idx++] = d;
+        }
+
+        var vb = new VertexBuffer(_gd, VertexPositionColor.VertexDeclaration, vertCount, BufferUsage.WriteOnly);
+        vb.SetData(verts);
+        var ib = new IndexBuffer(_gd, IndexElementSize.ThirtyTwoBits, indexCount, BufferUsage.WriteOnly);
+        ib.SetData(indices);
+
+        return (vb, ib, triCount);
+    }
+
+    private static Color GetSphereVertexColor(double lat, double lon, PlanetType type, bool gasMode)
+    {
+        // White pole caps
+        if (System.Math.Abs(lat) > 85.0) return new Color(235, 238, 245);
+
+        // Equator stripe
+        if (System.Math.Abs(lat) < 0.4) return GetEquatorColor(type);
+
+        bool darkCell;
+        if (gasMode)
+        {
+            int latCell = (int)System.Math.Floor((lat + 90.0) / 5.0);
+            darkCell = latCell % 2 == 0;
+        }
+        else
+        {
+            int latCell = (int)System.Math.Floor((lat + 90.0)  / 5.0);
+            int lonCell = (int)System.Math.Floor((lon + 180.0) / 5.0);
+            darkCell = (latCell + lonCell) % 2 == 0;
+        }
+
+        return darkCell ? GetDarkColor(type) : GetLightColor(type);
+    }
+
+    private static Color GetDarkColor(PlanetType type) => type switch
+    {
+        PlanetType.Barren   => new Color( 75,  75,  75),
+        PlanetType.Lava     => new Color(100,  20,  20),
+        PlanetType.Rocky    => new Color( 80,  70,  50),
+        PlanetType.Ocean    => new Color( 20,  50, 110),
+        PlanetType.IcyRocky => new Color( 50,  80,  95),
+        PlanetType.GasGiant => new Color(120, 100,  70),
+        PlanetType.IceGiant => new Color( 50,  80, 130),
+        _                   => new Color( 80,  80,  80),
+    };
+
+    private static Color GetLightColor(PlanetType type) => type switch
+    {
+        PlanetType.Barren   => new Color(140, 140, 140),
+        PlanetType.Lava     => new Color(190,  80,  30),
+        PlanetType.Rocky    => new Color(165, 140, 110),
+        PlanetType.Ocean    => new Color( 40, 120, 170),
+        PlanetType.IcyRocky => new Color(175, 200, 215),
+        PlanetType.GasGiant => new Color(200, 180, 140),
+        PlanetType.IceGiant => new Color(110, 150, 195),
+        _                   => new Color(140, 140, 140),
+    };
+
+    private static Color GetEquatorColor(PlanetType type) => type switch
+    {
+        PlanetType.Barren   => new Color(180, 180, 160),
+        PlanetType.Lava     => new Color(220, 120,  40),
+        PlanetType.Rocky    => new Color(190, 170, 130),
+        PlanetType.Ocean    => new Color( 60, 150, 190),
+        PlanetType.IcyRocky => new Color(210, 225, 235),
+        PlanetType.GasGiant => GetLightColor(PlanetType.GasGiant),
+        PlanetType.IceGiant => GetLightColor(PlanetType.IceGiant),
+        _                   => new Color(180, 180, 160),
+    };
+
     // ── 2D primitives (same as other states) ──────────────────────────────────
 
     private void DrawText(SpriteBatch sb, string text, Vector2 pos, Color color, float scale = 1.0f)
@@ -2933,12 +3247,12 @@ public sealed class SystemSpaceState : GameState
     // TODO: remove — debug container entry for radar testing
     private sealed class TestContainerEntry
     {
-        public required string         Id       { get; init; }
-        public required string         Name     { get; init; }
-        public required Galaxy.Station Station  { get; init; }
-        public required DVec3          Offset   { get; init; }
-        public required VertexBuffer   Vb       { get; init; }
-        public required IndexBuffer    Ib       { get; init; }
-        public required int            TriCount { get; init; }
+        public required string         Id              { get; init; }
+        public required string         Name            { get; init; }
+        public required Galaxy.Station Station         { get; init; }
+        public required DVec3          Offset          { get; init; }
+        public required Containers.LockGrade LockGrade { get; init; }
+        public required DVec3          AngularVelocity { get; init; }
+        public          Quaternion     Orientation     { get; set; } = Quaternion.Identity;
     }
 }

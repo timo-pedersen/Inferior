@@ -46,7 +46,7 @@ public sealed class SpaceSimulation : Simulation
         double     SimTime,
         FlightMode FlightMode      = FlightMode.Space,
         bool       FlightAssistOn  = true,
-        bool       GlideModeActive = false);
+        bool       SlipstreamModeActive = false);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -95,13 +95,13 @@ public sealed class SpaceSimulation : Simulation
     // ── Flight mode (sim-internal; exposed read-only via ShipSnapshot) ─────────
     private FlightMode _currentFlightMode = FlightMode.Space;
 
-    // ── Flight Assist & Glide (sim-owned state; toggled by rising edge in input) ─
+    // ── Flight Assist & Slipstream (sim-owned state; toggled by rising edge in input) ─
     private bool   _flightAssistEnabled    = true;
-    private bool   _glideModeActive        = false;
+    private bool   _slipstreamModeActive        = false;
     private bool   _prevFlightAssistToggle = false;
-    private bool   _prevGlideModeToggle    = false;
-    // Glide charge delay: counts down from GlideStartupTime → 0, then sets _glideModeActive = true
-    private double _glideChargeTimer;
+    private bool   _prevSlipstreamToggle    = false;
+    // Slipstream charge delay: counts down from SlipstreamStartupTime → 0, then sets _slipstreamModeActive = true
+    private double _slipstreamChargeTimer;
 
     // Surface contact state — gating the one-shot "Surface contact." log message
     private bool _surfaceContact;
@@ -116,10 +116,16 @@ public sealed class SpaceSimulation : Simulation
     private double _eclipticTilt;
 
     // ── Sensors ───────────────────────────────────────────────────────────────
-    private readonly GravitySensor              _gravity        = new();
-    private readonly AtmosphericPressureSensor  _atmPressure    = new("AtmosphericSensor");
-    private readonly SolarSpectrumSensor        _solarSpectrum  = new("SolarSpectrumSensor");
-    private readonly LandingSupportSystem       _landingSupport = new();
+    private readonly GravitySensor              _gravity               = new();
+    private readonly AtmosphericPressureSensor  _atmPressure           = new("AtmosphericSensor");
+    private readonly SolarSpectrumSensor        _solarSpectrum         = new("SolarSpectrumSensor");
+    private readonly LandingSupportSystem       _landingSupport        = new();
+    private readonly PlanetaryCoordinateSensor  _planetaryCoordSensor  = new();
+
+    // Galaxy-space velocity of the atmospheric body at entry time.
+    // ship.Velocity is stored planet-relative while in atmosphere;
+    // this offset keeps ship.Position tracking the planet in galaxy space.
+    private DVec3 _atmosphericPlanetVelocity;
 
     // ── Pad target (main thread → sim thread) ─────────────────────────────────
     private volatile LandingPadData? _activePadTarget;
@@ -132,11 +138,11 @@ public sealed class SpaceSimulation : Simulation
     // ── Physics constants ─────────────────────────────────────────────────────
     private const double PhysG              = 6.674e-11;
     private const double ShipCollisionRadius = 5.0;   // metres — ship bounding sphere for surface collision
-    private const double GlideMinSpeed   = 1_000.0;  // m/s — minimum forward speed in glide
-    private const double GlideMaxSpeed   = 10_000.0; // m/s — maximum forward speed in glide
-    private const double GlideMinDensity = 0.05;     // relative density — below this glide unavailable
-    private const double GlideStartupTime = 2.0;     // seconds charge delay before glide engages
-    private const double GlideAccelRate  = 200.0;    // m/s² — acceleration to reach min speed
+    private const double SlipstreamMinSpeed    = 1_000.0;  // m/s — minimum forward speed in slipstream
+    private const double SlipstreamMaxSpeed    = 10_000.0; // m/s — maximum forward speed in slipstream
+    private const double SlipstreamMinDensity  = 0.05;     // relative density — below this slipstream unavailable
+    private const double SlipstreamStartupTime = 2.0;      // seconds charge delay before slipstream engages
+    private const double SlipstreamAccelRate   = 200.0;    // m/s² — acceleration to reach min speed
 
     // ── TickPhysics ───────────────────────────────────────────────────────────
 
@@ -168,10 +174,10 @@ public sealed class SpaceSimulation : Simulation
         }
         _prevFlightAssistToggle = input.FlightAssistToggle;
 
-        // ── Glide Mode toggle (rising edge) ──────────────────────────────
-        if (input.GlideModeToggle && !_prevGlideModeToggle)
+        // ── Slipstream toggle (rising edge) ──────────────────────────────
+        if (input.SlipstreamToggle && !_prevSlipstreamToggle)
         {
-            if (!_glideModeActive && _glideChargeTimer <= 0)
+            if (!_slipstreamModeActive && _slipstreamChargeTimer <= 0)
             {
                 // Attempting to activate — check prerequisites
                 bool shieldsActive = false;
@@ -187,28 +193,28 @@ public sealed class SpaceSimulation : Simulation
 
                 if (shieldsActive)
                     DataBus.System.Publish(Topics.System.All,
-                        new SystemMessage("Glide unavailable — shields active"));
-                else if (nearDensity < GlideMinDensity)
+                        new SystemMessage("Slipstream unavailable — shields active"));
+                else if (nearDensity < SlipstreamMinDensity)
                     DataBus.System.Publish(Topics.System.All,
-                        new SystemMessage("Glide unavailable — insufficient atmospheric pressure"));
+                        new SystemMessage("Slipstream unavailable — insufficient atmospheric pressure"));
                 else
                 {
-                    _glideChargeTimer = GlideStartupTime;
-                    DataBus.System.Publish(Topics.System.All, new SystemMessage("Glide mode charging..."));
+                    _slipstreamChargeTimer = SlipstreamStartupTime;
+                    DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream charging..."));
                 }
             }
-            else if (_glideModeActive)
+            else if (_slipstreamModeActive)
             {
                 // Deactivating — apply exit tumble if at high speed
                 var rv = _refVelSnapshot;
                 DVec3 groundVel  = rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
                 DVec3  relVel    = ship.Velocity - groundVel;
                 double exitSpeed = DVec3.Dot(relVel, ship.Forward);
-                double speedFrac = exitSpeed / GlideMaxSpeed;
+                double speedFrac = exitSpeed / SlipstreamMaxSpeed;
 
-                _glideModeActive  = false;
-                _glideChargeTimer = 0;
-                DataBus.System.Publish(Topics.System.All, new SystemMessage("Glide mode disengaged"));
+                _slipstreamModeActive  = false;
+                _slipstreamChargeTimer = 0;
+                DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
 
                 if (speedFrac > 0.5)
                 {
@@ -220,11 +226,11 @@ public sealed class SpaceSimulation : Simulation
                     if (len > 0.001)
                         ship.ApplyAngularImpulse(new DVec3(ax / len, ay / len, 0) * impulseMag);
                     DataBus.System.Publish(Topics.System.All,
-                        new SystemMessage("Warning — high-speed glide exit", SystemMessagePriority.ImportantWarning));
+                        new SystemMessage("Warning — high-speed slipstream exit", SystemMessagePriority.ImportantWarning));
                 }
             }
         }
-        _prevGlideModeToggle = input.GlideModeToggle;
+        _prevSlipstreamToggle  = input.SlipstreamToggle;
 
         // ── FlightMode transition ─────────────────────────────────────────
         var nearBody = _nearAtmBody;  // set by UpdateEnvironment this tick
@@ -245,6 +251,22 @@ public sealed class SpaceSimulation : Simulation
 
         if (newMode != _currentFlightMode)
         {
+            if (newMode == FlightMode.Atmosphere && nearBody != null)
+            {
+                // Convert ship to planet-relative frame so atmospheric physics
+                // (drag, slipstream, collision) operate against a stationary ground.
+                DVec3 velEcl = nearBody.Body.SemiMajorAxis > 0.0 && nearBody.Body.ParentMassKg > 0.0
+                    ? nearBody.Body.ComputeVelocity(GameClock.SimTime, Units.G * nearBody.Body.ParentMassKg, DVec3.Zero)
+                    : SimpleOrbitalVelocityEcl(nearBody.Body, GameClock.SimTime);
+                _atmosphericPlanetVelocity = EclipticToGalaxy(velEcl);
+                ship.Velocity -= _atmosphericPlanetVelocity;
+            }
+            else if (newMode == FlightMode.Space)
+            {
+                // Restore ship to galaxy-relative frame on atmosphere exit.
+                ship.Velocity += _atmosphericPlanetVelocity;
+                _atmosphericPlanetVelocity = DVec3.Zero;
+            }
             _currentFlightMode = newMode;
             DataBus.System.Publish(Topics.System.All,
                 new SystemMessage(newMode == FlightMode.Atmosphere
@@ -262,7 +284,7 @@ public sealed class SpaceSimulation : Simulation
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
             ship.Forward, ship.Up,
             GameClock.SimTime,
-            _currentFlightMode, _flightAssistEnabled, _glideModeActive);
+            _currentFlightMode, _flightAssistEnabled, _slipstreamModeActive);
     }
 
     // ── Space (velocity-target stub) ─────────────────────────────────────────
@@ -295,35 +317,33 @@ public sealed class SpaceSimulation : Simulation
         double altitude = dist - body.RadiusMeters;
         double density  = body.DensityAtAltitude(System.Math.Max(altitude, 0));
 
-        // Ground velocity (main thread provides full orbital velocity via SetReferenceVelocity
-        // when FlightMode == Atmosphere — see SystemSpaceState.UpdateReferenceVelocity)
-        var   rv        = _refVelSnapshot;
-        DVec3 groundVel = rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
+        // ship.Velocity is planet-relative (transformed at atmosphere entry).
+        DVec3 groundVel = DVec3.Zero;
 
-        // Glide charge timer — counts down then activates
-        if (_glideChargeTimer > 0 && !_glideModeActive)
+        // Slipstream charge timer — counts down then activates
+        if (_slipstreamChargeTimer > 0 && !_slipstreamModeActive)
         {
-            _glideChargeTimer -= dt;
-            if (_glideChargeTimer <= 0)
+            _slipstreamChargeTimer -= dt;
+            if (_slipstreamChargeTimer <= 0)
             {
-                _glideChargeTimer = 0;
-                _glideModeActive  = true;
-                DataBus.System.Publish(Topics.System.All, new SystemMessage("Glide mode active"));
+                _slipstreamChargeTimer = 0;
+                _slipstreamModeActive  = true;
+                DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
             }
         }
 
-        // Auto-deactivate glide if density drops below threshold (e.g. flying above atmosphere)
-        if (_glideModeActive && density < GlideMinDensity)
+        // Auto-deactivate slipstream if density drops below threshold (e.g. flying above atmosphere)
+        if (_slipstreamModeActive && density < SlipstreamMinDensity)
         {
-            _glideModeActive = false;
+            _slipstreamModeActive = false;
             DataBus.System.Publish(Topics.System.All,
-                new SystemMessage("Glide disengaged — insufficient atmosphere",
+                new SystemMessage("Slipstream disengaged — insufficient atmosphere",
                     SystemMessagePriority.ImportantWarning));
         }
 
         DVec3 totalForce = gravForce;
 
-        if (!_glideModeActive)
+        if (!_slipstreamModeActive)
         {
             // Aerodynamic drag & lift against ground-relative velocity
             DVec3 velRel = ship.Velocity - groundVel;
@@ -346,7 +366,7 @@ public sealed class SpaceSimulation : Simulation
             totalForce += ship.Up      * (input.ThrustVertical   * ship.MaxDownThrustN);
 
             // Flight Assist: apply upward thrust to oppose gravity (battery-backed — no power draw)
-            if (_flightAssistEnabled && density >= GlideMinDensity)
+            if (_flightAssistEnabled && density >= SlipstreamMinDensity)
             {
                 double faN = System.Math.Min(ship.MaxDownThrustN, gMag * ship.Mass);
                 totalForce += ship.Up * faN;
@@ -354,31 +374,37 @@ public sealed class SpaceSimulation : Simulation
         }
         else
         {
-            // Glide: no drag applied — speed is managed via direct velocity adjustment below
+            // Slipstream: no drag applied — speed is managed via direct velocity adjustment below
         }
 
         // Integrate forces
         ship.Velocity += totalForce / ship.Mass * dt;
 
-        // Glide speed management — applied after force integration, directly on velocity
-        if (_glideModeActive)
+        // Slipstream speed management — applied after force integration, directly on velocity
+        if (_slipstreamModeActive)
         {
             DVec3  relVel   = ship.Velocity - groundVel;
             double vForward = DVec3.Dot(relVel, ship.Forward);
 
-            if (vForward < GlideMinSpeed)
+            if (vForward < SlipstreamMinSpeed)
             {
-                double delta = System.Math.Min(GlideAccelRate * dt, GlideMinSpeed - vForward);
+                double delta = System.Math.Min(SlipstreamAccelRate * dt, SlipstreamMinSpeed - vForward);
                 ship.Velocity += ship.Forward * delta;
             }
-            else if (vForward > GlideMaxSpeed)
+            else if (vForward > SlipstreamMaxSpeed)
             {
-                double delta = System.Math.Min(GlideAccelRate * dt, vForward - GlideMaxSpeed);
+                double delta = System.Math.Min(SlipstreamAccelRate * dt, vForward - SlipstreamMaxSpeed);
                 ship.Velocity -= ship.Forward * delta;
             }
         }
 
-        ship.Position += ship.Velocity * dt;
+        // Add planet's galaxy-space velocity so ship.Position tracks the planet
+        // while ship.Velocity remains in planet-relative frame.
+        ship.Position += (ship.Velocity + _atmosphericPlanetVelocity) * dt;
+
+        // Planetary coordinate sensor (only for PlanetData bodies)
+        if (near.Body.Planet != null)
+            _planetaryCoordSensor.Tick(ship.Position, ship.Velocity, near.Body, bodyPos, dt);
 
         // ── Shield atmospheric depletion ──────────────────────────────────
         if (density > 0.0)
@@ -408,7 +434,7 @@ public sealed class SpaceSimulation : Simulation
         {
             DVec3 surfaceNormal = (ship.Position - bodyPos) / distAfter;
             ship.Position = bodyPos + surfaceNormal * minDist;
-            ship.Velocity = groundVel;  // inherit ground velocity — no rebound
+            ship.Velocity = DVec3.Zero;  // planet-relative zero at surface
 
             if (!_surfaceContact)
             {
@@ -421,6 +447,17 @@ public sealed class SpaceSimulation : Simulation
         {
             _surfaceContact = false;
         }
+    }
+
+    // Fallback circular-orbit velocity in ecliptic space — used when Keplerian elements unavailable.
+    private static DVec3 SimpleOrbitalVelocityEcl(OrbitalBody body, double simTime)
+    {
+        double angle = DMath.OrbitalAngle(simTime, body.Period, body.PhaseOffset);
+        double omega = 2.0 * System.Math.PI / body.Period;
+        return new DVec3(
+            -System.Math.Sin(angle) * body.OrbitalRadius * omega,
+            0.0,
+            System.Math.Cos(angle) * body.OrbitalRadius * omega);
     }
 
     // ── Coordinate helper — ecliptic space → galaxy space ────────────────────

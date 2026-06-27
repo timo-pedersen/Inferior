@@ -132,6 +132,17 @@ public static class Topics
         public const string Value = "Pressure";  // Pa — published by active AtmosphericPressureSensor on demand
     }
 
+    public static class PlanetCoord
+    {
+        public const string Altitude      = "PlanetCoord.Altitude";       // metres above surface
+        public const string Latitude      = "PlanetCoord.Latitude";       // degrees, +N/-S
+        public const string Longitude     = "PlanetCoord.Longitude";      // degrees, +E/-W
+        public const string Heading       = "PlanetCoord.Heading";        // degrees, 0–360
+        public const string GroundSpeed   = "PlanetCoord.GroundSpeed";    // m/s horizontal
+        public const string VerticalSpeed = "PlanetCoord.VerticalSpeed";  // m/s, +up/-down
+        public const string Temperature   = "PlanetCoord.Temperature";    // kelvin
+    }
+
     public static class SolarSpectrum
     {
         public const string Data = "Data";  // double[] — 10-bin normalised Planck spectrum (0-1 per bin)
