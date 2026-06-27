@@ -28,7 +28,11 @@
 | **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
-| **Planetary flight (`FlightMode`)** | ✓ Done | `FlightMode { Space, Atmosphere }` in sim; auto-detect via nearest body altitude; force-based physics in atmosphere (gravity, drag, lift); Flight Assist (V key) and Slipstream (G key) sim-owned; `SystemSpaceState` stays active throughout |
+| **Planetary flight (`FlightMode`)** | ✓ Done (Brief E overhaul) | `FlightMode { Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream }`; auto-detect via nearest body altitude; force-based atmo physics (gravity, drag, lift); Flight Assist (V), Slipstream/mode toggle (G), X-Stop (X), Gear (scroll) |
+| **SystemNewtonian flight model** | ✓ Done | Gear-ceiling Newtonian with thrust taper; 10-gear speed table from `FlightConstants`; X-Stop brakes to reference-body velocity; gear auto-selected on Slipstream exit |
+| **SystemSlipstream flight model** | ✓ Done | 10-harmonic log-scaled table (1 km/s – 30 Gm/s); smooth-step ramp between harmonics; clunk roll animation; planet/station dropout at 100 km / 2 km |
+| **LKM station zones** | ✓ Done | 3 concentric zones (8 km / 2 km / 500 m) with per-zone gear cap; 6-second compliance window; violation flag stub; forces Slipstream exit on zone entry |
+| **Flight HUD** | ✓ Done | Mode / gear / LKM line in HUD (replaces old "Set:" speed); `Topics.Flight.*` DataBus topics; clunk camera roll animation |
 | **Keplerian orbital mechanics** | ✓ Done | Full orbital elements (`e`, `i`, `Ω`, `ω`, `M₀`) on `OrbitalBody`; `ComputePosition` + `ComputeVelocity`; Newton solver for eccentric anomaly; moons/asteroids/stations keep circular rail |
 | **PlanetData + PlanetFactory** | ✓ Done | `PlanetType`, `AtmosphereCompositionType` enums; `PlanetData` record with physical/atmosphere/surface data; `PlanetFactory` procedural generation; per-tick planet orientation update in sim |
 | **Reference frame fix** | ✓ Done | On atmosphere entry, planet orbital velocity subtracted from `ship.Velocity` (→ planet-relative); position integration adds `_atmosphericPlanetVelocity` to keep galaxy position tracking. Restored on exit. `UpdateReferenceFrame` sends `DVec3.Zero` in atmosphere. |
@@ -58,7 +62,14 @@ Atmospheric flight is a `FlightMode` enum within `SystemSpaceState`, not a separ
 `FlightMode` controls which forces the sim applies and which render passes are active.
 
 ```csharp
-public enum FlightMode { Space, Atmosphere }
+public enum FlightMode
+{
+    Docked,
+    SystemNewtonian,          // Gear-ceiling force-based Newtonian
+    SystemSlipstream,         // Harmonic warp-speed flight
+    AtmosphericNewtonian,     // Force-based atmospheric (gravity, drag, lift)
+    AtmosphericSlipstream,    // High-speed atmospheric mode
+}
 ```
 
 Planned future GameStates (not yet designed or implemented):
@@ -68,7 +79,7 @@ enum GameState
 {
     GalaxyMap, SystemMap,
     HyperspaceEntry, Hyperspace, HyperspaceExit,
-    SystemSpace,   // atmospheric flight is FlightMode.Atmosphere within this state
+    SystemSpace,   // all FlightMode variants run within this state
     Surface,       // on foot — future
     Docked
 }
@@ -94,9 +105,10 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
-2. **Station text/markings pass** — station name on hull, bay numbers
-3. **Power system refinement** — heat, coolant, more components
+1. **Flight model tuning** — first flight test of Brief E; tune `AtmoGearSpeedScale` (default 0.05 → ~1280 m/s top gear vs 2000 m/s AtmoSlipstream max); tune gear speed table steps
+2. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
+3. **Station text/markings pass** — station name on hull, bay numbers
+4. **Power system refinement** — heat, coolant, more components
 
 ---
 

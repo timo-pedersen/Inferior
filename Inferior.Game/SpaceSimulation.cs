@@ -25,14 +25,8 @@ public sealed class SpaceSimulation : Simulation
     private double _lastHeartbeat;
 
     // ── Ship ──────────────────────────────────────────────────────────────────
-    // Written by main thread via SetShip(); read by sim thread each tick.
-    // Volatile reference — assignment is atomic on 64-bit .NET.
     private volatile Ship? _ship;
 
-    /// <summary>
-    /// Sets the active ship. Call from the main thread when entering a system.
-    /// The sim thread picks it up on the next tick.
-    /// </summary>
     public void SetShip(Ship ship) => _ship = ship;
 
     // ── Ship state snapshot (written by sim thread, read by main thread) ──────
@@ -44,17 +38,24 @@ public sealed class SpaceSimulation : Simulation
         DVec3      Forward,
         DVec3      Up,
         double     SimTime,
-        FlightMode FlightMode      = FlightMode.Space,
-        bool       FlightAssistOn  = true,
-        bool       SlipstreamModeActive = false);
+        FlightMode FlightMode        = FlightMode.SystemNewtonian,
+        bool       FlightAssistOn    = true,
+        // Newtonian / LKM
+        int        NewtonianGear     = 0,   // 0-based gear index
+        int        NewtonianGearCount= 10,  // total gears available
+        int        LkmMaxGear        = int.MaxValue,  // 0-based; int.MaxValue = no limit
+        int        LkmZone           = 0,   // 0=none, 1/2/3
+        double     LkmComplianceTimer= 0,
+        bool       XStopActive       = false,
+        // Slipstream
+        int        SlipstreamHarmonicIndex = 0,
+        double     ClunkPhase        = -1.0);  // -1 = inactive, 0→1 = animating
 
     private volatile ShipSnapshot? _shipSnapshot;
 
-    /// <summary>Latest ship state. Null until the first physics tick completes.</summary>
     public ShipSnapshot? ShipState => _shipSnapshot;
 
-    /// <summary>Current flight mode readable from the main thread (via volatile ShipSnapshot).</summary>
-    public FlightMode CurrentFlightMode => _shipSnapshot?.FlightMode ?? FlightMode.Space;
+    public FlightMode CurrentFlightMode => _shipSnapshot?.FlightMode ?? FlightMode.SystemNewtonian;
 
     // ── Teleport request (main thread → sim thread) ───────────────────────────
     private sealed record TeleportRequest(DVec3 Position, Quaternion Orientation);
@@ -63,7 +64,6 @@ public sealed class SpaceSimulation : Simulation
     public void RequestSnapToOrigin()
         => _teleportRequest = new TeleportRequest(new DVec3(0, 0.5e11, 3e11), Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
 
-    /// <summary>Teleport the ship to the given position and orientation next tick.</summary>
     public void TeleportShip(DVec3 position, Quaternion orientation)
         => _teleportRequest = new TeleportRequest(position, orientation);
 
@@ -71,88 +71,117 @@ public sealed class SpaceSimulation : Simulation
     private sealed record WorldSnapshot(Star Star, StarSystem System, DVec3 ShipPos, double GameTime);
     private volatile WorldSnapshot? _worldSnapshot;
 
-    /// <summary>Called from main thread each frame when in a star system.</summary>
     public void SetWorldState(Star star, StarSystem system, DVec3 refPos, double gameTime)
         => _worldSnapshot = new WorldSnapshot(star, system, refPos, gameTime);
 
-    // ── Reference frame velocity (written by main thread, read by sim thread) ─
-    // In space mode: dominant body's blended orbital velocity (flight-assist zero point).
-    // In atmosphere mode: dominant body's full orbital velocity (ground reference for drag).
+    // ── Reference frame velocity (main thread → sim thread) ──────────────────
+    // In space: dominant body's blended orbital velocity (Newtonian zero-point).
+    // In atmosphere: dominant body's full orbital velocity (ground reference).
     private sealed record RefVelSnapshot(double X, double Y, double Z);
     private volatile RefVelSnapshot? _refVelSnapshot;
 
-    /// <summary>Sets the flight-assist zero point — ship holds this velocity when not thrusting.</summary>
     public void SetReferenceVelocity(DVec3 vel)
         => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z);
 
-    // ── Ship move speed (written by main thread, read by sim thread) ──────────
+    // ── Ship move speed (legacy — used by old velocity-target path; still read by debug cam proximity) ──
     private long _shipSpeedBits = BitConverter.DoubleToInt64Bits(5e9);
 
-    /// <summary>Sets the ship's effective move speed. Called from the main thread each frame.</summary>
     public void SetShipMoveSpeed(double speedMs)
         => System.Threading.Interlocked.Exchange(ref _shipSpeedBits, BitConverter.DoubleToInt64Bits(speedMs));
 
-    // ── Flight mode (sim-internal; exposed read-only via ShipSnapshot) ─────────
-    private FlightMode _currentFlightMode = FlightMode.Space;
+    // ── Nearest station distance (main thread → sim thread) ──────────────────
+    private long _nearestStationDistBits = BitConverter.DoubleToInt64Bits(double.MaxValue);
 
-    // ── Flight Assist & Slipstream (sim-owned state; toggled by rising edge in input) ─
-    private bool   _flightAssistEnabled    = true;
-    private bool   _slipstreamModeActive        = false;
-    private bool   _prevFlightAssistToggle = false;
-    private bool   _prevSlipstreamToggle    = false;
-    // Slipstream charge delay: counts down from SlipstreamStartupTime → 0, then sets _slipstreamModeActive = true
+    public void SetNearestStationDistance(double meters)
+        => System.Threading.Interlocked.Exchange(ref _nearestStationDistBits, BitConverter.DoubleToInt64Bits(meters));
+
+    private double GetNearestStationDistance()
+        => BitConverter.Int64BitsToDouble(System.Threading.Interlocked.Read(ref _nearestStationDistBits));
+
+    // ── Flight mode (sim-internal) ────────────────────────────────────────────
+    private FlightMode _currentFlightMode = FlightMode.SystemNewtonian;
+
+    // ── Flight Assist (atmospheric only) ─────────────────────────────────────
+    private bool _flightAssistEnabled    = true;
+    private bool _prevFlightAssistToggle = false;
+
+    // ── Atmospheric Slipstream state (used when _currentFlightMode == AtmosphericNewtonian) ─
+    private bool   _slipstreamModeActive  = false;
+    private bool   _prevSlipstreamToggle  = false;
     private double _slipstreamChargeTimer;
+    private const double AtmoSlipstreamMinDensity  = 0.05;   // relative density threshold
+    private const double AtmoSlipstreamStartupTime = 2.0;    // seconds charge delay
+    private const double AtmoSlipstreamAccelRate   = 200.0;  // m/s² to reach min speed
+    private const double AtmoSlipstreamMinSpeedMs  = 1_000.0;
+    private const double AtmoSlipstreamMaxSpeedMs  = 10_000.0;
 
-    // Surface contact state — gating the one-shot "Surface contact." log message
+    // ── SystemNewtonian state ─────────────────────────────────────────────────
+    private int  _newtonianGear  = 0;          // 0-based
+    private int  _lkmMaxGear     = int.MaxValue;
+    private bool _xStopActive    = false;
+    private bool _prevXStopToggle = false;
+
+    // ── SystemSlipstream state ────────────────────────────────────────────────
+    private int    _slipstreamHarmonicIndex   = 0;
+    private double _slipstreamCurrentSpeed    = 0;
+    private double _slipstreamTargetSpeed     = 0;
+    private double _slipstreamStartSpeed      = 0;   // speed when last gear shift began
+    private bool   _slipstreamTransitioning   = false;
+    private double _slipstreamTransitionTimer = 0;
+
+    // ── Clunk animation (tick-counted, published in snapshot for render thread) ─
+    private double _clunkTimer    = 0;
+    private double _clunkDuration = 0;
+
+    // ── LKM zone state ────────────────────────────────────────────────────────
+    private int    _currentLkmZone    = 0;
+    private double _lkmComplianceTimer = 0;
+    private bool   _lkmPenaltyPending  = false;
+
+    // ── Surface contact state ─────────────────────────────────────────────────
     private bool _surfaceContact;
 
     // ── Nearest atmospheric body (written by UpdateEnvironment, read by TickPhysics) ──
-    // Both run on the sim thread — no cross-thread sync needed.
     private sealed record NearAtmBodyInfo(OrbitalBody Body, DVec3 EclipticPos, double AltitudeM);
     private NearAtmBodyInfo? _nearAtmBody;
 
-    // Ecliptic tilt for EclipticToGalaxy conversion (written by UpdateEnvironment)
+    // Nearest body surface altitude (all bodies, regardless of atmosphere).
+    private double _nearBodyAltitude = double.MaxValue;
+
+    // Ecliptic tilt (written by UpdateEnvironment)
     private double _eclipticAz;
     private double _eclipticTilt;
 
-    // ── Sensors ───────────────────────────────────────────────────────────────
-    private readonly GravitySensor              _gravity               = new();
-    private readonly AtmosphericPressureSensor  _atmPressure           = new("AtmosphericSensor");
-    private readonly SolarSpectrumSensor        _solarSpectrum         = new("SolarSpectrumSensor");
-    private readonly LandingSupportSystem       _landingSupport        = new();
-    private readonly PlanetaryCoordinateSensor  _planetaryCoordSensor  = new();
-
-    // Galaxy-space velocity of the atmospheric body at entry time.
-    // ship.Velocity is stored planet-relative while in atmosphere;
-    // this offset keeps ship.Position tracking the planet in galaxy space.
+    // Galaxy-space velocity of the atmospheric body at atmosphere entry.
     private DVec3 _atmosphericPlanetVelocity;
+
+    // ── Sensors ───────────────────────────────────────────────────────────────
+    private readonly GravitySensor              _gravity              = new();
+    private readonly AtmosphericPressureSensor  _atmPressure          = new("AtmosphericSensor");
+    private readonly SolarSpectrumSensor        _solarSpectrum        = new("SolarSpectrumSensor");
+    private readonly LandingSupportSystem       _landingSupport       = new();
+    private readonly PlanetaryCoordinateSensor  _planetaryCoordSensor = new();
 
     // ── Pad target (main thread → sim thread) ─────────────────────────────────
     private volatile LandingPadData? _activePadTarget;
 
     public void SetPadTarget(LandingPadData? data) => _activePadTarget = data;
 
-    // dt stored in TickPhysics for use in Publish (Publish has no dt parameter)
     private double _lastDt;
 
     // ── Physics constants ─────────────────────────────────────────────────────
-    private const double PhysG              = 6.674e-11;
-    private const double ShipCollisionRadius = 5.0;   // metres — ship bounding sphere for surface collision
-    private const double SlipstreamMinSpeed    = 1_000.0;  // m/s — minimum forward speed in slipstream
-    private const double SlipstreamMaxSpeed    = 10_000.0; // m/s — maximum forward speed in slipstream
-    private const double SlipstreamMinDensity  = 0.05;     // relative density — below this slipstream unavailable
-    private const double SlipstreamStartupTime = 2.0;      // seconds charge delay before slipstream engages
-    private const double SlipstreamAccelRate   = 200.0;    // m/s² — acceleration to reach min speed
+    private const double PhysG               = 6.674e-11;
+    private const double ShipCollisionRadius = 5.0;
 
     // ── TickPhysics ───────────────────────────────────────────────────────────
 
     protected override void TickPhysics(PlayerInput input, double dt)
     {
         _lastDt = dt;
-        var ship = _ship;  // read once — volatile
+        var ship = _ship;
         if (ship == null) return;
 
-        // ── Teleport (Home key or debug-cam sync) ────────────────────────
+        // ── Teleport ─────────────────────────────────────────────────────
         var teleport = _teleportRequest;
         if (teleport != null)
         {
@@ -165,7 +194,7 @@ public sealed class SpaceSimulation : Simulation
         // ── Rotation ─────────────────────────────────────────────────────
         ship.ApplyRotation(input.PitchInput, input.YawInput, input.RollInput, dt);
 
-        // ── Flight Assist toggle (rising edge) ────────────────────────────
+        // ── Flight Assist toggle (atmospheric only, rising edge) ──────────
         if (input.FlightAssistToggle && !_prevFlightAssistToggle)
         {
             _flightAssistEnabled = !_flightAssistEnabled;
@@ -174,132 +203,264 @@ public sealed class SpaceSimulation : Simulation
         }
         _prevFlightAssistToggle = input.FlightAssistToggle;
 
-        // ── Slipstream toggle (rising edge) ──────────────────────────────
-        if (input.SlipstreamToggle && !_prevSlipstreamToggle)
+        // ── X-Stop toggle (rising edge) ───────────────────────────────────
+        if (input.XStopToggle && !_prevXStopToggle)
         {
-            if (!_slipstreamModeActive && _slipstreamChargeTimer <= 0)
+            if (_currentFlightMode == FlightMode.SystemNewtonian)
             {
-                // Attempting to activate — check prerequisites
-                bool shieldsActive = false;
-                double nearDensity = 0;
-                foreach (var c in ship.Components)
-                {
-                    if (c is ShieldComponent sc && sc.Status == ComponentStatus.Running && sc.CapacitorFill > 0)
-                        shieldsActive = true;
-                }
-                var nb = _nearAtmBody;
-                if (nb != null)
-                    nearDensity = nb.Body.DensityAtAltitude(System.Math.Max(nb.AltitudeM, 0));
-
-                if (shieldsActive)
-                    DataBus.System.Publish(Topics.System.All,
-                        new SystemMessage("Slipstream unavailable — shields active"));
-                else if (nearDensity < SlipstreamMinDensity)
-                    DataBus.System.Publish(Topics.System.All,
-                        new SystemMessage("Slipstream unavailable — insufficient atmospheric pressure"));
-                else
-                {
-                    _slipstreamChargeTimer = SlipstreamStartupTime;
-                    DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream charging..."));
-                }
-            }
-            else if (_slipstreamModeActive)
-            {
-                // Deactivating — apply exit tumble if at high speed
-                var rv = _refVelSnapshot;
-                DVec3 groundVel  = rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
-                DVec3  relVel    = ship.Velocity - groundVel;
-                double exitSpeed = DVec3.Dot(relVel, ship.Forward);
-                double speedFrac = exitSpeed / SlipstreamMaxSpeed;
-
-                _slipstreamModeActive  = false;
-                _slipstreamChargeTimer = 0;
-                DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
-
-                if (speedFrac > 0.5)
-                {
-                    double gyroFactor = ship.HasGyro ? 0.4 : 1.0;
-                    double impulseMag = speedFrac * 2.0 * gyroFactor;
-                    double ax = System.Random.Shared.NextDouble() - 0.5;
-                    double ay = System.Random.Shared.NextDouble() - 0.5;
-                    double len = System.Math.Sqrt(ax * ax + ay * ay);
-                    if (len > 0.001)
-                        ship.ApplyAngularImpulse(new DVec3(ax / len, ay / len, 0) * impulseMag);
-                    DataBus.System.Publish(Topics.System.All,
-                        new SystemMessage("Warning — high-speed slipstream exit", SystemMessagePriority.ImportantWarning));
-                }
+                _xStopActive = !_xStopActive;
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage(_xStopActive ? "X-Stop active" : "X-Stop cancelled"));
             }
         }
-        _prevSlipstreamToggle  = input.SlipstreamToggle;
+        _prevXStopToggle = input.XStopToggle;
 
-        // ── FlightMode transition ─────────────────────────────────────────
-        var nearBody = _nearAtmBody;  // set by UpdateEnvironment this tick
+        // ── Slipstream / flight mode toggle (rising edge) ─────────────────
+        if (input.SlipstreamToggle && !_prevSlipstreamToggle)
+        {
+            switch (_currentFlightMode)
+            {
+                case FlightMode.SystemNewtonian:
+                    TryEnterSystemSlipstream(ship);
+                    break;
+                case FlightMode.SystemSlipstream:
+                    ExitSystemSlipstream(ship);
+                    break;
+                case FlightMode.AtmosphericNewtonian:
+                    if (!_slipstreamModeActive && _slipstreamChargeTimer <= 0)
+                        TryEnterAtmosphericSlipstream(ship);
+                    else if (_slipstreamModeActive)
+                        ExitAtmosphericSlipstream(ship);
+                    break;
+            }
+        }
+        _prevSlipstreamToggle = input.SlipstreamToggle;
+
+        // ── Newtonian gear shifts ─────────────────────────────────────────
+        if (_currentFlightMode == FlightMode.SystemNewtonian)
+        {
+            double[] gears  = ship.NewtonianGears;
+            int      topIdx = gears.Length - 1;
+            if (input.GearUp   && _newtonianGear < topIdx)  _newtonianGear++;
+            if (input.GearDown && _newtonianGear > 0)        _newtonianGear--;
+        }
+        else if (_currentFlightMode == FlightMode.SystemSlipstream)
+        {
+            if (input.GearUp || input.GearDown)
+                ShiftSlipstreamHarmonic(ship, input.GearUp ? 1 : -1);
+        }
+
+        // ── FlightMode transition (Space ↔ Atmosphere) ───────────────────
+        var   nearBody = _nearAtmBody;
+        bool  inSpace  = _currentFlightMode is FlightMode.SystemNewtonian or FlightMode.SystemSlipstream;
+        bool  inAtmo   = _currentFlightMode == FlightMode.AtmosphericNewtonian;
         FlightMode newMode = _currentFlightMode;
 
         if (nearBody == null)
         {
-            newMode = FlightMode.Space;
+            if (!inSpace) newMode = FlightMode.SystemNewtonian;
         }
         else
         {
             double ceiling = nearBody.Body.AtmosphereCeilingAltitude;
-            if (_currentFlightMode == FlightMode.Space && nearBody.AltitudeM < ceiling)
-                newMode = FlightMode.Atmosphere;
-            else if (_currentFlightMode == FlightMode.Atmosphere && nearBody.AltitudeM > ceiling * 1.1)
-                newMode = FlightMode.Space;
+            if (inSpace && nearBody.AltitudeM < ceiling)
+                newMode = FlightMode.AtmosphericNewtonian;
+            else if (inAtmo && nearBody.AltitudeM > ceiling * 1.1)
+                newMode = FlightMode.SystemNewtonian;
         }
 
         if (newMode != _currentFlightMode)
         {
-            if (newMode == FlightMode.Atmosphere && nearBody != null)
+            // Entering atmosphere — clear any space Slipstream state
+            if (newMode == FlightMode.AtmosphericNewtonian)
             {
-                // Convert ship to planet-relative frame so atmospheric physics
-                // (drag, slipstream, collision) operate against a stationary ground.
-                DVec3 velEcl = nearBody.Body.SemiMajorAxis > 0.0 && nearBody.Body.ParentMassKg > 0.0
-                    ? nearBody.Body.ComputeVelocity(GameClock.SimTime, Units.G * nearBody.Body.ParentMassKg, DVec3.Zero)
-                    : SimpleOrbitalVelocityEcl(nearBody.Body, GameClock.SimTime);
+                if (_currentFlightMode == FlightMode.SystemSlipstream)
+                {
+                    _slipstreamTransitioning = false;
+                    _slipstreamCurrentSpeed  = 0;
+                    _clunkTimer = 0;
+                }
+
+                var nb = nearBody!;
+                DVec3 velEcl = nb.Body.SemiMajorAxis > 0.0 && nb.Body.ParentMassKg > 0.0
+                    ? nb.Body.ComputeVelocity(GameClock.SimTime, Units.G * nb.Body.ParentMassKg, DVec3.Zero)
+                    : SimpleOrbitalVelocityEcl(nb.Body, GameClock.SimTime);
                 _atmosphericPlanetVelocity = EclipticToGalaxy(velEcl);
                 ship.Velocity -= _atmosphericPlanetVelocity;
             }
-            else if (newMode == FlightMode.Space)
+            else if (newMode == FlightMode.SystemNewtonian)
             {
-                // Restore ship to galaxy-relative frame on atmosphere exit.
                 ship.Velocity += _atmosphericPlanetVelocity;
                 _atmosphericPlanetVelocity = DVec3.Zero;
+                _slipstreamModeActive  = false;
+                _slipstreamChargeTimer = 0;
             }
+
             _currentFlightMode = newMode;
-            DataBus.System.Publish(Topics.System.All,
-                new SystemMessage(newMode == FlightMode.Atmosphere
-                    ? "Entering atmosphere"
-                    : "Leaving atmosphere"));
+            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+                newMode == FlightMode.AtmosphericNewtonian ? "Entering atmosphere" : "Leaving atmosphere"));
         }
 
+        // ── LKM zone update (space modes only) ───────────────────────────
+        if (_currentFlightMode is FlightMode.SystemNewtonian or FlightMode.SystemSlipstream)
+            UpdateLkmZones(ship, dt);
+
         // ── Physics dispatch ──────────────────────────────────────────────
-        if (_currentFlightMode == FlightMode.Atmosphere && nearBody != null)
-            TickAtmospherePhysics(ship, input, nearBody, dt);
-        else
-            TickSpacePhysics(ship, input, dt);
+        switch (_currentFlightMode)
+        {
+            case FlightMode.SystemNewtonian:
+                TickNewtonianPhysics(ship, input, dt);
+                break;
+            case FlightMode.SystemSlipstream:
+                TickSystemSlipstreamPhysics(ship, dt);
+                break;
+            case FlightMode.AtmosphericNewtonian:
+                if (nearBody != null)
+                    TickAtmospherePhysics(ship, input, nearBody, dt);
+                break;
+        }
+
+        // ── Snapshot ──────────────────────────────────────────────────────
+        FlightMode snapMode = _currentFlightMode == FlightMode.AtmosphericNewtonian && _slipstreamModeActive
+            ? FlightMode.AtmosphericSlipstream
+            : _currentFlightMode;
+
+        double clunkPhase = _clunkTimer > 0 && _clunkDuration > 0
+            ? 1.0 - _clunkTimer / _clunkDuration
+            : -1.0;
 
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
             ship.Forward, ship.Up,
             GameClock.SimTime,
-            _currentFlightMode, _flightAssistEnabled, _slipstreamModeActive);
+            snapMode,
+            _flightAssistEnabled,
+            _newtonianGear,
+            ship.NewtonianGears.Length,
+            _lkmMaxGear,
+            _currentLkmZone,
+            _lkmComplianceTimer,
+            _xStopActive,
+            _slipstreamHarmonicIndex,
+            clunkPhase);
     }
 
-    // ── Space (velocity-target stub) ─────────────────────────────────────────
+    // ── SystemNewtonian physics ───────────────────────────────────────────────
 
-    private void TickSpacePhysics(Ship ship, PlayerInput input, double dt)
+    private void TickNewtonianPhysics(Ship ship, PlayerInput input, double dt)
     {
-        var rv      = _refVelSnapshot;
-        var baseVel = rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
-        ship.MoveSpeedMs = BitConverter.Int64BitsToDouble(
-            System.Threading.Interlocked.Read(ref _shipSpeedBits));
-        ship.ApplyVelocityTarget(input.ThrustForward, input.ThrustLateral, input.ThrustVertical, baseVel);
+        double[] gears  = ship.NewtonianGears;
+        int      maxIdx = System.Math.Min(
+            _lkmMaxGear == int.MaxValue ? gears.Length - 1 : _lkmMaxGear,
+            gears.Length - 1);
+        if (_newtonianGear > maxIdx) _newtonianGear = maxIdx;
+
+        double gearCeiling    = gears[_newtonianGear];
+        double reverseCeiling = gearCeiling * FlightConstants.ReverseSpeedRatio;
+        double accel          = ship.FlightAcceleration;
+
+        DVec3 refVel  = GetRefVelocity();
+        DVec3 relVel  = ship.Velocity - refVel;
+        DVec3 fwdDir  = ship.Forward;
+
+        // X-Stop: maximum braking toward reference velocity
+        if (_xStopActive)
+        {
+            double relSpeed = relVel.Length;
+            if (relSpeed < FlightConstants.XStopSnapThreshold)
+            {
+                ship.Velocity = refVel;
+                _xStopActive  = false;
+                DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop complete"));
+            }
+            else
+            {
+                ship.Velocity += relVel.Normalized() * (-accel * dt);
+            }
+            ship.Position += ship.Velocity * dt;
+            return;
+        }
+
+        // Forward thrust — tapered as speed approaches gear ceiling
+        if (input.ThrustForward > 0)
+        {
+            double speedAlongFwd = DVec3.Dot(relVel, fwdDir);
+            double fraction      = System.Math.Clamp(speedAlongFwd / gearCeiling, 0, 1);
+            double thrustFactor  = System.Math.Max(0,
+                1.0 - System.Math.Pow(fraction, FlightConstants.ThrustTaperExponent));
+            ship.Velocity += fwdDir * (accel * thrustFactor * input.ThrustForward * dt);
+        }
+
+        // Reverse thrust — separate ceiling
+        if (input.ThrustForward < 0)
+        {
+            double speedAgainstFwd = DVec3.Dot(relVel, -fwdDir);
+            double fraction        = System.Math.Clamp(speedAgainstFwd / reverseCeiling, 0, 1);
+            double thrustFactor    = System.Math.Max(0,
+                1.0 - System.Math.Pow(fraction, FlightConstants.ThrustTaperExponent));
+            ship.Velocity += (-fwdDir) * (accel * thrustFactor * System.Math.Abs(input.ThrustForward) * dt);
+        }
+
+        // Strafe and vertical (uncapped — small inputs, no separate ceiling defined)
+        double strafeAccel = accel * 0.5;
+        if (input.ThrustLateral  != 0) ship.Velocity += ship.Right * (strafeAccel * input.ThrustLateral  * dt);
+        if (input.ThrustVertical != 0) ship.Velocity += ship.Up    * (strafeAccel * input.ThrustVertical * dt);
+
         ship.Position += ship.Velocity * dt;
     }
 
-    // ── Atmosphere (force-based Newtonian) ───────────────────────────────────
+    // ── SystemSlipstream physics ──────────────────────────────────────────────
+
+    private void TickSystemSlipstreamPhysics(Ship ship, double dt)
+    {
+        // Forced dropout — planets
+        if (_nearBodyAltitude < FlightConstants.SlipstreamPlanetDropoutAltitude)
+        {
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
+            ExitSystemSlipstreamToNewtonian(ship);
+            TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
+            return;
+        }
+
+        // Forced dropout — stations
+        if (GetNearestStationDistance() < FlightConstants.SlipstreamStationDropoutRange)
+        {
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
+            ExitSystemSlipstreamToNewtonian(ship);
+            TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
+            return;
+        }
+
+        // Smooth ramp between harmonics
+        if (_slipstreamTransitioning)
+        {
+            _slipstreamTransitionTimer -= dt;
+            double rawT = 1.0 - System.Math.Clamp(
+                _slipstreamTransitionTimer / FlightConstants.SlipstreamAccelSeconds, 0, 1);
+            double t = rawT * rawT * (3.0 - 2.0 * rawT);  // smooth-step
+            _slipstreamCurrentSpeed = _slipstreamStartSpeed
+                + (_slipstreamTargetSpeed - _slipstreamStartSpeed) * t;
+
+            if (_slipstreamTransitionTimer <= 0)
+            {
+                _slipstreamCurrentSpeed  = _slipstreamTargetSpeed;
+                _slipstreamTransitioning = false;
+            }
+        }
+
+        // Advance clunk animation timer (used by render thread via snapshot)
+        if (_clunkTimer > 0)
+            _clunkTimer = System.Math.Max(0, _clunkTimer - dt);
+
+        // Apply velocity directly along forward direction
+        DVec3 refVel = GetRefVelocity();
+        ship.Velocity = refVel + ship.Forward * _slipstreamCurrentSpeed;
+        ship.Position += ship.Velocity * dt;
+    }
+
+    // ── Atmosphere physics (force-based) ──────────────────────────────────────
 
     private void TickAtmospherePhysics(Ship ship, PlayerInput input, NearAtmBodyInfo near, double dt)
     {
@@ -313,14 +474,11 @@ public sealed class SpaceSimulation : Simulation
         double gMag      = PhysG * body.MassKg / (dist * dist);
         DVec3  gravForce = gravDir * (gMag * ship.Mass);
 
-        // Altitude & atmospheric density
         double altitude = dist - body.RadiusMeters;
         double density  = body.DensityAtAltitude(System.Math.Max(altitude, 0));
+        DVec3  groundVel = DVec3.Zero;  // ship.Velocity is planet-relative
 
-        // ship.Velocity is planet-relative (transformed at atmosphere entry).
-        DVec3 groundVel = DVec3.Zero;
-
-        // Slipstream charge timer — counts down then activates
+        // Atmospheric Slipstream charge timer
         if (_slipstreamChargeTimer > 0 && !_slipstreamModeActive)
         {
             _slipstreamChargeTimer -= dt;
@@ -332,8 +490,8 @@ public sealed class SpaceSimulation : Simulation
             }
         }
 
-        // Auto-deactivate slipstream if density drops below threshold (e.g. flying above atmosphere)
-        if (_slipstreamModeActive && density < SlipstreamMinDensity)
+        // Auto-deactivate atmospheric Slipstream if density drops
+        if (_slipstreamModeActive && density < AtmoSlipstreamMinDensity)
         {
             _slipstreamModeActive = false;
             DataBus.System.Publish(Topics.System.All,
@@ -345,7 +503,7 @@ public sealed class SpaceSimulation : Simulation
 
         if (!_slipstreamModeActive)
         {
-            // Aerodynamic drag & lift against ground-relative velocity
+            // Drag and lift against ground-relative velocity
             DVec3 velRel = ship.Velocity - groundVel;
             if (density > 0 && body.AtmosphereSurfaceDensity > 0)
             {
@@ -360,53 +518,43 @@ public sealed class SpaceSimulation : Simulation
                     totalForce += ship.Up * (ship.AerodynamicLift * density * vFwd * System.Math.Abs(vFwd));
             }
 
-            // Engine thrust
             totalForce += ship.Forward * (input.ThrustForward  * ship.MaxForwardThrustN);
             totalForce += ship.Right   * (input.ThrustLateral   * ship.MaxDownThrustN * 0.5);
             totalForce += ship.Up      * (input.ThrustVertical   * ship.MaxDownThrustN);
 
-            // Flight Assist: apply upward thrust to oppose gravity (battery-backed — no power draw)
-            if (_flightAssistEnabled && density >= SlipstreamMinDensity)
+            if (_flightAssistEnabled && density >= AtmoSlipstreamMinDensity)
             {
                 double faN = System.Math.Min(ship.MaxDownThrustN, gMag * ship.Mass);
                 totalForce += ship.Up * faN;
             }
         }
-        else
-        {
-            // Slipstream: no drag applied — speed is managed via direct velocity adjustment below
-        }
 
-        // Integrate forces
         ship.Velocity += totalForce / ship.Mass * dt;
 
-        // Slipstream speed management — applied after force integration, directly on velocity
+        // Atmospheric Slipstream speed management
         if (_slipstreamModeActive)
         {
             DVec3  relVel   = ship.Velocity - groundVel;
             double vForward = DVec3.Dot(relVel, ship.Forward);
 
-            if (vForward < SlipstreamMinSpeed)
+            if (vForward < AtmoSlipstreamMinSpeedMs)
             {
-                double delta = System.Math.Min(SlipstreamAccelRate * dt, SlipstreamMinSpeed - vForward);
+                double delta = System.Math.Min(AtmoSlipstreamAccelRate * dt, AtmoSlipstreamMinSpeedMs - vForward);
                 ship.Velocity += ship.Forward * delta;
             }
-            else if (vForward > SlipstreamMaxSpeed)
+            else if (vForward > AtmoSlipstreamMaxSpeedMs)
             {
-                double delta = System.Math.Min(SlipstreamAccelRate * dt, vForward - SlipstreamMaxSpeed);
+                double delta = System.Math.Min(AtmoSlipstreamAccelRate * dt, vForward - AtmoSlipstreamMaxSpeedMs);
                 ship.Velocity -= ship.Forward * delta;
             }
         }
 
-        // Add planet's galaxy-space velocity so ship.Position tracks the planet
-        // while ship.Velocity remains in planet-relative frame.
         ship.Position += (ship.Velocity + _atmosphericPlanetVelocity) * dt;
 
-        // Planetary coordinate sensor (only for PlanetData bodies)
         if (near.Body.Planet != null)
             _planetaryCoordSensor.Tick(ship.Position, ship.Velocity, near.Body, bodyPos, dt);
 
-        // ── Shield atmospheric depletion ──────────────────────────────────
+        // Shield atmospheric depletion
         if (density > 0.0)
         {
             ShieldComponent? shield = null;
@@ -416,17 +564,16 @@ public sealed class SpaceSimulation : Simulation
 
             if (shield != null)
             {
-                const double AtmosphericDrainRate       = 5.0;      // empties ~100% fill in <1 s at density 1.0
-                const double ShieldAtmosphericHeatFactor = 2_000.0; // J of heat per unit fill drained
-
-                double drain = density * shield.CapacitorFill * AtmosphericDrainRate * dt;
+                const double AtmDrainRate       = 5.0;
+                const double ShieldHeatFactor   = 2_000.0;
+                double drain = density * shield.CapacitorFill * AtmDrainRate * dt;
                 drain = System.Math.Min(drain, shield.CapacitorFill);
                 shield.DrainCapacitor(drain);
-                shield.AddHeat(drain * ShieldAtmosphericHeatFactor);
+                shield.AddHeat(drain * ShieldHeatFactor);
             }
         }
 
-        // ── Sphere collision ──────────────────────────────────────────────
+        // Sphere collision
         double minDist   = body.RadiusMeters + ShipCollisionRadius;
         double distAfter = (ship.Position - bodyPos).Length;
 
@@ -434,7 +581,7 @@ public sealed class SpaceSimulation : Simulation
         {
             DVec3 surfaceNormal = (ship.Position - bodyPos) / distAfter;
             ship.Position = bodyPos + surfaceNormal * minDist;
-            ship.Velocity = DVec3.Zero;  // planet-relative zero at surface
+            ship.Velocity = DVec3.Zero;
 
             if (!_surfaceContact)
             {
@@ -449,7 +596,235 @@ public sealed class SpaceSimulation : Simulation
         }
     }
 
-    // Fallback circular-orbit velocity in ecliptic space — used when Keplerian elements unavailable.
+    // ── LKM zone detection ────────────────────────────────────────────────────
+
+    private void UpdateLkmZones(Ship ship, double dt)
+    {
+        var    zones      = FlightConstants.StationLkmZones;
+        double dist       = GetNearestStationDistance();
+        int    newMax     = int.MaxValue;
+        int    activeZone = 0;
+
+        for (int z = zones.Length - 1; z >= 0; z--)
+        {
+            if (dist < zones[z].radius)
+            {
+                newMax     = zones[z].maxGearIndex;
+                activeZone = z + 1;
+                break;
+            }
+        }
+
+        // Zone entry: message + start compliance window
+        if (activeZone > _currentLkmZone)
+        {
+            double maxSpeed = FlightConstants.NewtonianGearSpeeds[System.Math.Min(newMax, FlightConstants.NewtonianGearSpeeds.Length - 1)];
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage($"LKM: Zone {activeZone} — max speed {maxSpeed:N0} m/s. " +
+                    $"Comply within {FlightConstants.LkmComplianceWindow:N0}s."));
+            _lkmComplianceTimer = FlightConstants.LkmComplianceWindow;
+            _lkmPenaltyPending  = true;
+
+            // Force exit from SystemSlipstream when entering any LKM zone
+            if (_currentFlightMode == FlightMode.SystemSlipstream)
+            {
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage("Slipstream disengaged — LKM zone", SystemMessagePriority.ImportantWarning));
+                ExitSystemSlipstreamToNewtonian(ship);
+            }
+        }
+
+        // Zone exit: clear penalty
+        if (activeZone < _currentLkmZone)
+            _lkmPenaltyPending = false;
+
+        _currentLkmZone = activeZone;
+        _lkmMaxGear     = newMax;
+
+        // Compliance check
+        if (_lkmPenaltyPending && activeZone > 0)
+        {
+            _lkmComplianceTimer -= dt;
+            DVec3  refVel  = GetRefVelocity();
+            double curSpd  = (ship.Velocity - refVel).Length;
+            double limSpd  = FlightConstants.NewtonianGearSpeeds[System.Math.Min(newMax, FlightConstants.NewtonianGearSpeeds.Length - 1)];
+
+            if (curSpd <= limSpd * 1.05)
+            {
+                _lkmPenaltyPending = false;  // complied in time
+            }
+            else if (_lkmComplianceTimer <= 0)
+            {
+                _lkmPenaltyPending = false;
+                FlagLkmViolation();
+            }
+        }
+    }
+
+    private static void FlagLkmViolation()
+        => DataBus.System.Publish(Topics.System.All,
+            new SystemMessage("LKM violation recorded. Commander flagged.", SystemMessagePriority.ImportantWarning));
+
+    // ── Slipstream helpers ────────────────────────────────────────────────────
+
+    private void TryEnterSystemSlipstream(Ship ship)
+    {
+        if (_nearBodyAltitude < FlightConstants.SlipstreamPlanetDropoutAltitude)
+        {
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Cannot engage Slipstream — clear space required"));
+            return;
+        }
+
+        if (_currentLkmZone > 0)
+        {
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Cannot engage Slipstream — LKM zone active"));
+            return;
+        }
+
+        double[]  harmonics    = ship.SlipstreamHarmonics;
+        DVec3     refVel       = GetRefVelocity();
+        double    currentSpeed = System.Math.Max(0, DVec3.Dot(ship.Velocity - refVel, ship.Forward));
+
+        // Start at lowest harmonic; ramp up from current speed
+        _slipstreamHarmonicIndex   = 0;
+        _slipstreamTargetSpeed     = harmonics[0];
+        _slipstreamStartSpeed      = System.Math.Min(currentSpeed, harmonics[0]);
+        _slipstreamCurrentSpeed    = _slipstreamStartSpeed;
+        _slipstreamTransitioning   = true;
+        _slipstreamTransitionTimer = FlightConstants.SlipstreamAccelSeconds;
+
+        _currentFlightMode = FlightMode.SystemSlipstream;
+        _xStopActive = false;
+        DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
+        TriggerClunk(ship.ClunkDurationMs);
+    }
+
+    private void ExitSystemSlipstream(Ship ship)
+    {
+        // Apply exit tumble at high speed
+        double[]  harmonics  = ship.SlipstreamHarmonics;
+        double    harmMax    = harmonics[harmonics.Length - 1];
+        double    speedFrac  = _slipstreamCurrentSpeed / harmMax;
+
+        if (speedFrac > 0.5)
+        {
+            double gyroFactor = ship.HasGyro ? 0.4 : 1.0;
+            double impulseMag = speedFrac * 2.0 * gyroFactor;
+            double ax = System.Random.Shared.NextDouble() - 0.5;
+            double ay = System.Random.Shared.NextDouble() - 0.5;
+            double len = System.Math.Sqrt(ax * ax + ay * ay);
+            if (len > 0.001)
+                ship.ApplyAngularImpulse(new DVec3(ax / len, ay / len, 0) * impulseMag);
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Warning — high-speed Slipstream exit", SystemMessagePriority.ImportantWarning));
+        }
+
+        DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
+        ExitSystemSlipstreamToNewtonian(ship);
+    }
+
+    private void ExitSystemSlipstreamToNewtonian(Ship ship)
+    {
+        _slipstreamTransitioning = false;
+        _slipstreamCurrentSpeed  = 0;
+        _clunkTimer              = 0;
+        _currentFlightMode       = FlightMode.SystemNewtonian;
+
+        // Auto-select gear matching exit speed
+        DVec3  refVel = GetRefVelocity();
+        double speed  = System.Math.Max(0, DVec3.Dot(ship.Velocity - refVel, ship.Forward));
+        double[] gears = ship.NewtonianGears;
+        _newtonianGear = gears.Length - 1;
+        for (int i = 0; i < gears.Length; i++)
+        {
+            if (gears[i] >= speed) { _newtonianGear = i; break; }
+        }
+    }
+
+    private void ShiftSlipstreamHarmonic(Ship ship, int direction)
+    {
+        if (_slipstreamTransitioning) return;  // debounce during transition
+
+        double[] harmonics = ship.SlipstreamHarmonics;
+        int newIdx = System.Math.Clamp(_slipstreamHarmonicIndex + direction, 0, harmonics.Length - 1);
+        if (newIdx == _slipstreamHarmonicIndex) return;
+
+        _slipstreamHarmonicIndex   = newIdx;
+        _slipstreamStartSpeed      = _slipstreamCurrentSpeed;
+        _slipstreamTargetSpeed     = harmonics[newIdx];
+        _slipstreamTransitioning   = true;
+        _slipstreamTransitionTimer = FlightConstants.SlipstreamAccelSeconds;
+
+        TriggerClunk(ship.ClunkDurationMs);
+    }
+
+    private void TriggerClunk(double durationMs)
+    {
+        _clunkDuration = durationMs / 1000.0;
+        _clunkTimer    = _clunkDuration;
+    }
+
+    private void TryEnterAtmosphericSlipstream(Ship ship)
+    {
+        bool shieldsActive = false;
+        double nearDensity = 0;
+        foreach (var c in ship.Components)
+        {
+            if (c is ShieldComponent sc && sc.Status == ComponentStatus.Running && sc.CapacitorFill > 0)
+                shieldsActive = true;
+        }
+        var nb = _nearAtmBody;
+        if (nb != null)
+            nearDensity = nb.Body.DensityAtAltitude(System.Math.Max(nb.AltitudeM, 0));
+
+        if (shieldsActive)
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Slipstream unavailable — shields active"));
+        else if (nearDensity < AtmoSlipstreamMinDensity)
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Slipstream unavailable — insufficient atmospheric pressure"));
+        else
+        {
+            _slipstreamChargeTimer = AtmoSlipstreamStartupTime;
+            DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream charging..."));
+        }
+    }
+
+    private void ExitAtmosphericSlipstream(Ship ship)
+    {
+        DVec3  refVel    = DVec3.Zero;  // planet-relative zero
+        DVec3  relVel    = ship.Velocity - refVel;
+        double exitSpeed = DVec3.Dot(relVel, ship.Forward);
+        double speedFrac = exitSpeed / AtmoSlipstreamMaxSpeedMs;
+
+        _slipstreamModeActive  = false;
+        _slipstreamChargeTimer = 0;
+        DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
+
+        if (speedFrac > 0.5)
+        {
+            double gyroFactor = ship.HasGyro ? 0.4 : 1.0;
+            double impulseMag = speedFrac * 2.0 * gyroFactor;
+            double ax = System.Random.Shared.NextDouble() - 0.5;
+            double ay = System.Random.Shared.NextDouble() - 0.5;
+            double len = System.Math.Sqrt(ax * ax + ay * ay);
+            if (len > 0.001)
+                ship.ApplyAngularImpulse(new DVec3(ax / len, ay / len, 0) * impulseMag);
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Warning — high-speed slipstream exit", SystemMessagePriority.ImportantWarning));
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private DVec3 GetRefVelocity()
+    {
+        var rv = _refVelSnapshot;
+        return rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
+    }
+
     private static DVec3 SimpleOrbitalVelocityEcl(OrbitalBody body, double simTime)
     {
         double angle = DMath.OrbitalAngle(simTime, body.Period, body.PhaseOffset);
@@ -459,10 +834,6 @@ public sealed class SpaceSimulation : Simulation
             0.0,
             System.Math.Cos(angle) * body.OrbitalRadius * omega);
     }
-
-    // ── Coordinate helper — ecliptic space → galaxy space ────────────────────
-    // Inverse of the galaxy→ecliptic Rodrigues rotation in UpdateEnvironment
-    // (same axis k, angle = +tilt instead of -tilt).
 
     private DVec3 EclipticToGalaxy(DVec3 ecl)
     {
@@ -507,15 +878,10 @@ public sealed class SpaceSimulation : Simulation
         foreach (var planet in snap.System.Planets)
             CollectBody(world, planet, DVec3.Zero, snap.GameTime);
 
-        // Use the reference position the main thread chose — it's already mode-aware:
-        // ship position in flight, camera position in debug cam.
         var ship  = _ship;
         DVec3 pos = snap.ShipPos;
         DVec3 vel = ship?.Velocity ?? DVec3.Zero;
 
-        // Body positions are in ecliptic space (from GetPosition).
-        // Rotate ship position to ecliptic for consistent sensor deltas.
-        // Rodrigues' formula, double precision — inverse rotation uses angle = -tilt.
         double az   = snap.System.EclipticTiltAzimuthRadians;
         double tilt = snap.System.EclipticTiltRadians;
         double kx   = System.Math.Cos(az), kz = System.Math.Sin(az);
@@ -526,19 +892,24 @@ public sealed class SpaceSimulation : Simulation
             pos.Y * cosA + (kz * pos.X - kx * pos.Z) * sinA,
             pos.Z * cosA + (kx * pos.Y             ) * sinA + kz * dot * (1.0 - cosA));
 
-        // Store for TickPhysics (same thread — written before TickPhysics runs)
         _eclipticAz   = az;
         _eclipticTilt = tilt;
 
-        // Detect nearest body within 120% of atmosphere ceiling for FlightMode detection.
-        // 120% provides a buffer zone so _nearAtmBody is non-null both entering and during
-        // the 10% hysteresis used for exit.
-        _nearAtmBody = null;
+        // Find nearest body surface altitude (for Slipstream dropout check)
+        _nearBodyAltitude = double.MaxValue;
+        _nearAtmBody      = null;
         double nearestDist = double.MaxValue;
+
         foreach (var (body, bodyEclipticPos) in world.OrbitalBodies)
         {
             double d   = (shipEcliptic - bodyEclipticPos).Length;
             double alt = d - body.RadiusMeters;
+
+            // Track nearest surface altitude (all bodies)
+            if (alt < _nearBodyAltitude)
+                _nearBodyAltitude = alt;
+
+            // Track nearest atmospheric body (for FlightMode transitions)
             if (alt < body.AtmosphereCeilingAltitude * 1.2 && d < nearestDist)
             {
                 nearestDist  = d;
@@ -604,7 +975,6 @@ public sealed class SpaceSimulation : Simulation
         _atmPressure.Tick(_lastDt);
         _solarSpectrum.Tick(_lastDt);
 
-        // Thermal signature = sum of heat generation rates across all heated components
         if (_ship != null)
         {
             double sig = 0.0;
@@ -613,7 +983,20 @@ public sealed class SpaceSimulation : Simulation
             DataBus.Instruments.Publish(Topics.Ship.ThermalSignature, sig);
         }
 
+        // Publish flight-mode topics for instrument subscribers
         var snap = _shipSnapshot;
+        if (snap != null)
+        {
+            DataBus.Instruments.Publish(Topics.Flight.Mode,          (double)snap.FlightMode);
+            DataBus.Instruments.Publish(Topics.Flight.Gear,          (double)(snap.NewtonianGear + 1));
+            DataBus.Instruments.Publish(Topics.Flight.MaxGear,
+                snap.LkmMaxGear == int.MaxValue ? -1.0 : (double)(snap.LkmMaxGear + 1));
+            DataBus.Instruments.Publish(Topics.Flight.HarmonicIndex, (double)(snap.SlipstreamHarmonicIndex + 1));
+            DataBus.Instruments.Publish(Topics.Flight.LkmZone,       (double)snap.LkmZone);
+            DataBus.Instruments.Publish(Topics.Flight.LkmCompliance, snap.LkmComplianceTimer);
+            DataBus.Instruments.Publish(Topics.Flight.XStopActive,   snap.XStopActive ? 1.0 : 0.0);
+        }
+
         if (_ship != null && snap != null)
         {
             _landingSupport.SelectPad(_activePadTarget);

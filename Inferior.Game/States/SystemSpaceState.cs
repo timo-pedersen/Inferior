@@ -987,6 +987,19 @@ public sealed class SystemSpaceState : GameState
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
 
+        // Push nearest station surface distance to sim thread (LKM zones and Slipstream dropout)
+        {
+            DVec3  shipPosForDist     = _frameShipSnap?.Position ?? _camera.UniversePosition;
+            double nearestStationDist = double.MaxValue;
+            foreach (var (station, stPos) in _stationPositions)
+            {
+                double r    = StationPhysicalRadius(station);
+                double dist = System.Math.Max((stPos - shipPosForDist).Length - r, 0.0);
+                if (dist < nearestStationDist) nearestStationDist = dist;
+            }
+            _simulation.SetNearestStationDistance(nearestStationDist);
+        }
+
         // Rebuild test container contacts — if newly populated this frame, repopulate
         if (_testContainers.Count == 0 && _stationPositions.Count > 0)
             SpawnTestContainers();
@@ -1081,6 +1094,15 @@ public sealed class SystemSpaceState : GameState
         // Set matrices shared by everything
         _effect.View       = _camera.ViewMatrix;
         _effect.Projection = _camera.ProjectionMatrix;
+
+        // Clunk roll — cosmetic camera roll applied for one gear-shift duration
+        if (_frameShipSnap?.ClunkPhase >= 0.0)
+        {
+            float phase = (float)_frameShipSnap.ClunkPhase;
+            float roll  = MathHelper.ToRadians(FlightConstants.ClunkRollDegrees)
+                        * MathF.Sin(phase * MathF.PI);
+            _effect.View = Matrix.CreateRotationZ(roll) * _effect.View;
+        }
 
         // Star lighting direction — from star (at origin) toward camera
         // This gives correct shading on planet hemispheres
@@ -2179,7 +2201,6 @@ public sealed class SystemSpaceState : GameState
             : _frameShipSnap?.Velocity ?? DVec3.Zero;
         double relSpeedMs = (movingVel - _refVelocity).Length;
 
-        // Show set fly-speed (scroll-adjusted) in both modes
         if (_debugCameraMode)
         {
             DrawText(sb, $"Set: {Units.FormatSpeed(_camera.MoveSpeedMs)}",
@@ -2187,12 +2208,36 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
-            DVec3 shipPos    = _frameShipSnap?.Position ?? _camera.UniversePosition;
-            double effSpeed  = ComputeShipSpeed(shipPos);
-            string setLine   = System.Math.Abs(effSpeed - _shipBaseSpeed) > 0.5
-                ? $"Set: {Units.FormatSpeed(_shipBaseSpeed)}  (cap: {Units.FormatSpeed(effSpeed)})"
-                : $"Set: {Units.FormatSpeed(_shipBaseSpeed)}";
-            DrawText(sb, setLine, new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
+            var snap = _frameShipSnap;
+            if (snap != null)
+            {
+                string modeName = snap.FlightMode switch
+                {
+                    FlightMode.SystemNewtonian       => "NEWTON",
+                    FlightMode.SystemSlipstream      => "SLIPSTREAM",
+                    FlightMode.AtmosphericNewtonian  => "ATMO",
+                    FlightMode.AtmosphericSlipstream => "ATMO-SLIP",
+                    FlightMode.Docked                => "DOCKED",
+                    _                                => "—",
+                };
+                string flightLine;
+                if (snap.FlightMode == FlightMode.SystemNewtonian)
+                {
+                    double gearSpeed = snap.NewtonianGear < FlightConstants.NewtonianGearSpeeds.Length
+                        ? FlightConstants.NewtonianGearSpeeds[snap.NewtonianGear] : 0;
+                    string lkmStr = snap.LkmZone > 0 ? $"  LKM-{snap.LkmZone}" : "";
+                    flightLine = $"[{modeName}]  G{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}";
+                }
+                else if (snap.FlightMode == FlightMode.SystemSlipstream)
+                {
+                    flightLine = $"[{modeName}]  H{snap.SlipstreamHarmonicIndex + 1}";
+                }
+                else
+                {
+                    flightLine = $"[{modeName}]";
+                }
+                DrawText(sb, flightLine, new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
+            }
         }
 
         DrawText(sb, $"Speed: {Units.FormatSpeed(relSpeedMs)}  (vs {_refName})",
@@ -2277,12 +2322,6 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
-            // Scroll adjusts ship base fly speed (same steps as debug camera)
-            if (scroll != 0)
-            {
-                double factor = scroll > 0 ? 2.0 : 0.5;
-                _shipBaseSpeed = System.Math.Clamp(_shipBaseSpeed * factor, 1.0, 1e12);
-            }
             // Home — snap ship back to near-star (useful during dev)
             if (homePressed)
                 _simulation.RequestSnapToOrigin();
@@ -2454,7 +2493,7 @@ public sealed class SystemSpaceState : GameState
                        : 0.0;
 
         // In atmosphere: ship.Velocity is planet-relative (zero reference).
-        _refVelocity = _simulation.CurrentFlightMode == FlightMode.Atmosphere
+        _refVelocity = _simulation.CurrentFlightMode is FlightMode.AtmosphericNewtonian or FlightMode.AtmosphericSlipstream
             ? DVec3.Zero
             : domVelocity * blend;
         _refName = domName;
@@ -2928,12 +2967,22 @@ public sealed class SystemSpaceState : GameState
         double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
         double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
 
-        // V = Flight Assist toggle, G = Slipstream toggle (rising-edge sent to sim)
+        // V = Flight Assist toggle, G = Slipstream/mode toggle, X = X-Stop (rising-edge sent to sim)
         bool faToggle         = keys.IsKeyDown(Keys.V) && !_prevKeys.IsKeyDown(Keys.V);
         bool slipstreamToggle = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
+        bool xStopToggle      = keys.IsKeyDown(Keys.X) && !_prevKeys.IsKeyDown(Keys.X);
+
+        // Scroll wheel → one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
+        int  scroll   = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+        bool gearUp   = scroll > 0;
+        bool gearDown = scroll < 0;
 
         return new PlayerInput(fwd, lat, vert, roll, pitchInput, yawInput, false,
-            FlightAssistToggle: faToggle, SlipstreamToggle: slipstreamToggle);
+            FlightAssistToggle: faToggle,
+            SlipstreamToggle:   slipstreamToggle,
+            XStopToggle:        xStopToggle,
+            GearUp:             gearUp,
+            GearDown:           gearDown);
     }
 
     // ── UI mode ───────────────────────────────────────────────────────────────
@@ -3129,7 +3178,7 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawAtmosPanel(SpriteBatch sb)
     {
-        if (_frameShipSnap?.FlightMode != FlightMode.Atmosphere) return;
+        if (_frameShipSnap?.FlightMode is not (FlightMode.AtmosphericNewtonian or FlightMode.AtmosphericSlipstream)) return;
 
         string altStr  = _pcAlt < 10_000.0
             ? $"{_pcAlt:N0} m"

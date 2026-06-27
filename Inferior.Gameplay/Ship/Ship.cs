@@ -92,8 +92,38 @@ public sealed class Ship
 
     // ── Drive ─────────────────────────────────────────────────────────────────
     // Velocity-target model: ship snaps to MoveSpeedMs in the thrust direction.
-    // Replace with force-based Newtonian (F=ma) once the engine/power system exists.
-    public double MoveSpeedMs { get; set; } = 5e9;  // m/s — tuned to match debug camera feel
+    // Used by debug camera proximity scaling; Newtonian flight does not read MoveSpeedMs.
+    public double MoveSpeedMs { get; set; } = 5e9;  // m/s
+
+    // Number of engine nodes — governs gear table depth and Slipstream harmonic count.
+    public int NodeCount { get; init; } = FlightConstants.DefaultNodeCount;
+
+    // Forward acceleration in m/s² (derived from thrust and mass).
+    public double FlightAcceleration => MaxForwardThrustN / Mass;
+
+    // Newtonian gear speed ceilings — bottom NodeCount entries from the global table.
+    public double[] NewtonianGears =>
+        FlightConstants.NewtonianGearSpeeds.Take(NodeCount).ToArray();
+
+    // Slipstream harmonic speeds — NodeCount entries, log-scaled from min to max.
+    public double[] SlipstreamHarmonics
+    {
+        get
+        {
+            int    n     = NodeCount;
+            double min   = FlightConstants.SlipstreamMinSpeed;
+            double max   = FlightConstants.SlipstreamMaxSpeed;
+            double ratio = System.Math.Pow(max / min, 1.0 / (n - 1));
+            return Enumerable.Range(0, n)
+                .Select(i => min * System.Math.Pow(ratio, i))
+                .ToArray();
+        }
+    }
+
+    // Gear-shift clunk duration in seconds (shorter for more nodes).
+    public double ClunkDurationMs =>
+        FlightConstants.ClunkBaseDurationMs
+        + FlightConstants.ClunkNodePenaltyMs * (24 - NodeCount);
 
     // ── Atmosphere / aerodynamics ──────────────────────────────────────────────
     // Set from HullDefinition at ship construction.

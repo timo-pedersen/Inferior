@@ -186,6 +186,17 @@ public static class Topics
         public const string ThermalSignature = "Ship.ThermalSignature";
     }
 
+    public static class Flight
+    {
+        public const string Mode          = "Flight.Mode";          // double cast of FlightMode enum
+        public const string Gear          = "Flight.Gear";          // double, 1-based
+        public const string MaxGear       = "Flight.MaxGear";       // double, 1-based (LKM cap; -1 = none)
+        public const string HarmonicIndex = "Flight.HarmonicIndex"; // double, 1-based
+        public const string LkmZone       = "Flight.LkmZone";       // double (0=none, 1/2/3)
+        public const string LkmCompliance = "Flight.LkmCompliance"; // double countdown seconds
+        public const string XStopActive   = "Flight.XStop";         // double (1.0 = active)
+    }
+
     /// <summary>Debug / development sensors — not present in release builds.</summary>
     public static class Debug
     {
