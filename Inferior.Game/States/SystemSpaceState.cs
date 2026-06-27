@@ -117,6 +117,10 @@ public sealed class SystemSpaceState : GameState
     private VertexBuffer?  _containerVb;
     private IndexBuffer?   _containerIb;
 
+    // ── Ship mesh (three components, built once per session entry) ────────────
+    private VertexBuffer? _shipHullVb,    _shipNacelleVb,    _shipPylonVb;
+    private IndexBuffer?  _shipHullIb,    _shipNacelleIb,    _shipPylonIb;
+
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
     private MouseState       _prevMouse;
@@ -188,8 +192,12 @@ public sealed class SystemSpaceState : GameState
     // ── Camera modes ──────────────────────────────────────────────────────────
     // TAB  — toggles between ship-control and mouse-driven UI interaction.
     // F11  — toggles between ship camera (cockpit) and free debug camera.
+    // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
+    private bool _thirdPersonMode;
+    private DVec3 _tpCamPos;       // smoothed third-person camera position
+    private bool  _tpCamPosValid;
     private bool _prevIsGameActive = true;
     private bool _prevUiMouseMode;
 
@@ -375,6 +383,14 @@ public sealed class SystemSpaceState : GameState
         // Container renderer and shared mesh (one geometry; colour from lock grade per draw call)
         _meshRenderer = new MeshRenderer(_gd);
         (_containerVb, _containerIb) = BuildContainerMesh(_gd);
+
+        // Ship mesh — three components; built once per session entry on the main thread
+        var (hullMesh, nacelleMesh, pylonMesh) = Type1HullFactory.BuildAll(_gd);
+        _shipHullVb    = hullMesh.vb;    _shipHullIb    = hullMesh.ib;
+        _shipNacelleVb = nacelleMesh.vb; _shipNacelleIb = nacelleMesh.ib;
+        _shipPylonVb   = pylonMesh.vb;   _shipPylonIb   = pylonMesh.ib;
+        _thirdPersonMode  = false;
+        _tpCamPosValid    = false;
 
         // Ring vertices reused per orbit ring
         _ringVerts = MeshFactory.CreateRingVertices(128);
@@ -807,6 +823,12 @@ public sealed class SystemSpaceState : GameState
         _meshRenderer = null;
         _containerVb?.Dispose();
         _containerIb?.Dispose();
+        _shipHullVb?.Dispose();    _shipHullIb?.Dispose();
+        _shipNacelleVb?.Dispose(); _shipNacelleIb?.Dispose();
+        _shipPylonVb?.Dispose();   _shipPylonIb?.Dispose();
+        _shipHullVb    = null; _shipHullIb    = null;
+        _shipNacelleVb = null; _shipNacelleIb = null;
+        _shipPylonVb   = null; _shipPylonIb   = null;
         _pixel?.Dispose();
         _starGlowTex?.Dispose();
         _navGlowTex?.Dispose();
@@ -833,9 +855,10 @@ public sealed class SystemSpaceState : GameState
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
 
-        // TAB — UI mode toggle; F11 — ship/debug camera toggle
+        // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
+        bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
 
         if (tabJustPressed)
         {
@@ -850,6 +873,12 @@ public sealed class SystemSpaceState : GameState
                 _simulation.TeleportShip(_camera.UniversePosition, _camera.Orientation);
             }
             _debugCameraMode = !_debugCameraMode;
+            if (_debugCameraMode) _thirdPersonMode = false;  // can't combine with debug cam
+        }
+        if (f3JustPressed && !_debugCameraMode)
+        {
+            _thirdPersonMode = !_thirdPersonMode;
+            _tpCamPosValid   = false;  // force immediate snap on first frame
         }
 
         // Animations always run, regardless of input mode
@@ -918,12 +947,17 @@ public sealed class SystemSpaceState : GameState
         }
         else
         {
-            // Ship mode — input goes to the simulation; camera follows cockpit.
+            // Ship mode — input goes to the simulation; camera follows cockpit or third-person orbit.
             // Cursor is locked to window centre so mouse can't escape the window.
             _lastFlightInput = BuildShipInput(lookMouse, keys);
             _simulation.SetInput(_lastFlightInput);
             if (_frameShipSnap != null)
-                _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+            {
+                if (_thirdPersonMode)
+                    UpdateThirdPersonCamera(_frameShipSnap);
+                else
+                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+            }
             if (IsGameActive) Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
         }
 
@@ -1088,6 +1122,7 @@ public sealed class SystemSpaceState : GameState
             DrawPlanetBody(body, pos);
         DrawStations();
         DrawTestContainers();
+        DrawShipMesh();
         DrawStationGlows(sb);
 
         // Pass 2 — transparent (no depth write/read — shader ray-sphere handles visibility)
@@ -1379,6 +1414,82 @@ public sealed class SystemSpaceState : GameState
         var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, 36, BufferUsage.WriteOnly);
         ib.SetData(idx);
         return (vb, ib, 12);
+    }
+
+    private void DrawShipMesh()
+    {
+        if (!_thirdPersonMode) return;
+        if (_frameShipSnap == null) return;
+        if (_meshRenderer == null) return;
+        if (_shipHullVb    == null || _shipHullIb    == null ||
+            _shipNacelleVb == null || _shipNacelleIb == null ||
+            _shipPylonVb   == null || _shipPylonIb   == null) return;
+
+        float   rs        = (float)Camera3D.RenderScale;
+        Vector3 renderPos = _camera.ToRenderSpace(_frameShipSnap.Position);
+        Matrix  view      = _camera.ViewMatrix;
+        Matrix  proj      = _camera.ProjectionMatrix;
+
+        // RotationY(PI) maps the model's +Z-forward nose to the ship's -Z-forward convention.
+        Matrix world = Matrix.CreateScale(rs)
+                     * Matrix.CreateRotationY(MathF.PI)
+                     * Matrix.CreateFromQuaternion(_frameShipSnap.Orientation)
+                     * Matrix.CreateTranslation(renderPos);
+
+        var sunCol = new Color(SceneLighting.SunColour);
+        _meshRenderer.DrawDynamic(_shipHullVb,    _shipHullIb,    world, view, proj,
+            Type1HullFactory.HullColour,    SceneLighting.SunDirection, sunCol);
+        _meshRenderer.DrawDynamic(_shipNacelleVb, _shipNacelleIb, world, view, proj,
+            Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunCol);
+        _meshRenderer.DrawDynamic(_shipPylonVb,   _shipPylonIb,   world, view, proj,
+            Type1HullFactory.PylonColour,   SceneLighting.SunDirection, sunCol);
+
+        _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
+        _gd.DepthStencilState = DepthStencilState.Default;
+    }
+
+    private void UpdateThirdPersonCamera(SpaceSimulation.ShipSnapshot snap)
+    {
+        // Camera sits 80 m behind and 30 m above the ship, looks slightly ahead of CoM.
+        DVec3 targetCamPos = snap.Position - snap.Forward * 80.0 + snap.Up * 30.0;
+        DVec3 lookTarget   = snap.Position + snap.Forward * 8.0;
+
+        // Snap on the first frame after entering third-person; lerp smoothly after that.
+        _tpCamPos = _tpCamPosValid
+            ? DVec3.Lerp(_tpCamPos, targetCamPos, 0.08)
+            : targetCamPos;
+        _tpCamPosValid = true;
+
+        // Use ship's own up axis so the camera rolls with the ship — eliminates the
+        // singularity that occurs when the ship points near vertical and world-up is
+        // nearly parallel to the look direction.
+        DVec3 lookDir = DVec3.Normalize(lookTarget - _tpCamPos);
+        _camera.SetPose(_tpCamPos, QuatLookAtWithUp(lookDir, snap.Up));
+    }
+
+    // Builds a quaternion whose -Z axis aligns with `forward` and whose +Y axis
+    // aligns as closely as possible with `shipUp`. No singularity because shipUp is
+    // always perpendicular to shipForward (orthogonal ship axes).
+    private static Quaternion QuatLookAtWithUp(DVec3 forward, DVec3 shipUp)
+    {
+        var fwd    = new Vector3((float)forward.X, (float)forward.Y, (float)forward.Z);
+        var upHint = new Vector3((float)shipUp.X,  (float)shipUp.Y,  (float)shipUp.Z);
+
+        var right = Vector3.Cross(fwd, upHint);  // Cross(fwd,up) → right; det = +1
+        if (right.LengthSquared() < 1e-6f)
+            right = Vector3.Cross(fwd, Vector3.UnitX);  // degenerate fallback
+        right = Vector3.Normalize(right);
+        var up = Vector3.Normalize(Vector3.Cross(right, fwd));  // reorthogonalise up
+
+        // Build rotation matrix M so Transform(-Z, q) = fwd, Transform(+Y, q) = up.
+        // MonoGame row-major: row 0 = right, row 1 = up, row 2 = -fwd.
+        var m = new Matrix(
+            right.X, right.Y, right.Z, 0f,
+            up.X,    up.Y,    up.Z,    0f,
+           -fwd.X,  -fwd.Y,  -fwd.Z,  0f,
+            0f,      0f,      0f,      1f);
+
+        return Quaternion.CreateFromRotationMatrix(m);
     }
 
     private void DrawStationOrbitRings()
@@ -2865,6 +2976,14 @@ public sealed class SystemSpaceState : GameState
     // at AU-scale distances competes for depth buffer precision when you're docking.
     private float ComputeNearClip()
     {
+        // In third-person, camera is ~80–90 m from the ship — clip at 1% of that distance
+        // (default 10 km near clip would hide the ship entirely).
+        if (_thirdPersonMode && _frameShipSnap != null)
+        {
+            double distToShip = (_frameShipSnap.Position - _camera.UniversePosition).Length;
+            return (float)(distToShip * 0.01 * Camera3D.RenderScale);
+        }
+
         DVec3  camPos        = _camera.UniversePosition;
         double minSurf       = double.MaxValue;
         double nearestRadius = 250.0; // fallback: smallest station size

@@ -38,6 +38,7 @@
 | **GeometryBuilder** | ✓ Done | `Inferior.Rendering/GeometryBuilder.cs`; `AddConvexFace` / `AddFace(outwardNormal)`; winding auto-corrected from centroid or explicit normal; `BuildDynamic` (VertexPositionNormalTexture, flat normals) and `BuildBaked` (VertexPositionColor). |
 | **MeshRenderer** | ✓ Done | `Inferior.Rendering/MeshRenderer.cs`; `DrawBaked` (VertexPositionColorTexture, no lighting) and `DrawDynamic` (VertexPositionNormalTexture, BasicEffect star light); explicit `CullCounterClockwiseFace`. |
 | **Container rendering** | ✓ Done | Single shared chamfered-box mesh (2.5×2.5×6 m, 0.1 m chamfer) via `GeometryBuilder`; per-lock-grade colour at draw time; seeded angular velocity tumble updated per frame; drawn through `MeshRenderer.DrawDynamic`. |
+| **Type-1 ship hull** | ✓ Done | 31-face hull + hex nacelles + pylons; dynamic lighting; third-person camera (F3) |
 
 ---
 

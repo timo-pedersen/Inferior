@@ -55,14 +55,17 @@ public sealed class GeometryBuilder
         for (int t = 0; t < triCount; t++)
         {
             var (p0, p1, p2) = _tris[t];
-            Vector3 normal   = Vector3.Normalize(Vector3.Cross(p1 - p0, p2 - p0));
-            int     v        = t * 3;
+            // AddTriangle stores vertices so Cross(p1-p0, p2-p0) points outward (CCW from outside).
+            // DirectX/MonoGame CullCounterClockwise culls CCW faces, so emit indices as (0,2,1)
+            // to render CW-from-outside front faces while keeping the outward normal correct.
+            Vector3 normal = Vector3.Normalize(Vector3.Cross(p1 - p0, p2 - p0));
+            int v = t * 3;
             verts[v]     = new VertexPositionNormalTexture(p0, normal, Vector2.Zero);
             verts[v + 1] = new VertexPositionNormalTexture(p1, normal, Vector2.Zero);
             verts[v + 2] = new VertexPositionNormalTexture(p2, normal, Vector2.Zero);
             indices[v]     = v;
-            indices[v + 1] = v + 1;
-            indices[v + 2] = v + 2;
+            indices[v + 1] = v + 2;  // swap 1↔2 → CW from outside = visible front face
+            indices[v + 2] = v + 1;
         }
 
         var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration, vertCount, BufferUsage.WriteOnly);
@@ -89,13 +92,13 @@ public sealed class GeometryBuilder
         for (int t = 0; t < triCount; t++)
         {
             var (p0, p1, p2) = _tris[t];
-            int v            = t * 3;
+            int v = t * 3;
             verts[v]     = new VertexPositionColor(p0, Color.White);
             verts[v + 1] = new VertexPositionColor(p1, Color.White);
             verts[v + 2] = new VertexPositionColor(p2, Color.White);
             indices[v]     = v;
-            indices[v + 1] = v + 1;
-            indices[v + 2] = v + 2;
+            indices[v + 1] = v + 2;  // swap 1↔2 → CW from outside = visible front face
+            indices[v + 2] = v + 1;
         }
 
         var vb = new VertexBuffer(gd, VertexPositionColor.VertexDeclaration, vertCount, BufferUsage.WriteOnly);

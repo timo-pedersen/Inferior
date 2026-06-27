@@ -51,7 +51,7 @@ public sealed class MeshRenderer : IDisposable
         _effect.LightingEnabled                = true;
         _effect.TextureEnabled                 = false;
         _effect.DirectionalLight0.Enabled      = true;
-        _effect.DirectionalLight0.Direction    = sunDirection;
+        _effect.DirectionalLight0.Direction    = -sunDirection;
         _effect.DirectionalLight0.DiffuseColor = sunColour.ToVector3();
         _effect.DirectionalLight1.Enabled      = false;
         _effect.DirectionalLight2.Enabled      = false;
