@@ -4,6 +4,7 @@ using Inferior.Core.Math;
 using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Inferior.Game.StationGen;
+using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
@@ -128,6 +129,7 @@ public sealed class SystemSpaceState : GameState
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
     private UIManager?       _ui;
+    private DriveInstrumentPanel? _drivePanel;
     private InstrumentMeter? _reactorPowerOutputMeter;
     private InstrumentMeter? _reactorDrawnMeter;
     private InstrumentMeter? _busConsumptionMeter;
@@ -666,6 +668,8 @@ public sealed class SystemSpaceState : GameState
         _cockpitRail.AddCenterTab("DOCK",     _dockingInstrument);
         _cockpitRail.AddCenterTab("LOG",      _console);
         _cockpitRail.AddCenterTab("CTRL",     new Panel { DrawBackground = false, DrawBorder = false });
+        _drivePanel = new DriveInstrumentPanel();
+        _cockpitRail.RightWing.Add(_drivePanel);     // drawn first, under shield button
         _cockpitRail.RightWing.Add(_shieldToggleButton);
 
         // ── LeftWing: targeting direction ball + 3-line target readout ────────
@@ -1062,9 +1066,15 @@ public sealed class SystemSpaceState : GameState
             : _frameShipSnap?.Position ?? _camera.UniversePosition;
         _simulation.SetWorldState(_star, _system, refPos, _gameTimeSeconds);
 
+        // Keep drive panel filling the right wing (wing bounds are set by CockpitRail.Update)
+        if (_drivePanel != null && _cockpitRail != null)
+        {
+            var rwb = _cockpitRail.RightWing.Bounds;
+            _drivePanel.Bounds = new Rectangle(0, 0, rwb.Width, rwb.Height);
+        }
+
         if (!_uiMouseMode)
             HandleKeyboard(keys, mouse);
-
 
         var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
         _hudAlert.Update(dt);
@@ -1095,13 +1105,15 @@ public sealed class SystemSpaceState : GameState
         _effect.View       = _camera.ViewMatrix;
         _effect.Projection = _camera.ProjectionMatrix;
 
-        // Clunk roll — cosmetic camera roll applied for one gear-shift duration
+        // Clunk roll — camera-space roll around the ship forward axis.
+        // Multiply on the right so the rotation is in view space, not world space.
+        // This prevents planets from gluing to the screen frame during the animation.
         if (_frameShipSnap?.ClunkPhase >= 0.0)
         {
             float phase = (float)_frameShipSnap.ClunkPhase;
             float roll  = MathHelper.ToRadians(FlightConstants.ClunkRollDegrees)
                         * MathF.Sin(phase * MathF.PI);
-            _effect.View = Matrix.CreateRotationZ(roll) * _effect.View;
+            _effect.View = _camera.ViewMatrix * Matrix.CreateRotationZ(roll);
         }
 
         // Star lighting direction — from star (at origin) toward camera
@@ -2225,8 +2237,9 @@ public sealed class SystemSpaceState : GameState
                 {
                     double gearSpeed = snap.NewtonianGear < FlightConstants.NewtonianGearSpeeds.Length
                         ? FlightConstants.NewtonianGearSpeeds[snap.NewtonianGear] : 0;
-                    string lkmStr = snap.LkmZone > 0 ? $"  LKM-{snap.LkmZone}" : "";
-                    flightLine = $"[{modeName}]  G{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}";
+                    string lkmStr   = snap.LkmZone > 0    ? $"  LKM-{snap.LkmZone}" : "";
+                    string xStopStr = snap.XStopActive    ? "  X-STOP" : "";
+                    flightLine = $"[{modeName}]  G{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}{xStopStr}";
                 }
                 else if (snap.FlightMode == FlightMode.SystemSlipstream)
                 {

@@ -49,7 +49,10 @@ public sealed class SpaceSimulation : Simulation
         bool       XStopActive       = false,
         // Slipstream
         int        SlipstreamHarmonicIndex = 0,
-        double     ClunkPhase        = -1.0);  // -1 = inactive, 0→1 = animating
+        double     ClunkPhase        = -1.0,   // -1 = inactive, 0→1 = animating
+        // Speeds relative to reference frame
+        double     RelativeSpeedMs   = 0.0,    // |vel - refVel| in m/s
+        double     ForwardSpeedMs    = 0.0);   // dot(vel - refVel, forward) — signed
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -241,8 +244,10 @@ public sealed class SpaceSimulation : Simulation
         {
             double[] gears  = ship.NewtonianGears;
             int      topIdx = gears.Length - 1;
+            int      prev   = _newtonianGear;
             if (input.GearUp   && _newtonianGear < topIdx)  _newtonianGear++;
             if (input.GearDown && _newtonianGear > 0)        _newtonianGear--;
+            if (_newtonianGear != prev) TriggerClunk(ship.ClunkDurationMs);
         }
         else if (_currentFlightMode == FlightMode.SystemSlipstream)
         {
@@ -305,6 +310,10 @@ public sealed class SpaceSimulation : Simulation
         if (_currentFlightMode is FlightMode.SystemNewtonian or FlightMode.SystemSlipstream)
             UpdateLkmZones(ship, dt);
 
+        // ── Clunk timer (runs in all flight modes) ────────────────────────
+        if (_clunkTimer > 0)
+            _clunkTimer = System.Math.Max(0, _clunkTimer - dt);
+
         // ── Physics dispatch ──────────────────────────────────────────────
         switch (_currentFlightMode)
         {
@@ -329,6 +338,11 @@ public sealed class SpaceSimulation : Simulation
             ? 1.0 - _clunkTimer / _clunkDuration
             : -1.0;
 
+        DVec3  snapRefVel = GetRefVelocity();
+        DVec3  snapRelVel = ship.Velocity - snapRefVel;
+        double snapRelSpd = snapRelVel.Length;
+        double snapFwdSpd = DVec3.Dot(snapRelVel, ship.Forward);
+
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
             ship.Forward, ship.Up,
@@ -342,7 +356,9 @@ public sealed class SpaceSimulation : Simulation
             _lkmComplianceTimer,
             _xStopActive,
             _slipstreamHarmonicIndex,
-            clunkPhase);
+            clunkPhase,
+            snapRelSpd,
+            snapFwdSpd);
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────
@@ -423,14 +439,19 @@ public sealed class SpaceSimulation : Simulation
             return;
         }
 
-        // Forced dropout — stations
-        if (GetNearestStationDistance() < FlightConstants.SlipstreamStationDropoutRange)
+        // Forced dropout — stations (advance range grows with speed so the ship can brake)
         {
-            DataBus.System.Publish(Topics.System.All,
-                new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
-            ExitSystemSlipstreamToNewtonian(ship);
-            TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
-            return;
+            double stationDist = GetNearestStationDistance();
+            double advanceDist = System.Math.Max(FlightConstants.SlipstreamStationDropoutRange,
+                                                  _slipstreamCurrentSpeed * 8.0);
+            if (stationDist < advanceDist)
+            {
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
+                ExitSystemSlipstreamToNewtonian(ship, capVelocity: true);
+                TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
+                return;
+            }
         }
 
         // Smooth ramp between harmonics
@@ -449,10 +470,6 @@ public sealed class SpaceSimulation : Simulation
                 _slipstreamTransitioning = false;
             }
         }
-
-        // Advance clunk animation timer (used by render thread via snapshot)
-        if (_clunkTimer > 0)
-            _clunkTimer = System.Math.Max(0, _clunkTimer - dt);
 
         // Apply velocity directly along forward direction
         DVec3 refVel = GetRefVelocity();
@@ -698,7 +715,6 @@ public sealed class SpaceSimulation : Simulation
         _currentFlightMode = FlightMode.SystemSlipstream;
         _xStopActive = false;
         DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
-        TriggerClunk(ship.ClunkDurationMs);
     }
 
     private void ExitSystemSlipstream(Ship ship)
@@ -725,15 +741,28 @@ public sealed class SpaceSimulation : Simulation
         ExitSystemSlipstreamToNewtonian(ship);
     }
 
-    private void ExitSystemSlipstreamToNewtonian(Ship ship)
+    private void ExitSystemSlipstreamToNewtonian(Ship ship, bool capVelocity = false)
     {
         _slipstreamTransitioning = false;
         _slipstreamCurrentSpeed  = 0;
         _clunkTimer              = 0;
         _currentFlightMode       = FlightMode.SystemNewtonian;
 
+        DVec3 refVel = GetRefVelocity();
+
+        // Clamp exit speed near stations so the ship can brake without overshooting.
+        // capVelocity is set when the dropout was triggered by a speed-advance check
+        // (station may be further than 10 km but still too close for current speed).
+        if (capVelocity || GetNearestStationDistance() < 10_000.0)
+        {
+            DVec3  relVel = ship.Velocity - refVel;
+            double relSpd = relVel.Length;
+            double maxSpd = FlightConstants.NewtonianGearSpeeds[3];  // 400 m/s — inner LKM zone limit
+            if (relSpd > maxSpd && relSpd > 0)
+                ship.Velocity = refVel + relVel * (maxSpd / relSpd);
+        }
+
         // Auto-select gear matching exit speed
-        DVec3  refVel = GetRefVelocity();
         double speed  = System.Math.Max(0, DVec3.Dot(ship.Velocity - refVel, ship.Forward));
         double[] gears = ship.NewtonianGears;
         _newtonianGear = gears.Length - 1;
@@ -756,8 +785,6 @@ public sealed class SpaceSimulation : Simulation
         _slipstreamTargetSpeed     = harmonics[newIdx];
         _slipstreamTransitioning   = true;
         _slipstreamTransitionTimer = FlightConstants.SlipstreamAccelSeconds;
-
-        TriggerClunk(ship.ClunkDurationMs);
     }
 
     private void TriggerClunk(double durationMs)
@@ -987,14 +1014,21 @@ public sealed class SpaceSimulation : Simulation
         var snap = _shipSnapshot;
         if (snap != null)
         {
-            DataBus.Instruments.Publish(Topics.Flight.Mode,          (double)snap.FlightMode);
-            DataBus.Instruments.Publish(Topics.Flight.Gear,          (double)(snap.NewtonianGear + 1));
+            DataBus.Instruments.Publish(Topics.Flight.Mode,            (double)snap.FlightMode);
+            DataBus.Instruments.Publish(Topics.Flight.Gear,            (double)(snap.NewtonianGear + 1));
+            DataBus.Instruments.Publish(Topics.Flight.GearCount,       (double)snap.NewtonianGearCount);
+            double gearCeil = snap.NewtonianGear < FlightConstants.NewtonianGearSpeeds.Length
+                ? FlightConstants.NewtonianGearSpeeds[snap.NewtonianGear] : 0.0;
+            DataBus.Instruments.Publish(Topics.Flight.GearCeilingMs,   gearCeil);
             DataBus.Instruments.Publish(Topics.Flight.MaxGear,
                 snap.LkmMaxGear == int.MaxValue ? -1.0 : (double)(snap.LkmMaxGear + 1));
-            DataBus.Instruments.Publish(Topics.Flight.HarmonicIndex, (double)(snap.SlipstreamHarmonicIndex + 1));
-            DataBus.Instruments.Publish(Topics.Flight.LkmZone,       (double)snap.LkmZone);
-            DataBus.Instruments.Publish(Topics.Flight.LkmCompliance, snap.LkmComplianceTimer);
-            DataBus.Instruments.Publish(Topics.Flight.XStopActive,   snap.XStopActive ? 1.0 : 0.0);
+            DataBus.Instruments.Publish(Topics.Flight.HarmonicIndex,   (double)(snap.SlipstreamHarmonicIndex + 1));
+            DataBus.Instruments.Publish(Topics.Flight.HarmonicCount,   (double)snap.NewtonianGearCount);
+            DataBus.Instruments.Publish(Topics.Flight.LkmZone,         (double)snap.LkmZone);
+            DataBus.Instruments.Publish(Topics.Flight.LkmCompliance,   snap.LkmComplianceTimer);
+            DataBus.Instruments.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);
+            DataBus.Instruments.Publish(Topics.Flight.RelativeSpeedMs, snap.RelativeSpeedMs);
+            DataBus.Instruments.Publish(Topics.Flight.ForwardSpeedMs,  snap.ForwardSpeedMs);
         }
 
         if (_ship != null && snap != null)

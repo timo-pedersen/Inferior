@@ -61,10 +61,11 @@ public static class FlightConstants
     // Smooth ramp time when shifting between harmonics (seconds).
     public const double SlipstreamAccelSeconds = 2.5;
 
-    // Gear-shift clunk duration.
+    // Gear-shift clunk duration (Newtonian only — slipstream gets its own effect later).
     // Actual = ClunkBaseDurationMs + ClunkNodePenaltyMs × (24 - nodeCount)
-    public const double ClunkBaseDurationMs = 250.0;
-    public const double ClunkNodePenaltyMs  =  60.0;  // per missing node vs. 24
+    // Default 10-node ship: 150 + 15 × 14 = 360 ms
+    public const double ClunkBaseDurationMs = 150.0;
+    public const double ClunkNodePenaltyMs  =  15.0;  // per missing node vs. 24
 
     // Roll oscillation during clunk animation (degrees, each way).
     public const float ClunkRollDegrees = 1.5f;

@@ -30,9 +30,9 @@
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
 | **Planetary flight (`FlightMode`)** | ✓ Done (Brief E overhaul) | `FlightMode { Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream }`; auto-detect via nearest body altitude; force-based atmo physics (gravity, drag, lift); Flight Assist (V), Slipstream/mode toggle (G), X-Stop (X), Gear (scroll) |
 | **SystemNewtonian flight model** | ✓ Done | Gear-ceiling Newtonian with thrust taper; 10-gear speed table from `FlightConstants`; X-Stop brakes to reference-body velocity; gear auto-selected on Slipstream exit |
-| **SystemSlipstream flight model** | ✓ Done | 10-harmonic log-scaled table (1 km/s – 30 Gm/s); smooth-step ramp between harmonics; clunk roll animation; planet/station dropout at 100 km / 2 km |
-| **LKM station zones** | ✓ Done | 3 concentric zones (8 km / 2 km / 500 m) with per-zone gear cap; 6-second compliance window; violation flag stub; forces Slipstream exit on zone entry |
-| **Flight HUD** | ✓ Done | Mode / gear / LKM line in HUD (replaces old "Set:" speed); `Topics.Flight.*` DataBus topics; clunk camera roll animation |
+| **SystemSlipstream flight model** | ✓ Done | 10-harmonic log-scaled table (1 km/s – 30 Gm/s); smooth-step ramp between harmonics; clunk roll animation (Newtonian only); planet dropout at 100 km; station dropout is speed-aware (max(2 km, speed×8 s)) with 400 m/s exit cap |
+| **LKM station zones** | ✓ Done | 3 concentric zones (8 km / 2 km / 500 m) with per-zone gear cap; 6-second compliance window; violation flag stub; forces Slipstream exit on zone entry with 400 m/s velocity cap |
+| **Flight HUD** | ✓ Done | Mode / gear / LKM / X-STOP indicator line; `Topics.Flight.*` DataBus topics; clunk camera-space roll (view-space multiplication, no planet-glue) |
 | **Keplerian orbital mechanics** | ✓ Done | Full orbital elements (`e`, `i`, `Ω`, `ω`, `M₀`) on `OrbitalBody`; `ComputePosition` + `ComputeVelocity`; Newton solver for eccentric anomaly; moons/asteroids/stations keep circular rail |
 | **PlanetData + PlanetFactory** | ✓ Done | `PlanetType`, `AtmosphereCompositionType` enums; `PlanetData` record with physical/atmosphere/surface data; `PlanetFactory` procedural generation; per-tick planet orientation update in sim |
 | **Reference frame fix** | ✓ Done | On atmosphere entry, planet orbital velocity subtracted from `ship.Velocity` (→ planet-relative); position integration adds `_atmosphericPlanetVelocity` to keep galaxy position tracking. Restored on exit. `UpdateReferenceFrame` sends `DVec3.Zero` in atmosphere. |
@@ -105,7 +105,10 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Flight model tuning** — first flight test of Brief E; tune `AtmoGearSpeedScale` (default 0.05 → ~1280 m/s top gear vs 2000 m/s AtmoSlipstream max); tune gear speed table steps
+1. **Flight model tuning** — post-tuning pass: atmospheric flight bugs (5 m spawn altitude, atmo slipstream no visual speed change, HUD pressure value); sky rendering next
+   - Station approach: speed-aware dropout + 400 m/s exit cap ✓ (this session)
+   - Clunk: Newtonian-only, 360 ms (10-node), camera-space roll, XStop HUD ✓ (this session)
+   - Remaining: investigate temperature display (millions K); atmo slipstream visual; 5 m spawn altitude
 2. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
 3. **Station text/markings pass** — station name on hull, bay numbers
 4. **Power system refinement** — heat, coolant, more components

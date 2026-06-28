@@ -188,13 +188,18 @@ public static class Topics
 
     public static class Flight
     {
-        public const string Mode          = "Flight.Mode";          // double cast of FlightMode enum
-        public const string Gear          = "Flight.Gear";          // double, 1-based
-        public const string MaxGear       = "Flight.MaxGear";       // double, 1-based (LKM cap; -1 = none)
-        public const string HarmonicIndex = "Flight.HarmonicIndex"; // double, 1-based
-        public const string LkmZone       = "Flight.LkmZone";       // double (0=none, 1/2/3)
-        public const string LkmCompliance = "Flight.LkmCompliance"; // double countdown seconds
-        public const string XStopActive   = "Flight.XStop";         // double (1.0 = active)
+        public const string Mode            = "Flight.Mode";            // double cast of FlightMode enum
+        public const string Gear            = "Flight.Gear";            // double, 1-based
+        public const string GearCount       = "Flight.GearCount";       // double, total gear count
+        public const string GearCeilingMs   = "Flight.GearCeiling";     // double, m/s ceiling for current gear
+        public const string MaxGear         = "Flight.MaxGear";         // double, 1-based (LKM cap; -1 = none)
+        public const string HarmonicIndex   = "Flight.HarmonicIndex";   // double, 1-based
+        public const string HarmonicCount   = "Flight.HarmonicCount";   // double, total harmonic count
+        public const string LkmZone         = "Flight.LkmZone";         // double (0=none, 1/2/3)
+        public const string LkmCompliance   = "Flight.LkmCompliance";   // double countdown seconds
+        public const string XStopActive     = "Flight.XStop";           // double (1.0 = active)
+        public const string RelativeSpeedMs = "Flight.RelativeSpeed";   // double, m/s magnitude of (vel - refVel)
+        public const string ForwardSpeedMs  = "Flight.ForwardSpeed";    // double, m/s signed (negative = backwards)
     }
 
     /// <summary>Debug / development sensors — not present in release builds.</summary>
