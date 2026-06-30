@@ -412,6 +412,13 @@ public sealed class SystemSpaceState : GameState
 
         // Station module layouts — generated once from name-derived seed.
         // StationGenerator.Generate also runs StationDecorator internally.
+        // Pre-set SunDirection now so BakeLighting uses the correct world-space direction.
+        // Draw() would set it per-frame, but Generate() runs in OnEnter before any Draw().
+        {
+            Vector3 srp = _camera.ToRenderSpace(DVec3.Zero);
+            Vector3 ld  = srp == Vector3.Zero ? -Vector3.UnitZ : Vector3.Normalize(-srp);
+            SceneLighting.SunDirection = -ld;
+        }
         _stationGeometry.Clear();
         foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
@@ -421,7 +428,7 @@ public sealed class SystemSpaceState : GameState
         _hullMeshes.Clear();
         foreach (var station in _system.Stations)
         {
-            var modules = StationGenerator.Generate(station, _gd);
+            var modules = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
             _stationGeometry[station] = modules;
             foreach (var mod in modules)
             {

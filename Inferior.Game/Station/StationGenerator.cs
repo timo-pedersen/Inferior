@@ -17,7 +17,8 @@ public sealed class StationGenerator
 
     private StationGenerator(int seed) { _rng = new SeededRandom(seed); }
 
-    public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd)
+    public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd,
+                                               double gameTime = 0.0)
     {
         int seed = NameHash(station.Name);
         var gen  = new StationGenerator(seed);
@@ -39,7 +40,9 @@ public sealed class StationGenerator
         AssignTextures(modules, gd, palette, station.Name);
 
         StationDecorator.Decorate(modules);
-        BakeLighting(modules);
+        var sysQ      = station.GetOrientation(gameTime);
+        var stRotQ    = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+        BakeLighting(modules, Matrix.CreateFromQuaternion(stRotQ));
         StationDecorator.ApplyAmbientOcclusion(modules);
         return modules;
     }
@@ -108,16 +111,20 @@ public sealed class StationGenerator
     };
 
     // Bakes SceneLighting into each module's decoration vertex colours.
+    // stationRot: the station's world-space rotation at bake time. Combined with each
+    // module's local rotation so the N·L is computed in world space, matching the
+    // hull pass which applies modRot * stationRot via the BasicEffect World matrix.
     // Must run after Decorate() (so meshes exist) and before Build() (so GPU buffers
     // pick up the modified colours).
-    private static void BakeLighting(List<PlacedModule> modules)
+    private static void BakeLighting(List<PlacedModule> modules, Matrix stationRot)
     {
         foreach (var mod in modules)
         {
             if (mod.Mesh == null) continue;
             mod.Transform.Decompose(out _, out Quaternion rot, out _);
+            Matrix modRot = Matrix.CreateFromQuaternion(rot);
             mod.Mesh.ApplyLighting(
-                Matrix.CreateFromQuaternion(rot),
+                modRot * stationRot,
                 SceneLighting.SunDirection,
                 SceneLighting.Ambient,
                 SceneLighting.SunColour);

@@ -25,7 +25,7 @@
 | ShipSizeClass enum | ✓ Stubbed | Exists, not yet enforced |
 | **Power system** | ✓ Done | PowerCore → PowerBus → Connector → Shield chain working; cold start sequence; PowerPriorityManager; instruments reporting to DataBus; CommandBus integration |
 | **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `inferior-design-stations-claude.md` |
-| **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours |
+| **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours; SunDirection pre-set in OnEnter before baking; stationRot included in world normal transform |
 | **Animated glow lights** | ✓ Done | `StationLightInfo` with Rate/Phase/LightPattern; `ComputeGlowIntensity`; strobe, pulse, heartbeat patterns; aviation warning lights on tall structures |
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
 | **Planetary flight (`FlightMode`)** | ✓ Done (Brief E overhaul) | `FlightMode { Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream }`; auto-detect via nearest body altitude; force-based atmo physics (gravity, drag, lift); Flight Assist (V), Slipstream/mode toggle (G), X-Stop (X), Gear (scroll) |

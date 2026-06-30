@@ -9,9 +9,9 @@ namespace Inferior.Game;
 /// </summary>
 public static class SceneLighting
 {
-    // Direction FROM the star TOWARD the scene (i.e. the incident light direction reversed).
+    // Direction FROM the scene TOWARD the star (conventional L vector).
     // dot(faceNormal, SunDirection) > 0 → face is lit.
-    // BasicEffect convention: DirectionalLight0.Direction = -SunDirection.
+    // BasicEffect convention: DirectionalLight0.Direction = -SunDirection (incident direction).
     public static Vector3 SunDirection { get; set; } = Vector3.Normalize(new Vector3(0.5f, 1f, 0.3f));
 
     // Minimum light factor on the shadow side — keeps un-lit faces from going pure black.
