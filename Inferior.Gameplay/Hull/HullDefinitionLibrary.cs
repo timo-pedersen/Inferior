@@ -54,8 +54,8 @@ public static class HullDefinitionLibrary
 
         // 25 t hull; 1.2 × 25000 × 9.81 ≈ 294 kN hover margin
         AerodynamicLift         = 0.8,   // modest lift — not a glider
-        AerodynamicBrakeFront   = 0.15,
-        AerodynamicBrakeLateral = 0.40,  // > 2× front per spec
+        AerodynamicBrakeFront   = 0.75,
+        AerodynamicBrakeLateral = 2.00,  // > 2× front per spec
         MaxDownThrustN          = 300_000,
 
         Slots =
@@ -87,8 +87,8 @@ public static class HullDefinitionLibrary
 
         // 80 t hull; 1.2 × 80000 × 9.81 ≈ 941 kN hover margin
         AerodynamicLift         = 1.4,   // better lift than Sidewinder
-        AerodynamicBrakeFront   = 0.22,
-        AerodynamicBrakeLateral = 0.55,
+        AerodynamicBrakeFront   = 1.10,
+        AerodynamicBrakeLateral = 2.75,
         MaxDownThrustN          = 960_000,
 
         Slots =

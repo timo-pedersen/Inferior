@@ -279,8 +279,8 @@ public sealed class Star
         };
 
         return (
-            massS  * Units.SolarMass,
-            radS   * Units.SolarRadius,
+            massS * Units.SolarMass,
+            radS,   // StellarRadius() already returns metres (R☉ × mass^α)
             lum,
             temp);
     }

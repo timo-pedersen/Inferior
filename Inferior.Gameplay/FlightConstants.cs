@@ -63,18 +63,28 @@ public static class FlightConstants
 
     // Gear-shift clunk duration (Newtonian only — slipstream gets its own effect later).
     // Actual = ClunkBaseDurationMs + ClunkNodePenaltyMs × (24 - nodeCount)
-    // Default 10-node ship: 150 + 15 × 14 = 360 ms
+    // Default 10-node ship: 150 + 30 × 14 = 570 ms
     public const double ClunkBaseDurationMs = 150.0;
-    public const double ClunkNodePenaltyMs  =  15.0;  // per missing node vs. 24
+    public const double ClunkNodePenaltyMs  =  30.0;  // per missing node vs. 24
 
     // Roll oscillation during clunk animation (degrees, each way).
     public const float ClunkRollDegrees = 1.5f;
 
     // Slipstream drop-out distance from planet surface (metres).
+    // Must be less than SlipstreamProximityDropoffM so the ship has already slowed
+    // significantly before dropout fires (and the position snap is close to real position).
     public const double SlipstreamPlanetDropoutAltitude = 100_000.0;  // 100 km
 
     // Slipstream drop-out distance from station centre (metres).
-    public const double SlipstreamStationDropoutRange = 2_000.0;
+    // At 20 km the proximity scale has already damped the ship to near zero.
+    public const double SlipstreamStationDropoutRange = 20_000.0;
+
+    // Distance at which proximity scale begins damping Slipstream speed.
+    // Scale = (dist / dropoff)³ — cubic dropoff.  Must be larger than both
+    // SlipstreamPlanetDropoutAltitude and SlipstreamStationDropoutRange so the
+    // ship visibly decelerates well before the forced exit fires.
+    // At 500 km: scale=1.0; at 250 km: scale=0.125; at 100 km: scale=0.008 → near-stopped.
+    public const double SlipstreamProximityDropoffM = 500_000.0;  // 500 km
 
     // ── ATMOSPHERIC NEWTONIAN ─────────────────────────────────────────────
     // Top Newtonian gear speed is multiplied by this factor in-atmosphere.

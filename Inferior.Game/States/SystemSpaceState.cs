@@ -155,8 +155,8 @@ public sealed class SystemSpaceState : GameState
 
     // ── Ground radar (atmosphere-only instrument panel) ───────────────────────
     private Action<double>? _pcAltHandler, _pcVsHandler, _pcLatHandler,
-                            _pcLonHandler, _pcHdgHandler, _pcGsHandler, _pcTempHandler;
-    private double _pcAlt, _pcVs, _pcLat, _pcLon, _pcHdg, _pcGs, _pcTemp;
+                            _pcLonHandler, _pcHdgHandler, _pcGsHandler, _pcTempHandler, _pcPressHandler;
+    private double _pcAlt, _pcVs, _pcLat, _pcLon, _pcHdg, _pcGs, _pcTemp, _pcPress;
     private Action<RadarContact>? _radarContactHandler;
     private Action<string>?       _radarLostHandler;
 
@@ -734,13 +734,14 @@ public sealed class SystemSpaceState : GameState
         DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
         DataBus.System.Subscribe(Topics.System.All, _systemHandler);
 
-        _pcAltHandler  = v => _pcAlt  = v;
-        _pcVsHandler   = v => _pcVs   = v;
-        _pcLatHandler  = v => _pcLat  = v;
+        _pcAltHandler   = v => _pcAlt   = v;
+        _pcVsHandler    = v => _pcVs    = v;
+        _pcLatHandler   = v => _pcLat   = v;
         _pcLonHandler  = v => _pcLon  = v;
         _pcHdgHandler  = v => _pcHdg  = v;
         _pcGsHandler   = v => _pcGs   = v;
-        _pcTempHandler = v => _pcTemp  = v;
+        _pcTempHandler  = v => _pcTemp  = v;
+        _pcPressHandler = v => _pcPress = v;
         DataBus.Instruments.Subscribe(Topics.PlanetCoord.Altitude,      _pcAltHandler);
         DataBus.Instruments.Subscribe(Topics.PlanetCoord.VerticalSpeed, _pcVsHandler);
         DataBus.Instruments.Subscribe(Topics.PlanetCoord.Latitude,      _pcLatHandler);
@@ -748,6 +749,7 @@ public sealed class SystemSpaceState : GameState
         DataBus.Instruments.Subscribe(Topics.PlanetCoord.Heading,       _pcHdgHandler);
         DataBus.Instruments.Subscribe(Topics.PlanetCoord.GroundSpeed,   _pcGsHandler);
         DataBus.Instruments.Subscribe(Topics.PlanetCoord.Temperature,   _pcTempHandler);
+        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Pressure,      _pcPressHandler);
 
         _radarContactHandler = c =>
         {
@@ -801,7 +803,8 @@ public sealed class SystemSpaceState : GameState
         if (_pcLonHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Longitude,     _pcLonHandler);
         if (_pcHdgHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Heading,       _pcHdgHandler);
         if (_pcGsHandler   != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.GroundSpeed,   _pcGsHandler);
-        if (_pcTempHandler != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Temperature,   _pcTempHandler);
+        if (_pcTempHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Temperature, _pcTempHandler);
+        if (_pcPressHandler != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Pressure,    _pcPressHandler);
 
         // Remove all radar contacts fed from this session so TargetingSystem is clean on re-entry
         foreach (string id in _radarContactIds)
@@ -3202,23 +3205,28 @@ public sealed class SystemSpaceState : GameState
         string hdgStr  = $"{(int)System.Math.Round(_pcHdg):D3}°";
         string gsStr   = $"{(int)_pcGs} m/s";
         string tempStr = $"{(int)_pcTemp} K";
-
-        (string label, string value)[] rows =
-        [
-            ("ALT",  altStr),
-            ("VS",   vsStr),
-            ("LAT",  latStr),
-            ("LON",  lonStr),
-            ("HDG",  hdgStr),
-            ("GS",   gsStr),
-            ("TEMP", tempStr),
-        ];
+        string presStr = _pcPress >= 0.01
+            ? $"{_pcPress:F2} bar"
+            : _pcPress > 0.0 ? $"{_pcPress * 1000.0:F1} mbar" : "--- bar";
+        bool   presGreen = _pcPress >= FlightConstants.AtmoSlipstreamCutoffBar;
 
         const int ColW  = 200;
         const int LineH = 20;
         const float S   = 0.8f;
         int x = _gd.Viewport.Width - ColW - 12;
         int y = 10;
+
+        (string label, string value, Color color)[] rows =
+        [
+            ("ALT",  altStr,  ColHUD),
+            ("VS",   vsStr,   ColHUD),
+            ("LAT",  latStr,  ColHUD),
+            ("LON",  lonStr,  ColHUD),
+            ("HDG",  hdgStr,  ColHUD),
+            ("GS",   gsStr,   ColHUD),
+            ("TEMP", tempStr, ColHUD),
+            ("PRES", presStr, presGreen ? new Color(80, 220, 100) : ColHUD),
+        ];
 
         var bgRect = new Rectangle(x - 6, y - 4, ColW + 10, rows.Length * LineH + 8);
         DrawRect(sb, bgRect, new Color(8, 12, 25, 190));
@@ -3230,7 +3238,7 @@ public sealed class SystemSpaceState : GameState
             DrawText(sb, rows[i].label, new Vector2(x, ly), ColHUDDim, S);
             // Right-align value
             Vector2 valSize = FontHelper.Measure(_font, rows[i].value, S);
-            DrawText(sb, rows[i].value, new Vector2(x + ColW - valSize.X, ly), ColHUD, S);
+            DrawText(sb, rows[i].value, new Vector2(x + ColW - valSize.X, ly), rows[i].color, S);
         }
     }
 

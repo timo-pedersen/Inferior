@@ -30,14 +30,15 @@
 | **Targeting system** | ✓ Done | 'C' key + click targeting; `TargetingSystem` class; HUD brackets; `ProjectToScreen` fixed for render-scale 1e-9 |
 | **Planetary flight (`FlightMode`)** | ✓ Done (Brief E overhaul) | `FlightMode { Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream }`; auto-detect via nearest body altitude; force-based atmo physics (gravity, drag, lift); Flight Assist (V), Slipstream/mode toggle (G), X-Stop (X), Gear (scroll) |
 | **SystemNewtonian flight model** | ✓ Done | Gear-ceiling Newtonian with thrust taper; 10-gear speed table from `FlightConstants`; X-Stop brakes to reference-body velocity; gear auto-selected on Slipstream exit |
-| **SystemSlipstream flight model** | ✓ Done | 10-harmonic log-scaled table (1 km/s – 30 Gm/s); smooth-step ramp between harmonics; clunk roll animation (Newtonian only); planet dropout at 100 km; station dropout is speed-aware (max(2 km, speed×8 s)) with 400 m/s exit cap |
+| **SystemSlipstream flight model** | ✓ Done | 10-harmonic log-scaled table (1 km/s – 30 Gm/s); smooth-step ramp between harmonics; clunk roll animation (Newtonian only); `ComputeProximityScale()` cubic speed dropoff from 100 km; planet dropout at 200 km alt; station dropout at 20 km with 400 m/s exit cap |
 | **LKM station zones** | ✓ Done | 3 concentric zones (8 km / 2 km / 500 m) with per-zone gear cap; 6-second compliance window; violation flag stub; forces Slipstream exit on zone entry with 400 m/s velocity cap |
 | **Flight HUD** | ✓ Done | Mode / gear / LKM / X-STOP indicator line; `Topics.Flight.*` DataBus topics; clunk camera-space roll (view-space multiplication, no planet-glue) |
 | **Keplerian orbital mechanics** | ✓ Done | Full orbital elements (`e`, `i`, `Ω`, `ω`, `M₀`) on `OrbitalBody`; `ComputePosition` + `ComputeVelocity`; Newton solver for eccentric anomaly; moons/asteroids/stations keep circular rail |
 | **PlanetData + PlanetFactory** | ✓ Done | `PlanetType`, `AtmosphereCompositionType` enums; `PlanetData` record with physical/atmosphere/surface data; `PlanetFactory` procedural generation; per-tick planet orientation update in sim |
 | **Reference frame fix** | ✓ Done | On atmosphere entry, planet orbital velocity subtracted from `ship.Velocity` (→ planet-relative); position integration adds `_atmosphericPlanetVelocity` to keep galaxy position tracking. Restored on exit. `UpdateReferenceFrame` sends `DVec3.Zero` in atmosphere. |
 | **PlanetaryCoordinateSensor** | ✓ Done | `Inferior.Gameplay/Sensors/`; publishes `PlanetCoord.*` topics each tick in atmosphere: Altitude, Latitude, Longitude, Heading, GroundSpeed, VerticalSpeed, Temperature. Topics added to `Inferior.Core/DataBus/Topics.cs`. |
-| **Ground radar HUD panel** | ✓ Done | 7-line panel (ALT/VS/LAT/LON/HDG/GS/TEMP) drawn in `DrawAtmosPanel()`; visible only in `FlightMode.Atmosphere`; subscribes/unsubscribes to `PlanetCoord.*` on state enter/exit. |
+| **Ground radar HUD panel** | ✓ Done | 8-row panel (ALT/VS/LAT/LON/HDG/GS/TEMP/PRES) in `DrawAtmosPanel()`; PRES shown in green when ≥ 0.1 bar (Slipstream threshold); subscribes/unsubscribes to `PlanetCoord.*` on state enter/exit. |
+| **DriveInstrumentPanel** | ✓ Done | Right cockpit-rail wing; DRIVE header + mode label; Newtonian: GEAR/CEIL/FWD/REL rows (X-STOP overlay); Slipstream: HARM/SPEED rows; FUEL/PWR/HEAT stub bars; `Topics.Flight.*` DataBus driven. |
 | **Checkerboard planet sphere** | ✓ Done | Per-planet `VertexPositionColor` sphere (128×64 segments) built in `BuildPlanetSphere()`; 5°×5° cells with type-specific colour pairs (7 `PlanetType`s); pole caps; equator stripe; pre-baked directional lighting; rotates via `body.Orientation`. |
 | **GeometryBuilder** | ✓ Done | `Inferior.Rendering/GeometryBuilder.cs`; `AddConvexFace` / `AddFace(outwardNormal)`; winding auto-corrected from centroid or explicit normal; `BuildDynamic` (VertexPositionNormalTexture, flat normals) and `BuildBaked` (VertexPositionColor). |
 | **MeshRenderer** | ✓ Done | `Inferior.Rendering/MeshRenderer.cs`; `DrawBaked` (VertexPositionColorTexture, no lighting) and `DrawDynamic` (VertexPositionNormalTexture, BasicEffect star light); explicit `CullCounterClockwiseFace`. |
@@ -105,10 +106,15 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Flight model tuning** — post-tuning pass: atmospheric flight bugs (5 m spawn altitude, atmo slipstream no visual speed change, HUD pressure value); sky rendering next
-   - Station approach: speed-aware dropout + 400 m/s exit cap ✓ (this session)
-   - Clunk: Newtonian-only, 360 ms (10-node), camera-space roll, XStop HUD ✓ (this session)
-   - Remaining: investigate temperature display (millions K); atmo slipstream visual; 5 m spawn altitude
+1. **Flight model tuning** — runtime investigation needed for remaining Brief E1 items:
+   - Station approach: proximity scale + 20 km dropout + 400 m/s exit cap ✓
+   - Clunk: Newtonian-only, 570 ms (10-node), camera-space roll, X-STOP HUD ✓
+   - DriveInstrumentPanel (gear/speed instrument) ✓
+   - PRES row in atmo HUD ✓
+   - **Fix 3 resolved**: `Star.GetPhysicals` was multiplying stellar radius by `Units.SolarRadius` twice (`StarPhysics.StellarRadius` already returns metres). Temperatures now plausible (~200–600 K). Also fixed `altFraction` clamp in `ComputeTemperature` to `[0,1]` (was unbounded above 1 when ship is underground).
+   - **Fix 6 resolved**: `UpdateEnvironment` was accepting bodies with negative `alt` as `_nearAtmBody` (ship inside planet in ecliptic space always passes `alt < ceiling`). Added `alt >= 0` guard. Also clamped `_nearBodyAltitude` to `Math.Max(0, alt)` to prevent negative values poisoning `ComputeProximityScale` (which would give negative effective slipstream speed).
+   - **Fix 7 pending**: Verify atmo slipstream mode label and visual speed change in-game.
+   - **Atmospheric entry velocity fix**: Slipstream→atmosphere direct transition now zeroes planet-relative velocity (was carrying forward harmonic as real speed → 17 km/s). Planet dropout uses body's actual `ComputeVelocity()` not blended `GetRefVelocity()`. Drag coefficients increased 5× (Sidewinder: front 0.75, lateral 2.0; Cobra: front 1.10, lateral 2.75).
 2. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
 3. **Station text/markings pass** — station name on hull, bay numbers
 4. **Power system refinement** — heat, coolant, more components

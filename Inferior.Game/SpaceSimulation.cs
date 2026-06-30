@@ -150,6 +150,10 @@ public sealed class SpaceSimulation : Simulation
 
     // Nearest body surface altitude (all bodies, regardless of atmosphere).
     private double _nearBodyAltitude = double.MaxValue;
+    // Position, radius, and body ref of the body that owns _nearBodyAltitude (for position snap on dropout).
+    private DVec3      _nearBodyEclipticPos;
+    private double     _nearBodyRadius;
+    private OrbitalBody? _nearBodyRef;
 
     // Ecliptic tilt (written by UpdateEnvironment)
     private double _eclipticAz;
@@ -279,7 +283,8 @@ public sealed class SpaceSimulation : Simulation
             // Entering atmosphere — clear any space Slipstream state
             if (newMode == FlightMode.AtmosphericNewtonian)
             {
-                if (_currentFlightMode == FlightMode.SystemSlipstream)
+                bool fromSlipstream = _currentFlightMode == FlightMode.SystemSlipstream;
+                if (fromSlipstream)
                 {
                     _slipstreamTransitioning = false;
                     _slipstreamCurrentSpeed  = 0;
@@ -291,6 +296,11 @@ public sealed class SpaceSimulation : Simulation
                     ? nb.Body.ComputeVelocity(GameClock.SimTime, Units.G * nb.Body.ParentMassKg, DVec3.Zero)
                     : SimpleOrbitalVelocityEcl(nb.Body, GameClock.SimTime);
                 _atmosphericPlanetVelocity = EclipticToGalaxy(velEcl);
+                // Slipstream speed is virtual — entering atmosphere directly from slipstream
+                // would carry the full forward harmonic as real velocity. Zero it first so
+                // planet-relative entry speed is 0 (gravity then accelerates normally from rest).
+                if (fromSlipstream)
+                    ship.Velocity = _atmosphericPlanetVelocity;
                 ship.Velocity -= _atmosphericPlanetVelocity;
             }
             else if (newMode == FlightMode.SystemNewtonian)
@@ -432,6 +442,25 @@ public sealed class SpaceSimulation : Simulation
         // Forced dropout — planets
         if (_nearBodyAltitude < FlightConstants.SlipstreamPlanetDropoutAltitude)
         {
+            // Snap position to dropout altitude along the surface normal so high-speed
+            // approaches don't tunnel through the planet in a single frame.
+            DVec3  bodyGalaxy = EclipticToGalaxy(_nearBodyEclipticPos);
+            DVec3  toShip     = ship.Position - bodyGalaxy;
+            double dist       = toShip.Length;
+            if (dist > 1.0)
+                ship.Position = bodyGalaxy + (toShip / dist)
+                                * (_nearBodyRadius + FlightConstants.SlipstreamPlanetDropoutAltitude);
+
+            // Zero relative speed — use the body's actual orbital velocity directly rather
+            // than the blended reference velocity, which can lag by one tick near the dropout edge.
+            if (_nearBodyRef is { SemiMajorAxis: > 0.0, ParentMassKg: > 0.0 } dropBody)
+            {
+                DVec3 velEcl = dropBody.ComputeVelocity(GameClock.SimTime, Units.G * dropBody.ParentMassKg, DVec3.Zero);
+                ship.Velocity = EclipticToGalaxy(velEcl);
+            }
+            else
+                ship.Velocity = GetRefVelocity();
+
             DataBus.System.Publish(Topics.System.All,
                 new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
             ExitSystemSlipstreamToNewtonian(ship);
@@ -439,19 +468,14 @@ public sealed class SpaceSimulation : Simulation
             return;
         }
 
-        // Forced dropout — stations (advance range grows with speed so the ship can brake)
+        // Forced dropout — stations
+        if (GetNearestStationDistance() < FlightConstants.SlipstreamStationDropoutRange)
         {
-            double stationDist = GetNearestStationDistance();
-            double advanceDist = System.Math.Max(FlightConstants.SlipstreamStationDropoutRange,
-                                                  _slipstreamCurrentSpeed * 8.0);
-            if (stationDist < advanceDist)
-            {
-                DataBus.System.Publish(Topics.System.All,
-                    new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
-                ExitSystemSlipstreamToNewtonian(ship, capVelocity: true);
-                TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
-                return;
-            }
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
+            ExitSystemSlipstreamToNewtonian(ship, capVelocity: true);
+            TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
+            return;
         }
 
         // Smooth ramp between harmonics
@@ -471,9 +495,11 @@ public sealed class SpaceSimulation : Simulation
             }
         }
 
-        // Apply velocity directly along forward direction
-        DVec3 refVel = GetRefVelocity();
-        ship.Velocity = refVel + ship.Forward * _slipstreamCurrentSpeed;
+        // Apply velocity — damped by proximity to stations/bodies so speed
+        // visibly decreases on approach, leaving the ship near-stopped at dropout.
+        double effectiveSpeed = _slipstreamCurrentSpeed * ComputeProximityScale();
+        DVec3  refVel         = GetRefVelocity();
+        ship.Velocity = refVel + ship.Forward * effectiveSpeed;
         ship.Position += ship.Velocity * dt;
     }
 
@@ -737,6 +763,9 @@ public sealed class SpaceSimulation : Simulation
                 new SystemMessage("Warning — high-speed Slipstream exit", SystemMessagePriority.ImportantWarning));
         }
 
+        // Zero relative speed — set velocity to the gravity-dominant body's reference velocity.
+        ship.Velocity = GetRefVelocity();
+
         DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
         ExitSystemSlipstreamToNewtonian(ship);
     }
@@ -852,6 +881,21 @@ public sealed class SpaceSimulation : Simulation
         return rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
     }
 
+    /// <summary>
+    /// Returns [0, 1] proximity damping for Slipstream speed.
+    /// 1.0 far from any station or body; approaches 0 within ~20 km.
+    /// Cubic dropoff over <see cref="FlightConstants.SlipstreamProximityDropoffM"/>.
+    /// </summary>
+    private double ComputeProximityScale()
+    {
+        double dropoff = FlightConstants.SlipstreamProximityDropoffM;
+        double minDist = GetNearestStationDistance();
+        if (_nearBodyAltitude < minDist) minDist = _nearBodyAltitude;
+        if (minDist >= dropoff) return 1.0;
+        double t = minDist / dropoff;  // 0 near object, 1 at dropoff edge
+        return t * t * t;              // cubic: visible drop from ~80 km, near-zero at 20 km
+    }
+
     private static DVec3 SimpleOrbitalVelocityEcl(OrbitalBody body, double simTime)
     {
         double angle = DMath.OrbitalAngle(simTime, body.Period, body.PhaseOffset);
@@ -932,12 +976,20 @@ public sealed class SpaceSimulation : Simulation
             double d   = (shipEcliptic - bodyEclipticPos).Length;
             double alt = d - body.RadiusMeters;
 
-            // Track nearest surface altitude (all bodies)
+            // Track nearest surface altitude (all bodies); clamp to 0 so underground
+            // readings don't poison ComputeProximityScale (which would give negative speed).
             if (alt < _nearBodyAltitude)
-                _nearBodyAltitude = alt;
+            {
+                _nearBodyAltitude    = System.Math.Max(0.0, alt);
+                _nearBodyEclipticPos = bodyEclipticPos;
+                _nearBodyRadius      = body.RadiusMeters;
+                _nearBodyRef         = body;
+            }
 
-            // Track nearest atmospheric body (for FlightMode transitions)
-            if (alt < body.AtmosphereCeilingAltitude * 1.2 && d < nearestDist)
+            // Track nearest atmospheric body for FlightMode transitions.
+            // Exclude alt < 0: ship underground in ecliptic space means a position mismatch;
+            // accepting it would trigger atmosphere entry with the ship inside the planet.
+            if (alt >= 0 && alt < body.AtmosphereCeilingAltitude * 1.2 && d < nearestDist)
             {
                 nearestDist  = d;
                 _nearAtmBody = new NearAtmBodyInfo(body, bodyEclipticPos, alt);

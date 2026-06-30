@@ -12,7 +12,8 @@ public readonly record struct PlanetaryCoordinates(
     double Heading,
     double GroundSpeed,
     double VerticalSpeed,
-    double Temperature);
+    double Temperature,
+    double Pressure);
 
 public sealed class PlanetaryCoordinateSensor
 {
@@ -28,6 +29,7 @@ public sealed class PlanetaryCoordinateSensor
         DataBus.Instruments.Publish(Topics.PlanetCoord.GroundSpeed,   coords.GroundSpeed);
         DataBus.Instruments.Publish(Topics.PlanetCoord.VerticalSpeed, coords.VerticalSpeed);
         DataBus.Instruments.Publish(Topics.PlanetCoord.Temperature,   coords.Temperature);
+        DataBus.Instruments.Publish(Topics.PlanetCoord.Pressure,      coords.Pressure);
     }
 
     public static PlanetaryCoordinates Compute(DVec3 shipPos, DVec3 shipVel, OrbitalBody body, DVec3 bodyPos)
@@ -87,7 +89,10 @@ public sealed class PlanetaryCoordinateSensor
         // Temperature: base × altitude fraction × solar elevation factor
         double temperature = ComputeTemperature(altitude, body, bodyPos, up);
 
-        return new PlanetaryCoordinates(altitude, lat, lon, heading, groundSpeed, verticalSpeed, temperature);
+        // Pressure: barometric formula (bar) using PlanetData if available, legacy density otherwise
+        double pressure = body.DensityAtAltitude(altitude);
+
+        return new PlanetaryCoordinates(altitude, lat, lon, heading, groundSpeed, verticalSpeed, temperature, pressure);
     }
 
     private static double ComputeTemperature(double altitude, OrbitalBody body, DVec3 bodyPos, DVec3 up)
@@ -97,7 +102,7 @@ public sealed class PlanetaryCoordinateSensor
         double bodyDist    = bodyPos.Length;
         DVec3  sunDir      = bodyDist > 0 ? -bodyPos / bodyDist : new DVec3(0, 1, 0);
         double solarFactor = System.Math.Max(DVec3.Dot(sunDir, up), 0.0);
-        double altFraction = System.Math.Max(1.0 - altitude / body.AtmosphereCeilingAltitude, 0.0);
+        double altFraction = System.Math.Clamp(1.0 - altitude / body.AtmosphereCeilingAltitude, 0.0, 1.0);
 
         return body.Planet.AverageTemperature * altFraction * (0.5 + 0.5 * solarFactor);
     }

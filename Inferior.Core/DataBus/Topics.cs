@@ -141,6 +141,7 @@ public static class Topics
         public const string GroundSpeed   = "PlanetCoord.GroundSpeed";    // m/s horizontal
         public const string VerticalSpeed = "PlanetCoord.VerticalSpeed";  // m/s, +up/-down
         public const string Temperature   = "PlanetCoord.Temperature";    // kelvin
+        public const string Pressure      = "PlanetCoord.Pressure";       // bar; 0 if no atmosphere
     }
 
     public static class SolarSpectrum
