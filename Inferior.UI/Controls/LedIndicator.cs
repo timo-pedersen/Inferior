@@ -2,7 +2,7 @@ using Inferior.Core.DataBus;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace Inferior.UI.Controls.Cockpit;
+namespace Inferior.UI.Controls;
 
 public enum LedShape    { Round, Square }
 public enum LabelAnchor { Top, Bottom, Left, Right }

@@ -2,7 +2,7 @@ using Inferior.Core.DataBus;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace Inferior.UI.Controls.Cockpit;
+namespace Inferior.UI.Controls;
 
 /// <summary>
 /// Analogue needle gauge with 180° sweep.

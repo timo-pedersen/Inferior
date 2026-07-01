@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System.Text;
 
-namespace Inferior.UI.Controls.Cockpit;
+namespace Inferior.UI.Controls;
 
 public enum LineBreakMode
 {
