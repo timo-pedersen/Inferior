@@ -2988,22 +2988,37 @@ public static class StationDecorator
 
         // ── Manufacturer label on ±Y faces ────────────────────────────────────
         string label = ShippingContainerFactory.GenerateManufacturerName(rng.Next());
-        Color  textColor = new Color(220, 215, 190);
-        int    cc = Math.Max(1, label.Length);
-        float  ps = Math.Clamp((hl - c) * 2f * 0.80f / (cc * (BitmapFonts.CharW + 1)), 0.022f, 0.072f);
-        float  tw = cc * (BitmapFonts.CharW + 1) * ps;
-        float  th = BitmapFonts.CharH * ps;
+
+        // Stencil-paint palette — pick one per container.
+        Color[] textPalette =
+        [
+            new Color(220, 215, 190),  // weathered cream
+            new Color(245, 245, 240),  // near-white
+            new Color(240, 210,  50),  // stencil yellow
+            new Color(230,  90,  30),  // hazmat orange
+            new Color(200,  30,  30),  // fire-code red
+            new Color( 30, 180,  90),  // customs green
+            new Color( 55,  55,  55),  // stencil black
+        ];
+        Color textColor = textPalette[rng.Next(textPalette.Length)];
+
+        int   cc = Math.Max(1, label.Length);
+        float ps = Math.Clamp((hl - c) * 2f * 0.80f / (cc * (BitmapFonts.CharW + 1)), 0.022f, 0.072f);
+        float tw = cc * (BitmapFonts.CharW + 1) * ps;
+        float th = BitmapFonts.CharH * ps;
         const float labelRaise = 0.015f;
 
-        // AddQuad(center,normal,up) uses right=cross(up,normal); textUp=-axisZ gives right=+axisX.
-        // +Y face: text reads left→right along axisX
+        // textUp = +axisZ (away from module surface) so letters read right-side-up
+        // when the viewer stands on the same face as the container.
+        // Origin starts at bottom of text block (axisZ * -th*0.5 from face centre).
+        // +Y face: text reads left→right along +axisX
         AddTextGeometry(mesh, label,
-            orig + axisY * (hs + labelRaise) - axisX * (tw * 0.5f) + axisZ * (th * 0.5f),
-            axisX, -axisZ, axisY, ps, textColor);
-        // -Y face: mirror axisX so the text reads correctly from that side
+            orig + axisY * (hs + labelRaise) - axisX * (tw * 0.5f) - axisZ * (th * 0.5f),
+            axisX, axisZ, axisY, ps, textColor);
+        // -Y face: mirror axisX so text reads left→right when viewed from the other side
         AddTextGeometry(mesh, label,
-            orig - axisY * (hs + labelRaise) + axisX * (tw * 0.5f) + axisZ * (th * 0.5f),
-            -axisX, -axisZ, -axisY, ps, textColor);
+            orig - axisY * (hs + labelRaise) + axisX * (tw * 0.5f) - axisZ * (th * 0.5f),
+            -axisX, axisZ, -axisY, ps, textColor);
     }
 
     // A rectangular face of the container body.
