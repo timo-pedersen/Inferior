@@ -84,8 +84,14 @@ public sealed class SystemSpaceState : GameState
     private VertexPositionTexture[]      _atmosQuadVerts = new VertexPositionTexture[6];
 
     // Skybox star field — built once on enter, static for the session
-    private VertexPositionColor[] _skyboxPoints    = [];  // PointList — one vertex per star
-    private VertexPositionColor[] _skyboxGlowVerts = [];  // TriangleList — tiny quads for bright/near stars
+    private VertexPositionColor[]       _skyboxPoints    = [];  // PointList — one vertex per star
+    private VertexPositionColor[]       _skyboxGlowVerts = [];  // TriangleList — tiny quads for bright/near stars
+    private (Vector3 pos, Star star)[]  _targetableStars = [];  // stars ≤1000 ly — hittable from cursor
+
+    // Skybox targeting state
+    private Star?   _hoveredSkyboxStar;   // star under cursor this frame (UI mode only)
+    private Star?   _lockedSkyboxStar;    // currently selected hyperspace-target star
+    private Vector2 _uiCursorScreen;      // cached cursor position for overlay drawing
 
     // ── 2D overlay (SpriteBatch for HUD) ──────────────────────────────────────
     private Texture2D _pixel       = null!;
@@ -454,7 +460,7 @@ public sealed class SystemSpaceState : GameState
         _prevCameraPosValid = false;
 
         // Skybox — galaxy stars projected onto a far sphere around the current system
-        (_skyboxPoints, _skyboxGlowVerts) = BuildSkybox(_star, GalaxyGenerator.Generate());
+        (_skyboxPoints, _skyboxGlowVerts, _targetableStars) = BuildSkybox(_star, GalaxyGenerator.Generate());
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
@@ -1001,11 +1007,24 @@ public sealed class SystemSpaceState : GameState
             // the player opens the UI. Rotation inputs are zeroed to keep the ship still.
             _simulation.SetInput(_lastFlightInput with { PitchInput = 0, YawInput = 0, RollInput = 0 });
 
-            // Click-to-target — left click selects the nearest radar contact bracket
+            // Track cursor position for the skybox star overlay drawn later
+            _uiCursorScreen = new Vector2(mouse.X, mouse.Y);
+
+            // Skybox star hover — find nearest targetable star under cursor each frame
+            var uiVp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+            UpdateSkyboxHover(_uiCursorScreen, uiVp);
+
+            // Click-to-target — left click selects the nearest radar contact bracket,
+            // or a skybox star if the cursor is within hover range of one.
             if (mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released)
             {
-                var vp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
-                _targeting.SelectAtCursor(new Vector2(mouse.X, mouse.Y), vp, _gd.Viewport);
+                _targeting.SelectAtCursor(_uiCursorScreen, uiVp, _gd.Viewport);
+
+                if (_hoveredSkyboxStar != null)
+                {
+                    _targeting.SetHyperspaceTarget(_hoveredSkyboxStar);
+                    _lockedSkyboxStar = _hoveredSkyboxStar;
+                }
             }
         }
         else if (_debugCameraMode)
@@ -1246,6 +1265,7 @@ public sealed class SystemSpaceState : GameState
         DrawHUD(sb);
         DrawStationDots(sb);
         DrawTargetingHUD(sb);
+        DrawSkyboxStarOverlay(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
@@ -2178,11 +2198,108 @@ public sealed class SystemSpaceState : GameState
         return new Color(tint * brightness);
     }
 
-    private static (VertexPositionColor[] points, VertexPositionColor[] glowVerts)
+    // ── Skybox star targeting ─────────────────────────────────────────────────
+
+    private const double SkyboxTargetRadiusLY = 1000.0;  // maximum targetable distance
+    private const float  SkyboxHoverPixels    = 12f;      // cursor snap radius in screen pixels
+
+    // Finds the nearest targetable skybox star to the cursor (each frame in UI mode).
+    private void UpdateSkyboxHover(Vector2 cursor, Matrix viewProj)
+    {
+        _hoveredSkyboxStar = null;
+        float bestSq = SkyboxHoverPixels * SkyboxHoverPixels;
+        int   w = _gd.Viewport.Width;
+        int   h = _gd.Viewport.Height;
+
+        foreach (var (pos, star) in _targetableStars)
+        {
+            Vector4 clip = Vector4.Transform(new Vector4(pos, 1f), viewProj);
+            if (clip.W <= 0f) continue;
+
+            float sx = ( clip.X / clip.W * 0.5f + 0.5f) * w;
+            float sy = (-clip.Y / clip.W * 0.5f + 0.5f) * h;
+
+            float dx = cursor.X - sx;
+            float dy = cursor.Y - sy;
+            float dSq = dx * dx + dy * dy;
+
+            if (dSq < bestSq) { bestSq = dSq; _hoveredSkyboxStar = star; }
+        }
+    }
+
+    // Draws the hover label and locked-star ring in UI mode.
+    private void DrawSkyboxStarOverlay(SpriteBatch sb)
+    {
+        if (!_uiMouseMode) return;
+
+        var  viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+        int  w        = _gd.Viewport.Width;
+        int  h        = _gd.Viewport.Height;
+        var  hypColor = new Color(80, 160, 255);  // matches dirball "hyp" colour
+
+        // Locked star — persistent ring + name even when cursor moves away
+        if (_lockedSkyboxStar != null)
+        {
+            Vector2? screen = SkyboxProject(_lockedSkyboxStar, viewProj, w, h);
+            if (screen.HasValue)
+            {
+                DrawStarRing(sb, screen.Value, 10f, hypColor);
+
+                string distStr = $"{StarMap.DistanceLY(_star, _lockedSkyboxStar):F1} ly";
+                var    namePos = screen.Value + new Vector2(14f, -8f);
+                FontHelper.Draw(sb, _font, _lockedSkyboxStar.Name, namePos,                        hypColor);
+                FontHelper.Draw(sb, _font, distStr,                namePos + new Vector2(0f, 18f), new Color(55, 110, 178));
+            }
+        }
+
+        // Hovered star — dim label near cursor while mouse lingers nearby
+        if (_hoveredSkyboxStar != null && _hoveredSkyboxStar != _lockedSkyboxStar)
+        {
+            var labelPos = _uiCursorScreen + new Vector2(14f, -8f);
+            FontHelper.Draw(sb, _font, _hoveredSkyboxStar.Name, labelPos, new Color(180, 200, 220));
+
+            string distStr = $"{StarMap.DistanceLY(_star, _hoveredSkyboxStar):F1} ly";
+            FontHelper.Draw(sb, _font, distStr, labelPos + new Vector2(0f, 18f), new Color(120, 140, 160));
+        }
+    }
+
+    // Projects a targetable star's skybox position to screen pixels; null if behind camera.
+    private Vector2? SkyboxProject(Star star, Matrix viewProj, int w, int h)
+    {
+        foreach (var (pos, s) in _targetableStars)
+        {
+            if (s.GalaxyIndex != star.GalaxyIndex) continue;
+            Vector4 clip = Vector4.Transform(new Vector4(pos, 1f), viewProj);
+            if (clip.W <= 0f) return null;
+            float sx = ( clip.X / clip.W * 0.5f + 0.5f) * w;
+            float sy = (-clip.Y / clip.W * 0.5f + 0.5f) * h;
+            return new Vector2(sx, sy);
+        }
+        return null;
+    }
+
+    // Draws a small dotted ring around a 2D screen position.
+    private void DrawStarRing(SpriteBatch sb, Vector2 centre, float radius, Color color)
+    {
+        const int Segments = 24;
+        for (int i = 0; i < Segments; i++)
+        {
+            float a  = i * MathF.Tau / Segments;
+            float x  = centre.X + MathF.Cos(a) * radius;
+            float y  = centre.Y + MathF.Sin(a) * radius;
+            sb.Draw(_pixel, new Rectangle((int)x, (int)y, 2, 2), color);
+        }
+    }
+
+    // ── Skybox build ──────────────────────────────────────────────────────────
+
+    private static (VertexPositionColor[] points, VertexPositionColor[] glowVerts,
+                    (Vector3 pos, Star star)[] targetable)
         BuildSkybox(Star currentStar, Star[] galaxy)
     {
-        var points = new List<VertexPositionColor>(galaxy.Length);
-        var glows  = new List<VertexPositionColor>();
+        var points     = new List<VertexPositionColor>(galaxy.Length);
+        var glows      = new List<VertexPositionColor>();
+        var targetable = new List<(Vector3, Star)>();
 
         // Half the galaxy radius in ly — used for distance falloff so stars dim gradually
         // across galaxy-scale distances rather than popping.
@@ -2206,6 +2323,9 @@ public sealed class SystemSpaceState : GameState
 
             points.Add(new VertexPositionColor(center, SkyboxStarColor(star.SpectralClass, brightness)));
 
+            if (dist <= SkyboxTargetRadiusLY)
+                targetable.Add((center, star));
+
             if (brightness >= SkyboxGlowCutoff)
             {
                 float   size    = star.MapDotSize * SkyboxGlowSize;
@@ -2225,7 +2345,7 @@ public sealed class SystemSpaceState : GameState
             }
         }
 
-        return ([.. points], [.. glows]);
+        return ([.. points], [.. glows], [.. targetable]);
     }
 
     private void DrawSkybox()
@@ -2797,6 +2917,7 @@ public sealed class SystemSpaceState : GameState
         {
             _targetingDirBall.RemoveVector("hyp");
             if (_targetLineHyp != null) _targetLineHyp.Text = "Hyp: None";
+            _lockedSkyboxStar = null;  // keep ring in sync with targeting system
         }
 
         // Pad target (green)
