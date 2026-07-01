@@ -26,6 +26,7 @@ public static class StationDecorator
             var greebleRng      = new System.Random(baseRng.Next());
             var edgeTrimRng     = new System.Random(baseRng.Next());
             var ambientLightRng = new System.Random(baseRng.Next());
+            var cableRng        = new System.Random(baseRng.Next());
 
             // If the module has a custom hull factory, seed its mesh now so
             // ComputeFaces can read the actual face normals and centres.
@@ -64,17 +65,25 @@ public static class StationDecorator
                 // GenerateLandingPads. Skip all decoration passes so nothing lands on them.
                 if (IsDockingPadFace(mod, face)) continue;
 
-                var occupancy = new FaceOccupancy();
+                var occupancy         = new FaceOccupancy();
+                var greeblePlacements = new List<PlacedGreebleInfo>();
                 GenerateWindows     (mod, face, windowRng,      mesh, glassMesh, occupancy);
                 GenerateHatches     (mod, face, hatchRng,       mesh, occupancy);
-                GenerateAntennas    (mod, face, antennaRng,     mesh, mod.GlowLights);
-                GenerateDishes      (mod, face, dishRng,        mesh, occupancy);
+                GenerateAntennas    (mod, face, antennaRng,     mesh, mod.GlowLights, occupancy, greeblePlacements);
+                GenerateDishes      (mod, face, dishRng,        mesh, occupancy, greeblePlacements);
                 GenerateChimneys    (mod, face, chimneyRng,     mesh, mod.GlowLights, mod);
                 GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
                 GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
-                GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy);
+                GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy, greeblePlacements);
                 GenerateTanks       (mod, face, mesh, occupancy, new System.Random(tankRng.Next()));
                 GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()));
+
+                if (face.IsExposed && greeblePlacements.Count >= 2 && face.Width * face.Height >= 4f)
+                    StationCableGenerator.GenerateFaceCables(
+                        face.LocalNormal, face.LocalRight, face.LocalUp,
+                        face.Width, face.Height, face.LocalCenter,
+                        greeblePlacements, mesh,
+                        new System.Random(cableRng.Next()));
             }
 
             GeneratePipes         (mod, faces, pipeRng,     mesh);
@@ -626,7 +635,8 @@ public static class StationDecorator
     }
 
     private static void GenerateAntennas(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh, List<StationLightInfo> lights)
+        System.Random rng, StationModuleMesh mesh, List<StationLightInfo> lights,
+        FaceOccupancy occupancy, List<PlacedGreebleInfo> placements)
     {
         if (!face.IsExposed)           return;
         if (face.LocalNormal.Y < -0.3f) return;
@@ -649,6 +659,17 @@ public static class StationDecorator
             float radius = (float)(rng.NextDouble() * 0.12 + 0.04);
 
             mesh.AddSpike(basePos, face.LocalNormal, length, radius, antennaCol);
+
+            // Base mount plate — makes the cable connection look intentional
+            float   plateSize = MathF.Max(0.22f, radius * 3.5f);
+            float   plateH    = 0.09f;
+            var     plateT    = FaceLocalTransform(face, basePos + face.LocalNormal * (plateH * 0.5f));
+            mesh.AddOrientedBox(plateT, new Vector3(plateSize * 2, plateSize * 2, plateH), new Color(50, 50, 55));
+            occupancy.Occupy(u - plateSize, v - plateSize, u + plateSize, v + plateSize);
+            placements.Add(new PlacedGreebleInfo(
+                new Vector2(u, v),
+                new Vector2(plateSize * 2, plateSize * 2),
+                isConnectable: true));
 
             if (length > 2.5f)
             {
@@ -736,7 +757,8 @@ public static class StationDecorator
     private static readonly Color DishStructureColor = new Color(58, 55, 52);
 
     private static void GenerateDishes(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy,
+        List<PlacedGreebleInfo> placements)
     {
         if (!face.IsExposed) return;
         if (!DishCategories.Contains(mod.Definition.Category)) return;
@@ -770,6 +792,12 @@ public static class StationDecorator
                     sides:          11,
                     dishColor:      DishSurfaceColor(r),
                     structureColor: DishStructureColor);
+                var medPlateT = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, 0.04f));
+                mesh.AddOrientedBox(medPlateT, new Vector3(0.60f, 0.60f, 0.08f), new Color(50, 50, 55));
+                placements.Add(new PlacedGreebleInfo(
+                    new Vector2(cu, cv),
+                    new Vector2(r * 2.8f, r * 2.8f),
+                    isConnectable: true));
             }
         }
 
@@ -789,6 +817,12 @@ public static class StationDecorator
                 sides:          9,
                 dishColor:      DishSurfaceColor(r),
                 structureColor: DishStructureColor);
+            var smPlateT = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, 0.04f));
+            mesh.AddOrientedBox(smPlateT, new Vector3(0.35f, 0.35f, 0.06f), new Color(50, 50, 55));
+            placements.Add(new PlacedGreebleInfo(
+                new Vector2(cu, cv),
+                new Vector2(r * 2.4f, r * 2.4f),
+                isConnectable: true));
         }
     }
 
@@ -1791,9 +1825,10 @@ public static class StationDecorator
             "industrial" or "core" => (GreebleType)rng.Next(0, 6),
             "cargo"      or "fuel" => rng.NextDouble() < 0.5
                 ? GreebleType.ValveAssembly : GreebleType.ConduitEntry,
-            "science"              => rng.NextDouble() < 0.6
-                ? GreebleType.SensorPod : GreebleType.TechPanel,
-            "hab"                  => rng.NextDouble() < 0.5
+            "science"              => rng.NextDouble() < 0.35 ? GreebleType.SensorPod
+                                    : rng.NextDouble() < 0.60 ? GreebleType.JunctionBox
+                                    :                            GreebleType.TechPanel,
+            "hab"                  => rng.NextDouble() < 0.65
                 ? GreebleType.JunctionBox : GreebleType.TechPanel,
             _                      => (GreebleType)rng.Next(0, 3),
         };
@@ -1813,8 +1848,18 @@ public static class StationDecorator
         _                            => (0.35f, 0.35f),
     };
 
+    private static bool IsConnectableGreeble(GreebleType type) => type switch
+    {
+        GreebleType.JunctionBox      => true,
+        GreebleType.EquipmentHousing => true,
+        GreebleType.ConduitEntry     => true,
+        GreebleType.ValveAssembly    => true,
+        _                            => false,
+    };
+
     private static void GenerateGreebles(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy,
+        List<PlacedGreebleInfo> placements)
     {
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 12f) return;
@@ -1823,9 +1868,9 @@ public static class StationDecorator
         {
             "industrial" or "core" => 0.90f,
             "cargo"      or "fuel" => 0.70f,
-            "science"              => 0.60f,
-            "connector"            => 0.50f,
-            "hab"                  => 0.35f,
+            "science"              => 0.75f,
+            "connector"            => 0.55f,
+            "hab"                  => 0.60f,
             _                      => 0.20f,
         };
         if (rng.NextDouble() > prob) return;
@@ -1844,6 +1889,11 @@ public static class StationDecorator
 
             if (!occupancy.TryOccupy(cu, cv, hw, hh, 0.10f)) continue;
             count--;
+
+            placements.Add(new PlacedGreebleInfo(
+                new Vector2(cu, cv),
+                new Vector2(hw * 2, hh * 2),
+                IsConnectableGreeble(type)));
 
             AddGreeble(mod, face, cu, cv, hw, hh, type, rng, mesh);
         }
