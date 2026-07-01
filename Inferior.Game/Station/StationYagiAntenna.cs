@@ -34,7 +34,7 @@ internal sealed record YagiAntennaParams(
         float boomT     = 0.015f + (float)(rng.NextDouble() * 0.010f);
         bool  endCaps   = rng.NextDouble() < 0.60;
         float baseScale = 1.8f   + (float)(rng.NextDouble() * 0.7f);
-        float tilt      = (float)(rng.NextDouble() * 25f);  // 0–25° from face normal
+        float tilt      = (float)(rng.NextDouble() * 90f);  // 0–90° from face normal
         float bearing   = (float)(rng.NextDouble() * 360f);
 
         Color metal = rng.NextDouble() < 0.15
@@ -44,7 +44,7 @@ internal sealed record YagiAntennaParams(
                 (int)(70 + rng.NextDouble() * 60),
                 (int)(70 + rng.NextDouble() * 60));
 
-        float mastH      = 0.30f + (float)(rng.NextDouble() * 0.90f);  // 0.30–1.20 m
+        float mastH      = 1.00f + (float)(rng.NextDouble() * 1.50f);  // 1.0–2.5 m
         float elemBright = 0.85f + (float)(rng.NextDouble() * 0.35f);  // 0.85–1.20
         float baseBright = 0.80f + (float)(rng.NextDouble() * 0.50f);  // 0.80–1.30
 
@@ -143,7 +143,7 @@ internal static class StationYagiAntenna
                 break;
 
             case YagiElementType.O:
-                AddOctDisk(mesh, origin, right, up, fwd, halfLen, t, c);
+                AddOctDisk(mesh, origin, right, up, fwd, halfLen, t * 0.5f, c);
                 break;
 
             case YagiElementType.S:
@@ -179,7 +179,7 @@ internal static class StationYagiAntenna
         switch (p.BaseType)
         {
             case YagiBaseType.BigDisk:
-                AddOctDisk(mesh, origin, right, up, fwd, hl, t * 1.5f, c);
+                AddOctDisk(mesh, origin, right, up, fwd, hl, t * 0.75f, c);
                 break;
 
             case YagiBaseType.VDisk:
@@ -193,7 +193,7 @@ internal static class StationYagiAntenna
                 break;
 
             case YagiBaseType.OctBox:
-                AddOctDisk(mesh, origin, right, up, fwd, hl, t * 3f, c);
+                AddOctDisk(mesh, origin, right, up, fwd, hl, t * 1.5f, c);
                 break;
 
             case YagiBaseType.BigH:
@@ -206,7 +206,7 @@ internal static class StationYagiAntenna
             }
 
             case YagiBaseType.Para:
-                AddOctDisk(mesh, origin, right, up, fwd, hl * 0.5f, t * 2f, c);
+                AddOctDisk(mesh, origin, right, up, fwd, hl * 0.5f, t * 1.0f, c);
                 AddBox(mesh, origin - fwd * (hl * 0.25f), right, up, fwd, t, t, hl * 0.25f, c);
                 break;
 
