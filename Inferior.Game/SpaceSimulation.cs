@@ -401,7 +401,7 @@ public sealed class SpaceSimulation : Simulation
             }
             else
             {
-                ship.Velocity += relVel.Normalized() * (-accel * dt);
+                ship.Velocity += relVel.Normalized() * (-accel * FlightConstants.XStopBrakeFactor * dt);
             }
             ship.Position += ship.Velocity * dt;
             return;

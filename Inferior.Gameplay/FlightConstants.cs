@@ -41,6 +41,8 @@ public static class FlightConstants
     // ── X-STOP ───────────────────────────────────────────────────────────
     // Snap-to-reference threshold — below this, X-stop considers braking complete.
     public const double XStopSnapThreshold = 0.5;  // m/s
+    // Braking thrust multiplier — X-stop applies this factor × normal acceleration.
+    public const double XStopBrakeFactor   = 4.0;
 
     // ── LKM STATION ZONES ────────────────────────────────────────────────
     // (radius in metres from station centre, maxGearIndex is 0-based)

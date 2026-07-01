@@ -655,46 +655,57 @@ public static class StationDecorator
                 + face.LocalRight * u
                 + face.LocalUp    * v;
 
-            float length = AntennaHeight(rng);
-            float radius = (float)(rng.NextDouble() * 0.12 + 0.04);
+            float plateSize;
+            if (rng.NextDouble() < 0.30)
+            {
+                var yp = YagiAntennaParams.Generate(new System.Random(rng.Next()));
+                StationYagiAntenna.Build(yp, basePos, face.LocalNormal, mesh);
+                plateSize = 0.30f;
+            }
+            else
+            {
+                float length = AntennaHeight(rng);
+                float radius = (float)(rng.NextDouble() * 0.12 + 0.04);
 
-            mesh.AddSpike(basePos, face.LocalNormal, length, radius, antennaCol);
+                mesh.AddSpike(basePos, face.LocalNormal, length, radius, antennaCol);
+
+                if (length > 2.5f)
+                {
+                    Vector3 tipLocal = basePos + face.LocalNormal * length;
+                    lights.Add(new StationLightInfo(
+                        WorldPosition: Vector3.Transform(tipLocal, mod.Transform),
+                        Colour:        new Color(220, 25, 25),
+                        Type:          GlowType.AviationWarning,
+                        BaseIntensity: 1.0f,
+                        Rate:          0.65f,
+                        Phase:         (float)rng.NextDouble(),
+                        Pattern:       LightPattern.Strobe));
+                }
+
+                if (rng.NextDouble() < 0.4)
+                {
+                    const float stemLen = 1.2f;
+                    const float stemW   = 0.18f;
+                    Vector3 stemCenter = basePos + face.LocalNormal * (length + stemLen * 0.5f);
+                    mesh.AddOrientedBox(stemCenter, face.LocalNormal, stemLen, stemW, stemW, antennaCol);
+
+                    float   dishSize  = radius * 5f;
+                    Vector3 tipCenter = basePos + face.LocalNormal * (length + stemLen + 0.2f);
+                    mesh.AddBox(tipCenter, new Vector3(dishSize, dishSize * 0.3f, dishSize), antennaCol);
+                }
+
+                plateSize = MathF.Max(0.22f, radius * 3.5f);
+            }
 
             // Base mount plate — makes the cable connection look intentional
-            float   plateSize = MathF.Max(0.22f, radius * 3.5f);
-            float   plateH    = 0.09f;
-            var     plateT    = FaceLocalTransform(face, basePos + face.LocalNormal * (plateH * 0.5f));
+            float   plateH = 0.09f;
+            var     plateT = FaceLocalTransform(face, basePos + face.LocalNormal * (plateH * 0.5f));
             mesh.AddOrientedBox(plateT, new Vector3(plateSize * 2, plateSize * 2, plateH), new Color(50, 50, 55));
             occupancy.Occupy(u - plateSize, v - plateSize, u + plateSize, v + plateSize);
             placements.Add(new PlacedGreebleInfo(
                 new Vector2(u, v),
                 new Vector2(plateSize * 2, plateSize * 2),
                 isConnectable: true));
-
-            if (length > 2.5f)
-            {
-                Vector3 tipLocal = basePos + face.LocalNormal * length;
-                lights.Add(new StationLightInfo(
-                    WorldPosition: Vector3.Transform(tipLocal, mod.Transform),
-                    Colour:        new Color(220, 25, 25),
-                    Type:          GlowType.AviationWarning,
-                    BaseIntensity: 1.0f,
-                    Rate:          0.65f,
-                    Phase:         (float)rng.NextDouble(),
-                    Pattern:       LightPattern.Strobe));
-            }
-
-            if (rng.NextDouble() < 0.4)
-            {
-                const float stemLen = 1.2f;
-                const float stemW   = 0.18f;
-                Vector3 stemCenter = basePos + face.LocalNormal * (length + stemLen * 0.5f);
-                mesh.AddOrientedBox(stemCenter, face.LocalNormal, stemLen, stemW, stemW, antennaCol);
-
-                float   dishSize  = radius * 5f;
-                Vector3 tipCenter = basePos + face.LocalNormal * (length + stemLen + 0.2f);
-                mesh.AddBox(tipCenter, new Vector3(dishSize, dishSize * 0.3f, dishSize), antennaCol);
-            }
         }
     }
 
@@ -1815,19 +1826,22 @@ public static class StationDecorator
 
     private enum GreebleType
     {
-        JunctionBox, EquipmentHousing, ConduitEntry, SensorPod, TechPanel, ValveAssembly
+        JunctionBox, EquipmentHousing, ConduitEntry, SensorPod, TechPanel, ValveAssembly, YagiAntenna
     }
 
     private static GreebleType SelectGreebleType(string category, System.Random rng)
     {
         return category switch
         {
-            "industrial" or "core" => (GreebleType)rng.Next(0, 6),
+            "industrial" or "core" => (GreebleType)rng.Next(0, 7),
             "cargo"      or "fuel" => rng.NextDouble() < 0.5
                 ? GreebleType.ValveAssembly : GreebleType.ConduitEntry,
-            "science"              => rng.NextDouble() < 0.35 ? GreebleType.SensorPod
-                                    : rng.NextDouble() < 0.60 ? GreebleType.JunctionBox
-                                    :                            GreebleType.TechPanel,
+            "science"              => rng.NextDouble() switch {
+                                        < 0.15 => GreebleType.YagiAntenna,
+                                        < 0.45 => GreebleType.SensorPod,
+                                        < 0.75 => GreebleType.JunctionBox,
+                                        _      => GreebleType.TechPanel,
+                                     },
             "hab"                  => rng.NextDouble() < 0.65
                 ? GreebleType.JunctionBox : GreebleType.TechPanel,
             _                      => (GreebleType)rng.Next(0, 3),
@@ -1845,6 +1859,7 @@ public static class StationDecorator
         GreebleType.TechPanel        => (0.60f + (float)rng.NextDouble() * 0.20f,
                                          0.45f + (float)rng.NextDouble() * 0.15f),
         GreebleType.ValveAssembly    => (0.45f, 0.45f),
+        GreebleType.YagiAntenna      => (0.25f, 0.25f),
         _                            => (0.35f, 0.35f),
     };
 
@@ -1854,6 +1869,7 @@ public static class StationDecorator
         GreebleType.EquipmentHousing => true,
         GreebleType.ConduitEntry     => true,
         GreebleType.ValveAssembly    => true,
+        GreebleType.YagiAntenna      => true,
         _                            => false,
     };
 
@@ -2002,6 +2018,13 @@ public static class StationDecorator
                 Vector3 vArmA = LocalPointAbs(face, cu, cv - armLen, armH);
                 Vector3 vArmB = LocalPointAbs(face, cu, cv + armLen, armH);
                 mesh.AddPrismPipe(vArmA, vArmB, armW, 4, darkCol);
+                break;
+            }
+
+            case GreebleType.YagiAntenna:
+            {
+                var p = YagiAntennaParams.Generate(new System.Random(rng.Next()));
+                StationYagiAntenna.Build(p, LocalPointAbs(face, cu, cv, 0f), face.LocalNormal, mesh);
                 break;
             }
         }
