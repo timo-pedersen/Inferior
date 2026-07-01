@@ -2,7 +2,7 @@ using Inferior.Core.Math;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace Inferior.UI.Controls;
+namespace Inferior.UI.Controls.Cockpit;
 
 /// <summary>
 /// Top-down approach radar for landing pad alignment.

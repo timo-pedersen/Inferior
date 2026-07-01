@@ -1,7 +1,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace Inferior.UI.Controls;
+namespace Inferior.UI.Controls.Cockpit;
 
 /// <summary>
 /// Projects 3D direction vectors onto a 2D sphere display.

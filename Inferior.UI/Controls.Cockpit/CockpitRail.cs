@@ -1,7 +1,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace Inferior.UI.Controls;
+namespace Inferior.UI.Controls.Cockpit;
 
 /// <summary>
 /// Bottom cockpit rail — a shaped instrument panel anchored to the screen bottom.

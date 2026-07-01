@@ -6,6 +6,7 @@ using Inferior.Core.Math;
 using Inferior.Galaxy;
 using Inferior.UI;
 using Inferior.UI.Controls;
+using Inferior.UI.Controls.Cockpit;
 
 namespace Inferior.Game.States;
 

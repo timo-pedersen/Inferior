@@ -2,7 +2,7 @@ using Inferior.Core.DataBus;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-namespace Inferior.UI.Controls;
+namespace Inferior.UI.Controls.Cockpit;
 
 /// <summary>Radar exclusion zone (jammer, EMP, blocking body). Rendering path only — not wired.</summary>
 public readonly record struct RadarExclusionZone(Vector3 WorldPosition, float Radius, string Label);

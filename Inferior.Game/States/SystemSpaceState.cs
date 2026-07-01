@@ -13,6 +13,7 @@ using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
+using Inferior.UI.Controls.Cockpit;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
