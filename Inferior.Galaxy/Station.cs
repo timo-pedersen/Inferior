@@ -72,12 +72,18 @@ public sealed class Station
     public float SlowRotation { get; init; }
 
     /// <summary>
+    /// Initial spin angle in radians at gameTime = 0. Randomised at generation so
+    /// each station faces a different direction relative to the sun on first encounter.
+    /// </summary>
+    public float SpinPhase    { get; init; }
+
+    /// <summary>
     /// Returns the station's orientation quaternion at a given game time.
-    /// The tilt is fixed; the spin accumulates over time.
+    /// The tilt is fixed; the spin accumulates over time from a random initial phase.
     /// </summary>
     public System.Numerics.Quaternion GetOrientation(double gameTime)
     {
-        float spin = (float)(gameTime * SlowRotation);
+        float spin = SpinPhase + (float)(gameTime * SlowRotation);
         var tilt   = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitX, AxialTilt);
         var rotate = System.Numerics.Quaternion.CreateFromAxisAngle(System.Numerics.Vector3.UnitY, spin);
         return System.Numerics.Quaternion.Normalize(rotate * tilt);
@@ -166,6 +172,7 @@ public sealed class Station
             PhaseOffset   = rng.NextAngle(),
             AxialTilt     = axialTilt,
             SlowRotation  = slowRot,
+            SpinPhase     = (float)rng.NextAngle(),
             PersistenceId = $"{starName}:{orbitParent?.Name ?? "star"}:{name}",
         };
 

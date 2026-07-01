@@ -645,6 +645,11 @@ public static class StationDecorator
         Color baseCol    = StationModuleRegistry.CategoryColor(mod.Definition.Category);
         Color antennaCol = DarkenColor(baseCol, 0.45f);
 
+        // Maritime white — roughly 1-in-4 antenna clusters are painted white like
+        // the superstructure masts on an ocean-going vessel.
+        bool faceIsWhite = rng.NextDouble() < 0.25;
+        if (faceIsWhite) antennaCol = new Color(228, 232, 230);
+
         int count = rng.Next(1, 3);
         for (int i = 0; i < count; i++)
         {
@@ -658,7 +663,7 @@ public static class StationDecorator
             float plateSize;
             if (rng.NextDouble() < 0.30)
             {
-                var yp = YagiAntennaParams.Generate(new System.Random(rng.Next()));
+                var yp = YagiAntennaParams.Generate(new System.Random(rng.Next()), faceIsWhite);
                 StationYagiAntenna.Build(yp, basePos, face.LocalNormal, mesh);
                 plateSize = 0.30f;
             }

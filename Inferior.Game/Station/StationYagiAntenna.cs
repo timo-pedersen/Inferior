@@ -23,7 +23,7 @@ internal sealed record YagiAntennaParams(
     float           ElemBrightness,
     float           BaseBrightness)
 {
-    internal static YagiAntennaParams Generate(System.Random rng)
+    internal static YagiAntennaParams Generate(System.Random rng, bool forceWhite = false)
     {
         var elemType    = (YagiElementType)(int)(rng.NextDouble() * 5);
         var baseType    = (YagiBaseType)  (int)(rng.NextDouble() * 7);
@@ -37,9 +37,13 @@ internal sealed record YagiAntennaParams(
         float tilt      = (float)(rng.NextDouble() * 90f);  // 0–90° from face normal
         float bearing   = (float)(rng.NextDouble() * 360f);
 
-        Color metal = rng.NextDouble() < 0.15
-            ? new Color(90, 95, 85)
-            : new Color(
+        Color metal;
+        if (forceWhite)
+            metal = new Color(228, 232, 230);
+        else if (rng.NextDouble() < 0.15)
+            metal = new Color(90, 95, 85);
+        else
+            metal = new Color(
                 (int)(70 + rng.NextDouble() * 60),
                 (int)(70 + rng.NextDouble() * 60),
                 (int)(70 + rng.NextDouble() * 60));
