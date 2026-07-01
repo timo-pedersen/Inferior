@@ -79,10 +79,10 @@ internal static class StationYagiAntenna
         Vector3 boomFwd = Vector3.Normalize(Vector3.Transform(faceNormal,
             Quaternion.CreateFromAxisAngle(tiltAxis, p.TiltDegrees * MathF.PI / 180f)));
 
-        Vector3 boomRight = Vector3.Normalize(Vector3.Cross(boomFwd, Vector3.UnitY));
+        Vector3 boomRight = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, boomFwd));
         if (boomRight.LengthSquared() < 0.01f)
-            boomRight = Vector3.Normalize(Vector3.Cross(boomFwd, Vector3.UnitX));
-        Vector3 boomUp = Vector3.Normalize(Vector3.Cross(boomRight, boomFwd));
+            boomRight = Vector3.Normalize(Vector3.Cross(Vector3.UnitX, boomFwd));
+        Vector3 boomUp = Vector3.Normalize(Vector3.Cross(boomFwd, boomRight));
 
         // Colour variants: standard elements share one brightness, base element gets another
         Color elemColor = Scale(p.MetalColour, p.ElemBrightness);
