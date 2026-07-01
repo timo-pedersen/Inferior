@@ -32,6 +32,12 @@ public sealed class TextBox : Control
     public int    MaxLength   { get; set; } = int.MaxValue;
     public string Placeholder { get; set; } = "";
 
+    /// <summary>
+    /// Applied to the full text whenever a word boundary is typed (space, newline, punctuation).
+    /// Set to null to disable filtering. Defaults to <see cref="TextFilters.NastyWordFilter"/>.
+    /// </summary>
+    public Func<string, string>? TextFilter { get; set; } = TextFilters.NastyWordFilter;
+
     // ── Events ────────────────────────────────────────────────────────────────
     /// <summary>Fired whenever the text content changes. Arg = new full text.</summary>
     public event Action<TextBox, string>? TextChanged;
@@ -396,7 +402,23 @@ public sealed class TextBox : Control
         _cursor++;
         _selAnchor = -1;
         ResetBlink();
+
+        if (TextFilter != null && (char.IsWhiteSpace(c) || char.IsPunctuation(c)))
+            ApplyTextFilter();
+
         TextChanged?.Invoke(this, Text);
+    }
+
+    private void ApplyTextFilter()
+    {
+        if (TextFilter == null) return;
+        string current  = _text.ToString();
+        string filtered = TextFilter(current);
+        if (filtered == current) return;
+        int delta = filtered.Length - current.Length;
+        _text.Clear();
+        _text.Append(filtered);
+        _cursor = Math.Clamp(_cursor + delta, 0, _text.Length);
     }
 
     private void DeleteBack()
