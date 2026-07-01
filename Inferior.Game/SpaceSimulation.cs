@@ -52,7 +52,8 @@ public sealed class SpaceSimulation : Simulation
         double     ClunkPhase        = -1.0,   // -1 = inactive, 0→1 = animating
         // Speeds relative to reference frame
         double     RelativeSpeedMs   = 0.0,    // |vel - refVel| in m/s
-        double     ForwardSpeedMs    = 0.0);   // dot(vel - refVel, forward) — signed
+        double     ForwardSpeedMs    = 0.0,    // dot(vel - refVel, forward) — signed
+        double     AccelerationMs2   = 0.0);   // d(ForwardSpeedMs)/dt — signed, Newtonian only
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -147,6 +148,9 @@ public sealed class SpaceSimulation : Simulation
     // ── Nearest atmospheric body (written by UpdateEnvironment, read by TickPhysics) ──
     private sealed record NearAtmBodyInfo(OrbitalBody Body, DVec3 EclipticPos, double AltitudeM);
     private NearAtmBodyInfo? _nearAtmBody;
+
+    // Previous-tick forward speed, for computing signed acceleration.
+    private double _prevFwdSpeedMs = 0.0;
 
     // Nearest body surface altitude (all bodies, regardless of atmosphere).
     private double _nearBodyAltitude = double.MaxValue;
@@ -352,6 +356,8 @@ public sealed class SpaceSimulation : Simulation
         DVec3  snapRelVel = ship.Velocity - snapRefVel;
         double snapRelSpd = snapRelVel.Length;
         double snapFwdSpd = DVec3.Dot(snapRelVel, ship.Forward);
+        double snapAccel  = dt > 0 ? (snapFwdSpd - _prevFwdSpeedMs) / dt : 0.0;
+        _prevFwdSpeedMs   = snapFwdSpd;
 
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
@@ -368,7 +374,8 @@ public sealed class SpaceSimulation : Simulation
             _slipstreamHarmonicIndex,
             clunkPhase,
             snapRelSpd,
-            snapFwdSpd);
+            snapFwdSpd,
+            snapAccel);
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────
@@ -1079,8 +1086,9 @@ public sealed class SpaceSimulation : Simulation
             DataBus.Instruments.Publish(Topics.Flight.LkmZone,         (double)snap.LkmZone);
             DataBus.Instruments.Publish(Topics.Flight.LkmCompliance,   snap.LkmComplianceTimer);
             DataBus.Instruments.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);
-            DataBus.Instruments.Publish(Topics.Flight.RelativeSpeedMs, snap.RelativeSpeedMs);
-            DataBus.Instruments.Publish(Topics.Flight.ForwardSpeedMs,  snap.ForwardSpeedMs);
+            DataBus.Instruments.Publish(Topics.Flight.RelativeSpeedMs,  snap.RelativeSpeedMs);
+            DataBus.Instruments.Publish(Topics.Flight.ForwardSpeedMs,   snap.ForwardSpeedMs);
+            DataBus.Instruments.Publish(Topics.Flight.AccelerationMs2,  snap.AccelerationMs2);
             DataBus.Instruments.Publish(Topics.Ship.WarnLevel,         0.0);  // stub — connected to real systems in future brief
         }
 

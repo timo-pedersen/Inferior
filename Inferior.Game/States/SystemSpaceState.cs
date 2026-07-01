@@ -1114,8 +1114,12 @@ public sealed class SystemSpaceState : GameState
         UpdateRadarDisplay();
         UpdateLandingRadar();
 
-        // Update reference frame (zero-speed object)
+        // Update reference frame (zero-speed object); alert HUD when it changes.
+        string prevRefName = _refName;
         UpdateReferenceFrame(_camera.UniversePosition);
+        if (_refName != prevRefName && prevRefName.Length > 0)
+            _hudAlert.AddMessage(new SystemMessage(
+                $"Zero reference speed set to {_refName}.", SystemMessagePriority.NB));
         _simulation.SetReferenceVelocity(_refVelocity);
 
         // Proximity speed scale — applied to debug camera each frame

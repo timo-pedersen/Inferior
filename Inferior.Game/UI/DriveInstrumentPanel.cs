@@ -29,6 +29,7 @@ public sealed class DriveInstrumentPanel : Control
     private double _xStopActive;
     private double _relSpeedMs;
     private double _fwdSpeedMs;
+    private double _accelMs2;
 
     // Handlers stored to allow future unsubscription if needed
     private readonly Action<double>[] _handlers;
@@ -48,6 +49,7 @@ public sealed class DriveInstrumentPanel : Control
             v => _xStopActive   = v,
             v => _relSpeedMs    = v,
             v => _fwdSpeedMs    = v,
+            v => _accelMs2      = v,
         ];
         DataBus.Instruments.Subscribe(Topics.Flight.Mode,            _handlers[0]);
         DataBus.Instruments.Subscribe(Topics.Flight.Gear,            _handlers[1]);
@@ -60,6 +62,7 @@ public sealed class DriveInstrumentPanel : Control
         DataBus.Instruments.Subscribe(Topics.Flight.XStopActive,     _handlers[8]);
         DataBus.Instruments.Subscribe(Topics.Flight.RelativeSpeedMs, _handlers[9]);
         DataBus.Instruments.Subscribe(Topics.Flight.ForwardSpeedMs,  _handlers[10]);
+        DataBus.Instruments.Subscribe(Topics.Flight.AccelerationMs2, _handlers[11]);
     }
 
     // ── Draw ──────────────────────────────────────────────────────────────────
@@ -142,10 +145,14 @@ public sealed class DriveInstrumentPanel : Control
             if (fwd < 0) fwdStr = "-" + Units.FormatSpeed(-fwd);
             string relStr = Units.FormatSpeed(_relSpeedMs);
 
-            DrawRow(sb, renderer, theme, "GEAR", gearStr, px, ref y, pw, S, colDim, colNorm);
-            DrawRow(sb, renderer, theme, "CEIL", ceilStr, px, ref y, pw, S, colDim, colNorm);
-            DrawRow(sb, renderer, theme, "FWD",  fwdStr,  px, ref y, pw, S, colDim, colNorm);
-            DrawRow(sb, renderer, theme, "REL",  relStr,  px, ref y, pw, S, colDim, colNorm);
+            double accel   = _accelMs2;
+            string accelStr = (accel >= 0 ? "+" : "") + $"{accel:F2} m/s²";
+
+            DrawRow(sb, renderer, theme, "GEAR",  gearStr,  px, ref y, pw, S, colDim, colNorm);
+            DrawRow(sb, renderer, theme, "CEIL",  ceilStr,  px, ref y, pw, S, colDim, colNorm);
+            DrawRow(sb, renderer, theme, "FWD",   fwdStr,   px, ref y, pw, S, colDim, colNorm);
+            DrawRow(sb, renderer, theme, "ACC.",  accelStr, px, ref y, pw, S, colDim, colNorm);
+            DrawRow(sb, renderer, theme, "REL",   relStr,   px, ref y, pw, S, colDim, colNorm);
 
             if (_xStopActive > 0.5)
             {

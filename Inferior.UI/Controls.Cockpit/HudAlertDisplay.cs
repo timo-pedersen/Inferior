@@ -10,9 +10,10 @@ namespace Inferior.UI.Controls.Cockpit;
 /// manages display timing and draws a single line of coloured text.
 ///
 /// Display rules:
-///   Warning         — 4 s then auto-dismissed
-///   ImportantWarning — 6 s then auto-dismissed
-///   Critical        — persists until HandleInput() sees any keypress
+///   NB              — 3 s then auto-dismissed (blue-gray, no prefix)
+///   Warning         — 4 s then auto-dismissed (yellow, "! " prefix)
+///   ImportantWarning — 6 s then auto-dismissed (orange, "!! " prefix)
+///   Critical        — persists until HandleInput() sees any keypress (red)
 ///
 /// If multiple messages arrive, the highest-priority one is always shown.
 /// Within equal priority, the most recent is shown.
@@ -25,10 +26,11 @@ public sealed class HudAlertDisplay
 
     public void AddMessage(SystemMessage msg)
     {
-        if (msg.Priority < SystemMessagePriority.Warning) return;
+        if (msg.Priority < SystemMessagePriority.NB) return;
 
         double duration = msg.Priority switch
         {
+            SystemMessagePriority.NB               => 3.0,
             SystemMessagePriority.Warning          => 4.0,
             SystemMessagePriority.ImportantWarning => 6.0,
             _                                      => double.PositiveInfinity,  // Critical
@@ -108,6 +110,7 @@ public sealed class HudAlertDisplay
     {
         var (color, prefix) = msg.Priority switch
         {
+            SystemMessagePriority.NB               => (new Color(160, 175, 195), ""),
             SystemMessagePriority.Warning          => (new Color(220, 180,  40), "! "),
             SystemMessagePriority.ImportantWarning => (new Color(230, 120,  30), "!! "),
             SystemMessagePriority.Critical         => (new Color(220,  60,  60), "! "),

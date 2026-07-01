@@ -201,8 +201,9 @@ public static class Topics
         public const string LkmZone         = "Flight.LkmZone";         // double (0=none, 1/2/3)
         public const string LkmCompliance   = "Flight.LkmCompliance";   // double countdown seconds
         public const string XStopActive     = "Flight.XStop";           // double (1.0 = active)
-        public const string RelativeSpeedMs = "Flight.RelativeSpeed";   // double, m/s magnitude of (vel - refVel)
+        public const string RelativeSpeedMs  = "Flight.RelativeSpeed";    // double, m/s magnitude of (vel - refVel)
         public const string ForwardSpeedMs  = "Flight.ForwardSpeed";    // double, m/s signed (negative = backwards)
+        public const string AccelerationMs2 = "Flight.Acceleration";    // double, m/s² signed forward acceleration (Newtonian only)
     }
 
     /// <summary>Debug / development sensors — not present in release builds.</summary>
