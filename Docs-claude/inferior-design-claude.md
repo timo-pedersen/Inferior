@@ -230,9 +230,9 @@ Commander in replacement ship:
 
 ## DataBus architecture
 
-One static hub, six typed buses. Sim thread publishes; main thread drains once per `Game.Update()`. `CommandBus` runs in reverse (main thread publishes, sim thread drains at top of each tick).
+One static hub, eight typed buses. Sim thread publishes; main thread drains once per `Game.Update()`. `CommandBus` runs in reverse (main thread publishes, sim thread drains at top of each tick).
 
-Six buses: `System` (status messages), `Instruments` (live doubles), `InstrumentState` (damage/efficiency), `InstrumentRanges` (min/max at startup), `Radar` (contacts), `RadarLost` (contact IDs).
+Eight buses: `System` (status messages), `Instruments` (live doubles), `InstrumentState` (damage/efficiency), `InstrumentRanges` (min/max at startup), `Radar` (contacts), `RadarLost` (contact IDs), `Spectra` (spectrum scan results), `Target` (selected target changes).
 
 Topic convention: `ComponentName.ValueName`. Multiple instances: `ComponentName_N.ValueName`.
 

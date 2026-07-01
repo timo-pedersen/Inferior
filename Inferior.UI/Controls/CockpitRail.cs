@@ -37,6 +37,10 @@ public sealed class CockpitRail : Control
     public int PeekHeight   { get; set; } = 36;
     public int ContentPad   { get; set; } = 6;
 
+    // ── Connector LEDs ────────────────────────────────────────────────────────
+    public LedIndicator? LeftConnectorLed  { get; set; }
+    public LedIndicator? RightConnectorLed { get; set; }
+
     // ── Wing panels ───────────────────────────────────────────────────────────
 
     public Panel LeftWing  { get; }
@@ -249,24 +253,81 @@ public sealed class CockpitRail : Control
         renderer.FillRect(sb, RightWingRect, back);
         renderer.FillRect(sb, new Rectangle(cx, cy, cw, CenterHeight), back);
 
-        // Left ramp — diagonal fill (cy→wt) + rectangular fill below the diagonal (wt→sh)
-        FillRamp(sb, renderer, cx, cx - rw, cy, wt, back);
-        renderer.FillRect(sb, new Rectangle(cx - rw, wt, rw, sh - wt), back);
+        // Connector geometry: full rectangle minus notch cut from top-right corner.
+        // A=(cx,cy), B=(cx-hStep,cy), C=(cx-hStep-dz,cy+dz). LED in lower-outer area.
+        int rRampX  = cx + cw;
+        int connH   = wt - cy;
+        int lx      = cx - rw;
 
-        // Right ramp — diagonal fill (cy→wt) + rectangular fill below the diagonal (wt→sh)
-        int rRampX = cx + cw;
-        FillRamp(sb, renderer, rRampX, rRampX + rw, cy, wt, back);
+        int ledWidth = (LeftConnectorLed?.MeasureSize().X ?? 28) + 8;
+        int dz       = Math.Min(15, connH / 5);
+        int hStep    = rw - dz - ledWidth;
+        if (hStep < 4)
+        {
+            hStep = 4;
+            dz    = Math.Max(4, rw - ledWidth - 4);
+        }
+
+        // Left fill: scanline strip (diagonal), then full rectangle below
+        if (connH > 0)
+        {
+            for (int row = 0; row < dz; row++)
+            {
+                int diagX = cx - hStep - row;
+                renderer.FillRect(sb, new Rectangle(diagX, cy + row, cx - diagX, 1), back);
+            }
+            renderer.FillRect(sb, new Rectangle(lx, cy + dz, rw, connH - dz), back);
+        }
+        renderer.FillRect(sb, new Rectangle(lx, wt, rw, sh - wt), back);
+
+        // Right fill: mirror
+        if (connH > 0)
+        {
+            for (int row = 0; row < dz; row++)
+            {
+                int diagX = rRampX + hStep + row;
+                renderer.FillRect(sb, new Rectangle(rRampX, cy + row, diagX - rRampX, 1), back);
+            }
+            renderer.FillRect(sb, new Rectangle(rRampX, cy + dz, rw, connH - dz), back);
+        }
         renderer.FillRect(sb, new Rectangle(rRampX, wt, rw, sh - wt), back);
+
+        // ── Connector LEDs (drawn before border so border sits on top) ────────
+
+        if (connH > dz)
+        {
+            var leftLedArea  = new Rectangle(lx,     cy + dz, rw, connH - dz);
+            var rightLedArea = new Rectangle(rRampX, cy + dz, rw, connH - dz);
+
+            if (LeftConnectorLed != null)
+            {
+                var size = LeftConnectorLed.MeasureSize();
+                LeftConnectorLed.Draw(sb, new Point(
+                    leftLedArea.X + (leftLedArea.Width  - size.X) / 2,
+                    leftLedArea.Y + (leftLedArea.Height - size.Y) / 2));
+            }
+            if (RightConnectorLed != null)
+            {
+                var size = RightConnectorLed.MeasureSize();
+                RightConnectorLed.Draw(sb, new Point(
+                    rightLedArea.X + (rightLedArea.Width  - size.X) / 2,
+                    rightLedArea.Y + (rightLedArea.Height - size.Y) / 2));
+            }
+        }
 
         // ── Border lines ─────────────────────────────────────────────────────
 
-        renderer.DrawLine(sb, V(sx,       wt), V(sx,           sh), border);
-        renderer.DrawLine(sb, V(sx,       wt), V(cx - rw,      wt), border);
-        renderer.DrawLine(sb, V(cx - rw,  wt), V(cx,           cy), border);
-        renderer.DrawLine(sb, V(cx,       cy), V(cx + cw,      cy), border);
-        renderer.DrawLine(sb, V(cx + cw,  cy), V(rRampX + rw,  wt), border);
-        renderer.DrawLine(sb, V(rRampX + rw, wt), V(sx + sw,   wt), border);
-        renderer.DrawLine(sb, V(sx + sw,  wt), V(sx + sw,      sh), border);
+        renderer.DrawLine(sb, V(sx,           wt), V(sx,              sh), border);
+        renderer.DrawLine(sb, V(sx,           wt), V(cx - rw,         wt), border);
+        // Left notch: A→B horizontal step, B→C diagonal
+        renderer.DrawLine(sb, V(cx,                  cy), V(cx - hStep,              cy),      border);
+        renderer.DrawLine(sb, V(cx - hStep,          cy), V(cx - hStep - dz, cy + dz),         border);
+        renderer.DrawLine(sb, V(cx,                  cy), V(cx + cw,                 cy),       border);
+        // Right notch: A'→B' horizontal step, B'→C' diagonal
+        renderer.DrawLine(sb, V(cx + cw,             cy), V(cx + cw + hStep,         cy),       border);
+        renderer.DrawLine(sb, V(cx + cw + hStep,     cy), V(cx + cw + hStep + dz, cy + dz),    border);
+        renderer.DrawLine(sb, V(rRampX + rw,  wt), V(sx + sw,          wt), border);
+        renderer.DrawLine(sb, V(sx + sw,      wt), V(sx + sw,          sh), border);
 
         // ── Peek strip: [Tab0][Tab1][Tab2][Toggle][Tab3][Tab4][Tab5] ─────────
 
@@ -339,22 +400,4 @@ public sealed class CockpitRail : Control
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static Vector2 V(int x, int y) => new(x, y);
-
-    private static void FillRamp(SpriteBatch sb, UIRenderer renderer,
-        int xNear, int xFar, int yTop, int yBot, Color color)
-    {
-        int height = yBot - yTop;
-        if (height <= 0) return;
-
-        for (int row = 0; row <= height; row++)
-        {
-            float t    = (float)row / height;
-            int   xDiag  = xNear + (int)((xFar - xNear) * t);
-            int   xLeft  = Math.Min(xDiag, xNear);
-            int   xRight = Math.Max(xDiag, xNear);
-            int   width  = xRight - xLeft;
-            if (width > 0)
-                renderer.FillRect(sb, new Rectangle(xLeft, yTop + row, width, 1), color);
-        }
-    }
 }

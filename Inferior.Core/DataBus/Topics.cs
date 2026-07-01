@@ -185,6 +185,8 @@ public static class Topics
     {
         /// <summary>Sum of all component ThermalNode.LastHeatInputW — total heat generation rate (watts).</summary>
         public const string ThermalSignature = "Ship.ThermalSignature";
+        /// <summary>Warning level: 0=clear, 1=monitoring, 2=caution, 3=warning, 4=critical.</summary>
+        public const string WarnLevel        = "Ship.WarnLevel";
     }
 
     public static class Flight

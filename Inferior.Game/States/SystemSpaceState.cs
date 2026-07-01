@@ -148,6 +148,8 @@ public sealed class SystemSpaceState : GameState
     // Stored so we can unsubscribe on OnExit
     private Action<SystemMessage>? _systemHandler;
     private HudAlertDisplay        _hudAlert = new();
+    private LedIndicator?          _stopLed;
+    private LedIndicator?          _warnLed;
     private Action<double>?       _gravDirXHandler;
     private Action<double>?       _gravDirYHandler;
     private Action<double>?       _gravDirZHandler;
@@ -771,6 +773,55 @@ public sealed class SystemSpaceState : GameState
         DataBus.Radar.Subscribe(Topics.Radar.All,     _radarContactHandler);
         DataBus.RadarLost.Subscribe(Topics.Radar.All, _radarLostHandler);
 
+        _stopLed = new LedIndicator(
+            Topics.Flight.XStopActive,
+            DataBus.Instruments,
+            _gd,
+            _font)
+        {
+            LabelText      = "STOP",
+            LabelAnchor    = LabelAnchor.Bottom,
+            LabelFontScale = 0.8f,
+            Shape          = LedShape.Round,
+            LampSize       = 28,
+            MainColor      = new Color(255, 140, 0),
+            OnRangeMin     = 0.5,
+            OnRangeMax     = double.PositiveInfinity,
+        };
+
+        _warnLed = new LedIndicator(
+            Topics.Ship.WarnLevel,
+            DataBus.Instruments,
+            _gd,
+            _font)
+        {
+            LabelText         = "WARN",
+            LabelAnchor       = LabelAnchor.Bottom,
+            LabelFontScale    = 0.8f,
+            Shape             = LedShape.Round,
+            LampSize          = 28,
+            MainColor         = new Color(200, 50, 50),
+            OnRangeMin        = 0.5,
+            OnRangeMax        = double.PositiveInfinity,
+            ColorRanges       = new List<LedColorRange>
+            {
+                new(0.5, 1.5, new Color( 40, 110,  55)),
+                new(1.5, 2.5, new Color(220, 175,   0)),
+                new(2.5, 3.5, new Color(210,  45,  45)),
+                new(3.5, double.PositiveInfinity, new Color(210, 45, 45)),
+            },
+            BlinkRangeMin     = 3.5,
+            BlinkRangeMax     = double.PositiveInfinity,
+            MinBlinkFrequency = 2.0,
+            MaxBlinkFrequency = 2.0,
+        };
+
+        if (_cockpitRail != null)
+        {
+            _cockpitRail.LeftConnectorLed  = _stopLed;
+            _cockpitRail.RightConnectorLed = _warnLed;
+        }
+
         // First system message — confirms state entry
         DataBus.System.Publish(Topics.System.All, new($"Entered {_star.Name}"));
     }
@@ -817,6 +868,11 @@ public sealed class SystemSpaceState : GameState
         foreach (string id in _radarContactIds)
             _targeting.OnContactLost(id);
         _radarContactIds.Clear();
+
+        _stopLed?.Dispose();
+        _stopLed = null;
+        _warnLed?.Dispose();
+        _warnLed = null;
 
         _ui?.Dispose();
         _ui = null;
@@ -867,6 +923,7 @@ public sealed class SystemSpaceState : GameState
         var mouse = Mouse.GetState();
         var keys  = Keyboard.GetState();
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
+        BlinkClock.Update(dt);
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
@@ -897,6 +954,8 @@ public sealed class SystemSpaceState : GameState
 
         // Animations always run, regardless of input mode
         _ui?.Animate(dt);
+        _stopLed?.Update(dt);
+        _warnLed?.Update(dt);
 
         // Re-enable scan button once cooldown expires
         if (_scanCooldown > 0)
@@ -2247,9 +2306,8 @@ public sealed class SystemSpaceState : GameState
                 {
                     double gearSpeed = snap.NewtonianGear < FlightConstants.NewtonianGearSpeeds.Length
                         ? FlightConstants.NewtonianGearSpeeds[snap.NewtonianGear] : 0;
-                    string lkmStr   = snap.LkmZone > 0    ? $"  LKM-{snap.LkmZone}" : "";
-                    string xStopStr = snap.XStopActive    ? "  X-STOP" : "";
-                    flightLine = $"[{modeName}]  G{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}{xStopStr}";
+                    string lkmStr   = snap.LkmZone > 0 ? $"  LKM-{snap.LkmZone}" : "";
+                    flightLine = $"[{modeName}]  G{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}";
                 }
                 else if (snap.FlightMode == FlightMode.SystemSlipstream)
                 {

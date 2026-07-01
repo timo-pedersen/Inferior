@@ -1081,6 +1081,7 @@ public sealed class SpaceSimulation : Simulation
             DataBus.Instruments.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);
             DataBus.Instruments.Publish(Topics.Flight.RelativeSpeedMs, snap.RelativeSpeedMs);
             DataBus.Instruments.Publish(Topics.Flight.ForwardSpeedMs,  snap.ForwardSpeedMs);
+            DataBus.Instruments.Publish(Topics.Ship.WarnLevel,         0.0);  // stub — connected to real systems in future brief
         }
 
         if (_ship != null && snap != null)

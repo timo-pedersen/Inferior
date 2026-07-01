@@ -13,7 +13,7 @@
 | System map | ✓ Done | Bodies, orbits |
 | 3D flight state (`SystemSpaceState`) | ✓ Done | Newtonian, origin-shifting render |
 | UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState |
-| DataBus | ✓ Done | 6 buses: System, Instruments, InstrumentState, InstrumentRanges, Radar, RadarLost |
+| DataBus | ✓ Done | 8 buses: System, Instruments, InstrumentState, InstrumentRanges, Radar, RadarLost, Spectra, Target |
 | CommandBus | ✓ Done | Reverse direction; sim thread drains |
 | Simulation loop | ✓ Done | 60Hz background thread; PlayerInput immutable snapshot |
 | DVec3 + origin shifting | ✓ Done | Double-precision coordinates throughout |
@@ -41,6 +41,8 @@
 | **PlanetaryCoordinateSensor** | ✓ Done | `Inferior.Gameplay/Sensors/`; publishes `PlanetCoord.*` topics each tick in atmosphere: Altitude, Latitude, Longitude, Heading, GroundSpeed, VerticalSpeed, Temperature. Topics added to `Inferior.Core/DataBus/Topics.cs`. |
 | **Ground radar HUD panel** | ✓ Done | 8-row panel (ALT/VS/LAT/LON/HDG/GS/TEMP/PRES) in `DrawAtmosPanel()`; PRES shown in green when ≥ 0.1 bar (Slipstream threshold); subscribes/unsubscribes to `PlanetCoord.*` on state enter/exit. |
 | **DriveInstrumentPanel** | ✓ Done | Right cockpit-rail wing; DRIVE header + mode label; Newtonian: GEAR/CEIL/FWD/REL rows (X-STOP overlay); Slipstream: HARM/SPEED rows; FUEL/PWR/HEAT stub bars; `Topics.Flight.*` DataBus driven. |
+| **LedIndicator control** | ✓ Done | Round/square lamp; colour ranges; variable blink (BlinkClock global); exponential brightness easing (k=60, ~50 ms); stopping mode LED in HUD (amber, LabelAnchor.Bottom, subscribes to `Topics.Flight.XStopActive`) |
+| **CockpitRail notch connectors** | ✓ Done | Full-rect minus top-right notch (A→B horizontal + B→C diagonal); LED centered in lower-outer area; hStep/dz computed from LED size (no named constants); STOP (amber, round, left) and WARN (green/yellow/red/blink-red, round, right) LEDs in connectors; `Topics.Ship.WarnLevel` added, stubbed at 0.0 |
 | **Checkerboard planet sphere** | ✓ Done | Per-planet `VertexPositionColor` sphere (128×64 segments) built in `BuildPlanetSphere()`; 5°×5° cells with type-specific colour pairs (7 `PlanetType`s); pole caps; equator stripe; pre-baked directional lighting; rotates via `body.Orientation`. |
 | **GeometryBuilder** | ✓ Done | `Inferior.Rendering/GeometryBuilder.cs`; `AddConvexFace` / `AddFace(outwardNormal)`; winding auto-corrected from centroid or explicit normal; `BuildDynamic` (VertexPositionNormalTexture, flat normals) and `BuildBaked` (VertexPositionColor). |
 | **MeshRenderer** | ✓ Done | `Inferior.Rendering/MeshRenderer.cs`; `DrawBaked` (VertexPositionColorTexture, no lighting) and `DrawDynamic` (VertexPositionNormalTexture, BasicEffect star light); explicit `CullCounterClockwiseFace`. |
@@ -200,7 +202,6 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | `inferior-components-claude.md` | docs-claude | Component specs, properties, units |
 | `inferior-design-ship-claude.md` | docs-claude | Ship classes, roles, hull system |
 | `inferior-design-stations-claude.md` | docs-claude | Station generation — architecture, modules, decoration |
-| `inferior-design-planetary-claude.md` | docs-claude | Planetary flight — FlightMode, forces, Slipstream, Flight Assist |
 | `inferior-design.md` | docs | Full design doc with rationale |
 | `inferior-lore.md` | docs | Full lore with narrative |
 | `inferior-classes.md` | docs-archive | Class sketches — may be stale; repo is authoritative |
