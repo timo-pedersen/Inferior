@@ -71,6 +71,16 @@ public sealed class SpaceSimulation : Simulation
     public void TeleportShip(DVec3 position, Quaternion orientation)
         => _teleportRequest = new TeleportRequest(position, orientation);
 
+    // ── Flight mode override (main thread → sim thread, used by hyperspace) ──
+    // -1 = no override pending; otherwise cast to FlightMode.
+    private volatile int _flightModeOverride = -1;
+
+    /// <summary>
+    /// Request the sim to set its flight mode on the next tick. Used when hyperspace exits
+    /// need the sim to wake up in Newtonian or Slipstream without going through normal transitions.
+    /// </summary>
+    public void SetFlightMode(FlightMode mode) => _flightModeOverride = (int)mode;
+
     // ── World state snapshot (written by main thread, read by sim thread) ─────
     private sealed record WorldSnapshot(Star Star, StarSystem System, DVec3 ShipPos, double GameTime);
     private volatile WorldSnapshot? _worldSnapshot;
@@ -200,6 +210,14 @@ public sealed class SpaceSimulation : Simulation
             ship.Velocity = DVec3.Zero;
             ship.SetOrientation(teleport.Orientation);
             _teleportRequest = null;
+        }
+
+        // ── Flight mode override (from hyperspace exit) ───────────────────
+        int modeOverride = _flightModeOverride;
+        if (modeOverride >= 0)
+        {
+            _currentFlightMode  = (FlightMode)modeOverride;
+            _flightModeOverride = -1;
         }
 
         // ── Rotation ─────────────────────────────────────────────────────
