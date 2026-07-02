@@ -3727,6 +3727,7 @@ public sealed class SystemSpaceState : GameState
                 // Skip alignment if no hyperspace target set
                 if (!_targeting.HasHyperspaceTarget)
                 {
+                    SyncHyperForwardToCamera();
                     AdvancePreamble(HyperPreamblePhase.DotFadeIn);
                     break;
                 }
@@ -3740,6 +3741,7 @@ public sealed class SystemSpaceState : GameState
 
                     if (angle * MathHelper.ToDegrees(1f) <= (float)FlatHyperspaceConstants.AlignThresholdDeg)
                     {
+                        SyncHyperForwardToCamera();
                         AdvancePreamble(HyperPreamblePhase.DotFadeIn);
                     }
                     else
@@ -3970,15 +3972,31 @@ public sealed class SystemSpaceState : GameState
 
     private PlaneBasis GetPlaneBasis()
     {
-        if (_hyperPlane == null)
-            return new PlaneBasis(Vector3.UnitY, -Vector3.UnitZ, Vector3.UnitX);
+        // Always derived from the camera — it is the ground truth for current orientation
+        // whether we are in preamble alignment or active hyperspace flight.
+        // cross(forward, up) = right: cross(-Z, +Y) = +X (verified).
+        var fwd   = _camera.Forward;
+        var up    = _camera.Up;
+        var right = Vector3.Normalize(Vector3.Cross(fwd, up));
+        return new PlaneBasis(up, fwd, right);
+    }
 
-        // Use _hyperForward (current steering direction) not _hyperPlane.Forward (fixed at entry).
-        // Recompute Right so it stays perpendicular to both Normal and the current forward.
-        var normal  = new Vector3((float)_hyperPlane.Normal.X, (float)_hyperPlane.Normal.Y, (float)_hyperPlane.Normal.Z);
-        var forward = new Vector3((float)_hyperForward.X,      (float)_hyperForward.Y,      (float)_hyperForward.Z);
-        var right   = Vector3.Normalize(Vector3.Cross(normal, forward));
-        return new PlaneBasis(normal, forward, right);
+    // Called when alignment completes (or is skipped). Locks _hyperForward to the camera's
+    // current facing so FlatHyperspace drives the ship in the correct direction.
+    private void SyncHyperForwardToCamera()
+    {
+        // Project camera forward onto the hyperspace plane to ensure it stays in-plane.
+        if (_hyperPlane != null)
+        {
+            DVec3 camFwd = new(_camera.Forward.X, _camera.Forward.Y, _camera.Forward.Z);
+            DVec3 n      = _hyperPlane.Normal;
+            DVec3 proj   = camFwd - n * DVec3.Dot(camFwd, n);
+            _hyperForward = proj.LengthSquared > 1e-10 ? proj.Normalized() : _hyperPlane.Forward;
+        }
+        else
+        {
+            _hyperForward = new DVec3(_camera.Forward.X, _camera.Forward.Y, _camera.Forward.Z);
+        }
     }
 
     // Builds a Quaternion from a forward vector and a reference up, same as CreateLookAt logic.
