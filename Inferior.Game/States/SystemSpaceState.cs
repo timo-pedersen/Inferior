@@ -1054,6 +1054,13 @@ public sealed class SystemSpaceState : GameState
             _simulation.SetInput(PlayerInput.Zero);
             if (IsGameActive) Mouse.SetPosition(dcx, dcy);
         }
+        else if (_hyperMode is FlightMode.EnteringFlatHyperspace or FlightMode.FlatHyperspace)
+        {
+            // Hyperspace — sim is frozen; camera is driven directly by UpdateEnteringHyperspace /
+            // UpdateFlatHyperspace. Do NOT let ship-follow overwrite the camera pose here.
+            _simulation.SetInput(PlayerInput.Zero);
+            if (IsGameActive) Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
+        }
         else
         {
             // Ship mode — input goes to the simulation; camera follows cockpit or third-person orbit.
@@ -1285,7 +1292,7 @@ public sealed class SystemSpaceState : GameState
 
         // Hyperspace sheets — drawn between 3D scene and 2D HUD so they sit behind text
         if (_hyperMode is FlightMode.EnteringFlatHyperspace or FlightMode.FlatHyperspace)
-            _sheetRenderer?.Draw(_gd, _camera, (float)_sheetsProgress);
+            _sheetRenderer?.Draw(_gd, _camera, (float)_sheetsProgress, GetPlaneBasis());
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
@@ -2257,6 +2264,7 @@ public sealed class SystemSpaceState : GameState
     // Draws the hover label and locked-star ring in UI mode.
     private void DrawSkyboxStarOverlay(SpriteBatch sb)
     {
+        if (_hyperMode is FlightMode.FlatHyperspace) return;  // no skybox in hyperspace
         var  viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
         int  w        = _gd.Viewport.Width;
         int  h        = _gd.Viewport.Height;
@@ -2375,6 +2383,7 @@ public sealed class SystemSpaceState : GameState
 
     private void DrawSkybox()
     {
+        if (_hyperMode is FlightMode.FlatHyperspace) return;  // sheets replace the skybox
         if (_skyboxPoints.Length == 0 && _skyboxGlowVerts.Length == 0) return;
 
         _gd.RasterizerState = RasterizerState.CullNone;
@@ -3780,7 +3789,7 @@ public sealed class SystemSpaceState : GameState
                 _preambleTimer  += dt;
                 double raw       = _preambleTimer / FlatHyperspaceConstants.SheetsGrowDuration;
                 _sheetsProgress  = EaseIn(Math.Min(raw, 1.0));
-                _sheetRenderer?.Update(dt, _camera);
+                _sheetRenderer?.Update(dt, _camera, GetPlaneBasis());
                 if (raw >= 1.0)
                 {
                     _sheetsProgress = 1.0;
@@ -3796,7 +3805,7 @@ public sealed class SystemSpaceState : GameState
         if (_hyperPlane == null) return;
 
         _simulation.SetInput(PlayerInput.Zero);
-        _sheetRenderer?.Update(dt, _camera);
+        _sheetRenderer?.Update(dt, _camera, GetPlaneBasis());
 
         // Steer — mouse yaw only; pitch/roll ignored
         int    cx       = _gd.Viewport.Width  / 2;
@@ -3960,6 +3969,18 @@ public sealed class SystemSpaceState : GameState
     }
 
     private static double EaseIn(double t) => t * t;  // quadratic ease-in
+
+    private PlaneBasis GetPlaneBasis()
+    {
+        if (_hyperPlane == null)
+            return new PlaneBasis(Vector3.UnitY, -Vector3.UnitZ, Vector3.UnitX);
+        // DVec3 direction vectors are unit length — cast directly to float render directions.
+        // These are world-space directions; the View matrix applies the camera transform.
+        return new PlaneBasis(
+            new Vector3((float)_hyperPlane.Normal.X,  (float)_hyperPlane.Normal.Y,  (float)_hyperPlane.Normal.Z),
+            new Vector3((float)_hyperPlane.Forward.X, (float)_hyperPlane.Forward.Y, (float)_hyperPlane.Forward.Z),
+            new Vector3((float)_hyperPlane.Right.X,   (float)_hyperPlane.Right.Y,   (float)_hyperPlane.Right.Z));
+    }
 
     // Builds a Quaternion from a forward vector and a reference up, same as CreateLookAt logic.
     private static Quaternion QuaternionFromForwardUp(Vector3 forward, Vector3 up)
