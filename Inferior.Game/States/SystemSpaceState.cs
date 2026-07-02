@@ -1196,7 +1196,7 @@ public sealed class SystemSpaceState : GameState
         if (_hyperMode == FlightMode.EnteringFlatHyperspace)
             UpdateEnteringHyperspace(dt, keys);
         else if (_hyperMode == FlightMode.FlatHyperspace)
-            UpdateFlatHyperspace(dt, keys);
+            UpdateFlatHyperspace(dt, lookMouse);
 
         var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
         _hudAlert.Update(dt);
@@ -3800,18 +3800,16 @@ public sealed class SystemSpaceState : GameState
         }
     }
 
-    private void UpdateFlatHyperspace(double dt, KeyboardState keys)
+    private void UpdateFlatHyperspace(double dt, MouseState mouse)
     {
         if (_hyperPlane == null) return;
 
         _simulation.SetInput(PlayerInput.Zero);
         _sheetRenderer?.Update(dt, _camera, GetPlaneBasis());
 
-        // Steer — mouse yaw only; pitch/roll ignored
-        int    cx       = _gd.Viewport.Width  / 2;
-        var    mouse    = Mouse.GetState();
+        // Steer — mouse yaw only; pitch/roll ignored. Uses the focus-corrected lookMouse.
+        int    cx       = _gd.Viewport.Width / 2;
         double yawDelta = -(mouse.X - cx) * MouseSensitivity;
-        if (IsGameActive) Mouse.SetPosition(cx, _gd.Viewport.Height / 2);
 
         if (Math.Abs(yawDelta) > 1e-6)
         {
@@ -3974,12 +3972,13 @@ public sealed class SystemSpaceState : GameState
     {
         if (_hyperPlane == null)
             return new PlaneBasis(Vector3.UnitY, -Vector3.UnitZ, Vector3.UnitX);
-        // DVec3 direction vectors are unit length — cast directly to float render directions.
-        // These are world-space directions; the View matrix applies the camera transform.
-        return new PlaneBasis(
-            new Vector3((float)_hyperPlane.Normal.X,  (float)_hyperPlane.Normal.Y,  (float)_hyperPlane.Normal.Z),
-            new Vector3((float)_hyperPlane.Forward.X, (float)_hyperPlane.Forward.Y, (float)_hyperPlane.Forward.Z),
-            new Vector3((float)_hyperPlane.Right.X,   (float)_hyperPlane.Right.Y,   (float)_hyperPlane.Right.Z));
+
+        // Use _hyperForward (current steering direction) not _hyperPlane.Forward (fixed at entry).
+        // Recompute Right so it stays perpendicular to both Normal and the current forward.
+        var normal  = new Vector3((float)_hyperPlane.Normal.X, (float)_hyperPlane.Normal.Y, (float)_hyperPlane.Normal.Z);
+        var forward = new Vector3((float)_hyperForward.X,      (float)_hyperForward.Y,      (float)_hyperForward.Z);
+        var right   = Vector3.Normalize(Vector3.Cross(normal, forward));
+        return new PlaneBasis(normal, forward, right);
     }
 
     // Builds a Quaternion from a forward vector and a reference up, same as CreateLookAt logic.

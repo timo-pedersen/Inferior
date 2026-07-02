@@ -5,20 +5,20 @@ using Inferior.Rendering;
 namespace Inferior.Game.Hyperspace;
 
 /// <summary>
-/// 2001-style perspective grid drawn as two infinite-looking sheets above and below the ship.
-/// Grid lines are built in plane-local space (Right/Forward/Normal) so they always align with
-/// the hyperspace plane regardless of the ship's galactic orientation at entry.
+/// 2001-style perspective grid: two sheets above and below, lines running away ahead.
+/// All geometry is in front of the camera (v ≥ 0) to avoid behind-camera projection artifacts.
 /// </summary>
 public sealed class GridHyperspaceSheetRenderer : IHyperspaceSheetRenderer
 {
-    // ── Tuneable parameters ───────────────────────────────────────────────────
-    private const float SheetHalfSeparation = 80f;    // render units — half-gap between sheets
-    private const float GridExtent          = 2000f;  // how far along Right/Forward the grid extends
-    private const int   GridLinesLateral    = 18;     // lines across Right axis
-    private const int   GridLinesLong       = 24;     // lines along Forward axis
-    private const float ScrollSpeed         = 120f;   // render units per second
-    private static readonly Color GridColour = new(20, 60, 140);
-    private static readonly Color GridBright = new(60, 140, 255);
+    // ── Tuneable ──────────────────────────────────────────────────────────────
+    private const float SheetHalfSeparation = 80f;    // render units half-gap between sheets
+    private const float GridForwardExtent   = 3000f;  // how far ahead the grid runs
+    private const float GridLateralExtent   = 1500f;  // half-width left/right
+    private const int   GridLinesLateral    = 20;     // vertical lines across the width
+    private const int   GridLinesLong       = 20;     // horizontal lines running forward
+    private const float ScrollSpeed         = 200f;   // render units/s — scrolls toward camera
+    private static readonly Color GridDim    = new(15,  50, 130);
+    private static readonly Color GridBright = new(55, 130, 255);
 
     private readonly GraphicsDevice _gd;
     private readonly BasicEffect    _effect;
@@ -37,7 +37,7 @@ public sealed class GridHyperspaceSheetRenderer : IHyperspaceSheetRenderer
 
     public void Update(double dt, Camera3D camera, PlaneBasis basis)
     {
-        _scrollOffset = (_scrollOffset + ScrollSpeed * dt) % GridExtent;
+        _scrollOffset = (_scrollOffset + ScrollSpeed * dt) % (GridForwardExtent / GridLinesLong);
     }
 
     public void Draw(GraphicsDevice gd, Camera3D camera, float sheetsProgress, PlaneBasis basis)
@@ -49,7 +49,7 @@ public sealed class GridHyperspaceSheetRenderer : IHyperspaceSheetRenderer
         _effect.World      = Matrix.Identity;
 
         float alpha  = MathHelper.Clamp(sheetsProgress, 0f, 1f);
-        float sheetD = SheetHalfSeparation * alpha;  // animates from 0 outward as sheets grow
+        float sheetD = SheetHalfSeparation * alpha;
 
         var verts = new List<VertexPositionColor>(512);
         BuildSheet(verts,  sheetD, alpha, basis);
@@ -70,45 +70,41 @@ public sealed class GridHyperspaceSheetRenderer : IHyperspaceSheetRenderer
 
     public void Dispose() => _effect.Dispose();
 
-    // ── Private helpers ───────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void BuildSheet(List<VertexPositionColor> verts, float sheetOffset, float alpha, PlaneBasis basis)
     {
-        // sheetOffset is measured along the plane Normal
-        // Grid is built in plane-local space: u along Right, v along Forward, w = Normal
-
-        float halfU = GridExtent;
-        float halfV = GridExtent;
-        float spacing = halfV / GridLinesLong;
-
-        // Longitudinal lines — run along Forward, spaced along Right
+        // ── Longitudinal lines — run forward from camera, spaced laterally ─
         for (int i = 0; i <= GridLinesLateral; i++)
         {
-            float u      = MathHelper.Lerp(-halfU, halfU, i / (float)GridLinesLateral);
-            bool  accent = (i % 3 == 0);
-            Color col    = ColorWithAlpha(accent ? GridBright : GridColour, alpha * (accent ? 0.9f : 0.5f));
+            float u      = MathHelper.Lerp(-GridLateralExtent, GridLateralExtent, i / (float)GridLinesLateral);
+            bool  accent = (i % 4 == 0);
+            Color col    = Alpha(accent ? GridBright : GridDim, alpha * (accent ? 1.0f : 0.55f));
 
-            Vector3 a = ToWorld(u, -halfV, sheetOffset, basis);
-            Vector3 b = ToWorld(u,  halfV, sheetOffset, basis);
-            AddLine(verts, a, b, col);
+            AddLine(verts,
+                ToWorld(u,  2f,               sheetOffset, basis),  // start just in front of camera
+                ToWorld(u, GridForwardExtent, sheetOffset, basis),
+                col);
         }
 
-        // Lateral lines — run along Right, scroll along Forward
+        // ── Lateral lines — run left-right, scroll toward camera ─
+        float spacing = GridForwardExtent / GridLinesLong;
         for (int i = 0; i < GridLinesLong; i++)
         {
-            float v      = -halfV + (i * spacing + (float)_scrollOffset) % halfV;
-            bool  accent = (i % 4 == 0);
-            Color col    = ColorWithAlpha(accent ? GridBright : GridColour, alpha * (accent ? 0.9f : 0.5f));
+            // v is always positive (in front of camera)
+            float v      = spacing * i + (float)_scrollOffset;
+            bool  accent = (i % 5 == 0);
+            Color col    = Alpha(accent ? GridBright : GridDim, alpha * (accent ? 1.0f : 0.55f));
 
-            Vector3 a = ToWorld(-halfU, v, sheetOffset, basis);
-            Vector3 b = ToWorld( halfU, v, sheetOffset, basis);
-            AddLine(verts, a, b, col);
+            AddLine(verts,
+                ToWorld(-GridLateralExtent, v, sheetOffset, basis),
+                ToWorld( GridLateralExtent, v, sheetOffset, basis),
+                col);
         }
     }
 
-    // Converts plane-local (u=right, v=forward, w=normal-offset) to world render space
-    private static Vector3 ToWorld(float u, float v, float w, PlaneBasis basis)
-        => basis.Right * u + basis.Forward * v + basis.Normal * w;
+    private static Vector3 ToWorld(float u, float v, float w, PlaneBasis b)
+        => b.Right * u + b.Forward * v + b.Normal * w;
 
     private static void AddLine(List<VertexPositionColor> verts, Vector3 a, Vector3 b, Color c)
     {
@@ -116,9 +112,9 @@ public sealed class GridHyperspaceSheetRenderer : IHyperspaceSheetRenderer
         verts.Add(new VertexPositionColor(b, c));
     }
 
-    private static Color ColorWithAlpha(Color c, float alpha)
+    private static Color Alpha(Color c, float a)
     {
-        int a = (int)(255 * MathHelper.Clamp(alpha, 0f, 1f));
-        return new Color(c.R, c.G, c.B, a);
+        int ai = (int)(255 * MathHelper.Clamp(a, 0f, 1f));
+        return new Color(c.R, c.G, c.B, ai);
     }
 }
