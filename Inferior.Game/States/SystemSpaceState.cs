@@ -2230,14 +2230,12 @@ public sealed class SystemSpaceState : GameState
     // Draws the hover label and locked-star ring in UI mode.
     private void DrawSkyboxStarOverlay(SpriteBatch sb)
     {
-        if (!_uiMouseMode) return;
-
         var  viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
         int  w        = _gd.Viewport.Width;
         int  h        = _gd.Viewport.Height;
         var  hypColor = new Color(80, 160, 255);  // matches dirball "hyp" colour
 
-        // Locked star — persistent ring + name even when cursor moves away
+        // Locked star — persistent ring + name in all flight modes
         if (_lockedSkyboxStar != null)
         {
             Vector2? screen = SkyboxProject(_lockedSkyboxStar, viewProj, w, h);
@@ -2252,8 +2250,8 @@ public sealed class SystemSpaceState : GameState
             }
         }
 
-        // Hovered star — dim label near cursor while mouse lingers nearby
-        if (_hoveredSkyboxStar != null && _hoveredSkyboxStar != _lockedSkyboxStar)
+        // Hovered star — dim label near cursor (UI mode only)
+        if (_uiMouseMode && _hoveredSkyboxStar != null && _hoveredSkyboxStar != _lockedSkyboxStar)
         {
             var labelPos = _uiCursorScreen + new Vector2(14f, -8f);
             FontHelper.Draw(sb, _font, _hoveredSkyboxStar.Name, labelPos, new Color(180, 200, 220));
