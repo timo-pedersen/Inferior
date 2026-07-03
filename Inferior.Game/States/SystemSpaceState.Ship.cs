@@ -199,15 +199,6 @@ public sealed partial class SystemSpaceState
             GearDown:           gearDown);
     }
 
-    // ── UI mode ───────────────────────────────────────────────────────────────
-
-    private void ApplyUiMode(bool active)
-    {
-        if (_rightPanel != null) _rightPanel.UiModeActive = active;
-        if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
-        // CockpitRail is always interactable — peek strip tabs and toggle work in all modes.
-    }
-
     // ── Cockpit layout ────────────────────────────────────────────────────────
 
     private (DVec3? pos, Quaternion? ori) CaptureShipState()
@@ -215,18 +206,5 @@ public sealed partial class SystemSpaceState
         var snap = _simulation.ShipState;
         if (snap == null) return (null, null);
         return (snap.Position, snap.Orientation);
-    }
-
-    private CockpitLayout CaptureCockpitLayout()
-    {
-        var (rightTab, rightOpen) = _rightPanel?.CaptureState() ?? (-1, false);
-        var (leftTab,  leftOpen)  = _leftPanel?.CaptureState()  ?? (-1, false);
-        return new CockpitLayout(rightTab, rightOpen, leftTab, leftOpen);
-    }
-
-    private void ApplyCockpitLayout(CockpitLayout layout)
-    {
-        _rightPanel?.ApplyState(layout.RightActiveTab, layout.RightOpen);
-        _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
     }
 }

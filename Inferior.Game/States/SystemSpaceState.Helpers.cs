@@ -364,20 +364,4 @@ public sealed partial class SystemSpaceState
 
         return System.Math.Exp(t * System.Math.Log(1.0 / minScale)) * minScale;
     }
-
-    // ── 2D primitives (same as other states) ──────────────────────────────────
-
-    private void DrawText(SpriteBatch sb, string text, Vector2 pos, Color color, float scale = 1.0f)
-        => FontHelper.Draw(sb, _font, text, pos, color, scale);
-
-    private void DrawRect(SpriteBatch sb, Rectangle rect, Color color)
-        => sb.Draw(_pixel, rect, color);
-
-    private void DrawRectBorder(SpriteBatch sb, Rectangle rect, Color color, int thickness = 1)
-    {
-        sb.Draw(_pixel, new Rectangle(rect.Left,  rect.Top,              rect.Width, thickness), color);
-        sb.Draw(_pixel, new Rectangle(rect.Left,  rect.Bottom-thickness, rect.Width, thickness), color);
-        sb.Draw(_pixel, new Rectangle(rect.Left,  rect.Top,  thickness,  rect.Height),           color);
-        sb.Draw(_pixel, new Rectangle(rect.Right-thickness, rect.Top, thickness, rect.Height),   color);
-    }
 }

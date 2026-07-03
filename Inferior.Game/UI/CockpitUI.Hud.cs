@@ -1,34 +1,16 @@
 using Inferior.Core;
-using Inferior.Core.DataBus;
 using Inferior.Core.Math;
-using Inferior.Core.Simulation;
-using Inferior.Galaxy;
-using Inferior.Game.Hyperspace;
-using Inferior.Game.StationGen;
-using Inferior.Game.UI;
+using Inferior.Game;
 using Inferior.Gameplay;
-using Inferior.Gameplay.Components;
-using Inferior.Gameplay.Components.Power;
-using Inferior.Gameplay.Sensors;
-using Inferior.Gameplay.Ship;
-using Inferior.Rendering;
 using Inferior.UI;
-using Inferior.UI.Controls;
-using Inferior.UI.Controls.Cockpit;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
-using System.Reflection.Metadata;
 
-namespace Inferior.Game.States;
+namespace Inferior.Game.UI;
 
-public sealed partial class SystemSpaceState
+public sealed partial class CockpitUI
 {
-
-    // ── 2D HUD ────────────────────────────────────────────────────────────────
-
-    private void DrawCrosshair(SpriteBatch sb)
+    public void DrawCrosshair(SpriteBatch sb)
     {
         int cx  = _gd.Viewport.Width  / 2;
         int cy  = _gd.Viewport.Height / 2;
@@ -42,32 +24,35 @@ public sealed partial class SystemSpaceState
         sb.Draw(_pixel, new Rectangle(cx, cy + gap + 1,   1, arm), Color.White);
     }
 
-    private void DrawHUD(SpriteBatch sb)
+    public void DrawHud(SpriteBatch sb,
+        bool debugCameraMode, DVec3 cameraActualVelocity, DVec3 refVelocity, string refName,
+        SpaceSimulation.ShipSnapshot? shipSnap, double gameTimeSeconds,
+        bool uiMouseMode, FlightMode hyperspaceMode, double cameraMoveSpeedMs)
     {
         int bottom = _gd.Viewport.Height;
 
         // Relative speed — velocity relative to the reference frame object.
         // Debug mode: camera position delta / dt vs reference.
         // Ship mode: simulation velocity vs reference.
-        DVec3 movingVel = _debugCameraMode
-            ? _cameraActualVelocity
-            : _frameShipSnap?.Velocity ?? DVec3.Zero;
-        double relSpeedMs = (movingVel - _refVelocity).Length;
+        DVec3 movingVel = debugCameraMode
+            ? cameraActualVelocity
+            : shipSnap?.Velocity ?? DVec3.Zero;
+        double relSpeedMs = (movingVel - refVelocity).Length;
 
-        if (_debugCameraMode)
+        if (debugCameraMode)
         {
-            DrawText(sb, $"Set: {Units.FormatSpeed(_camera.MoveSpeedMs)}",
+            SpritePrimitives.DrawText(sb, _font, $"Set: {Units.FormatSpeed(cameraMoveSpeedMs)}",
                 new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
         }
         else
         {
-            var snap = _frameShipSnap;
+            var snap = shipSnap;
             if (snap != null)
             {
                 // Hyperspace modes are driven locally, not by the sim snapshot
-                var displayMode = _hyperspace.Mode is FlightMode.EnteringFlatHyperspace
+                var displayMode = hyperspaceMode is FlightMode.EnteringFlatHyperspace
                                            or FlightMode.FlatHyperspace
-                    ? _hyperspace.Mode
+                    ? hyperspaceMode
                     : snap.FlightMode;
                 string modeName = displayMode switch
                 {
@@ -96,41 +81,41 @@ public sealed partial class SystemSpaceState
                 {
                     flightLine = $"[{modeName}]";
                 }
-                DrawText(sb, flightLine, new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
+                SpritePrimitives.DrawText(sb, _font, flightLine, new Vector2(16, bottom - 98), ColHUDDim, 0.8f);
             }
         }
 
-        DrawText(sb, $"Speed: {Units.FormatSpeed(relSpeedMs)}  (vs {_refName})",
+        SpritePrimitives.DrawText(sb, _font, $"Speed: {Units.FormatSpeed(relSpeedMs)}  (vs {refName})",
             new Vector2(16, bottom - 80), ColHUD);
 
         // Game time
-        DrawText(sb, $"T+{Units.FormatTime(_gameTimeSeconds)}", new Vector2(16, bottom - 58), ColHUDDim, 0.8f);
+        SpritePrimitives.DrawText(sb, _font, $"T+{Units.FormatTime(gameTimeSeconds)}", new Vector2(16, bottom - 58), ColHUDDim, 0.8f);
 
-        DrawAtmosPanel(sb);
+        DrawAtmosPanel(sb, shipSnap);
 
         // Controls hint — changes with mode
-        if (_uiMouseMode)
+        if (uiMouseMode)
         {
-            DrawText(sb, "UI MODE  —  TAB: return to flight",
+            SpritePrimitives.DrawText(sb, _font, "UI MODE  —  TAB: return to flight",
                 new Vector2(16, _gd.Viewport.Height - 30), new Color(80, 160, 220), 0.72f);
         }
-        else if (_debugCameraMode)
+        else if (debugCameraMode)
         {
-            DrawText(sb, "DEBUG CAM  —  Mouse: look   WASD: fwd/strafe   RF: up/down   QE: roll   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
+            SpritePrimitives.DrawText(sb, _font, "DEBUG CAM  —  Mouse: look   WASD: fwd/strafe   RF: up/down   QE: roll   Shift: fast   Ctrl: slow   F11: ship cam   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), new Color(220, 160, 80), 0.72f);
         }
         else
         {
-            DrawText(sb, "Mouse: look   WASD: fwd/strafe   QE: roll   RF: up/down   M: system map   N: galaxy map   F11: debug   TAB: UI",
+            SpritePrimitives.DrawText(sb, _font, "Mouse: look   WASD: fwd/strafe   QE: roll   RF: up/down   M: system map   N: galaxy map   F11: debug   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
         }
     }
 
     // ── Ground radar panel (atmosphere-only) ──────────────────────────────────
 
-    private void DrawAtmosPanel(SpriteBatch sb)
+    private void DrawAtmosPanel(SpriteBatch sb, SpaceSimulation.ShipSnapshot? shipSnap)
     {
-        if (_frameShipSnap?.FlightMode is not (FlightMode.AtmosphericNewtonian or FlightMode.AtmosphericSlipstream)) return;
+        if (shipSnap?.FlightMode is not (FlightMode.AtmosphericNewtonian or FlightMode.AtmosphericSlipstream)) return;
 
         string altStr  = _pcAlt < 10_000.0
             ? $"{_pcAlt:N0} m"
@@ -165,16 +150,22 @@ public sealed partial class SystemSpaceState
         ];
 
         var bgRect = new Rectangle(x - 6, y - 4, ColW + 10, rows.Length * LineH + 8);
-        DrawRect(sb, bgRect, new Color(8, 12, 25, 190));
-        DrawRectBorder(sb, bgRect, ColBorder);
+        SpritePrimitives.DrawRect(sb, _pixel, bgRect, new Color(8, 12, 25, 190));
+        SpritePrimitives.DrawRectBorder(sb, _pixel, bgRect, ColBorder);
 
         for (int i = 0; i < rows.Length; i++)
         {
             int ly = y + i * LineH;
-            DrawText(sb, rows[i].label, new Vector2(x, ly), ColHUDDim, S);
+            SpritePrimitives.DrawText(sb, _font, rows[i].label, new Vector2(x, ly), ColHUDDim, S);
             // Right-align value
             Vector2 valSize = FontHelper.Measure(_font, rows[i].value, S);
-            DrawText(sb, rows[i].value, new Vector2(x + ColW - valSize.X, ly), rows[i].color, S);
+            SpritePrimitives.DrawText(sb, _font, rows[i].value, new Vector2(x + ColW - valSize.X, ly), rows[i].color, S);
         }
+    }
+
+    public void DrawHudAlert(SpriteBatch sb)
+    {
+        if (_ui == null) return;
+        _hudAlert.Draw(sb, _ui.Renderer, _font, _gd.Viewport.Width, _gd.Viewport.Height);
     }
 }
