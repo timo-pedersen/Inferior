@@ -85,7 +85,7 @@ public sealed partial class SystemSpaceState
     // Draws the hover label and locked-star ring in UI mode.
     private void DrawSkyboxStarOverlay(SpriteBatch sb)
     {
-        if (_hyperMode is FlightMode.FlatHyperspace) return;  // no skybox in hyperspace
+        if (_hyperspace.Mode is FlightMode.FlatHyperspace) return;  // no skybox in hyperspace
         var  viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
         int  w        = _gd.Viewport.Width;
         int  h        = _gd.Viewport.Height;
@@ -204,7 +204,7 @@ public sealed partial class SystemSpaceState
 
     private void DrawSkybox()
     {
-        if (_hyperMode is FlightMode.FlatHyperspace) return;  // sheets replace the skybox
+        if (_hyperspace.Mode is FlightMode.FlatHyperspace) return;  // sheets replace the skybox
         if (_skyboxPoints.Length == 0 && _skyboxGlowVerts.Length == 0) return;
 
         _gd.RasterizerState = RasterizerState.CullNone;

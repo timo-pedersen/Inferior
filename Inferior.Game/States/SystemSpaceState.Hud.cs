@@ -65,9 +65,9 @@ public sealed partial class SystemSpaceState
             if (snap != null)
             {
                 // Hyperspace modes are driven locally, not by the sim snapshot
-                var displayMode = _hyperMode is FlightMode.EnteringFlatHyperspace
+                var displayMode = _hyperspace.Mode is FlightMode.EnteringFlatHyperspace
                                            or FlightMode.FlatHyperspace
-                    ? _hyperMode
+                    ? _hyperspace.Mode
                     : snap.FlightMode;
                 string modeName = displayMode switch
                 {

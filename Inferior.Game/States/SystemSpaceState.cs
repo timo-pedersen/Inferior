@@ -217,19 +217,7 @@ public sealed partial class SystemSpaceState : GameState
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
 
     // ── Flat Hyperspace ───────────────────────────────────────────────────────
-    // Hyperspace is driven entirely from SystemSpaceState — the sim is frozen at PlayerInput.Zero.
-    private HyperspacePlane?          _hyperPlane;
-    private DVec3                     _hyperGalPos;      // player position in galactic ly (moves each tick)
-    private DVec3                     _hyperForward;     // current travel direction (unit vector, in-plane)
-    private IHyperspaceSheetRenderer? _sheetRenderer;
-    private FlightMode                _hyperMode = FlightMode.SystemNewtonian;  // local hyperspace state
-
-    // Preamble state machine
-    private HyperPreamblePhase _preamblePhase;
-    private double             _preambleTimer;   // seconds into current phase
-    private double             _dotBrightness;   // 0..1 — dot fade-in progress
-    private double             _lineProgress;    // 0..1 — line spread progress
-    private double             _sheetsProgress;  // 0..1 — sheet spread progress
+    private FlatHyperspaceController _hyperspace = null!;
 
     // Ship snapshot captured once at the top of Update() — all sub-systems use this
     // single consistent value so no two decisions in the same frame see different positions.
@@ -480,6 +468,8 @@ public sealed partial class SystemSpaceState : GameState
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
+
+        _hyperspace = new FlatHyperspaceController(_gd, _pixel, _simulation, _targeting, EnterSystem);
 
         _starGlowTex = CreateStarGlowTexture(_gd, 128);
         _navGlowTex  = CreateNavGlowTexture(_gd, 64);
@@ -1054,7 +1044,7 @@ public sealed partial class SystemSpaceState : GameState
             _simulation.SetInput(PlayerInput.Zero);
             if (IsGameActive) Mouse.SetPosition(dcx, dcy);
         }
-        else if (_hyperMode is FlightMode.EnteringFlatHyperspace or FlightMode.FlatHyperspace)
+        else if (_hyperspace.Mode is FlightMode.EnteringFlatHyperspace or FlightMode.FlatHyperspace)
         {
             // Hyperspace — sim is frozen; camera is driven directly by UpdateEnteringHyperspace /
             // UpdateFlatHyperspace. Do NOT let ship-follow overwrite the camera pose here.
@@ -1151,8 +1141,8 @@ public sealed partial class SystemSpaceState : GameState
         // Update targeting system with pre-computed galaxy-space positions.
         // In FlatHyperspace use the actual galactic player position so distance/direction updates.
         DVec3 shipPosForTargeting = _frameShipSnap?.Position ?? _camera.UniversePosition;
-        DVec3 galPosForTargeting  = _hyperMode is FlightMode.FlatHyperspace
-                                    ? _hyperGalPos
+        DVec3 galPosForTargeting  = _hyperspace.Mode is FlightMode.FlatHyperspace
+                                    ? _hyperspace.GalacticPosition
                                     : _star.GalacticPos;
         _targeting.Update(shipPosForTargeting, galPosForTargeting, _bodyPositions, _stationPositions);
         UpdatePadTargetPosition();
@@ -1197,10 +1187,7 @@ public sealed partial class SystemSpaceState : GameState
             HandleKeyboard(keys, mouse);
 
         // Flat hyperspace update runs every tick regardless of UI mode
-        if (_hyperMode == FlightMode.EnteringFlatHyperspace)
-            UpdateEnteringHyperspace(dt, keys);
-        else if (_hyperMode == FlightMode.FlatHyperspace)
-            UpdateFlatHyperspace(dt, lookMouse);
+        _hyperspace.Update(dt, lookMouse, _camera, _star, _frameShipSnap);
 
         var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
         _hudAlert.Update(dt);
@@ -1295,15 +1282,14 @@ public sealed partial class SystemSpaceState : GameState
         gd.DepthStencilState = DepthStencilState.None;
 
         // Hyperspace sheets — drawn between 3D scene and 2D HUD so they sit behind text
-        if (_hyperMode is FlightMode.EnteringFlatHyperspace or FlightMode.FlatHyperspace)
-            _sheetRenderer?.Draw(_gd, _camera, (float)_sheetsProgress, GetPlaneBasis());
+        _hyperspace.DrawSheets(_gd, _camera);
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         DrawHUD(sb);
         DrawStationDots(sb);
         DrawTargetingHUD(sb);
         DrawSkyboxStarOverlay(sb);
-        DrawHyperspaceOverlay(sb);
+        _hyperspace.DrawOverlay(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
@@ -1338,7 +1324,7 @@ public sealed partial class SystemSpaceState : GameState
         bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
 
         if (hPressed)
-            HandleHyperspaceKey();
+            _hyperspace.HandleKey(_camera, _star, _frameShipSnap);
 
         if (cPressed)
         {

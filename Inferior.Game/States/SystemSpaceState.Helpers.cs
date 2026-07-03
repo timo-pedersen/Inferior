@@ -209,6 +209,23 @@ public sealed partial class SystemSpaceState
         _er01 * pos.X + _er11 * pos.Y + _er21 * pos.Z,
         _er02 * pos.X + _er12 * pos.Y + _er22 * pos.Z);
 
+    // Enters a different star system, re-using OnEnter logic without a full state transition.
+    private void EnterSystem(Star star, DVec3 spawnPos, Quaternion spawnOri, FlightMode mode)
+    {
+        _star   = star;
+        _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+        _eclipticRotation = Matrix.Identity;  // reset until proper ecliptic rotation is set
+
+        // Rebuild skybox for new star
+        (_skyboxPoints, _skyboxGlowVerts, _targetableStars) = BuildSkybox(_star, GalaxyGenerator.Generate());
+
+        _camera.SetPose(spawnPos, spawnOri);
+        _simulation.TeleportShip(spawnPos, spawnOri);
+        _simulation.SetFlightMode(mode);
+
+        DataBus.System.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
+    }
+
     // ── Near clip ─────────────────────────────────────────────────────────────
 
     // Near clip is proportional to the distance from the camera to the nearest station surface.
