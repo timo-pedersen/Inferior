@@ -145,7 +145,6 @@ public sealed partial class SystemSpaceState : GameState
     private AnalogueNeedle?  _connectorNeedle;
     private InstrumentMeter? _shieldCapacitorMeter;
     private ToggleButton?    _shieldToggleButton;
-    private Action<double>?  _shieldCapacitorHandler;
     private SystemConsole?   _console;
     private DirectionBall?   _systemDirBall;
     private DirectionBall?   _cockpitDirBall;
@@ -153,22 +152,15 @@ public sealed partial class SystemSpaceState : GameState
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
     private CockpitRail?     _cockpitRail;
-    // Stored so we can unsubscribe on OnExit
-    private Action<SystemMessage>? _systemHandler;
+    // Disposed as a batch in OnExit — see BusSubscription<T>
+    private readonly List<IDisposable> _subscriptions = new();
     private HudAlertDisplay        _hudAlert = new();
     private LedIndicator?          _stopLed;
     private LedIndicator?          _warnLed;
-    private Action<double>?       _gravDirXHandler;
-    private Action<double>?       _gravDirYHandler;
-    private Action<double>?       _gravDirZHandler;
     private double                _gravDirX, _gravDirY, _gravDirZ;
 
     // ── Ground radar (atmosphere-only instrument panel) ───────────────────────
-    private Action<double>? _pcAltHandler, _pcVsHandler, _pcLatHandler,
-                            _pcLonHandler, _pcHdgHandler, _pcGsHandler, _pcTempHandler, _pcPressHandler;
     private double _pcAlt, _pcVs, _pcLat, _pcLon, _pcHdg, _pcGs, _pcTemp, _pcPress;
-    private Action<RadarContact>? _radarContactHandler;
-    private Action<string>?       _radarLostHandler;
 
     // ── Targeting ─────────────────────────────────────────────────────────────
     private readonly TargetingSystem _targeting       = new();
@@ -655,14 +647,14 @@ public sealed partial class SystemSpaceState : GameState
             _shield.PowerOn = on;
         };
 
-        _shieldCapacitorHandler = fill =>
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            $"Shield.{Topics.Shield.Capacitor}", fill =>
         {
             if (_shieldToggleButton == null) return;
             _shieldToggleButton.IsConfirmed = fill >= 1.0 ? true
                                             : fill <= 0.0 ? false
                                             : null;
-        };
-        DataBus.Instruments.Subscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
+        }));
 
         _landingRadar = new LandingRadarPanel
         {
@@ -741,50 +733,46 @@ public sealed partial class SystemSpaceState : GameState
         ApplyUiMode(false);
 
         // Meters subscribe themselves via Topic — only non-meter handlers need wiring here
-        _systemHandler = msg =>
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            $"GravitySensor.{Topics.GravitySensor.DirectionX}", v => _gravDirX = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            $"GravitySensor.{Topics.GravitySensor.DirectionY}", v => _gravDirY = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            $"GravitySensor.{Topics.GravitySensor.DirectionZ}", v => _gravDirZ = v));
+
+        _subscriptions.Add(new BusSubscription<SystemMessage>(DataBus.System, Topics.System.All, msg =>
         {
             _console?.AddMessage(msg);
             _hudAlert.AddMessage(msg);
-        };
+        }));
 
-        _gravDirXHandler = v => _gravDirX = v;
-        _gravDirYHandler = v => _gravDirY = v;
-        _gravDirZHandler = v => _gravDirZ = v;
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.Altitude,      v => _pcAlt   = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.VerticalSpeed, v => _pcVs    = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.Latitude,      v => _pcLat   = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.Longitude,     v => _pcLon   = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.Heading,       v => _pcHdg   = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.GroundSpeed,   v => _pcGs    = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.Temperature,   v => _pcTemp  = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+            Topics.PlanetCoord.Pressure,      v => _pcPress = v));
 
-        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
-        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionY}", _gravDirYHandler);
-        DataBus.Instruments.Subscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
-        DataBus.System.Subscribe(Topics.System.All, _systemHandler);
-
-        _pcAltHandler   = v => _pcAlt   = v;
-        _pcVsHandler    = v => _pcVs    = v;
-        _pcLatHandler   = v => _pcLat   = v;
-        _pcLonHandler  = v => _pcLon  = v;
-        _pcHdgHandler  = v => _pcHdg  = v;
-        _pcGsHandler   = v => _pcGs   = v;
-        _pcTempHandler  = v => _pcTemp  = v;
-        _pcPressHandler = v => _pcPress = v;
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Altitude,      _pcAltHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.VerticalSpeed, _pcVsHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Latitude,      _pcLatHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Longitude,     _pcLonHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Heading,       _pcHdgHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.GroundSpeed,   _pcGsHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Temperature,   _pcTempHandler);
-        DataBus.Instruments.Subscribe(Topics.PlanetCoord.Pressure,      _pcPressHandler);
-
-        _radarContactHandler = c =>
+        _subscriptions.Add(new BusSubscription<RadarContact>(DataBus.Radar, Topics.Radar.All, c =>
         {
             _targeting.OnContactUpdated(c);
             UpdateCockpitDirBallContact(c);
-        };
-        _radarLostHandler = id =>
+        }));
+        _subscriptions.Add(new BusSubscription<string>(DataBus.RadarLost, Topics.Radar.All, id =>
         {
             _targeting.OnContactLost(id);
             _cockpitDirBall?.RemoveVector($"radar_{id}");
-        };
-        DataBus.Radar.Subscribe(Topics.Radar.All,     _radarContactHandler);
-        DataBus.RadarLost.Subscribe(Topics.Radar.All, _radarLostHandler);
+        }));
 
         _stopLed = new LedIndicator(
             Topics.Flight.XStopActive,
@@ -854,28 +842,8 @@ public sealed partial class SystemSpaceState : GameState
         if (_atmPressureMeter        != null) _atmPressureMeter.Topic        = "";
         if (_spectrumGraph           != null) _spectrumGraph.Topic           = "";
 
-        if (_gravDirXHandler != null)
-            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionX}", _gravDirXHandler);
-        if (_gravDirYHandler != null)
-            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionY}", _gravDirYHandler);
-        if (_gravDirZHandler != null)
-            DataBus.Instruments.Unsubscribe($"GravitySensor.{Topics.GravitySensor.DirectionZ}", _gravDirZHandler);
-        if (_systemHandler != null)
-            DataBus.System.Unsubscribe(Topics.System.All, _systemHandler);
-        if (_radarContactHandler != null)
-            DataBus.Radar.Unsubscribe(Topics.Radar.All, _radarContactHandler);
-        if (_radarLostHandler != null)
-            DataBus.RadarLost.Unsubscribe(Topics.Radar.All, _radarLostHandler);
-        if (_shieldCapacitorHandler != null)
-            DataBus.Instruments.Unsubscribe($"Shield.{Topics.Shield.Capacitor}", _shieldCapacitorHandler);
-        if (_pcAltHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Altitude,      _pcAltHandler);
-        if (_pcVsHandler   != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.VerticalSpeed, _pcVsHandler);
-        if (_pcLatHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Latitude,      _pcLatHandler);
-        if (_pcLonHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Longitude,     _pcLonHandler);
-        if (_pcHdgHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Heading,       _pcHdgHandler);
-        if (_pcGsHandler   != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.GroundSpeed,   _pcGsHandler);
-        if (_pcTempHandler  != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Temperature, _pcTempHandler);
-        if (_pcPressHandler != null) DataBus.Instruments.Unsubscribe(Topics.PlanetCoord.Pressure,    _pcPressHandler);
+        foreach (var sub in _subscriptions) sub.Dispose();
+        _subscriptions.Clear();
 
         // Remove all radar contacts fed from this session so TargetingSystem is clean on re-entry
         foreach (string id in _radarContactIds)
