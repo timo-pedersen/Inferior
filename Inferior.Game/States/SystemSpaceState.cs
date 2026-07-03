@@ -72,21 +72,12 @@ public sealed partial class SystemSpaceState : GameState
     private double _er10, _er11 = 1, _er12;
     private double _er20, _er21, _er22 = 1;
 
-    private VertexBuffer _sphereVb = null!;
-    private IndexBuffer  _sphereIb = null!;
-    private int          _sphereTriCount;
-
-    // Reusable ring vertex array — rebuilt each frame per orbit
-    private VertexPositionColor[] _ringVerts = null!;
-
-    // Reused per glow billboard draw — avoids per-frame allocation
-    private VertexPositionColorTexture[] _glowVerts      = new VertexPositionColorTexture[6];
-    // Reused per atmosphere billboard draw — 6 verts (2 triangles)
-    private VertexPositionTexture[]      _atmosQuadVerts = new VertexPositionTexture[6];
+    // ── Celestial body rendering ──────────────────────────────────────────────
+    private RingPrimitive         _ringPrimitive    = null!;
+    private CelestialBodyRenderer _celestialBodies  = null!;
 
     // Skybox star field — built once on enter, static for the session
-    private VertexPositionColor[]       _skyboxPoints    = [];  // PointList — one vertex per star
-    private VertexPositionColor[]       _skyboxGlowVerts = [];  // TriangleList — tiny quads for bright/near stars
+    private SkyboxRenderer              _skyboxRenderer  = null!;
     private (Vector3 pos, Star star)[]  _targetableStars = [];  // stars ≤1000 ly — hittable from cursor
 
     // Skybox targeting state
@@ -96,7 +87,6 @@ public sealed partial class SystemSpaceState : GameState
 
     // ── 2D overlay (SpriteBatch for HUD) ──────────────────────────────────────
     private Texture2D _pixel       = null!;
-    private Texture2D _starGlowTex = null!;  // soft radial gradient — reused for all glow layers
     private Texture2D _navGlowTex  = null!;  // cubic-falloff radial gradient for nav/strobe light glow
 
     // ── Time ──────────────────────────────────────────────────────────────────
@@ -117,8 +107,6 @@ public sealed partial class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
     // GPU-side hull meshes (VertexPositionNormalTexture) for real-time BasicEffect lighting.
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
-    // Per-planet checkerboard sphere meshes (VertexPositionColor, pre-baked lighting)
-    private readonly Dictionary<OrbitalBody, (VertexBuffer vb, IndexBuffer ib, int triCount)> _planetSpheres = [];
 
     // ── Container rendering ───────────────────────────────────────────────────
     // One shared mesh (all containers identical geometry; colour from lock grade per draw call).
@@ -202,18 +190,8 @@ public sealed partial class SystemSpaceState : GameState
 
     public override bool WantsCursor => _uiMouseMode;
 
-    // ── Visual constants ──────────────────────────────────────────────────────
-    // Visual radii in render units (NOT true physical radius — inflated for visibility)
-    private const float StarVisualRadius = 8f;
-    // Minimum apparent star size in screen pixels — keeps the star visible at any distance
-    private const float StarMinPixels         = 1f;
-    // Planets: minimum pixel size within boost range, then allowed to shrink and vanish
-    private const float PlanetMinPixels       = 1f;
-    private const float PlanetMaxBoostDist    = 4500f; // ~30 AU — no boost beyond this
-
     // Colours
     private static readonly Color ColBackground = new(4, 4, 12);
-    private static readonly Color ColOrbitRing  = new(25, 35, 55, 180);
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -343,17 +321,6 @@ public sealed partial class SystemSpaceState : GameState
         _effect.DirectionalLight1.Enabled = false;
         _effect.DirectionalLight2.Enabled = false;
 
-        // Shared sphere mesh for moons/asteroids (no PlanetData)
-        var (vb, ib) = MeshFactory.CreateSphere(_gd, rings: 24, segments: 24);
-        _sphereVb        = vb;
-        _sphereIb        = ib;
-        _sphereTriCount  = 24 * 24 * 2;
-
-        // Per-planet checkerboard sphere meshes
-        foreach (var planet in _system.Planets)
-            if (planet.Planet != null)
-                _planetSpheres[planet] = BuildPlanetSphere(planet);
-
         // Container renderer and shared mesh (one geometry; colour from lock grade per draw call)
         _meshRenderer = new MeshRenderer(_gd);
         (_containerVb, _containerIb) = BuildContainerMesh(_gd);
@@ -366,8 +333,8 @@ public sealed partial class SystemSpaceState : GameState
         _thirdPersonMode  = false;
         _tpCamPosValid    = false;
 
-        // Ring vertices reused per orbit ring
-        _ringVerts = MeshFactory.CreateRingVertices(128);
+        // Ring primitive reused for both orbit rings and station orbit rings
+        _ringPrimitive = new RingPrimitive();
 
         StationTextureRegistry.Initialize(_gd);
 
@@ -423,16 +390,21 @@ public sealed partial class SystemSpaceState : GameState
         _prevCameraPosValid = false;
 
         // Skybox — galaxy stars projected onto a far sphere around the current system
-        (_skyboxPoints, _skyboxGlowVerts, _targetableStars) = BuildSkybox(_star, GalaxyGenerator.Generate());
+        _skyboxRenderer = new SkyboxRenderer(_gd, _effect);
+        var (skyPoints, skyGlow, targetable) = SkyboxRenderer.Build(_star, GalaxyGenerator.Generate());
+        _skyboxRenderer.Load(skyPoints, skyGlow);
+        _targetableStars = targetable;
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
 
         _hyperspace = new FlatHyperspaceController(_gd, _pixel, _simulation, _targeting, EnterSystem);
 
-        _starGlowTex = CreateStarGlowTexture(_gd, 128);
         _navGlowTex  = CreateNavGlowTexture(_gd, 64);
         _atmosEffect = _content.Load<Effect>("Effects/Atmosphere");
+
+        _celestialBodies = new CelestialBodyRenderer(_gd, _effect, _atmosEffect,
+            _ringPrimitive, EclipticToGalaxy, _system);
 
         _pendingTransition = null;
         UpdateUI();
@@ -484,17 +456,15 @@ public sealed partial class SystemSpaceState : GameState
             _targeting.OnContactLost(id);
         _radarContactIds.Clear();
 
+        _celestialBodies?.Dispose();
+
         _effect?.Dispose();
-        _sphereVb?.Dispose();
-        _sphereIb?.Dispose();
         foreach (var v in _decoMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _glassMeshes.Values)   { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _hullMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _planetSpheres.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
-        _planetSpheres.Clear();
         _testContainers.Clear();
         _meshRenderer?.Dispose();
         _meshRenderer = null;
@@ -507,7 +477,6 @@ public sealed partial class SystemSpaceState : GameState
         _shipNacelleVb = null; _shipNacelleIb = null;
         _shipPylonVb   = null; _shipPylonIb   = null;
         _pixel?.Dispose();
-        _starGlowTex?.Dispose();
         _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
     }
@@ -819,25 +788,26 @@ public sealed partial class SystemSpaceState : GameState
 
         // Pass 0 — skybox (drawn before depth buffer has any data, so geometry always wins)
         gd.DepthStencilState = DepthStencilState.None;
-        DrawSkybox();
+        if (_hyperspace.Mode is not FlightMode.FlatHyperspace)
+            _skyboxRenderer.Draw();
 
         // Pass 1 — opaque geometry (depth writes on)
         gd.BlendState        = BlendState.AlphaBlend;
         gd.DepthStencilState = DepthStencilState.Default;
-        DrawOrbitRings();
+        _celestialBodies.DrawOrbitRings(_camera, _eclipticRotation, _gameTimeSeconds);
         DrawStationOrbitRings();
 
         // Star glow — 3D billboard with depth-read so planets drawn opaque afterward
         // correctly overwrite it on their disc areas (fixes glow bleeding through planets).
         gd.BlendState        = BlendState.Additive;
         gd.DepthStencilState = DepthStencilState.DepthRead;
-        DrawStarGlow3D();
+        _celestialBodies.DrawStarGlow(_camera, _star);
 
         gd.BlendState        = BlendState.Opaque;
         gd.DepthStencilState = DepthStencilState.Default;
-        DrawStarBody();
+        _celestialBodies.DrawStar(_camera, _star);
         foreach (var (body, pos) in _bodyPositions)
-            DrawPlanetBody(body, pos);
+            _celestialBodies.DrawPlanet(_camera, body, pos);
         DrawStations();
         DrawTestContainers();
         DrawShipMesh();
@@ -847,7 +817,7 @@ public sealed partial class SystemSpaceState : GameState
         gd.BlendState        = BlendState.AlphaBlend;
         gd.DepthStencilState = DepthStencilState.None;
         foreach (var (body, pos) in _bodyPositions)
-            DrawAtmosphere(body, pos);
+            _celestialBodies.DrawAtmosphere(_camera, body, pos);
 
         // ── 2D overlay ────────────────────────────────────────────────────────
         gd.DepthStencilState = DepthStencilState.None;

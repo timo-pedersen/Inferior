@@ -1,6 +1,7 @@
 using Inferior.Core.Math;
 using Inferior.Core.Random;
 using Inferior.Game.StationGen;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 using System.Text;
 

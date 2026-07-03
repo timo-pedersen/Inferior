@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Inferior.Core.Math;
 using Inferior.Core.Random;
 using Inferior.Galaxy;
+using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
 

@@ -217,7 +217,9 @@ public sealed partial class SystemSpaceState
         _eclipticRotation = Matrix.Identity;  // reset until proper ecliptic rotation is set
 
         // Rebuild skybox for new star
-        (_skyboxPoints, _skyboxGlowVerts, _targetableStars) = BuildSkybox(_star, GalaxyGenerator.Generate());
+        var (skyPoints, skyGlow, targetable) = SkyboxRenderer.Build(_star, GalaxyGenerator.Generate());
+        _skyboxRenderer.Load(skyPoints, skyGlow);
+        _targetableStars = targetable;
 
         _camera.SetPose(spawnPos, spawnOri);
         _simulation.TeleportShip(spawnPos, spawnOri);

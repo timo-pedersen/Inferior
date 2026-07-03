@@ -261,7 +261,7 @@ public sealed partial class SystemSpaceState
             _effect.World = Matrix.CreateScale(ringR)
                           * _eclipticRotation
                           * Matrix.CreateTranslation(parentRender);
-            DrawRingRaw(ringColor);
+            _ringPrimitive.Draw(_gd, _effect, ringColor);
         }
 
         _effect.VertexColorEnabled = false;

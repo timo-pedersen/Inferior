@@ -1,6 +1,6 @@
 using Microsoft.Xna.Framework;
 
-namespace Inferior.Game;
+namespace Inferior.Rendering;
 
 /// <summary>
 /// Scene-level directional light parameters shared by all 3D rendering passes.
