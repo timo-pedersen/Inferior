@@ -32,7 +32,7 @@ public sealed partial class SystemSpaceState
             || _containerVb == null || _containerIb == null) return;
 
         float  rs   = (float)Camera3D.RenderScale;
-        Matrix view = _camera.ViewMatrix;
+        Matrix view = _effect.View;
         Matrix proj = _camera.ProjectionMatrix;
 
         foreach (var tc in _testContainers)

@@ -563,7 +563,7 @@ public sealed partial class SystemSpaceState : GameState
             _uiCursorScreen = new Vector2(mouse.X, mouse.Y);
 
             // Skybox star hover — find nearest targetable star under cursor each frame
-            var uiVp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+            var uiVp = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
             UpdateSkyboxHover(_uiCursorScreen, uiVp);
 
             // Click-to-target — left click selects the nearest radar contact bracket,
@@ -829,7 +829,7 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.DrawHud(sb, _debugCameraMode, _cameraActualVelocity, _refVelocity, _refName,
             _frameShipSnap, _gameTimeSeconds, _uiMouseMode, _hyperspace.Mode, _camera.MoveSpeedMs);
         DrawStationDots(sb);
-        _cockpitUI.DrawTargetingHud(sb, _camera, _padWorldPos, _padDistance);
+        _cockpitUI.DrawTargetingHud(sb, _camera, _effect.View, _padWorldPos, _padDistance);
         DrawSkyboxStarOverlay(sb);
         _hyperspace.DrawOverlay(sb);
         sb.End();
@@ -867,7 +867,7 @@ public sealed partial class SystemSpaceState : GameState
 
         if (cPressed)
         {
-            var vp = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+            var vp = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
             _targeting.SelectClosestToReticle(vp, _gd.Viewport);
         }
 

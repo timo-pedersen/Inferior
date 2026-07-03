@@ -274,7 +274,7 @@ public sealed partial class SystemSpaceState
     {
         const float MaxDistRU = 1.0f;   // 1 million km → 1.0 render unit
 
-        var viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+        var viewProj = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
         int w = _gd.Viewport.Width;
         int h = _gd.Viewport.Height;
 
@@ -300,7 +300,7 @@ public sealed partial class SystemSpaceState
     {
         if (_stationPositions.Count == 0) return;
 
-        Matrix   viewProj  = _camera.ViewMatrix * _camera.ProjectionMatrix;
+        Matrix   viewProj  = _effect.View * _camera.ProjectionMatrix;
         Viewport viewport  = _gd.Viewport;
         Vector2  texCentre = new(_navGlowTex.Width * 0.5f, _navGlowTex.Height * 0.5f);
 

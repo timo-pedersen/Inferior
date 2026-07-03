@@ -147,9 +147,10 @@ public sealed partial class CockpitUI
         }
     }
 
-    public void DrawTargetingHud(SpriteBatch sb, Camera3D camera, DVec3 padWorldPos, double padDistance)
+    public void DrawTargetingHud(SpriteBatch sb, Camera3D camera, Matrix currentView,
+        DVec3 padWorldPos, double padDistance)
     {
-        var vp       = Matrix.Multiply(camera.ViewMatrix, camera.ProjectionMatrix);
+        var vp       = Matrix.Multiply(currentView, camera.ProjectionMatrix);
         var viewport = _gd.Viewport;
 
         // Station / body contacts

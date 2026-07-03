@@ -58,7 +58,7 @@ public sealed partial class SystemSpaceState
     private void DrawSkyboxStarOverlay(SpriteBatch sb)
     {
         if (_hyperspace.Mode is FlightMode.FlatHyperspace) return;  // no skybox in hyperspace
-        var  viewProj = Matrix.Multiply(_camera.ViewMatrix, _camera.ProjectionMatrix);
+        var  viewProj = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
         int  w        = _gd.Viewport.Width;
         int  h        = _gd.Viewport.Height;
         var  hypColor = new Color(80, 160, 255);  // matches dirball "hyp" colour

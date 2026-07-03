@@ -37,7 +37,7 @@ public sealed partial class SystemSpaceState
 
         float   rs        = (float)Camera3D.RenderScale;
         Vector3 renderPos = _camera.ToRenderSpace(_frameShipSnap.Position);
-        Matrix  view      = _camera.ViewMatrix;
+        Matrix  view      = _effect.View;
         Matrix  proj      = _camera.ProjectionMatrix;
 
         // RotationY(PI) maps the model's +Z-forward nose to the ship's -Z-forward convention.

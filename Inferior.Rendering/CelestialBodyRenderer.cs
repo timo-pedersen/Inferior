@@ -283,7 +283,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         _atmosQuadVerts[4] = new(br, Vector2.Zero);
         _atmosQuadVerts[5] = new(bl, Vector2.Zero);
 
-        _atmosEffect.Parameters["ViewProjection"].SetValue(camera.ViewMatrix * camera.ProjectionMatrix);
+        _atmosEffect.Parameters["ViewProjection"].SetValue(_effect.View * _effect.Projection);
         _atmosEffect.Parameters["PlanetCenter"].SetValue(renderPos);
         _atmosEffect.Parameters["PlanetRadius"].SetValue(planetRadius * 0.98f); // slight inset to close gap at limb
         _atmosEffect.Parameters["AtmosRadius"].SetValue(shaderAtmosRadius);
