@@ -219,6 +219,7 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | File | Where | Purpose |
 |---|---|---|
 | `inferior-current-state.md` | docs-claude | This file — active state, conventions, next steps |
+| `inferior-architecture-map-claude.md` | docs-claude | Flat one-line-per-file map of every project — "where do I look for X?" |
 | `inferior-design-claude.md` | docs-claude | Design decisions, philosophy, all major systems |
 | `inferior-lore-claude.md` | docs-claude | Lore reference — bands, species, drive, materials |
 | `inferior-components-claude.md` | docs-claude | Component specs, properties, units |
