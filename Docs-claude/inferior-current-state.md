@@ -46,8 +46,18 @@
 | **Checkerboard planet sphere** | ✓ Done | Per-planet `VertexPositionColor` sphere (128×64 segments) built in `BuildPlanetSphere()`; 5°×5° cells with type-specific colour pairs (7 `PlanetType`s); pole caps; equator stripe; pre-baked directional lighting; rotates via `body.Orientation`. |
 | **GeometryBuilder** | ✓ Done | `Inferior.Rendering/GeometryBuilder.cs`; `AddConvexFace` / `AddFace(outwardNormal)`; winding auto-corrected from centroid or explicit normal; `BuildDynamic` (VertexPositionNormalTexture, flat normals) and `BuildBaked` (VertexPositionColor). |
 | **MeshRenderer** | ✓ Done | `Inferior.Rendering/MeshRenderer.cs`; `DrawBaked` (VertexPositionColorTexture, no lighting) and `DrawDynamic` (VertexPositionNormalTexture, BasicEffect star light); explicit `CullCounterClockwiseFace`. |
-| **Container rendering** | ✓ Done | Single shared chamfered-box mesh (2.5×2.5×6 m, 0.1 m chamfer) via `GeometryBuilder`; per-lock-grade colour at draw time; seeded angular velocity tumble updated per frame; drawn through `MeshRenderer.DrawDynamic`. |
-| **Type-1 ship hull** | ✓ Done | 31-face hull + hex nacelles + pylons; dynamic lighting; third-person camera (F3) |
+| **Container rendering (debug only)** | ✓ Done, known gap | Single shared chamfered-box mesh (2.5×2.5×6 m, 0.1 m chamfer) via `GeometryBuilder`; flat per-lock-grade colour at draw time, no texture or name markings; seeded angular velocity tumble; drawn through `MeshRenderer.DrawDynamic`. Never connected to the real `ShippingContainer`/`ShippingContainerFactory` domain model (`Inferior.Game/Containers/`) — investigation not started. |
+| **Type-1 ship hull** | ✓ Done | 31-face hull + hex nacelles + pylons; dynamic lighting; third-person camera (F3); drawing owned by `ShipMeshRenderer` (`Inferior.Rendering`) |
+| **`SystemSpaceState` file structure** | ✓ Done | Split into a `partial class` across `Inferior.Game/States/`: primary `SystemSpaceState.cs` (fields, ctor, `OnEnter`/`OnExit`/`OnResize`/`Update`/`Draw`/`HandleKeyboard`) plus `.Stations.cs`, `.CelestialBodies.cs` (now nearly empty — one Stations-owned texture helper left), `.Skybox.cs`, `.Ship.cs`, `.Targeting.cs`, `.Helpers.cs`, `.DebugContainers.cs`. `.Hyperspace.cs`/`.Hud.cs` were deleted once their contents fully moved to `FlatHyperspaceController`/`CockpitUI`. |
+| **`FlatHyperspaceController`** | ✓ Done | `Inferior.Game/Hyperspace/`, alongside `HyperspacePlane`/`FlatHyperspaceConstants`/`IHyperspaceSheetRenderer`; owns flat-hyperspace flight (preamble alignment, travel, drop-out, overlay); `Camera3D`/`Star`/ship snapshot always passed per-call, never stored (camera can be reassigned via debug Home-key reset); `EnterSystem` world/skybox swap stays on `SystemSpaceState`, handed in as an `Action<Star, DVec3, Quaternion, FlightMode>` callback. |
+| **`BusSubscription<T>`** | ✓ Done | `Inferior.Core/DataBus/`; `IDisposable` wrapper pairing one `Bus<T>` subscribe/unsubscribe, so subscriptions collect into a `List<IDisposable>` and tear down in one loop instead of 15 hand-paired named fields. 3 of the 15 (gravity direction X/Y/Z) stayed on `SystemSpaceState` since `UpdateReferenceFrame` needs them too. |
+| **`CockpitUI`** | ✓ Done | `Inferior.Game/UI/`, alongside `DriveInstrumentPanel`/`RadarDisplay`/`LandingRadarPanel`/`DockingInstrument`/`CockpitRail`/`HudAlertDisplay`/`LedIndicator`/`SpectrumGraph`; owns the entire cockpit instrument/HUD tree (`UIManager`, panels, meters, dir-balls, radar displays), split into `.cs`/`.DirectionBalls.cs`/`.Targeting.cs`/`.Hud.cs`; takes borrowed deps plus `galaxyToEcliptic`/`onShieldToggle` callbacks rather than owning coordinate-transform/shield knowledge. `FeedRadarContacts`/`UpdatePadTargetPosition` stay on `SystemSpaceState`, calling `CockpitUI.NotifyRadarContact`/`NotifyRadarContactLost` where they need the cockpit direction ball. |
+| **`SpritePrimitives`** | ✓ Done | `Inferior.UI`; `DrawText`/`DrawRect`/`DrawRectBorder` promoted out of per-state duplicates into one shared static helper; used by `CockpitUI` and `SystemSpaceState.Helpers.cs`. |
+| **`CelestialBodyRenderer`** | ✓ Done, known gap | `Inferior.Rendering`; owns star/planet body+glow+atmosphere drawing, orbit rings, and the underlying sphere/glow/atmosphere GPU meshes. Its planet-sphere lighting bake needed `SceneLighting`, which moved from `Inferior.Game` down to `Inferior.Rendering` as part of this extraction (`Inferior.Rendering` can't reference `Inferior.Game`). `Dispose()` now frees per-planet sphere buffers on `OnExit` — previously leaked, accumulating for every system visited in a play session. **Known gap, not fixed:** mid-session `EnterSystem` (hyperspace dropout into a different system) doesn't rebuild planet spheres or station geometry; pre-existing, deliberately left open. |
+| **`RingPrimitive`** | ✓ Done | `Inferior.Rendering`; small shared ring-mesh utility extracted from the old local ring-draw methods; used by both `CelestialBodyRenderer` (planet/moon orbit rings) and `SystemSpaceState.Stations.cs` (station orbit rings, which build their own compound world matrix first and need the plain draw overload, not a scale-only one). |
+| **`SkyboxRenderer`** | ✓ Done | `Inferior.Rendering`; `Build` (static)/`Load`/`Draw`; `Load` runs from both `OnEnter` and `EnterSystem`, so — unlike `CelestialBodyRenderer` above — the skybox correctly rebuilds on a mid-session system change. Star-hover/click targeting logic and `_targetableStars` stay on `SystemSpaceState`; the hyperspace-mode draw guard moved to the `SystemSpaceState.Draw()` call site since `Inferior.Rendering` can't see `Inferior.Game.Hyperspace`. |
+| **`ShipMeshRenderer`** | ✓ Done | `Inferior.Rendering`; owns the ship hull/nacelle/pylon meshes (via `Type1HullFactory`) and their drawing; shares the single `MeshRenderer` instance with debug test containers (borrowed via constructor, not owned — `SystemSpaceState` still disposes it). `Draw` takes the already-rolled view matrix as an explicit parameter to preserve the clunk-roll fix below. Camera-control/spawn-orientation math (`UpdateThirdPersonCamera`, `QuatLookAtWithUp`, `QuatLookAt`) stays on `SystemSpaceState`. |
+| **Clunk-roll view-matrix bug** | ✓ Fixed | The gear-shift/harmonic "clunk" camera roll is applied once per frame onto the shared `BasicEffect.View`. Several call sites independently re-derived the raw, un-rolled `_camera.ViewMatrix` instead and so stayed visually fixed during a clunk: own-ship third-person mesh, debug test containers, targeting brackets (incl. containers), the locked hyperspace-target skybox ring, station dot markers, station nav-light/warning-strobe glow, planet atmosphere billboards, plus skybox star hover and "C"-key target selection. All now read the already-rolled matrix. `DrawStarGlow3D`'s behind-camera cull check was checked and confirmed not affected by roll. |
 
 ---
 
@@ -110,18 +120,17 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-1. **Flight model tuning** — runtime investigation needed for remaining Brief E1 items:
-   - Station approach: proximity scale + 20 km dropout + 400 m/s exit cap ✓
-   - Clunk: Newtonian-only, 570 ms (10-node), camera-space roll, X-STOP HUD ✓
-   - DriveInstrumentPanel (gear/speed instrument) ✓
-   - PRES row in atmo HUD ✓
-   - **Fix 3 resolved**: `Star.GetPhysicals` was multiplying stellar radius by `Units.SolarRadius` twice (`StarPhysics.StellarRadius` already returns metres). Temperatures now plausible (~200–600 K). Also fixed `altFraction` clamp in `ComputeTemperature` to `[0,1]` (was unbounded above 1 when ship is underground).
-   - **Fix 6 resolved**: `UpdateEnvironment` was accepting bodies with negative `alt` as `_nearAtmBody` (ship inside planet in ecliptic space always passes `alt < ceiling`). Added `alt >= 0` guard. Also clamped `_nearBodyAltitude` to `Math.Max(0, alt)` to prevent negative values poisoning `ComputeProximityScale` (which would give negative effective slipstream speed).
-   - **Fix 7 pending**: Verify atmo slipstream mode label and visual speed change in-game.
-   - **Atmospheric entry velocity fix**: Slipstream→atmosphere direct transition now zeroes planet-relative velocity (was carrying forward harmonic as real speed → 17 km/s). Planet dropout uses body's actual `ComputeVelocity()` not blended `GetRefVelocity()`. Drag coefficients increased 5× (Sidewinder: front 0.75, lateral 2.0; Cobra: front 1.10, lateral 2.75).
-2. **Sky rendering** — atmosphere colour gradient + haze at low altitude; pass through Atmosphere.fx in SystemSpaceState
-3. **Station text/markings pass** — station name on hull, bay numbers
-4. **Power system refinement** — heat, coolant, more components
+1. **`StationSceneRenderer` extraction** — station mesh/glow/dot rendering out of
+   `SystemSpaceState.Stations.cs` into `Inferior.Rendering`, same pattern as
+   `CelestialBodyRenderer`/`SkyboxRenderer`/`ShipMeshRenderer`.
+2. **`SpawnShip` vs. `ShipBuilder` convention** — `SpawnShip` still manually wires
+   reactor/bus/shield/heatsink/coolant directly, bypassing the documented "`ShipBuilder`
+   is the sole construction path for `Ship`" rule. Investigation in progress as of this
+   doc update; no resolution decided yet.
+3. **Debug test containers vs. `ShippingContainer`/`ShippingContainerFactory`** —
+   decide whether/how to connect the flat-colour debug containers to the real domain
+   model (see Open design decisions).
+4. **Player-editable cockpit** — design pass (see Open design decisions).
 
 ---
 
@@ -142,17 +151,27 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 ## Project structure
 
 ```
-Inferior.Core        — DVec3, Units, DataBus, CommandBus, GameClock, Noise, PlayerInput, Topics
+Inferior.Core        — DVec3, Units, DataBus, CommandBus, BusSubscription<T>, GameClock, Noise, Topics
 Inferior.Galaxy      — star/system generation, OrbitalBody, StarPhysics
-Inferior.Gameplay    — Simulation, Physics/, SensorData/, Sensors/, TargetingSystem
+Inferior.Gameplay    — Simulation, Physics/, SensorData/, Sensors/, PlayerInput
 Inferior.Persistence — ShipRecord, repositories, log (pure IO, no live objects)
-Inferior.Rendering   — Camera3D, MeshFactory
-Inferior.UI          — UIManager, UIRenderer, Theme, all controls
-Inferior.Game        — entry point, game states, SpaceSimulation, ShipBuilder, factories,
-                       StationGenerator, StationDecorator, StationModuleRegistry
+Inferior.Rendering   — Camera3D, MeshFactory, GeometryBuilder, MeshRenderer, Type1HullFactory,
+                       SceneLighting, CelestialBodyRenderer, RingPrimitive, SkyboxRenderer,
+                       ShipMeshRenderer
+Inferior.UI          — UIManager, UIRenderer, Theme, all controls, SpritePrimitives
+Inferior.Game        — entry point, game states, SpaceSimulation, TargetingSystem, ShipBuilder,
+                       factories, StationGenerator, StationDecorator, StationModuleRegistry,
+                       Hyperspace/ (FlatHyperspaceController + hyperspace sheet renderers),
+                       UI/ (CockpitUI, DriveInstrumentPanel)
 ```
 
-Dependency: `Core ← Galaxy ← Gameplay ← Persistence` and `Core ← UI`, all converging in `Game`.
+Dependency: `Core ← Galaxy ← Gameplay ← Rendering`, `Core ← Persistence`, and `Core ← UI`, all
+converging in `Game` (which also depends on `Galaxy`/`Gameplay` directly).
+
+> Corrected from the previous version of this doc: `PlayerInput` lives in `Inferior.Gameplay`
+> (not `Core`), `TargetingSystem` lives in `Inferior.Game` (not `Gameplay`), and
+> `Inferior.Persistence` only references `Inferior.Core` directly — it does not go through
+> `Galaxy`/`Gameplay`. Verified against each project's `.csproj` while updating this doc.
 
 ---
 
@@ -189,6 +208,9 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 | Planetary terrain rendering | Deferred — separate brief required |
 | Landing radar instrument | Deferred — requires design doc with sketches |
 | Atmospheric visual effects (clouds, haze, re-entry glow) | Not yet designed |
+| Formal small-object rendering strategy (ships, containers, whatever comes after) | Deferred — waiting for a second real data point beyond ships, i.e. until the debug-container-vs-`ShippingContainer` question below is answered |
+| Player-editable cockpit (runtime add/remove/edit of cockpit instruments) | Not designed — `CockpitUI`'s clean construction/lifecycle boundary was partly built in service of this, but the feature itself hasn't been designed |
+| Debug test containers vs. real `ShippingContainer`/`ShippingContainerFactory` domain model | Not investigated — debug containers render flat/untextured with no name markings and were never connected to the real model |
 
 ---
 

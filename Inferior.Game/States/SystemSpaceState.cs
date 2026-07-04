@@ -115,8 +115,7 @@ public sealed partial class SystemSpaceState : GameState
     private IndexBuffer?   _containerIb;
 
     // ── Ship mesh (three components, built once per session entry) ────────────
-    private VertexBuffer? _shipHullVb,    _shipNacelleVb,    _shipPylonVb;
-    private IndexBuffer?  _shipHullIb,    _shipNacelleIb,    _shipPylonIb;
+    private ShipMeshRenderer _shipMeshRenderer = null!;
 
     // ── UI ────────────────────────────────────────────────────────────────────
     private StateTransition? _pendingTransition;
@@ -326,10 +325,7 @@ public sealed partial class SystemSpaceState : GameState
         (_containerVb, _containerIb) = BuildContainerMesh(_gd);
 
         // Ship mesh — three components; built once per session entry on the main thread
-        var (hullMesh, nacelleMesh, pylonMesh) = Type1HullFactory.BuildAll(_gd);
-        _shipHullVb    = hullMesh.vb;    _shipHullIb    = hullMesh.ib;
-        _shipNacelleVb = nacelleMesh.vb; _shipNacelleIb = nacelleMesh.ib;
-        _shipPylonVb   = pylonMesh.vb;   _shipPylonIb   = pylonMesh.ib;
+        _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
         _thirdPersonMode  = false;
         _tpCamPosValid    = false;
 
@@ -470,12 +466,7 @@ public sealed partial class SystemSpaceState : GameState
         _meshRenderer = null;
         _containerVb?.Dispose();
         _containerIb?.Dispose();
-        _shipHullVb?.Dispose();    _shipHullIb?.Dispose();
-        _shipNacelleVb?.Dispose(); _shipNacelleIb?.Dispose();
-        _shipPylonVb?.Dispose();   _shipPylonIb?.Dispose();
-        _shipHullVb    = null; _shipHullIb    = null;
-        _shipNacelleVb = null; _shipNacelleIb = null;
-        _shipPylonVb   = null; _shipPylonIb   = null;
+        _shipMeshRenderer?.Dispose();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
@@ -810,7 +801,8 @@ public sealed partial class SystemSpaceState : GameState
             _celestialBodies.DrawPlanet(_camera, body, pos);
         DrawStations();
         DrawTestContainers();
-        DrawShipMesh();
+        if (_thirdPersonMode && _frameShipSnap != null)
+            _shipMeshRenderer.Draw(_camera, _effect.View, _frameShipSnap.Position, _frameShipSnap.Orientation);
         DrawStationGlows(sb);
 
         // Pass 2 — transparent (no depth write/read — shader ray-sphere handles visibility)

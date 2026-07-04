@@ -26,38 +26,6 @@ namespace Inferior.Game.States;
 public sealed partial class SystemSpaceState
 {
 
-    private void DrawShipMesh()
-    {
-        if (!_thirdPersonMode) return;
-        if (_frameShipSnap == null) return;
-        if (_meshRenderer == null) return;
-        if (_shipHullVb    == null || _shipHullIb    == null ||
-            _shipNacelleVb == null || _shipNacelleIb == null ||
-            _shipPylonVb   == null || _shipPylonIb   == null) return;
-
-        float   rs        = (float)Camera3D.RenderScale;
-        Vector3 renderPos = _camera.ToRenderSpace(_frameShipSnap.Position);
-        Matrix  view      = _effect.View;
-        Matrix  proj      = _camera.ProjectionMatrix;
-
-        // RotationY(PI) maps the model's +Z-forward nose to the ship's -Z-forward convention.
-        Matrix world = Matrix.CreateScale(rs)
-                     * Matrix.CreateRotationY(MathF.PI)
-                     * Matrix.CreateFromQuaternion(_frameShipSnap.Orientation)
-                     * Matrix.CreateTranslation(renderPos);
-
-        var sunCol = new Color(SceneLighting.SunColour);
-        _meshRenderer.DrawDynamic(_shipHullVb,    _shipHullIb,    world, view, proj,
-            Type1HullFactory.HullColour,    SceneLighting.SunDirection, sunCol);
-        _meshRenderer.DrawDynamic(_shipNacelleVb, _shipNacelleIb, world, view, proj,
-            Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunCol);
-        _meshRenderer.DrawDynamic(_shipPylonVb,   _shipPylonIb,   world, view, proj,
-            Type1HullFactory.PylonColour,   SceneLighting.SunDirection, sunCol);
-
-        _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
-        _gd.DepthStencilState = DepthStencilState.Default;
-    }
-
     private void UpdateThirdPersonCamera(SpaceSimulation.ShipSnapshot snap)
     {
         // Camera sits 80 m behind and 30 m above the ship, looks slightly ahead of CoM.
