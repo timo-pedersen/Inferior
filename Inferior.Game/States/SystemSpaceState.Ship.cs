@@ -4,6 +4,7 @@ using Inferior.Core.Math;
 using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Inferior.Game.Hyperspace;
+using Inferior.Game.Ships;
 using Inferior.Game.StationGen;
 using Inferior.Game.UI;
 using Inferior.Gameplay;
@@ -72,49 +73,13 @@ public sealed partial class SystemSpaceState
 
     private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
-        var ship = new Ship
-        {
-            Position    = startPos,
-            SizeClass   = ShipSizeClass.Medium,
-            MoveSpeedMs = 5e9,
-        };
-        ship.SetOrientation(orientation);
+        var ship = ShipBuilder.NewShip("type1")
+            .WithPosition(startPos)
+            .WithOrientation(orientation)
+            .WithDefaultStartingComponents()
+            .Build();
 
-        var reactor = new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6);
-
-        var bus = new PowerBus("MainBus", capacityJ: 10e6, maxPower: 120e6);
-        bus.ConnectSource(reactor.OutputCapacitor);
-
-        var powerManager = new PowerPriorityManager();
-        powerManager.AttachToBus(bus);
-
-        _shield = new ShieldComponent("Shield", maxShieldJ: 5e6, chargeRateW: 500e3);
-
-        // Connector wires shield to bus via the priority manager, capping at 600 kW
-        var shieldConnector = new ConnectorComponent("ShieldConnector", "MainBus", "Shield", maxPower: 600e3);
-        shieldConnector.Connect(powerManager, _shield.DemandWatts, _shield.ReceivePower);
-
-        var heatsink = new HyperspaceHeatSink("HeatSink",
-            capacityJ:      50_000_000,   // 50 MJ thermal mass
-            transferRate:   800_000,      // 800 kW max inflow from coolant
-            heatDissipation: 500_000);    // 500 kW to hyperspace at full load
-
-        var coolant = new CoolantSystem("Coolant",
-            heatFlowPerComponent: 150_000,  // 150 kW max per node
-            coolantLeakage:       0.0002);  // ~0.02 %/s
-        coolant.AttachHeatSink(heatsink);
-        coolant.RegisterThermalNode(reactor.ThermalNode!);
-        coolant.RegisterThermalNode(_shield.ThermalNode!);
-
-        ship.Install(reactor);
-        ship.Install(bus);
-        ship.Install(powerManager);
-        ship.Install(_shield);
-        ship.Install(shieldConnector);
-        ship.Install(heatsink);
-        ship.Install(coolant);
-        _shield.PowerOn = false;  // starts off — player enables via SYS panel
-
+        _shield = ship.Components.OfType<ShieldComponent>().First();
         _ship = ship;
         _simulation.SetShip(ship);
     }
