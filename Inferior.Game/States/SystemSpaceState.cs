@@ -109,10 +109,9 @@ public sealed partial class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
 
     // ── Container rendering ───────────────────────────────────────────────────
-    // One shared mesh (all containers identical geometry; colour from lock grade per draw call).
+    // Renderer shared with ship/hull draw calls. Each test container owns its own
+    // VertexBuffer/IndexBuffer (see TestContainerEntry) — geometry differs per instance.
     private MeshRenderer?  _meshRenderer;
-    private VertexBuffer?  _containerVb;
-    private IndexBuffer?   _containerIb;
 
     // ── Ship mesh (three components, built once per session entry) ────────────
     private ShipMeshRenderer _shipMeshRenderer = null!;
@@ -320,9 +319,8 @@ public sealed partial class SystemSpaceState : GameState
         _effect.DirectionalLight1.Enabled = false;
         _effect.DirectionalLight2.Enabled = false;
 
-        // Container renderer and shared mesh (one geometry; colour from lock grade per draw call)
+        // Container renderer — geometry is built per-instance in SpawnTestContainers
         _meshRenderer = new MeshRenderer(_gd);
-        (_containerVb, _containerIb) = BuildContainerMesh(_gd);
 
         // Ship mesh — three components; built once per session entry on the main thread
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
@@ -382,6 +380,7 @@ public sealed partial class SystemSpaceState : GameState
             }
         }
         _stationPositions.Clear();
+        foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
         _testContainers.Clear();
         _prevCameraPosValid = false;
 
@@ -461,11 +460,10 @@ public sealed partial class SystemSpaceState : GameState
         _decoMeshes.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
+        foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
         _testContainers.Clear();
         _meshRenderer?.Dispose();
         _meshRenderer = null;
-        _containerVb?.Dispose();
-        _containerIb?.Dispose();
         _shipMeshRenderer?.Dispose();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
@@ -610,7 +608,8 @@ public sealed partial class SystemSpaceState : GameState
         // position is updated, producing a 1-tick (≈350 m) station-vs-ship mismatch.
         if (_frameShipSnap != null)
             _gameTimeSeconds = _frameShipSnap.SimTime;
-        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, ComputeNearClip(), 50_000f);
+        var (nearClip, farClip) = ComputeNearFarClip();
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, nearClip, farClip);
 
         // Rebuild body positions — collect in ecliptic space then rotate to galaxy space
         _bodyPositions.Clear();

@@ -4,9 +4,10 @@ using Microsoft.Xna.Framework.Graphics;
 namespace Inferior.Rendering;
 
 /// <summary>
-/// Unified 3D draw call with two modes:
-///   Baked   — pre-lit vertex-colour geometry (VertexPositionColorTexture); no dynamic lighting.
-///   Dynamic — real-time lit geometry (VertexPositionNormalTexture); star as directional light.
+/// Unified 3D draw call with three modes:
+///   Baked          — pre-lit vertex-colour geometry (VertexPositionColorTexture); no dynamic lighting.
+///   Dynamic        — real-time lit geometry (VertexPositionNormalTexture); star as directional light.
+///   DynamicColored — real-time lit, per-vertex coloured geometry (VertexPositionNormalColorTexture).
 ///
 /// Sets RasterizerState.CullCounterClockwiseFace explicitly — no CullNone workaround needed
 /// when geometry is wound correctly by GeometryBuilder.
@@ -58,6 +59,32 @@ public sealed class MeshRenderer : IDisposable
         _effect.AmbientLightColor              = new Vector3(0.09f);
         _effect.DiffuseColor                   = baseColour.ToVector3();
         _effect.Alpha                          = 1f;
+        _effect.World                          = world;
+        _effect.View                           = view;
+        _effect.Projection                     = projection;
+        Draw(vb, ib);
+    }
+
+    /// <summary>
+    /// Per-vertex coloured geometry with real-time directional lighting (containers).
+    /// Vertex buffer must use VertexPositionNormalColorTexture. Unlike DrawDynamic, colour
+    /// comes from the vertex data, not a single flat baseColour — lets a mesh have wear/
+    /// detail colour variation while still responding to the sun direction as it rotates.
+    /// </summary>
+    public void DrawDynamicColored(
+        VertexBuffer vb, IndexBuffer ib,
+        Matrix world, Matrix view, Matrix projection,
+        Vector3 sunDirection, Color sunColour)
+    {
+        _effect.VertexColorEnabled             = true;
+        _effect.LightingEnabled                = true;
+        _effect.TextureEnabled                 = false;
+        _effect.DirectionalLight0.Enabled      = true;
+        _effect.DirectionalLight0.Direction    = -sunDirection;
+        _effect.DirectionalLight0.DiffuseColor = sunColour.ToVector3();
+        _effect.DirectionalLight1.Enabled      = false;
+        _effect.DirectionalLight2.Enabled      = false;
+        _effect.AmbientLightColor              = new Vector3(0.09f);
         _effect.World                          = world;
         _effect.View                           = view;
         _effect.Projection                     = projection;

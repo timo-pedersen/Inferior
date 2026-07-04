@@ -28,8 +28,7 @@ public sealed partial class SystemSpaceState
 
     private void DrawTestContainers()
     {
-        if (_testContainers.Count == 0 || _meshRenderer == null
-            || _containerVb == null || _containerIb == null) return;
+        if (_testContainers.Count == 0 || _meshRenderer == null) return;
 
         float  rs   = (float)Camera3D.RenderScale;
         Matrix view = _effect.View;
@@ -49,12 +48,8 @@ public sealed partial class SystemSpaceState
                          * Matrix.CreateFromQuaternion(tc.Orientation)
                          * Matrix.CreateTranslation(renderPos);
 
-            _meshRenderer.DrawDynamic(
-                _containerVb, _containerIb,
-                world, view, proj,
-                GetContainerLockColour(tc.LockGrade),
-                SceneLighting.SunDirection,
-                new Color(SceneLighting.SunColour));
+            _meshRenderer.DrawDynamicColored(tc.Vb, tc.Ib, world, view, proj,
+                SceneLighting.SunDirection, new Color(SceneLighting.SunColour));
         }
 
         // Restore effect state expected by subsequent draw calls
@@ -90,6 +85,20 @@ public sealed partial class SystemSpaceState
                 // Lock grade — seeded so the same system always produces the same containers
                 var grade = (Containers.LockGrade)rng.NextInt(0, 3);
 
+                float wear        = rng.NextFloat(0f, 1f);
+                int   patternSeed = rng.NextInt(int.MinValue, int.MaxValue);
+
+                var container = Containers.ShippingContainerFactory.Generate(
+                    GetContainerLockColour(grade), wear, patternSeed, lockGrade: grade);
+
+                var vb = new VertexBuffer(_gd, VertexPositionNormalColorTexture.VertexDeclaration,
+                    container.Vertices.Length, BufferUsage.WriteOnly);
+                vb.SetData(container.Vertices);
+
+                var ib = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
+                    container.Indices.Length, BufferUsage.WriteOnly);
+                ib.SetData(container.Indices);
+
                 // Angular velocity — seeded slow tumble
                 var    tumbleRng = new Inferior.Core.Random.SeededRandom(globalIdx + 1);
                 double rate      = 0.01 + tumbleRng.NextDouble() * 0.04;
@@ -107,59 +116,13 @@ public sealed partial class SystemSpaceState
                     Offset          = offset,
                     LockGrade       = grade,
                     AngularVelocity = angVel,
+                    Container       = container,
+                    Vb              = vb,
+                    Ib              = ib,
                 });
                 globalIdx++;
             }
         }
-    }
-
-    // ── Container mesh builder ────────────────────────────────────────────────
-
-    private static (VertexBuffer vb, IndexBuffer ib) BuildContainerMesh(GraphicsDevice gd)
-    {
-        // 2.5 × 2.5 × 6.0 m container centred at origin, 0.1 m chamfer on all edges/corners.
-        const float hx = 1.25f, hy = 1.25f, hz = 3.0f;   // half-extents
-        const float c  = 0.10f;                            // chamfer width
-        float ix = hx - c, iy = hy - c, iz = hz - c;      // inner half-extents (main face corners)
-
-        var gb = new GeometryBuilder();
-
-        // 6 main faces
-        gb.AddConvexFace(new( hx,  iy,  iz), new( hx, -iy,  iz), new( hx, -iy, -iz), new( hx,  iy, -iz)); // +X
-        gb.AddConvexFace(new(-hx,  iy,  iz), new(-hx,  iy, -iz), new(-hx, -iy, -iz), new(-hx, -iy,  iz)); // -X
-        gb.AddConvexFace(new( ix,  hy,  iz), new(-ix,  hy,  iz), new(-ix,  hy, -iz), new( ix,  hy, -iz)); // +Y
-        gb.AddConvexFace(new( ix, -hy,  iz), new( ix, -hy, -iz), new(-ix, -hy, -iz), new(-ix, -hy,  iz)); // -Y
-        gb.AddConvexFace(new( ix,  iy,  hz), new(-ix,  iy,  hz), new(-ix, -iy,  hz), new( ix, -iy,  hz)); // +Z
-        gb.AddConvexFace(new( ix,  iy, -hz), new( ix, -iy, -hz), new(-ix, -iy, -hz), new(-ix,  iy, -hz)); // -Z
-
-        // 12 edge chamfer strips (4 along each axis)
-        // Z-axis edges (XY corners)
-        gb.AddConvexFace(new( hx,  iy,  iz), new( hx,  iy, -iz), new( ix,  hy, -iz), new( ix,  hy,  iz)); // +X+Y
-        gb.AddConvexFace(new(-ix,  hy,  iz), new(-ix,  hy, -iz), new(-hx,  iy, -iz), new(-hx,  iy,  iz)); // -X+Y
-        gb.AddConvexFace(new( hx, -iy,  iz), new( ix, -hy,  iz), new( ix, -hy, -iz), new( hx, -iy, -iz)); // +X-Y
-        gb.AddConvexFace(new(-hx, -iy,  iz), new(-hx, -iy, -iz), new(-ix, -hy, -iz), new(-ix, -hy,  iz)); // -X-Y
-        // X-axis edges (YZ corners)
-        gb.AddConvexFace(new( ix,  hy,  iz), new(-ix,  hy,  iz), new(-ix,  iy,  hz), new( ix,  iy,  hz)); // +Y+Z
-        gb.AddConvexFace(new( ix, -iy,  hz), new(-ix, -iy,  hz), new(-ix, -hy,  iz), new( ix, -hy,  iz)); // -Y+Z
-        gb.AddConvexFace(new( ix,  iy, -hz), new(-ix,  iy, -hz), new(-ix,  hy, -iz), new( ix,  hy, -iz)); // +Y-Z
-        gb.AddConvexFace(new( ix, -hy, -iz), new(-ix, -hy, -iz), new(-ix, -iy, -hz), new( ix, -iy, -hz)); // -Y-Z
-        // Y-axis edges (XZ corners)
-        gb.AddConvexFace(new( hx,  iy,  iz), new( ix,  iy,  hz), new( ix, -iy,  hz), new( hx, -iy,  iz)); // +X+Z
-        gb.AddConvexFace(new(-ix,  iy,  hz), new(-hx,  iy,  iz), new(-hx, -iy,  iz), new(-ix, -iy,  hz)); // -X+Z
-        gb.AddConvexFace(new( hx,  iy, -iz), new( hx, -iy, -iz), new( ix, -iy, -hz), new( ix,  iy, -hz)); // +X-Z
-        gb.AddConvexFace(new(-hx,  iy, -iz), new(-ix,  iy, -hz), new(-ix, -iy, -hz), new(-hx, -iy, -iz)); // -X-Z
-
-        // 8 corner triangles
-        gb.AddConvexFace(new( hx,  iy,  iz), new( ix,  hy,  iz), new( ix,  iy,  hz)); // +X+Y+Z
-        gb.AddConvexFace(new(-ix,  hy,  iz), new(-hx,  iy,  iz), new(-ix,  iy,  hz)); // -X+Y+Z
-        gb.AddConvexFace(new( hx, -iy,  iz), new( ix, -iy,  hz), new( ix, -hy,  iz)); // +X-Y+Z
-        gb.AddConvexFace(new(-hx, -iy,  iz), new(-ix, -hy,  iz), new(-ix, -iy,  hz)); // -X-Y+Z
-        gb.AddConvexFace(new( hx,  iy, -iz), new( ix,  iy, -hz), new( ix,  hy, -iz)); // +X+Y-Z
-        gb.AddConvexFace(new(-ix,  hy, -iz), new(-ix,  iy, -hz), new(-hx,  iy, -iz)); // -X+Y-Z
-        gb.AddConvexFace(new( hx, -iy, -iz), new( ix, -hy, -iz), new( ix, -iy, -hz)); // +X-Y-Z
-        gb.AddConvexFace(new(-hx, -iy, -iz), new(-ix, -iy, -hz), new(-ix, -hy, -iz)); // -X-Y-Z
-
-        return gb.BuildDynamic(gd);
     }
 
     // ── TODO: remove — debug container entry for radar testing
@@ -172,5 +135,8 @@ public sealed partial class SystemSpaceState
         public required Containers.LockGrade LockGrade { get; init; }
         public required DVec3          AngularVelocity { get; init; }
         public          Quaternion     Orientation     { get; set; } = Quaternion.Identity;
+        public required Containers.ShippingContainer Container { get; init; }
+        public required VertexBuffer   Vb              { get; init; }
+        public required IndexBuffer    Ib              { get; init; }
     }
 }

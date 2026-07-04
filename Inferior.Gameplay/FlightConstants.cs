@@ -25,6 +25,11 @@ public static class FlightConstants
 
     public static int NewtonianGearCount => NewtonianGearSpeeds.Length;
 
+    // Gear 1 (index 0) uses a reduced acceleration instead of Ship.FlightAcceleration —
+    // makes close-quarters maneuvering (docking, flying around debris) controllable.
+    // All other gears use the ship's normal acceleration, unchanged.
+    public const double Gear1AccelerationMs2 = 4.0;
+
     // Reverse speed ceiling as a fraction of the current gear's forward ceiling.
     public const double ReverseSpeedRatio = 0.25;
 

@@ -408,11 +408,22 @@ public sealed class SpaceSimulation : Simulation
 
         double gearCeiling    = gears[_newtonianGear];
         double reverseCeiling = gearCeiling * FlightConstants.ReverseSpeedRatio;
-        double accel          = ship.FlightAcceleration;
+        double accel          = _newtonianGear == 0
+            ? FlightConstants.Gear1AccelerationMs2
+            : ship.FlightAcceleration;
 
         DVec3 refVel  = GetRefVelocity();
         DVec3 relVel  = ship.Velocity - refVel;
         DVec3 fwdDir  = ship.Forward;
+
+        // Any thrust input cancels X-Stop — lets the pilot override braking immediately
+        // instead of having to wait for it to finish or re-press X.
+        if (_xStopActive &&
+            (input.ThrustForward != 0 || input.ThrustLateral != 0 || input.ThrustVertical != 0))
+        {
+            _xStopActive = false;
+            DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop cancelled"));
+        }
 
         // X-Stop: maximum braking toward reference velocity
         if (_xStopActive)

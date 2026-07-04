@@ -1,3 +1,4 @@
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -25,7 +26,7 @@ public sealed class AnimTag
 // UV coordinates are generated automatically from face geometry (5 m per tile).
 public sealed class StationModuleMesh
 {
-    private readonly List<VertexPositionColorTexture>  _verts = [];
+    private readonly List<VertexPositionNormalColorTexture>  _verts = [];
     private readonly List<int>                          _idx   = [];
     private readonly List<(int vertexBase, int count)>  _faces = [];
 
@@ -53,10 +54,10 @@ public sealed class StationModuleMesh
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
-        _verts.Add(new VertexPositionColorTexture(v0, color, Vector2.Zero));
-        _verts.Add(new VertexPositionColorTexture(v1, color, FaceUV(v1 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionColorTexture(v2, color, FaceUV(v2 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionColorTexture(v3, color, FaceUV(v3 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v0, normal, color, Vector2.Zero));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(v1 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(v2 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v3, normal, color, FaceUV(v3 - v0, uAxis, vAxis)));
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
         _faces.Add((b, 4));
         return b;
@@ -211,9 +212,9 @@ public sealed class StationModuleMesh
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
-        _verts.Add(new VertexPositionColorTexture(v0, color, Vector2.Zero));
-        _verts.Add(new VertexPositionColorTexture(v1, color, FaceUV(edge0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionColorTexture(v2, color, FaceUV(edge1, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v0, normal, color, Vector2.Zero));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(edge0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(edge1, uAxis, vAxis)));
         _idx.AddRange([b, b+2, b+1]);
         _faces.Add((b, 3));
     }
@@ -232,9 +233,9 @@ public sealed class StationModuleMesh
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
-        _verts.Add(new VertexPositionColorTexture(v0, c0, Vector2.Zero));
-        _verts.Add(new VertexPositionColorTexture(v1, c1, FaceUV(edge0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionColorTexture(v2, c2, FaceUV(edge1, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v0, normal, c0, Vector2.Zero));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(edge0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(edge1, uAxis, vAxis)));
         _idx.AddRange([b, b+2, b+1]);
         _faces.Add((b, 3));
     }
@@ -255,10 +256,10 @@ public sealed class StationModuleMesh
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
-        _verts.Add(new VertexPositionColorTexture(v0, c0, Vector2.Zero));
-        _verts.Add(new VertexPositionColorTexture(v1, c1, FaceUV(v1 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionColorTexture(v2, c2, FaceUV(v2 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionColorTexture(v3, c3, FaceUV(v3 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v0, normal, c0, Vector2.Zero));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(v1 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(v2 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v3, normal, c3, FaceUV(v3 - v0, uAxis, vAxis)));
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
         _faces.Add((b, 4));
         return b;
@@ -351,7 +352,18 @@ public sealed class StationModuleMesh
     // Indices are converted from int to short (safe up to 32 767 vertices).
     public (VertexPositionColorTexture[] verts, short[] indices) ToArrays()
     {
-        var verts   = _verts.ToArray();
+        var verts = _verts.Select(v => new VertexPositionColorTexture(v.Position, v.Color, v.TextureCoordinate)).ToArray();
+        var indices = new short[_idx.Count];
+        for (int i = 0; i < _idx.Count; i++)
+            indices[i] = (short)_idx[i];
+        return (verts, indices);
+    }
+
+    // Returns raw CPU-side arrays including per-vertex normals, for dynamically lit
+    // geometry (containers) — see VertexPositionNormalColorTexture.
+    public (VertexPositionNormalColorTexture[] verts, short[] indices) ToArraysWithNormals()
+    {
+        var verts   = _verts.ToArray();   // already the right type now
         var indices = new short[_idx.Count];
         for (int i = 0; i < _idx.Count; i++)
             indices[i] = (short)_idx[i];
@@ -363,7 +375,7 @@ public sealed class StationModuleMesh
     {
         if (_verts.Count == 0) return null;
 
-        var verts   = _verts.ToArray();
+        var verts   = _verts.Select(v => new VertexPositionColorTexture(v.Position, v.Color, v.TextureCoordinate)).ToArray();
         var indices = _idx.ToArray();
 
         var vb = new VertexBuffer(gd, VertexPositionColorTexture.VertexDeclaration,

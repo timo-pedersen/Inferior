@@ -24,9 +24,11 @@ public static class ShippingContainerFactory
     private const float HLy = Ly * 0.5f;
     private const float HLz = Lz * 0.5f;
 
-    private const float InsetZoneHalfLen    = 2.0f;
-    private const float PlainEndLen         = HLx - InsetZoneHalfLen; // 1.0 m
-    private const float FaceWidthAfterChamfer = Ly - 2f * Chamfer;   // 2.1 m
+    private const float InsetZoneHalfLen       = 2.0f;
+    private const float FaceWidthAfterChamfer  = Ly - 2f * Chamfer;              // 2.1 m
+    private const float FaceLengthAfterChamfer = Lx - 2f * Chamfer;              // 5.6 m
+    private const float HLxAfterChamfer        = FaceLengthAfterChamfer * 0.5f;  // 2.8 m
+    private const float PlainEndLen            = HLxAfterChamfer - InsetZoneHalfLen; // 0.8 m
 
     // ── Public API ────────────────────────────────────────────────────────────
 
@@ -34,7 +36,8 @@ public static class ShippingContainerFactory
         Color color,
         float wear,
         int sidePatternSeed,
-        string? text = null)
+        string? text = null,
+        LockGrade lockGrade = LockGrade.Civilian)
     {
         string manufacturerText = text ?? GenerateManufacturerName(sidePatternSeed);
 
@@ -46,14 +49,9 @@ public static class ShippingContainerFactory
         BuildEndDoors          (mesh, color);
         AddContainerText       (mesh, manufacturerText);
 
-        mesh.ApplyLighting(Matrix.Identity,
-            SceneLighting.SunDirection,
-            SceneLighting.Ambient,
-            SceneLighting.SunColour);
-
         ApplyWear(mesh, wear, sidePatternSeed);
 
-        var (verts, indices) = mesh.ToArrays();
+        var (verts, indices) = mesh.ToArraysWithNormals();
 
         return new ShippingContainer
         {
@@ -62,8 +60,8 @@ public static class ShippingContainerFactory
             Wear             = wear,
             SidePatternSeed  = sidePatternSeed,
             ManufacturerText = manufacturerText,
-            Lock             = LockGrade.Civilian,
-            IsLocked         = false,
+            Lock             = lockGrade,
+            IsLocked         = lockGrade != LockGrade.None,
             WorldPosition    = DVec3.Zero,
             Orientation      = Quaternion.Identity,
             Vertices         = verts,
@@ -160,226 +158,30 @@ public static class ShippingContainerFactory
     }
 
     // ── Chamfered box ─────────────────────────────────────────────────────────
-    // Container centred at origin. Long axis = X.
-    // Winding: CW from outside (same convention as StationModuleMesh.AddOrientedBox).
+    // Container centred at origin. Long axis = X. Geometry comes from the generic
+    // ChamferedBox helper — winding is verified automatically there, not hand-derived.
 
     private static void BuildChamferedBox(StationModuleMesh mesh, Color color)
     {
-        float c  = Chamfer;
-        float hx = HLx, hy = HLy, hz = HLz;
+        var box = ChamferedBox.Build(new Vector3(HLx, HLy, HLz), Chamfer);
 
-        // 4 long main faces
-        AddMainFaceY(mesh, color, +hy, hx, hz - c, inward: false);
-        AddMainFaceY(mesh, color, -hy, hx, hz - c, inward: true);
-        AddMainFaceZ(mesh, color, +hz, hx, hy - c, inward: false);
-        AddMainFaceZ(mesh, color, -hz, hx, hy - c, inward: true);
-
-        // 2 end main faces
-        AddMainFaceX(mesh, color, +hx, hy - c, hz - c, inward: false);
-        AddMainFaceX(mesh, color, -hx, hy - c, hz - c, inward: true);
-
-        // 4 long chamfer strips (run full length along X)
-        AddLongChamfer(mesh, color, +hy, +hz);
-        AddLongChamfer(mesh, color, +hy, -hz);
-        AddLongChamfer(mesh, color, -hy, +hz);
-        AddLongChamfer(mesh, color, -hy, -hz);
-
-        // 8 end chamfer strips on X+ face corners
-        AddEndChamfer(mesh, color, +hx, +hy, +hz);
-        AddEndChamfer(mesh, color, +hx, +hy, -hz);
-        AddEndChamfer(mesh, color, +hx, -hy, +hz);
-        AddEndChamfer(mesh, color, +hx, -hy, -hz);
-        // 8 end chamfer strips on X- face corners
-        AddEndChamfer(mesh, color, -hx, +hy, +hz);
-        AddEndChamfer(mesh, color, -hx, +hy, -hz);
-        AddEndChamfer(mesh, color, -hx, -hy, +hz);
-        AddEndChamfer(mesh, color, -hx, -hy, -hz);
-
-        // 8 corner triangles
-        AddCornerTri(mesh, color, +hx, +hy, +hz);
-        AddCornerTri(mesh, color, +hx, +hy, -hz);
-        AddCornerTri(mesh, color, +hx, -hy, +hz);
-        AddCornerTri(mesh, color, +hx, -hy, -hz);
-        AddCornerTri(mesh, color, -hx, +hy, +hz);
-        AddCornerTri(mesh, color, -hx, +hy, -hz);
-        AddCornerTri(mesh, color, -hx, -hy, +hz);
-        AddCornerTri(mesh, color, -hx, -hy, -hz);
+        // MainFaces intentionally not drawn — every one of the 6 main-face areas is
+        // fully covered by more specific decoration elsewhere (BuildLongFaceInsets,
+        // BuildEndDoors). Drawing them here too was an exactly-coincident redundant
+        // layer, not a partial one — hence flicker on all 6 faces, not just some.
+        foreach (var chamfer in box.EdgeChamfers)
+            AddFaceToMesh(mesh, box.Vertices, chamfer, color);
+        foreach (var tri in box.CornerTriangles)
+            AddFaceToMesh(mesh, box.Vertices, tri, color);
     }
 
-    // Y+/-  main face. inward=false → +Y face (normal +Y), inward=true → -Y (normal -Y).
-    private static void AddMainFaceY(StationModuleMesh mesh, Color c,
-        float y, float hx, float hzTrim, bool inward)
+    private static void AddFaceToMesh(StationModuleMesh mesh, Vector3[] verts, ChamferedBox.Face face, Color color)
     {
-        float x0 = -hx, x1 = hx, z0 = -hzTrim, z1 = hzTrim;
-        if (!inward)
-            mesh.AddQuad(new(x0,y,z1), new(x1,y,z1), new(x1,y,z0), new(x0,y,z0), c);
+        if (face.Indices.Length == 4)
+            mesh.AddQuad(verts[face.Indices[0]], verts[face.Indices[1]],
+                         verts[face.Indices[2]], verts[face.Indices[3]], color);
         else
-            mesh.AddQuad(new(x0,y,z0), new(x1,y,z0), new(x1,y,z1), new(x0,y,z1), c);
-    }
-
-    // Z+/- main face.
-    private static void AddMainFaceZ(StationModuleMesh mesh, Color c,
-        float z, float hx, float hyTrim, bool inward)
-    {
-        float x0 = -hx, x1 = hx, y0 = -hyTrim, y1 = hyTrim;
-        if (!inward) // +Z, normal +Z: CW from +Z side
-            mesh.AddQuad(new(x1,y0,z), new(x0,y0,z), new(x0,y1,z), new(x1,y1,z), c);
-        else         // -Z, normal -Z
-            mesh.AddQuad(new(x0,y0,z), new(x1,y0,z), new(x1,y1,z), new(x0,y1,z), c);
-    }
-
-    // X+/- end face.
-    private static void AddMainFaceX(StationModuleMesh mesh, Color c,
-        float x, float hyTrim, float hzTrim, bool inward)
-    {
-        float y0 = -hyTrim, y1 = hyTrim, z0 = -hzTrim, z1 = hzTrim;
-        if (!inward) // +X, normal +X
-            mesh.AddQuad(new(x,y0,z0), new(x,y0,z1), new(x,y1,z1), new(x,y1,z0), c);
-        else         // -X, normal -X
-            mesh.AddQuad(new(x,y0,z1), new(x,y0,z0), new(x,y1,z0), new(x,y1,z1), c);
-    }
-
-    // Long chamfer strip. Runs full X length. Corner at (yCorner, zCorner).
-    // Inner edge is at (yCorner - sign(yCorner)*Chamfer, zCorner) and
-    // (yCorner, zCorner - sign(zCorner)*Chamfer).
-    private static void AddLongChamfer(StationModuleMesh mesh, Color color,
-        float yCorner, float zCorner)
-    {
-        float sy = MathF.Sign(yCorner), sz = MathF.Sign(zCorner);
-        float yi = yCorner - sy * Chamfer; // inner Y (on main face plane)
-        float zi = zCorner - sz * Chamfer; // inner Z
-        float x0 = -HLx, x1 = HLx;
-
-        // Quad: inner-left, outer-left, outer-right, inner-right
-        // "inner" = where the chamfer meets the main face; "outer" = the chamfer's far edge
-        // Outward normal points diagonally (sy, sz) in YZ plane
-        // CW from outside: we need to ensure cross(v1-v0, v2-v0) points outward
-        var a = new Vector3(x0, yi, zCorner - sz * Chamfer); // inner bottom-left  (on chamfer)
-        var b = new Vector3(x1, yi, zCorner - sz * Chamfer); // inner bottom-right
-        var c2 = new Vector3(x1, yCorner - sy * Chamfer, zi); // inner top-right
-        var d = new Vector3(x0, yCorner - sy * Chamfer, zi); // inner top-left
-
-        // Wait, the strip is a flat quad between two parallel lines.
-        // One line: (x, yCorner-c, zCorner-c) across x  — the "outer" edge where all three faces meet
-        // Other line: where the chamfer meets the two main faces.
-        // The chamfer strip is actually triangular in cross-section (two parallel edges, both on the 45° plane).
-        //
-        // The chamfer is flat — a simple quad:
-        // outer edge (the bevelled corner): y = yCorner-sy*c, z = zCorner-sz*c  (this IS the strip)
-        // inner edges: one at y = yCorner-sy*c ON the Z-face, one at z = zCorner-sz*c ON the Y-face.
-        //
-        // So strip is: from (x, yi, zCorner-sz*c) to (x, yCorner-sy*c, zi) across the entire X length.
-
-        var v00 = new Vector3(x0, yi,                  zCorner - sz * Chamfer);
-        var v10 = new Vector3(x1, yi,                  zCorner - sz * Chamfer);
-        var v11 = new Vector3(x1, yCorner - sy * Chamfer, zi);
-        var v01 = new Vector3(x0, yCorner - sy * Chamfer, zi);
-
-        // Normal = normalize(sy, sz, 0) projected outward.
-        // Cross(v10-v00, v01-v00) should equal outward normal.
-        // v10-v00 = (Lx, 0, 0); v01-v00 = (0, sy*c, -sz*c)
-        // cross = (0*(0)-0*(-sz*c), 0*Lx - Lx*(-sz*c), Lx*(sy*c) - 0*Lx)
-        //       = (0, Lx*sz*c, Lx*sy*c)  — that's (0, sz, sy) direction.
-        // We want (0, sy, sz). So if sy and sz are both +, cross gives (0, sz, sy) = (0,+,+) ✓
-        // if sy=+1, sz=-1: cross gives (0, -1, +1) — that's pointing inward for the Y+/Z- corner.
-        // Hmm, let me reconsider the winding.
-
-        // For Y+/Z+ corner: outward normal is (0,+,+). Cross(v10-v00, v01-v00) = (0,+c*sz,+c*sy)
-        // With sy=sz=+1: (0, c, c) → direction (0,1,1) ✓
-        // For Y+/Z- corner: sy=+1,sz=-1: cross gives (0, c*(-1), c*(+1)) = (0,-c,c) → direction (0,-1,1)
-        // But we want outward = (0,+1,-1). So cross gives INWARD.
-        // Need to flip winding for Y+/Z- and Y-/Z+ cases.
-
-        if (sy * sz > 0) // both same sign: (++), (--) → cross product already outward
-            mesh.AddQuad(v00, v10, v11, v01, color);
-        else             // opposite signs: (+−), (−+) → flip
-            mesh.AddQuad(v01, v11, v10, v00, color);
-    }
-
-    // End-face chamfer strip for the X end face.
-    // Creates a quad on the 45° chamfer of the end face edge.
-    private static void AddEndChamfer(StationModuleMesh mesh, Color color,
-        float x, float yCorner, float zCorner)
-    {
-        float sy = MathF.Sign(yCorner), sz = MathF.Sign(zCorner);
-        float xn = MathF.Sign(x);
-
-        float yChamf = yCorner - sy * Chamfer;
-        float zChamf = zCorner - sz * Chamfer;
-
-        // The end chamfer strip is the quad between:
-        // (x, yChamf, zCorner-sz*c) and (x, yCorner-sy*c, zChamf)
-        // This is a small quad on the end face at the corner.
-
-        var v0 = new Vector3(x, yChamf,          zCorner - sz * Chamfer);
-        var v1 = new Vector3(x, yCorner - sy * Chamfer, zChamf);
-
-        // Outward normal has a component in the X direction and 45° in YZ.
-        // Two triangles, using these two edge vertices and the outer corner.
-        // Actually the end chamfer strip is just two verts meeting the long strip's end cap.
-        // Simplification: treat as single quad between inner edges of adjacent strips.
-        var v2 = new Vector3(x, yChamf,          zChamf);  // the shared chamfer corner
-
-        // Wind CW from outside. For X+ corner (xn=+1, sy=+1, sz=+1):
-        // Outward normal ~ (+1,+1,+1), normalised.
-        // Cross(v1-v0, v2-v0) should point outward.
-        // v1-v0 = (0, sy*c, -sz*c); v2-v0 = (0, 0, -sz*c + sz*c)... wait v2=(x,yChamf,zChamf)
-        // Hmm these might be degenerate. Let me pick better.
-
-        // The end chamfer quad has 4 verts:
-        // - on end face, at (x, yChamf, zChamf) - the chamfer outer corner
-        // - long chamfer strip ends at x: (x, yChamf, zCorner-sz*c) and (x, yCorner-sy*c, zChamf)
-        // - on end face plain surface: (x, yChamf, zChamf) — same as outer corner
-        // Actually: the end chamfer strip is the quad between:
-        //   (x, yChamf, zCorner-sz*c)  → edge where end chamfer meets Z-adjacent long strip
-        //   (x, yCorner-sy*c, zChamf)  → edge where end chamfer meets Y-adjacent long strip
-        // But these two points plus the outer corner form a triangle, not a quad.
-        // So end chamfers are TRIANGLES:
-
-        // Use the triangle: v0, v1, outer_corner
-        var outerCorner = new Vector3(x, yChamf, zChamf);
-
-        if (xn > 0)
-        {
-            if (sy * sz > 0)
-                mesh.AddTriangle(v0, outerCorner, v1, color);
-            else
-                mesh.AddTriangle(v0, v1, outerCorner, color);
-        }
-        else
-        {
-            if (sy * sz > 0)
-                mesh.AddTriangle(v0, v1, outerCorner, color);
-            else
-                mesh.AddTriangle(v0, outerCorner, v1, color);
-        }
-    }
-
-    // Corner triangle: fills the gap at box vertex where three chamfer strips meet.
-    private static void AddCornerTri(StationModuleMesh mesh, Color color,
-        float cx, float cy, float cz)
-    {
-        float sx = MathF.Sign(cx), sy = MathF.Sign(cy), sz = MathF.Sign(cz);
-
-        // The three vertices lie on the chamfer-inset edges of adjacent strips
-        var vX = new Vector3(cx,              cy - sy * Chamfer, cz - sz * Chamfer);
-        var vY = new Vector3(cx - sx * Chamfer, cy,              cz - sz * Chamfer);
-        var vZ = new Vector3(cx - sx * Chamfer, cy - sy * Chamfer, cz);
-
-        // Outward normal = normalise(sx, sy, sz).
-        // Wind CW from outside: cross(v1-v0, v2-v0) must match (sx, sy, sz).
-        // For all-positive: cross(vY-vX, vZ-vX) = cross((-c,c,0),(-c,0,c))
-        //   = (c*c - 0, 0 - (-c*c), 0 - (-c*c)) = (c², c², c²) → direction (1,1,1) ✓
-        // For (+,+,-): outward = (1,1,-1).
-        //   vX=(cx, cy-c, cz+c), vY=(cx-c, cy, cz+c), vZ=(cx-c, cy-c, cz)
-        //   cross(vY-vX, vZ-vX) = cross((-c,c,0),(-c,0,-c))
-        //   = (c*(-c)-0*0, 0*(-c)-(-c)*(-c), (-c)*0-c*(-c)) = (-c²,-c²,c²) → (-1,-1,1) WRONG.
-        // Need to swap: wind as vX, vZ, vY for that case.
-        // Pattern: when sx*sy*sz < 0, swap vY and vZ.
-        if (sx * sy * sz > 0)
-            mesh.AddTriangle(vX, vY, vZ, color);
-        else
-            mesh.AddTriangle(vX, vZ, vY, color);
+            mesh.AddTriangle(verts[face.Indices[0]], verts[face.Indices[1]], verts[face.Indices[2]], color);
     }
 
     // ── Fasteners ─────────────────────────────────────────────────────────────
@@ -498,23 +300,15 @@ public static class ShippingContainerFactory
         Color wallColor  = DarkenColor(color, 0.75f);
         Color floorColor = DarkenColor(color, 0.82f);
 
-        // Y+ face: normal +Y, long axis +X, cross axis −Z (so "cross" runs from back to front = −Z)
-        BuildFaceInsets(mesh, color, wallColor, floorColor,
-            origin:    new Vector3(0, HLy, 0),
-            normal:    Vector3.UnitY,
-            longAxis:  Vector3.UnitX,
-            crossAxis: -Vector3.UnitZ,
-            insetDir:  -Vector3.UnitY,
-            cols, rows, depth, groove);
-
-        // Y- face: normal -Y, long axis +X, cross axis +Z
-        BuildFaceInsets(mesh, color, wallColor, floorColor,
-            origin:    new Vector3(0, -HLy, 0),
-            normal:    -Vector3.UnitY,
-            longAxis:  Vector3.UnitX,
-            crossAxis: Vector3.UnitZ,
-            insetDir:  Vector3.UnitY,
-            cols, rows, depth, groove);
+        // Y+/Y- faces carry the manufacturer text (see AddContainerText), raised only
+        // ~1 cm above the surface — the inset grid there z-fights with the text quads.
+        // Good enough for now: skip the inset pattern on these two faces and use a
+        // single flat panel instead. A proper fix needs the inset layout and text
+        // placement to share one design. Z+/Z- keep the inset pattern unchanged.
+        AddFlatRect(mesh, color, Vector3.UnitY, Vector3.UnitX, -Vector3.UnitZ,
+            new Vector3(0, HLy, 0), FaceLengthAfterChamfer, FaceWidthAfterChamfer);
+        AddFlatRect(mesh, color, -Vector3.UnitY, Vector3.UnitX, Vector3.UnitZ,
+            new Vector3(0, -HLy, 0), FaceLengthAfterChamfer, FaceWidthAfterChamfer);
 
         // Z+ face: normal +Z, long axis −X, cross axis +Y
         BuildFaceInsets(mesh, color, wallColor, floorColor,
@@ -545,9 +339,9 @@ public static class ShippingContainerFactory
 
         // Plain end zones
         AddFlatRect(mesh, surface, normal, longAxis, crossAxis,
-            origin - longAxis * (HLx - PlainEndLen * 0.5f), PlainEndLen, faceWidth);
+            origin - longAxis * (HLxAfterChamfer - PlainEndLen * 0.5f), PlainEndLen, faceWidth);
         AddFlatRect(mesh, surface, normal, longAxis, crossAxis,
-            origin + longAxis * (HLx - PlainEndLen * 0.5f), PlainEndLen, faceWidth);
+            origin + longAxis * (HLxAfterChamfer - PlainEndLen * 0.5f), PlainEndLen, faceWidth);
 
         // Inset zone border grooves (4 thin flat strips around the zone)
         float borderX = zoneLen * 0.5f - groove * 0.5f;
@@ -584,37 +378,8 @@ public static class ShippingContainerFactory
                 // Inset floor
                 AddFlatRect(mesh, floor, normal, longAxis, crossAxis, fc, cellLen, cellWidth);
 
-                // Four inset walls (N/S in longAxis direction, E/W in crossAxis direction)
-                float hl = cellLen   * 0.5f;
-                float hw = cellWidth * 0.5f;
-
-                // +longAxis wall (S face of cell)
-                mesh.AddQuad(
-                    cc + longAxis * hl - crossAxis * hw,
-                    cc + longAxis * hl + crossAxis * hw,
-                    fc + longAxis * hl + crossAxis * hw,
-                    fc + longAxis * hl - crossAxis * hw, wall);
-
-                // -longAxis wall (N face)
-                mesh.AddQuad(
-                    cc - longAxis * hl + crossAxis * hw,
-                    cc - longAxis * hl - crossAxis * hw,
-                    fc - longAxis * hl - crossAxis * hw,
-                    fc - longAxis * hl + crossAxis * hw, wall);
-
-                // +crossAxis wall (E)
-                mesh.AddQuad(
-                    cc + crossAxis * hw + longAxis * hl,
-                    cc + crossAxis * hw - longAxis * hl,
-                    fc + crossAxis * hw - longAxis * hl,
-                    fc + crossAxis * hw + longAxis * hl, wall);
-
-                // -crossAxis wall (W)
-                mesh.AddQuad(
-                    cc - crossAxis * hw - longAxis * hl,
-                    cc - crossAxis * hw + longAxis * hl,
-                    fc - crossAxis * hw + longAxis * hl,
-                    fc - crossAxis * hw - longAxis * hl, wall);
+                // Four inset walls
+                AddRecessWalls(mesh, cc, fc, normal, crossAxis, cellWidth, cellLen, wall);
 
                 // Inter-row ridge
                 if (row < rows - 1)
@@ -769,18 +534,23 @@ public static class ShippingContainerFactory
     {
         if (wear < 0.2f) return;
 
-        float mainMul, edgeMul;
-        if      (wear < 0.5f) { mainMul = 0.92f; edgeMul = 1.05f; }
-        else if (wear < 0.8f) { mainMul = 0.80f; edgeMul = 1.10f; }
-        else                  { mainMul = 0.65f; edgeMul = 1.15f; }
+        // APPROXIMATE, NOT REDESIGNED (flagged, not fixed, per the container-chamfer
+        // brief): BuildChamferedBox used to emit a contiguous "main faces" block
+        // (indices 0-5) that a mainMul multiplier targeted here. It no longer does —
+        // main-face coverage now comes entirely from BuildFasteners / BuildLongFaceInsets
+        // / BuildEndDoors / AddContainerText, interleaved with each other and with no
+        // contiguous index range left to call "main" faces. Dropped mainMul entirely
+        // rather than guess a wrong target. Hardcoded face-index wear targeting is
+        // fragile in general — a proper fix would have each Build* function tag which
+        // face indices it added, so ApplyWear can target semantic groups instead of
+        // guessing numbers.
+        float edgeMul = wear < 0.5f ? 1.05f : wear < 0.8f ? 1.10f : 1.15f;
 
         int faceCount = mesh.FaceCount;
 
-        // Main faces are the first 6 (AddMainFaceY ×2, AddMainFaceZ ×2, AddMainFaceX ×2)
-        for (int f = 0;  f < Math.Min(6,  faceCount); f++) mesh.MultiplyFaceColor(f, mainMul);
-        // Chamfer strips are faces 6–29 (12 long + 8 end = 20, but end chamfers are triangles = 8 faces)
-        // Corner triangles follow: 8 faces. Total edge region ≈ faces 6..33.
-        for (int f = 6;  f < Math.Min(34, faceCount); f++) mesh.MultiplyFaceColor(f, edgeMul);
+        // Edge chamfers + corner triangles: BuildChamferedBox emits exactly these first
+        // now (12 edge-chamfer quads + 8 corner triangles = 20 faces), starting at index 0.
+        for (int f = 0; f < Math.Min(20, faceCount); f++) mesh.MultiplyFaceColor(f, edgeMul);
 
         if (wear >= 0.8f)
         {

@@ -228,14 +228,37 @@ public sealed partial class SystemSpaceState
         DataBus.System.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
     }
 
-    // ── Near clip ─────────────────────────────────────────────────────────────
+    // ── Near/far clip ─────────────────────────────────────────────────────────
+
+    // Bounds the near/far ratio so depth-buffer precision doesn't collapse when the
+    // near plane shrinks to inspect something up close (e.g. a container).
+    //
+    // 1e12 is deliberately far above the ratio already tolerated today in normal
+    // flight (~5e9 in open space at the default 10 km near clip; ~6e13 in third-person,
+    // where near shrinks to ~1 m) — this bound is a no-op for both of those, and only
+    // engages for the genuinely extreme case this brief targets: near collapsing toward
+    // zero at point-blank container range, where the unbounded ratio reaches ~1e19.
+    // Tune based on playtest — if fine surface detail still z-fights at typical
+    // inspection distances, lower it; if distant objects disappear more aggressively
+    // than feels right, raise it.
+    private const double MaxNearFarRatio = 1e12;
+
+    private (float near, float far) ComputeNearFarClip()
+    {
+        const float DefaultFar = 50_000f;
+
+        float near = ComputeNearClipValue();
+        float far  = (float)System.Math.Min(DefaultFar, near * MaxNearFarRatio);
+
+        return (near, far);
+    }
 
     // Near clip is proportional to the distance from the camera to the nearest station surface.
     // This keeps it large (10 km) in open space — good z-precision at system scale —
     // and shrinks it as you approach a station, reaching ~1 mm at hull contact.
     // Far-distance z-precision degrades when up-close, but that's acceptable: nothing
     // at AU-scale distances competes for depth buffer precision when you're docking.
-    private float ComputeNearClip()
+    private float ComputeNearClipValue()
     {
         // In third-person, camera is ~80–90 m from the ship — clip at 1% of that distance
         // (default 10 km near clip would hide the ship entirely).
@@ -245,25 +268,49 @@ public sealed partial class SystemSpaceState
             return (float)(distToShip * 0.01 * Camera3D.RenderScale);
         }
 
-        DVec3  camPos        = _camera.UniversePosition;
-        double minSurf       = double.MaxValue;
-        double nearestRadius = 250.0; // fallback: smallest station size
+        DVec3  camPos  = _camera.UniversePosition;
+        double minSurf = double.MaxValue;
 
         foreach (var (station, stPos) in _stationPositions)
         {
             double r    = StationPhysicalRadius(station);
             double dist = (stPos - camPos).Length;
             double surf = System.Math.Max(dist - r, 0.0);
-            if (surf < minSurf) { minSurf = surf; nearestRadius = r; }
+            if (surf < minSurf) minSurf = surf;
         }
 
         if (minSurf < 500_000.0) // within 500 km of any station surface
         {
-            // Floor the reference distance at the station's own radius so Z precision
-            // is preserved even when flying through the interior (where surfDist = 0
-            // would otherwise collapse the depth buffer to a single value).
-            double refDist    = System.Math.Max(minSurf, nearestRadius);
-            double nearMeters = refDist * 0.001;
+            // Floor the reference distance just above zero (rather than at the station's
+            // own radius) so the near clip can shrink almost all the way to the camera —
+            // needed to inspect small nearby objects (e.g. containers) up close without
+            // the near plane slicing through them. Only guards against a degenerate
+            // (zero) near plane; z-precision loss when flying through the station
+            // interior is an accepted tradeoff.
+            double refDist = System.Math.Max(minSurf, 0.001);
+
+            // Non-linear falloff. The old near = refDist * 0.001 shrank near-clip
+            // linearly with distance, which left only a 10cm near-clip at a completely
+            // ordinary 100m approach — depth-buffer precision concentrates near the
+            // near-clip plane, so that starved station geometry (walls, greebles
+            // spanning tens of metres) of precision and caused z-fighting, independent
+            // of far-clip. This curve stays metre-scale at ordinary approach distances
+            // and only collapses toward cm/mm scale in the last few metres, which is
+            // where close-up inspection (e.g. a container) actually needs it:
+            //   refDist    near
+            //    500 m     ~20 m
+            //    300 m     ~10 m
+            //    100 m     ~2.5 m
+            //     20 m     ~31 cm
+            //      5 m     ~5 cm
+            //      1 m     ~6 mm
+            //    0.1 m     ~0.3 mm
+            // Tune NearClipCurveScale/Exponent if either end still looks wrong in
+            // practice — Exponent controls how sharply it collapses at close range,
+            // Scale sets the anchor (currently near(100m) = 2.5m).
+            const double NearClipCurveExponent = 1.3;
+            const double NearClipCurveScale    = 0.00628;
+            double nearMeters = NearClipCurveScale * System.Math.Pow(refDist, NearClipCurveExponent);
             return (float)(nearMeters * Camera3D.RenderScale);
         }
 

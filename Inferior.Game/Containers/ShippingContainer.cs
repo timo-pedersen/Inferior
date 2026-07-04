@@ -1,6 +1,6 @@
 using Inferior.Core.Math;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace Inferior.Game.Containers;
 
@@ -20,9 +20,9 @@ public sealed class ShippingContainer
     public Quaternion          Orientation      { get; set; }
     public object?             Parent           { get; set; }   // null = free-floating
 
-    // Pre-baked mesh
-    public required VertexPositionColorTexture[] Vertices { get; init; }
-    public required short[]                      Indices  { get; init; }
+    // Mesh — lit dynamically at draw time (rotates, so a bake would go stale)
+    public required VertexPositionNormalColorTexture[] Vertices { get; init; }
+    public required short[]                            Indices  { get; init; }
 }
 
 public sealed record ContainerContents(CommodityType Type, int Units);
