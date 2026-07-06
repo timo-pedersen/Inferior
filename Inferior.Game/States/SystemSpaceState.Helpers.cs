@@ -228,94 +228,93 @@ public sealed partial class SystemSpaceState
         DataBus.System.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
     }
 
-    // ── Near/far clip ─────────────────────────────────────────────────────────
-
-    // Bounds the near/far ratio so depth-buffer precision doesn't collapse when the
-    // near plane shrinks to inspect something up close (e.g. a container).
+    // ── 3-tier render passes ─────────────────────────────────────────────────
     //
-    // 1e12 is deliberately far above the ratio already tolerated today in normal
-    // flight (~5e9 in open space at the default 10 km near clip; ~6e13 in third-person,
-    // where near shrinks to ~1 m) — this bound is a no-op for both of those, and only
-    // engages for the genuinely extreme case this brief targets: near collapsing toward
-    // zero at point-blank container range, where the unbounded ratio reaches ~1e19.
-    // Tune based on playtest — if fine surface detail still z-fights at typical
-    // inspection distances, lower it; if distant objects disappear more aggressively
-    // than feels right, raise it.
-    private const double MaxNearFarRatio = 1e12;
+    // One near/far pair can't serve millimetre fastener detail and system-scale
+    // distances at once — verified dead end (no floating-point depth format on this
+    // platform rules out reversed-Z; the ratio math doesn't close for a single pass
+    // at any value; deriving far from near assumes the nearest and farthest things
+    // you care about are the same object, which they usually aren't). Three fixed-
+    // scope passes, composited far-to-near with only the depth buffer cleared
+    // between them (never colour), so a nearer pass paints over a farther one's
+    // output with no cross-pass depth testing needed — correctness comes from the
+    // passes covering strictly decreasing, non-overlapping-by-construction ranges,
+    // not from depth comparison.
+    //
+    // Mid tier's outer boundary (57,000 m) is derived from angular size: a feature
+    // stops being worth a dedicated pass once it projects to a few screen pixels —
+    // below that, texture filtering/AA already blends it away, no LOD needed.
+    //   d = 2r · verticalRes / (N · FOV_rad)
+    // Using the largest real module radius (41.57 m — measured from the actual
+    // registry, largest is the 16×16×80 connector), N=3 px, 4K vertical (2160,
+    // checked as the harder case since more pixels/degree keeps detail resolvable
+    // longer), 60° vertical FOV (this game's fixed floor — narrower FOV keeps
+    // detail visible even longer, so 60° is correctly the case needing the largest
+    // margin):
+    //   d = 2×41.57×2160 / (3×1.0472) = 179,582 / 3.1416 ≈ 57,162 m → 57,000 m
+    // Comfortably covers the empirical 510m real-station and 2,500m legacy
+    // mega-station figures (23–112x margin).
+    private const double MidTierNear = 5.0;        // metres — near tier hands off here
+    private const double MidTierFar  = 57_000.0;   // metres — derived above
+    private const float  FarTierFar  = 50_000f;    // render units — system-scale default, unchanged
 
-    // Safety headroom past the farthest known module, applied to the independent far-clip
-    // measurement below — covers minor model/AABB inaccuracy, not a tuning knob for
-    // ratio comfort (that's MaxNearFarRatio's job, and only as a pathological backstop now).
-    private const double FarSafetyMargin = 1.15;
+    // Near tier's own far boundary can't be a fixed constant either — its near value
+    // ranges from ~5cm (5m proximity) to sub-micron at the curve's degenerate floor,
+    // over 5 decades on its own. far = near × ratio keeps that ratio constant by
+    // construction, comfortable across most of the near tier's range. Floored at
+    // MidTierNear so a shrinking near never drops far below where the mid tier picks
+    // up — without the floor, sub-15cm proximity would open a real gap (ratio-term
+    // alone falls below 5m there). The floor closes the gap; it does not make the
+    // most extreme sub-centimetre end "comfortable" — that residual is inherent to
+    // the near tier's own range and would need a 4th tier or a curve reshape, out of
+    // scope here.
+    private const double NearTierComfortableRatio = 10_000.0;
 
-    private (float near, float far) ComputeNearFarClip()
+    private sealed record RenderPassConfig(float Near, float Far, System.Action DrawCallback);
+
+    // Far-to-near so depth-clearing between passes is always safe: whatever's already
+    // in the colour buffer is strictly farther than what's about to draw on top of it.
+    private List<RenderPassConfig> BuildActivePasses()
     {
-        const float DefaultFar = 50_000f;
+        double nearTierNearReal = ComputeNearTierNear();
+        double nearTierFarReal  = System.Math.Max(nearTierNearReal * NearTierComfortableRatio, MidTierNear);
 
-        var (near, farthestModuleDist, nearStation) = ComputeNearClipValue();
+        float farTierNear  = (float)(MidTierFar * Camera3D.RenderScale);
+        float midTierNear  = (float)(MidTierNear * Camera3D.RenderScale);
+        float midTierFar   = farTierNear; // tiles exactly against the far tier's near
+        float nearTierNear = (float)(nearTierNearReal * Camera3D.RenderScale);
+        float nearTierFar  = (float)(nearTierFarReal * Camera3D.RenderScale);
 
-        if (!nearStation)
-            return (near, (float)System.Math.Min(DefaultFar, near * MaxNearFarRatio));
-
-        // Far is measured independently here — distance to the farthest module actually in
-        // range, not a multiple of near. Deriving far from near (far = near * ratio) implicitly
-        // assumes the nearest thing and the farthest thing you care about are the same object;
-        // they're usually not (you're near one module, trying to still see another one hundreds
-        // of metres off). That coupling is exactly what produced two reported symptoms: a
-        // station vanishing while your distance to the module you were looking at hadn't
-        // changed (near collapsed because of proximity to a *different*, closer module, and
-        // dragged far down with it), and the mirror case — backing away from one module grew
-        // near-clip enough to slice a different, closer module out of view.
-        //
-        // MaxNearFarRatio is still applied, but only as a backstop for a genuinely degenerate
-        // near (near collapsing toward zero) — not as the primary source of far. Using the
-        // tighter station-proximity ratio here instead would silently reintroduce the same
-        // bug: near legitimately shrinks to ~1m-equivalent whenever you're close to *any*
-        // nearby surface (a greeble, a corner, a small module), and near * 10,000 at that
-        // point is only ~63m — well under the few-hundred-metre reach needed to keep a
-        // farther module visible. The loose 1e12 ratio never engages against a real
-        // (already-bounded-by-actual-geometry) desiredFar, so it stays a true backstop.
-        double desiredFar = farthestModuleDist * Camera3D.RenderScale * FarSafetyMargin;
-        float  far        = (float)System.Math.Min(desiredFar, near * MaxNearFarRatio);
-
-        return (near, far);
+        return
+        [
+            new RenderPassConfig(farTierNear,  FarTierFar, DrawFarPassContent),
+            new RenderPassConfig(midTierNear,  midTierFar, DrawMidPassContent),
+            new RenderPassConfig(nearTierNear, nearTierFar, DrawNearPassContent),
+        ];
     }
 
-    // Near clip is proportional to the distance from the camera to the nearest station surface.
-    // This keeps it large (10 km) in open space — good z-precision at system scale —
-    // and shrinks it as you approach a station, reaching ~1 mm at hull contact.
-    // Far-distance z-precision degrades when up-close, but that's acceptable: nothing
-    // at AU-scale distances competes for depth buffer precision when you're docking.
-    private (float near, double farthestModuleDist, bool nearStation) ComputeNearClipValue()
+    // Near tier's own near-clip — extreme close-up (fasteners, container insets,
+    // rivets). Unchanged curve from prior tuning; the farthest-module tracking that
+    // used to live here has moved to the mid tier's fixed far, since real numbers
+    // showed no station needs more than ~500m of reach (see BuildActivePasses' header).
+    private double ComputeNearTierNear()
     {
         // In third-person, camera is ~80–90 m from the ship — clip at 1% of that distance
-        // (default 10 km near clip would hide the ship entirely). Not a station-proximity
-        // case — uses the global ratio cap, same as open space.
+        // (default would hide the ship entirely).
         if (_thirdPersonMode && _frameShipSnap != null)
         {
             double distToShip = (_frameShipSnap.Position - _camera.UniversePosition).Length;
-            return ((float)(distToShip * 0.01 * Camera3D.RenderScale), 0.0, false);
+            return distToShip * 0.01;
         }
 
-        DVec3  camPos        = _camera.UniversePosition;
-        double minSurf       = double.MaxValue;
-        double maxModuleSurf = 0.0;
+        DVec3  camPos  = _camera.UniversePosition;
+        double minSurf = double.MaxValue;
 
         // Measure against each placed module's real position, not an idealized per-size-class
-        // bounding sphere around the station's centre. A flat station-wide radius has no
-        // relationship to the station's actual (procedurally grown, often lopsided) shape —
-        // it either clips through real structure sitting outside the idealized sphere (a
-        // far-flung module, or decoration protruding past it), or leaves near-clip too large
-        // while weaving between modules that sit well inside it. Per-module distance fixes
-        // both: proximity now reflects whichever real module you're actually closest to.
+        // bounding sphere around the station's centre — a flat station-wide radius has no
+        // relationship to the station's actual (procedurally grown, often lopsided) shape.
         // Station module counts are small (tens, not hundreds — see StationGenerator's
         // moduleLimit), so brute-force iteration here is cheap; no spatial index needed.
-        //
-        // Near and far want opposite sides of each module: minSurf wants the surface facing
-        // the camera (dist - radius, how close can near-clip get before slicing this module),
-        // while maxModuleSurf wants the surface facing away from the camera (dist + radius,
-        // how far out does the farthest module's far edge actually reach) — using the same
-        // near-side value for both would undershoot far-clip by up to a module's own diameter.
         foreach (var (station, stPos) in _stationPositions)
         {
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
@@ -330,9 +329,7 @@ public sealed partial class SystemSpaceState
                 double moduleRadius    = (mod.AabbMax - mod.AabbMin).Length() * 0.5;
                 double dist            = (modUniversePos - camPos).Length;
                 double nearSurf        = System.Math.Max(dist - moduleRadius, 0.0);
-                double farSurf         = dist + moduleRadius;
-                if (nearSurf < minSurf)       minSurf       = nearSurf;
-                if (farSurf  > maxModuleSurf) maxModuleSurf = farSurf;
+                if (nearSurf < minSurf) minSurf = nearSurf;
             }
         }
 
@@ -346,14 +343,8 @@ public sealed partial class SystemSpaceState
             // interior is an accepted tradeoff.
             double refDist = System.Math.Max(minSurf, 0.001);
 
-            // Non-linear falloff. The old near = refDist * 0.001 shrank near-clip
-            // linearly with distance, which left only a 10cm near-clip at a completely
-            // ordinary 100m approach — depth-buffer precision concentrates near the
-            // near-clip plane, so that starved station geometry (walls, greebles
-            // spanning tens of metres) of precision and caused z-fighting, independent
-            // of far-clip. This curve stays metre-scale at ordinary approach distances
-            // and only collapses toward cm/mm scale in the last few metres, which is
-            // where close-up inspection (e.g. a container) actually needs it:
+            // Non-linear falloff — stays metre-scale at ordinary approach distances and
+            // only collapses toward cm/mm scale in the last few metres:
             //   refDist    near
             //    500 m     ~20 m
             //    300 m     ~10 m
@@ -362,16 +353,16 @@ public sealed partial class SystemSpaceState
             //      5 m     ~5 cm
             //      1 m     ~6 mm
             //    0.1 m     ~0.3 mm
-            // Tune NearClipCurveScale/Exponent if either end still looks wrong in
-            // practice — Exponent controls how sharply it collapses at close range,
-            // Scale sets the anchor (currently near(100m) = 2.5m).
             const double NearClipCurveExponent = 1.3;
             const double NearClipCurveScale    = 0.00628;
-            double nearMeters = NearClipCurveScale * System.Math.Pow(refDist, NearClipCurveExponent);
-            return ((float)(nearMeters * Camera3D.RenderScale), maxModuleSurf, true);
+            return NearClipCurveScale * System.Math.Pow(refDist, NearClipCurveExponent);
         }
 
-        return (0.00001f, 0.0, false); // default: 10 km near clip
+        // Nothing station-related in range — near tier has nothing to draw. Pick a
+        // default whose ratio-term lands exactly at the MidTierNear floor (0.0005m ×
+        // 10,000 = 5m), so the unused pass carries zero overlap rather than an
+        // arbitrary one.
+        return 0.0005;
     }
 
     // ── Proximity speed scale ─────────────────────────────────────────────────

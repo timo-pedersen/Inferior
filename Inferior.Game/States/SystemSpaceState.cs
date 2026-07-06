@@ -472,7 +472,11 @@ public sealed partial class SystemSpaceState : GameState
 
     public override void OnResize(int width, int height)
     {
-        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio, 0.00001f, 50_000f);
+        // Transient fallback — overwritten by the real per-pass projections next Draw(),
+        // and by the mid-tier representative projection next Update(). Matches that
+        // default so nothing renders through a stale pre-3-tier value in between.
+        _camera?.SetProjection(MathHelper.ToRadians(60f), AspectRatio,
+            (float)(MidTierNear * Camera3D.RenderScale), (float)(MidTierFar * Camera3D.RenderScale));
         UpdateUI();
         _cockpitUI?.OnResize(width, height);
     }
@@ -627,12 +631,15 @@ public sealed partial class SystemSpaceState : GameState
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
 
-        // Must run after the station-position rebuild above — it measures camera distance
-        // to this frame's station/module positions, and previously ran before that rebuild,
-        // pairing this frame's camera pose with last frame's station positions (same shape of
-        // bug as the SimTime race documented above).
-        var (nearClip, farClip) = ComputeNearFarClip();
-        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, nearClip, farClip);
+        // _camera.ProjectionMatrix is only a representative projection now — actual
+        // rendering uses three independent per-pass projections built fresh in Draw()
+        // (see BuildActivePasses). This one is read by UI/targeting code that needs *a*
+        // projection for screen-space math (radar contact hover, skybox star picking);
+        // the mid tier's fixed range is a far better fit for that than the old dynamic
+        // near-clip, which could shrink to sub-millimetre and made screen-space math
+        // near the camera imprecise for no benefit to those callers.
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio,
+            (float)(MidTierNear * Camera3D.RenderScale), (float)(MidTierFar * Camera3D.RenderScale));
 
         // Push nearest station surface distance to sim thread (LKM zones and Slipstream dropout)
         {
@@ -749,9 +756,8 @@ public sealed partial class SystemSpaceState : GameState
         gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         gd.BlendState        = BlendState.Opaque;
 
-        // Set matrices shared by everything
-        _effect.View       = _camera.ViewMatrix;
-        _effect.Projection = _camera.ProjectionMatrix;
+        // View matrix shared by every pass; projection is set fresh per pass below.
+        _effect.View = _camera.ViewMatrix;
 
         // Clunk roll — camera-space roll around the ship forward axis.
         // Multiply on the right so the rotation is in view space, not world space.
@@ -781,35 +787,32 @@ public sealed partial class SystemSpaceState : GameState
         // SunDirection = from scene toward star = opposite of "light travels" direction
         SceneLighting.SunDirection = -lightDir;
 
-        // Pass 0 — skybox (drawn before depth buffer has any data, so geometry always wins)
-        gd.DepthStencilState = DepthStencilState.None;
-        if (_hyperspace.Mode is not FlightMode.FlatHyperspace)
-            _skyboxRenderer.Draw();
+        // Three render passes — far, mid, near — each with its own independently
+        // scoped near/far (see BuildActivePasses in SystemSpaceState.Helpers.cs).
+        // Rendered far-to-near; only the depth buffer is cleared between passes,
+        // never colour, so a nearer pass paints over a farther one's output with no
+        // cross-pass depth test needed. Correctness comes from the passes covering
+        // strictly decreasing, non-overlapping-by-construction ranges, not from
+        // depth comparison.
+        var passes = BuildActivePasses();
+        for (int i = 0; i < passes.Count; i++)
+        {
+            var pass = passes[i];
+            _effect.Projection = Matrix.CreatePerspectiveFieldOfView(
+                MathHelper.ToRadians(60f), AspectRatio, pass.Near, pass.Far);
 
-        // Pass 1 — opaque geometry (depth writes on)
-        gd.BlendState        = BlendState.AlphaBlend;
-        gd.DepthStencilState = DepthStencilState.Default;
-        _celestialBodies.DrawOrbitRings(_camera, _eclipticRotation, _gameTimeSeconds);
-        DrawStationOrbitRings();
+            if (i > 0)
+                gd.Clear(ClearOptions.DepthBuffer, Color.Black, 1f, 0);
 
-        // Star glow — 3D billboard with depth-read so planets drawn opaque afterward
-        // correctly overwrite it on their disc areas (fixes glow bleeding through planets).
-        gd.BlendState        = BlendState.Additive;
-        gd.DepthStencilState = DepthStencilState.DepthRead;
-        _celestialBodies.DrawStarGlow(_camera, _star);
+            pass.DrawCallback();
+        }
 
-        gd.BlendState        = BlendState.Opaque;
-        gd.DepthStencilState = DepthStencilState.Default;
-        _celestialBodies.DrawStar(_camera, _star);
-        foreach (var (body, pos) in _bodyPositions)
-            _celestialBodies.DrawPlanet(_camera, body, pos);
-        DrawStations();
-        DrawTestContainers();
-        if (_thirdPersonMode && _frameShipSnap != null)
-            _shipMeshRenderer.Draw(_camera, _effect.View, _frameShipSnap.Position, _frameShipSnap.Orientation);
+        // One-shot overlays that don't participate in per-pass depth clipping — use
+        // the mid tier's representative projection (already on _camera.ProjectionMatrix).
+        _effect.Projection = _camera.ProjectionMatrix;
         DrawStationGlows(sb);
 
-        // Pass 2 — transparent (no depth write/read — shader ray-sphere handles visibility)
+        // Transparent pass (no depth write/read — shader ray-sphere handles visibility)
         gd.BlendState        = BlendState.AlphaBlend;
         gd.DepthStencilState = DepthStencilState.None;
         foreach (var (body, pos) in _bodyPositions)
@@ -845,6 +848,64 @@ public sealed partial class SystemSpaceState : GameState
         sb.Begin(blendState: BlendState.AlphaBlend);
         _cockpitUI.DrawHudAlert(sb);
         sb.End();
+    }
+
+    // ── Render pass content (see BuildActivePasses, SystemSpaceState.Helpers.cs) ────
+
+    // Far tier: star, planets, distant/other stations, skybox — nothing here is ever
+    // close to the camera by construction, so this pass's fixed near/far needs no
+    // per-frame computation. DrawStations() runs here too (same call as the other two
+    // passes) — this pass's near value hardware-clips away anything closer than the
+    // mid tier's outer boundary, so only far-flung modules survive here.
+    private void DrawFarPassContent()
+    {
+        // Skybox drawn first, before the depth buffer has any data, so geometry always wins
+        _gd.DepthStencilState = DepthStencilState.None;
+        if (_hyperspace.Mode is not FlightMode.FlatHyperspace)
+            _skyboxRenderer.Draw();
+
+        _gd.BlendState        = BlendState.AlphaBlend;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        _celestialBodies.DrawOrbitRings(_camera, _eclipticRotation, _gameTimeSeconds);
+        DrawStationOrbitRings();
+
+        // Star glow — depth-read so planets drawn opaque afterward correctly overwrite
+        // it on their disc areas (fixes glow bleeding through planets).
+        _gd.BlendState        = BlendState.Additive;
+        _gd.DepthStencilState = DepthStencilState.DepthRead;
+        _celestialBodies.DrawStarGlow(_camera, _star);
+
+        _gd.BlendState        = BlendState.Opaque;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        _celestialBodies.DrawStar(_camera, _star);
+        foreach (var (body, pos) in _bodyPositions)
+            _celestialBodies.DrawPlanet(_camera, body, pos);
+
+        DrawStations();
+    }
+
+    // Mid tier: station/ship-scale structure — individual modules/greebles/panels
+    // stay resolvable here. Fixed near/far (see BuildActivePasses); this is where
+    // "flying between towers" and "circling a station" live.
+    private void DrawMidPassContent()
+    {
+        _gd.BlendState        = BlendState.Opaque;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        DrawStations();
+        DrawTestContainers();
+    }
+
+    // Near tier: extreme close-up inspection — fasteners, container insets, rivets.
+    // Dynamic near (ComputeNearTierNear) keeps the existing curve; far is ratio-based
+    // off that same near, floored at the mid tier's near so the two passes never gap.
+    private void DrawNearPassContent()
+    {
+        _gd.BlendState        = BlendState.Opaque;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        DrawStations();
+        DrawTestContainers();
+        if (_thirdPersonMode && _frameShipSnap != null)
+            _shipMeshRenderer.Draw(_camera, _effect.View, _frameShipSnap.Position, _frameShipSnap.Orientation);
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
