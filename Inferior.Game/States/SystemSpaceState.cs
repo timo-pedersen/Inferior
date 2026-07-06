@@ -608,8 +608,6 @@ public sealed partial class SystemSpaceState : GameState
         // position is updated, producing a 1-tick (≈350 m) station-vs-ship mismatch.
         if (_frameShipSnap != null)
             _gameTimeSeconds = _frameShipSnap.SimTime;
-        var (nearClip, farClip) = ComputeNearFarClip();
-        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, nearClip, farClip);
 
         // Rebuild body positions — collect in ecliptic space then rotate to galaxy space
         _bodyPositions.Clear();
@@ -628,6 +626,13 @@ public sealed partial class SystemSpaceState : GameState
             DVec3 eclipticPos = _system.GetStationPosition(station, _gameTimeSeconds);
             _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
         }
+
+        // Must run after the station-position rebuild above — it measures camera distance
+        // to this frame's station/module positions, and previously ran before that rebuild,
+        // pairing this frame's camera pose with last frame's station positions (same shape of
+        // bug as the SimTime race documented above).
+        var (nearClip, farClip) = ComputeNearFarClip();
+        _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio, nearClip, farClip);
 
         // Push nearest station surface distance to sim thread (LKM zones and Slipstream dropout)
         {

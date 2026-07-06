@@ -243,12 +243,40 @@ public sealed partial class SystemSpaceState
     // than feels right, raise it.
     private const double MaxNearFarRatio = 1e12;
 
+    // Safety headroom past the farthest known module, applied to the independent far-clip
+    // measurement below — covers minor model/AABB inaccuracy, not a tuning knob for
+    // ratio comfort (that's MaxNearFarRatio's job, and only as a pathological backstop now).
+    private const double FarSafetyMargin = 1.15;
+
     private (float near, float far) ComputeNearFarClip()
     {
         const float DefaultFar = 50_000f;
 
-        float near = ComputeNearClipValue();
-        float far  = (float)System.Math.Min(DefaultFar, near * MaxNearFarRatio);
+        var (near, farthestModuleDist, nearStation) = ComputeNearClipValue();
+
+        if (!nearStation)
+            return (near, (float)System.Math.Min(DefaultFar, near * MaxNearFarRatio));
+
+        // Far is measured independently here — distance to the farthest module actually in
+        // range, not a multiple of near. Deriving far from near (far = near * ratio) implicitly
+        // assumes the nearest thing and the farthest thing you care about are the same object;
+        // they're usually not (you're near one module, trying to still see another one hundreds
+        // of metres off). That coupling is exactly what produced two reported symptoms: a
+        // station vanishing while your distance to the module you were looking at hadn't
+        // changed (near collapsed because of proximity to a *different*, closer module, and
+        // dragged far down with it), and the mirror case — backing away from one module grew
+        // near-clip enough to slice a different, closer module out of view.
+        //
+        // MaxNearFarRatio is still applied, but only as a backstop for a genuinely degenerate
+        // near (near collapsing toward zero) — not as the primary source of far. Using the
+        // tighter station-proximity ratio here instead would silently reintroduce the same
+        // bug: near legitimately shrinks to ~1m-equivalent whenever you're close to *any*
+        // nearby surface (a greeble, a corner, a small module), and near * 10,000 at that
+        // point is only ~63m — well under the few-hundred-metre reach needed to keep a
+        // farther module visible. The loose 1e12 ratio never engages against a real
+        // (already-bounded-by-actual-geometry) desiredFar, so it stays a true backstop.
+        double desiredFar = farthestModuleDist * Camera3D.RenderScale * FarSafetyMargin;
+        float  far        = (float)System.Math.Min(desiredFar, near * MaxNearFarRatio);
 
         return (near, far);
     }
@@ -258,28 +286,57 @@ public sealed partial class SystemSpaceState
     // and shrinks it as you approach a station, reaching ~1 mm at hull contact.
     // Far-distance z-precision degrades when up-close, but that's acceptable: nothing
     // at AU-scale distances competes for depth buffer precision when you're docking.
-    private float ComputeNearClipValue()
+    private (float near, double farthestModuleDist, bool nearStation) ComputeNearClipValue()
     {
         // In third-person, camera is ~80–90 m from the ship — clip at 1% of that distance
-        // (default 10 km near clip would hide the ship entirely).
+        // (default 10 km near clip would hide the ship entirely). Not a station-proximity
+        // case — uses the global ratio cap, same as open space.
         if (_thirdPersonMode && _frameShipSnap != null)
         {
             double distToShip = (_frameShipSnap.Position - _camera.UniversePosition).Length;
-            return (float)(distToShip * 0.01 * Camera3D.RenderScale);
+            return ((float)(distToShip * 0.01 * Camera3D.RenderScale), 0.0, false);
         }
 
-        DVec3  camPos  = _camera.UniversePosition;
-        double minSurf = double.MaxValue;
+        DVec3  camPos        = _camera.UniversePosition;
+        double minSurf       = double.MaxValue;
+        double maxModuleSurf = 0.0;
 
+        // Measure against each placed module's real position, not an idealized per-size-class
+        // bounding sphere around the station's centre. A flat station-wide radius has no
+        // relationship to the station's actual (procedurally grown, often lopsided) shape —
+        // it either clips through real structure sitting outside the idealized sphere (a
+        // far-flung module, or decoration protruding past it), or leaves near-clip too large
+        // while weaving between modules that sit well inside it. Per-module distance fixes
+        // both: proximity now reflects whichever real module you're actually closest to.
+        // Station module counts are small (tens, not hundreds — see StationGenerator's
+        // moduleLimit), so brute-force iteration here is cheap; no spatial index needed.
+        //
+        // Near and far want opposite sides of each module: minSurf wants the surface facing
+        // the camera (dist - radius, how close can near-clip get before slicing this module),
+        // while maxModuleSurf wants the surface facing away from the camera (dist + radius,
+        // how far out does the farthest module's far edge actually reach) — using the same
+        // near-side value for both would undershoot far-clip by up to a module's own diameter.
         foreach (var (station, stPos) in _stationPositions)
         {
-            double r    = StationPhysicalRadius(station);
-            double dist = (stPos - camPos).Length;
-            double surf = System.Math.Max(dist - r, 0.0);
-            if (surf < minSurf) minSurf = surf;
+            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+
+            var sysQ       = station.GetOrientation(_gameTimeSeconds);
+            var stationRot = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+
+            foreach (var mod in modules)
+            {
+                Vector3 modOffset      = Vector3.Transform(mod.Transform.Translation, stationRot);
+                DVec3   modUniversePos = stPos + new DVec3(modOffset.X, modOffset.Y, modOffset.Z);
+                double moduleRadius    = (mod.AabbMax - mod.AabbMin).Length() * 0.5;
+                double dist            = (modUniversePos - camPos).Length;
+                double nearSurf        = System.Math.Max(dist - moduleRadius, 0.0);
+                double farSurf         = dist + moduleRadius;
+                if (nearSurf < minSurf)       minSurf       = nearSurf;
+                if (farSurf  > maxModuleSurf) maxModuleSurf = farSurf;
+            }
         }
 
-        if (minSurf < 500_000.0) // within 500 km of any station surface
+        if (minSurf < 500_000.0) // within 500 km of any station module
         {
             // Floor the reference distance just above zero (rather than at the station's
             // own radius) so the near clip can shrink almost all the way to the camera —
@@ -311,10 +368,10 @@ public sealed partial class SystemSpaceState
             const double NearClipCurveExponent = 1.3;
             const double NearClipCurveScale    = 0.00628;
             double nearMeters = NearClipCurveScale * System.Math.Pow(refDist, NearClipCurveExponent);
-            return (float)(nearMeters * Camera3D.RenderScale);
+            return ((float)(nearMeters * Camera3D.RenderScale), maxModuleSurf, true);
         }
 
-        return 0.00001f; // default: 10 km near clip
+        return (0.00001f, 0.0, false); // default: 10 km near clip
     }
 
     // ── Proximity speed scale ─────────────────────────────────────────────────
