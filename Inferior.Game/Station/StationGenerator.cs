@@ -44,7 +44,9 @@ public sealed class StationGenerator
         var sysQ      = station.GetOrientation(gameTime);
         var stRotQ    = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
         BakeLighting(modules, Matrix.CreateFromQuaternion(stRotQ));
-        StationDecorator.ApplyAmbientOcclusion(modules);
+        // ApplyAmbientOcclusion intentionally NOT called here — the caller (SystemSpaceState)
+        // builds a flat GPU snapshot first, then calls it, then builds the graded snapshot,
+        // so both DetailLevel variants exist from one generation pass.
         return modules;
     }
 

@@ -38,7 +38,7 @@ public sealed partial class SystemSpaceState
         _                         =>  250f,
     };
 
-    private void DrawStations()
+    private void DrawStations(DetailLevel level)
     {
         if (_stationPositions.Count == 0) return;
 
@@ -94,6 +94,11 @@ public sealed partial class SystemSpaceState
         }
 
         // Decoration pass — pre-baked lighting in vertex colours; texture modulates.
+        // Full uses the wear/ambient-occlusion-graded mesh; Medium/Minimal use the flat
+        // (ungraded) variant built before that pass ran — same generator, fewer steps,
+        // same principle already established for containers and station decoration.
+        var decoMeshesForLevel = level == DetailLevel.Full ? _decoMeshes : _decoMeshesFlat;
+
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = true;
         _effect.TextureEnabled     = true;
@@ -111,7 +116,7 @@ public sealed partial class SystemSpaceState
 
             foreach (var mod in modules)
             {
-                if (!_decoMeshes.TryGetValue(mod, out var deco)) continue;
+                if (!decoMeshesForLevel.TryGetValue(mod, out var deco)) continue;
 
                 mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
 

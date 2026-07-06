@@ -33,11 +33,19 @@ public sealed class ShipMeshRenderer : IDisposable
     // currentView is the already-rolled view matrix (was _effect.View at the old call
     // site) — same reasoning as CockpitUI.DrawTargetingHud. Do NOT read camera.ViewMatrix
     // directly here; that would silently regress the clunk-roll fix from two briefs ago.
-    public void Draw(Camera3D camera, Matrix currentView, DVec3 shipPosition, Quaternion shipOrientation)
+    //
+    // currentProjection is likewise the active pass's projection (was _effect.Projection
+    // at the call site) — camera.ProjectionMatrix is only a representative mid-tier
+    // projection now that rendering uses three independent per-pass projections; reading
+    // it directly here would silently ignore whichever tier is actually calling Draw().
+    //
+    // level is accepted but not yet used — no ship mesh LOD variants exist yet.
+    public void Draw(Camera3D camera, Matrix currentView, Matrix currentProjection,
+        DVec3 shipPosition, Quaternion shipOrientation, DetailLevel level)
     {
         float   rs        = (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
-        Matrix  proj      = camera.ProjectionMatrix;
+        Matrix  proj      = currentProjection;
 
         // RotationY(PI) maps the model's +Z-forward nose to the ship's -Z-forward convention.
         Matrix world = Matrix.CreateScale(rs)

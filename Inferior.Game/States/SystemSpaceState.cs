@@ -102,7 +102,11 @@ public sealed partial class SystemSpaceState : GameState
     // TODO: remove test containers — 3–6 debris contacts per station for radar testing
     private readonly List<TestContainerEntry> _testContainers = [];
     // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes  = [];
+    // _decoMeshes carries the wear/ambient-occlusion-graded colours (DetailLevel.Full);
+    // _decoMeshesFlat is a second snapshot built before that pass ran (Medium/Minimal) —
+    // see the two Build() calls in OnEnter and DrawStations' DetailLevel gating.
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes     = [];
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshesFlat = [];
     // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
     // GPU-side hull meshes (VertexPositionNormalTexture) for real-time BasicEffect lighting.
@@ -353,16 +357,31 @@ public sealed partial class SystemSpaceState : GameState
             SceneLighting.SunDirection = -ld;
         }
         _stationGeometry.Clear();
-        foreach (var v in _decoMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)  { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _glassMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _hullMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
+        _decoMeshesFlat.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
         foreach (var station in _system.Stations)
         {
             var modules = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
             _stationGeometry[station] = modules;
+
+            // Flat (ungraded) snapshot — captured before ambient occlusion darkens
+            // faces below — used for Medium/Minimal DetailLevel. Same generator,
+            // fewer steps, same principle already established for containers.
+            foreach (var mod in modules)
+            {
+                var flatGpu = mod.Mesh?.Build(_gd);
+                if (flatGpu.HasValue)
+                    _decoMeshesFlat[mod] = flatGpu.Value;
+            }
+
+            StationDecorator.ApplyAmbientOcclusion(modules);
+
             foreach (var mod in modules)
             {
                 var gpu = mod.Mesh?.Build(_gd);
@@ -454,10 +473,12 @@ public sealed partial class SystemSpaceState : GameState
         _celestialBodies?.Dispose();
 
         _effect?.Dispose();
-        foreach (var v in _decoMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values)   { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _glassMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
+        foreach (var v in _hullMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
         _decoMeshes.Clear();
+        _decoMeshesFlat.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
         foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
@@ -804,7 +825,7 @@ public sealed partial class SystemSpaceState : GameState
             if (i > 0)
                 gd.Clear(ClearOptions.DepthBuffer, Color.Black, 1f, 0);
 
-            pass.DrawCallback();
+            pass.DrawCallback(pass.Level);
         }
 
         // One-shot overlays that don't participate in per-pass depth clipping — use
@@ -812,11 +833,12 @@ public sealed partial class SystemSpaceState : GameState
         _effect.Projection = _camera.ProjectionMatrix;
         DrawStationGlows(sb);
 
-        // Transparent pass (no depth write/read — shader ray-sphere handles visibility)
+        // Transparent pass (no depth write/read — shader ray-sphere handles visibility).
+        // Uses the mid tier's representative projection, already set above.
         gd.BlendState        = BlendState.AlphaBlend;
         gd.DepthStencilState = DepthStencilState.None;
         foreach (var (body, pos) in _bodyPositions)
-            _celestialBodies.DrawAtmosphere(_camera, body, pos);
+            _celestialBodies.DrawAtmosphere(_camera, body, pos, DetailLevel.Medium);
 
         // ── 2D overlay ────────────────────────────────────────────────────────
         gd.DepthStencilState = DepthStencilState.None;
@@ -857,7 +879,7 @@ public sealed partial class SystemSpaceState : GameState
     // per-frame computation. DrawStations() runs here too (same call as the other two
     // passes) — this pass's near value hardware-clips away anything closer than the
     // mid tier's outer boundary, so only far-flung modules survive here.
-    private void DrawFarPassContent()
+    private void DrawFarPassContent(DetailLevel level)
     {
         // Skybox drawn first, before the depth buffer has any data, so geometry always wins
         _gd.DepthStencilState = DepthStencilState.None;
@@ -866,46 +888,48 @@ public sealed partial class SystemSpaceState : GameState
 
         _gd.BlendState        = BlendState.AlphaBlend;
         _gd.DepthStencilState = DepthStencilState.Default;
-        _celestialBodies.DrawOrbitRings(_camera, _eclipticRotation, _gameTimeSeconds);
+        _celestialBodies.DrawOrbitRings(_camera, _eclipticRotation, _gameTimeSeconds, level);
         DrawStationOrbitRings();
 
         // Star glow — depth-read so planets drawn opaque afterward correctly overwrite
         // it on their disc areas (fixes glow bleeding through planets).
         _gd.BlendState        = BlendState.Additive;
         _gd.DepthStencilState = DepthStencilState.DepthRead;
-        _celestialBodies.DrawStarGlow(_camera, _star);
+        _celestialBodies.DrawStarGlow(_camera, _star, level);
 
         _gd.BlendState        = BlendState.Opaque;
         _gd.DepthStencilState = DepthStencilState.Default;
-        _celestialBodies.DrawStar(_camera, _star);
+        _celestialBodies.DrawStar(_camera, _star, level);
         foreach (var (body, pos) in _bodyPositions)
-            _celestialBodies.DrawPlanet(_camera, body, pos);
+            _celestialBodies.DrawPlanet(_camera, body, pos, level);
 
-        DrawStations();
+        DrawStations(level);
     }
 
     // Mid tier: station/ship-scale structure — individual modules/greebles/panels
     // stay resolvable here. Fixed near/far (see BuildActivePasses); this is where
-    // "flying between towers" and "circling a station" live.
-    private void DrawMidPassContent()
+    // "flying between towers" and "circling a station" live, and where the ship
+    // itself (third-person, ~80-90m away) actually belongs now the near tier is
+    // fixed to 100mm-5m.
+    private void DrawMidPassContent(DetailLevel level)
     {
         _gd.BlendState        = BlendState.Opaque;
         _gd.DepthStencilState = DepthStencilState.Default;
-        DrawStations();
-        DrawTestContainers();
+        DrawStations(level);
+        DrawTestContainers(level);
+        if (_thirdPersonMode && _frameShipSnap != null)
+            _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
+                _frameShipSnap.Position, _frameShipSnap.Orientation, level);
     }
 
     // Near tier: extreme close-up inspection — fasteners, container insets, rivets.
-    // Dynamic near (ComputeNearTierNear) keeps the existing curve; far is ratio-based
-    // off that same near, floored at the mid tier's near so the two passes never gap.
-    private void DrawNearPassContent()
+    // Fixed 100mm-5m (see BuildActivePasses); no dynamic computation needed.
+    private void DrawNearPassContent(DetailLevel level)
     {
         _gd.BlendState        = BlendState.Opaque;
         _gd.DepthStencilState = DepthStencilState.Default;
-        DrawStations();
-        DrawTestContainers();
-        if (_thirdPersonMode && _frameShipSnap != null)
-            _shipMeshRenderer.Draw(_camera, _effect.View, _frameShipSnap.Position, _frameShipSnap.Orientation);
+        DrawStations(level);
+        DrawTestContainers(level);
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────

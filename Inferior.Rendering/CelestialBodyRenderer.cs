@@ -80,7 +80,9 @@ public sealed class CelestialBodyRenderer : IDisposable
 
     // ── Opaque pass ───────────────────────────────────────────────────────────
 
-    public void DrawStar(Camera3D camera, Star star)
+    // level is accepted but not yet used — planets/star already render as a single
+    // cheap representation; no LOD variants exist yet.
+    public void DrawStar(Camera3D camera, Star star, DetailLevel level)
     {
         Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
         float   radius    = StarApparentRadius(renderPos);
@@ -93,7 +95,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         _effect.LightingEnabled = true;
     }
 
-    public void DrawPlanet(Camera3D camera, OrbitalBody body, DVec3 universePos)
+    public void DrawPlanet(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)
     {
         Vector3 renderPos = camera.ToRenderSpace(universePos);
         if (renderPos.Length() > 30_000f) return;
@@ -130,7 +132,7 @@ public sealed class CelestialBodyRenderer : IDisposable
 
     // ── Star glow (3D billboard, additive) ───────────────────────────────────
 
-    public void DrawStarGlow(Camera3D camera, Star star)
+    public void DrawStarGlow(Camera3D camera, Star star, DetailLevel level)
     {
         Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
         if (Vector4.Transform(new Vector4(renderPos, 1f),
@@ -229,7 +231,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         return System.Math.Max(StarVisualRadius, minRenderRadius);
     }
 
-    public void DrawAtmosphere(Camera3D camera, OrbitalBody body, DVec3 universePos)
+    public void DrawAtmosphere(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)
     {
         if (body.AtmosphereType == AtmosphereType.None || body.AtmosphereHeight <= 0) return;
         if (_atmosEffect == null) return;
@@ -333,7 +335,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         }
     }
 
-    public void DrawOrbitRings(Camera3D camera, Matrix eclipticRotation, double gameTimeSeconds)
+    public void DrawOrbitRings(Camera3D camera, Matrix eclipticRotation, double gameTimeSeconds, DetailLevel level)
     {
         // Disable lighting for line drawing
         _effect.LightingEnabled    = false;

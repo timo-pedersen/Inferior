@@ -26,13 +26,17 @@ namespace Inferior.Game.States;
 public sealed partial class SystemSpaceState
 {
 
-    private void DrawTestContainers()
+    // level is accepted but not yet used — no container LOD variants exist yet.
+    private void DrawTestContainers(DetailLevel level)
     {
         if (_testContainers.Count == 0 || _meshRenderer == null) return;
 
         float  rs   = (float)Camera3D.RenderScale;
         Matrix view = _effect.View;
-        Matrix proj = _camera.ProjectionMatrix;
+        // Active pass's projection (_effect.Projection), not camera.ProjectionMatrix —
+        // that's only a representative mid-tier projection now that rendering uses three
+        // independent per-pass projections. Same fix as ShipMeshRenderer.Draw needed.
+        Matrix proj = _effect.Projection;
 
         foreach (var tc in _testContainers)
         {
