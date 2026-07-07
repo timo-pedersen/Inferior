@@ -14,7 +14,7 @@ internal static class DockingBayHull
     private static float WallThicknessForSeed(int seed)
         => 0.20f + (float)new System.Random(seed ^ 0x444F434B).NextDouble() * 0.30f;
 
-    public static StationModuleMesh Build(int seed)
+    public static StationModuleMesh Build(int seed, Vector2 doorOpening)
     {
         var mesh = new StationModuleMesh();
 
@@ -23,7 +23,7 @@ internal static class DockingBayHull
         float si      = chamfer * 0.707f;   // same inset convention as BuildHullMesh (Stations.cs)
 
         Vector3 h = new(24f, 16f, 50f);     // half of the 48x32x100 bounding box
-        const float doorHalfW = 20f, doorHalfH = 12f;   // half of the 40x24 door opening
+        float doorHalfW = doorOpening.X * 0.5f, doorHalfH = doorOpening.Y * 0.5f;
 
         Color hullColor     = StationModuleRegistry.CategoryColor("docking-bay");
         Color interiorColor = Color.Lerp(hullColor, Color.Black, 0.15f);

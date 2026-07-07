@@ -148,6 +148,22 @@ public sealed class StationGenerator
         }
     }
 
+    // Runs just the growth loop (module placement — port math and AABB checks only, no
+    // GraphicsDevice, no mesh building) and returns the docking bay's definition if the
+    // pre-growth attachment succeeded, or null. Deterministic per station name, same as
+    // Generate — cheap enough to call once per station when a system loads (e.g.
+    // SystemMapState.OnEnter) rather than during full 3D generation. Returns the actual
+    // matched Definition (not a hardcoded display constant) so BoundingBox/DoorOpening stay
+    // correct automatically if more bay variants exist later.
+    public static StationModuleDefinition? FindDockingBay(Galaxy.Station station)
+    {
+        int seed = NameHash(station.Name);
+        var gen  = new StationGenerator(seed);
+        var modules = gen.Run(station);
+        ValidatePlacement(modules);
+        return modules.FirstOrDefault(m => m.Definition.Category == "docking-bay")?.Definition;
+    }
+
     // Asserts that every module except the core (index 0) has a non-null AttachmentPort.
     // A null AttachmentPort means the module was placed without a parent connection — an orphan.
     [System.Diagnostics.Conditional("DEBUG")]

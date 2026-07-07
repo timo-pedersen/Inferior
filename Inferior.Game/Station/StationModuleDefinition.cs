@@ -12,6 +12,11 @@ public sealed class StationModuleDefinition
     public          StationScale                 MinScale     { get; init; } = StationScale.Outpost;
     public required StationPort[]                Ports        { get; init; }
     public          float                        SelectWeight { get; init; } = 1f;
+    // Full width x height of a hull opening ships fly through (e.g. a docking bay's door).
+    // Zero for modules with no such opening. Read by both the module's own MeshFactory (so the
+    // geometry and this queryable value can never drift apart) and by callers wanting to know
+    // door dimensions without generating any geometry (e.g. the system map's station stats).
+    public          Vector2                      DoorOpening  { get; init; } = Vector2.Zero;
     // If set, called once per station to create the hull mesh for this module.
     // The factory receives the module's seed and returns a StationModuleMesh
     // with BaseFaceCount already set to the hull face count.

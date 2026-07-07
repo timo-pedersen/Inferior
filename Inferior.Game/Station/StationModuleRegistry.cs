@@ -305,18 +305,23 @@ public static class StationModuleRegistry
     };
 
     // ── docking-bay ───────────────────────────────────────────────────────────
-    // 48×32×100 — the first hollow module. Ships fly in through a 40×24 door on the -Z
-    // face and dock inside. Placed once per station via a dedicated pre-growth step
+    // 48×32×100 — the first hollow module. Ships fly in through a door on the -Z face and
+    // dock inside. Placed once per station via a dedicated pre-growth step
     // (StationGenerator.Run), never through organic WeightedPickModule selection — see the
     // Category exclusion there. MinScale = Port matches CoreHubLarge's Large-tier ports,
     // the only root this module can actually attach to (CoreHub's ports max out at Medium).
+    // Door size lives here, not as a constant inside DockingBayHull, so the mesh factory and
+    // anything reading DockingBay.DoorOpening (e.g. system-map station stats) can never drift.
+    private static readonly Vector2 DockingBayDoorOpening = new(40, 24);
+
     public static readonly StationModuleDefinition DockingBay = new()
     {
         Id          = "docking-bay",
         Category    = "docking-bay",
         BoundingBox = new Vector3(48, 32, 100),
         MinScale    = StationScale.Port,
-        MeshFactory = seed => DockingBayHull.Build(seed),
+        DoorOpening = DockingBayDoorOpening,
+        MeshFactory = seed => DockingBayHull.Build(seed, DockingBayDoorOpening),
         Ports       =
         [
             new StationPort { Id = "px", LocalPosition = new Vector3(+24, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },

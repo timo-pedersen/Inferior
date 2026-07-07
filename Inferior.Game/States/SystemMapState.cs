@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
+using Inferior.Game.StationGen;
 using Inferior.UI;
 using Inferior.UI.Controls;
 using Inferior.UI.Controls.Cockpit;
@@ -57,7 +58,14 @@ public sealed class SystemMapState : GameState
     // ── Selection / hover ─────────────────────────────────────────────────────
     private OrbitalBody?     _selectedBody;
     private OrbitalBody?     _hoveredBody;
+    private Station?         _selectedStation;
+    private Station?         _hoveredStation;
     private StateTransition? _pendingTransition;
+
+    // Docking-bay presence/dimensions per station — computed once per system load via
+    // StationGenerator.FindDockingBay (growth-loop only, no mesh building; ~0.5 ms/call
+    // measured), not recomputed on every hover.
+    private readonly Dictionary<Station, StationModuleDefinition?> _dockingBayInfo = [];
 
     // ── Nav target (right-click selection, passed back to flight) ─────────────
     private OrbitalBody? _navBody;
@@ -154,9 +162,15 @@ public sealed class SystemMapState : GameState
             _cockpitLayout   = CockpitLayout.Default;
         }
 
-        _selectedBody = null;
-        _hoveredBody  = null;
-        _cameraPos    = Vector2.Zero;
+        _selectedBody    = null;
+        _hoveredBody     = null;
+        _selectedStation = null;
+        _hoveredStation  = null;
+        _cameraPos       = Vector2.Zero;
+
+        _dockingBayInfo.Clear();
+        foreach (var station in _system.Stations)
+            _dockingBayInfo[station] = StationGenerator.FindDockingBay(station);
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
@@ -338,6 +352,7 @@ public sealed class SystemMapState : GameState
             }
 
             _selectedBody      = hitBody;
+            _selectedStation   = hitStation;
             _lastClickTime     = now;
             _lastClickBody     = hitBody;
             _lastClickStation  = hitStation;
@@ -359,8 +374,7 @@ public sealed class SystemMapState : GameState
         // Check stations first (they're smaller hit targets)
         foreach (var station in _system.Stations)
         {
-            DVec3   stationPos = GetStationSystemPos(station);
-            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            Vector2 screen = GetStationDisplayScreen(station);
             float   dx = mousePos.X - screen.X;
             float   dy = mousePos.Y - screen.Y;
             if (MathF.Sqrt(dx*dx + dy*dy) <= 10f)
@@ -386,7 +400,12 @@ public sealed class SystemMapState : GameState
     }
 
     private void HandleHover(MouseState mouse)
-        => _hoveredBody = HitTestBody(new Vector2(mouse.X, mouse.Y));
+    {
+        var pos = new Vector2(mouse.X, mouse.Y);
+        // Same priority order as HandleLeftButton's hit-testing: stations first (smaller targets).
+        _hoveredStation = HitTestStation(pos);
+        _hoveredBody    = _hoveredStation == null ? HitTestBody(pos) : null;
+    }
 
     private void HandleKeyboard(KeyboardState keys, MouseState mouse)
     {
@@ -470,29 +489,17 @@ public sealed class SystemMapState : GameState
             }
         }
 
-        // Station orbit rings — drawn around parent body or star
+        // Station orbit rings — drawn around parent body or star. Reflects the true orbital
+        // radius always; only the station's own dot/label/hit-test position is separated from
+        // its parent for visibility (GetStationDisplayScreen) — the ring itself is unaffected.
         var colStationOrbit = new Color(30, 50, 40, 100);
         foreach (var station in _system.Stations)
         {
             float radiusPx = (float)(station.OrbitalRadius / _metersPerPixel);
             if (radiusPx < MinOrbitRingPixels) continue;
 
-            Vector2 parentScreen;
-            if (station.OrbitParent == null)
-            {
-                parentScreen = SystemToScreen(Vector2.Zero);
-            }
-            else
-            {
-                DVec3 parentPos = station.OrbitParent.GetPosition(_gameTimeSeconds, DVec3.Zero);
-                // Moons need their parent planet's position
-                DVec3 parentOfParent = DVec3.Zero;
-                foreach (var p in _system.Planets)
-                    if (p.Children.Contains(station.OrbitParent))
-                        parentOfParent = p.GetPosition(_gameTimeSeconds, DVec3.Zero);
-                DVec3 resolvedPos = station.OrbitParent.GetPosition(_gameTimeSeconds, parentOfParent);
-                parentScreen = SystemToScreen(new Vector2((float)resolvedPos.X, (float)resolvedPos.Z));
-            }
+            DVec3   parentPos    = GetStationParentPos(station);
+            Vector2 parentScreen = SystemToScreen(new Vector2((float)parentPos.X, (float)parentPos.Z));
 
             DrawCircle(sb, parentScreen, radiusPx, colStationOrbit, CircleSegments(radiusPx));
         }
@@ -513,10 +520,7 @@ public sealed class SystemMapState : GameState
     private void DrawStar(SpriteBatch sb)
     {
         Vector2 screen = SystemToScreen(Vector2.Zero);
-
-        const double refMPP = 5e8;
-        float scale = MathF.Log((float)(refMPP / _metersPerPixel) + 1f, 2f);
-        float starR = System.Math.Clamp(StarVisualRadius * scale, 12f, 60f);
+        float   starR  = StarVisualRadiusPx();
 
         DrawDot(sb, screen, starR * 1.8f, _star.GlowColor * 0.3f);
         DrawDot(sb, screen, starR * 1.3f, _star.GlowColor * 0.5f);
@@ -576,6 +580,14 @@ public sealed class SystemMapState : GameState
 
     private void DrawInfoPanel(SpriteBatch sb)
     {
+        // Stations take priority, matching hit-test priority elsewhere in this file.
+        var displayStation = _selectedStation ?? _hoveredStation;
+        if (displayStation != null)
+        {
+            DrawStationInfoPanel(sb, displayStation);
+            return;
+        }
+
         var display = _selectedBody ?? _hoveredBody;
         if (display == null) return;
 
@@ -648,6 +660,56 @@ public sealed class SystemMapState : GameState
         DrawText(sb, "Double-click to approach", new Vector2(tx, ty + 4), ColHovered * 0.7f, 0.75f);
     }
 
+    private void DrawStationInfoPanel(SpriteBatch sb, Station station)
+    {
+        var bay = _dockingBayInfo.GetValueOrDefault(station);
+
+        int panelW   = 290;
+        int margin   = 16;
+        int x        = _gd.Viewport.Width - panelW - margin;
+        int y        = margin;
+        int lineH    = 22;
+        int bayLines = bay != null ? 2 : 1;
+        int panelH   = (6 + bayLines) * lineH + 24;
+
+        DrawRect(sb, new Rectangle(x, y, panelW, panelH), ColPanel);
+        DrawRectBorder(sb, new Rectangle(x, y, panelW, panelH), ColPanelBorder, 1);
+
+        int tx = x + 12;
+        int ty = y + 12;
+
+        DrawText(sb, station.Name, new Vector2(tx, ty), Color.White, 1.05f);
+        ty += (int)(lineH * 1.3f);
+
+        DrawText(sb, $"{station.Size} Station", new Vector2(tx, ty), ColStation);
+        ty += lineH;
+
+        string parentName = station.OrbitParent?.Name ?? _star.Name;
+        double orbitAU     = Units.MetersToAU(station.OrbitalRadius);
+        DrawText(sb, $"Orbits {parentName}", new Vector2(tx, ty), ColTextDim);
+        ty += lineH;
+        DrawText(sb, $"Orbit radius: {orbitAU:F3} AU", new Vector2(tx, ty), ColTextDim);
+        ty += lineH;
+
+        ty += 4;
+        if (bay != null)
+        {
+            DrawText(sb, $"Docking bay: {bay.BoundingBox.X:F0}x{bay.BoundingBox.Y:F0}x{bay.BoundingBox.Z:F0} m",
+                new Vector2(tx, ty), ColText);
+            ty += lineH;
+            DrawText(sb, $"  Door: {bay.DoorOpening.X:F0}x{bay.DoorOpening.Y:F0} m",
+                new Vector2(tx, ty), ColTextDim);
+            ty += lineH;
+        }
+        else
+        {
+            DrawText(sb, "Docking bay: none", new Vector2(tx, ty), ColTextDim);
+            ty += lineH;
+        }
+
+        DrawText(sb, "Double-click to approach", new Vector2(tx, ty + 4), ColHovered * 0.7f, 0.75f);
+    }
+
     private static readonly Color ColStation     = new(80, 200, 140);
     private static readonly Color ColStationName = new(80, 180, 120);
     private static readonly Color ColNavTarget   = new(255, 200, 50);
@@ -656,27 +718,28 @@ public sealed class SystemMapState : GameState
     {
         foreach (var station in _system.Stations)
         {
-            DVec3   stationPos = GetStationSystemPos(station);
-            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            Vector2 screen = GetStationDisplayScreen(station);
             if (!IsOnScreen(screen, 20f)) continue;
 
             // Diamond icon: draw two overlapping 45°-rotated rectangles
-            float r = station.Size switch
-            {
-                Galaxy.StationSize.Small  => 4f,
-                Galaxy.StationSize.Medium => 5f,
-                Galaxy.StationSize.Large  => 7f,
-                _                         => 4f,
-            };
+            float r = StationDotRadius(station.Size);
 
             bool isNavStation = _navStation == station;
+            bool selected     = _selectedStation == station;
+            bool hovered      = _hoveredStation  == station;
             Color stColor = isNavStation ? ColNavTarget : ColStation;
             DrawDot(sb, screen, r, stColor);
             // Cross-hair lines to distinguish from bodies
             sb.Draw(_pixel, new Rectangle((int)(screen.X - r * 1.8f), (int)screen.Y, (int)(r * 3.6f), 1), stColor * 0.6f);
             sb.Draw(_pixel, new Rectangle((int)screen.X, (int)(screen.Y - r * 1.8f), 1, (int)(r * 3.6f)), stColor * 0.6f);
+
+            if (selected)
+                DrawCircle(sb, screen, r * 1.8f + 4f, ColSelected, 24);
+            else if (hovered)
+                DrawCircle(sb, screen, r * 1.8f + 2f, ColHovered, 24);
+
             if (isNavStation)
-                DrawCircle(sb, screen, r + 8f, ColNavTarget, 24);
+                DrawCircle(sb, screen, r * 1.8f + 8f, ColNavTarget, 24);
         }
     }
 
@@ -684,30 +747,64 @@ public sealed class SystemMapState : GameState
     {
         foreach (var station in _system.Stations)
         {
-            DVec3   stationPos = GetStationSystemPos(station);
-            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+            Vector2 screen = GetStationDisplayScreen(station);
             if (!IsOnScreen(screen, 60f)) continue;
 
-            float r = 6f;
+            float r       = 6f;
+            bool  hovered = _hoveredStation == station || _selectedStation == station;
+            float alpha   = hovered ? NameAlphaHovered : NameAlphaDimmed;
             FontHelper.Draw(sb, _font, station.Name,
                 screen + new Vector2(r + 4f, -8f),
-                ColStationName * NameAlphaDimmed, 0.7f);
+                ColStationName * alpha, 0.7f);
         }
     }
 
-    private DVec3 GetStationSystemPos(Galaxy.Station station)
+    // Resolves an orbital body's own position, handling the one level of grandparent
+    // indirection a moon needs (a moon's parent planet orbits the star directly, DVec3.Zero).
+    // No-op grandparent lookup for a top-level planet, since it isn't any planet's child.
+    private DVec3 GetOrbitalBodyPos(OrbitalBody body)
     {
-        DVec3 parentPos = DVec3.Zero;
-        if (station.OrbitParent != null)
-        {
-            DVec3 grandparent = DVec3.Zero;
-            foreach (var p in _system.Planets)
-                if (p.Children.Contains(station.OrbitParent))
-                    grandparent = p.GetPosition(_gameTimeSeconds, DVec3.Zero);
-            parentPos = station.OrbitParent.GetPosition(_gameTimeSeconds, grandparent);
-        }
-        return station.GetPosition(_gameTimeSeconds, parentPos);
+        DVec3 grandparentPos = DVec3.Zero;
+        foreach (var p in _system.Planets)
+            if (p.Children.Contains(body))
+                grandparentPos = p.GetPosition(_gameTimeSeconds, DVec3.Zero);
+        return body.GetPosition(_gameTimeSeconds, grandparentPos);
     }
+
+    private DVec3 GetStationParentPos(Galaxy.Station station)
+        => station.OrbitParent != null ? GetOrbitalBodyPos(station.OrbitParent) : DVec3.Zero;
+
+    // True physical position — no visual adjustment. Everywhere a station's own screen position
+    // is drawn, named, or hit-tested, use GetStationDisplayScreen instead (this feeds into it).
+    private DVec3 GetStationSystemPos(Galaxy.Station station)
+        => station.GetPosition(_gameTimeSeconds, GetStationParentPos(station));
+
+    // Screen position for a station's own dot/label/hit-test, artificially separated from its
+    // parent's dot when the true position would sit close enough to overlap and become
+    // unclickable at high zoom. The orbit ring itself still reflects the true orbital radius —
+    // only this marker position is nudged.
+    private Vector2 GetStationDisplayScreen(Galaxy.Station station)
+    {
+        DVec3   parentPos    = GetStationParentPos(station);
+        DVec3   stationPos   = GetStationSystemPos(station);
+        Vector2 trueScreen   = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
+        Vector2 parentScreen = SystemToScreen(new Vector2((float)parentPos.X,  (float)parentPos.Z));
+
+        Vector2 offset = trueScreen - parentScreen;
+        float   dist   = offset.Length();
+
+        float minSeparation = GetStationParentVisualRadius(station) + StationDotRadius(station.Size) + 10f;
+
+        if (dist < minSeparation && dist > 0.01f)
+            return parentScreen + offset / dist * minSeparation;
+        return trueScreen;
+    }
+
+    // Visual radius of whatever the station orbits, for GetStationDisplayScreen's minimum
+    // separation — the star's glow radius if it orbits the star directly, or the parent body's
+    // (planet or moon) dot radius otherwise.
+    private float GetStationParentVisualRadius(Galaxy.Station station)
+        => station.OrbitParent != null ? VisualRadius(station.OrbitParent) : StarVisualRadiusPx();
 
     private void DrawHints(SpriteBatch sb)
     {
@@ -766,10 +863,9 @@ public sealed class SystemMapState : GameState
     {
         foreach (var station in _system.Stations)
         {
-            DVec3   stationPos = GetStationSystemPos(station);
-            Vector2 screen     = SystemToScreen(new Vector2((float)stationPos.X, (float)stationPos.Z));
-            float   dx         = screenPos.X - screen.X;
-            float   dy         = screenPos.Y - screen.Y;
+            Vector2 screen = GetStationDisplayScreen(station);
+            float   dx     = screenPos.X - screen.X;
+            float   dy     = screenPos.Y - screen.Y;
             if (MathF.Sqrt(dx*dx + dy*dy) <= 10f)
                 return station;
         }
@@ -835,6 +931,21 @@ public sealed class SystemMapState : GameState
 
         return System.Math.Clamp(baseSize * scale, minRadius, maxRadius);
     }
+
+    private float StarVisualRadiusPx()
+    {
+        const double refMPP = 5e8;
+        float scale = MathF.Log((float)(refMPP / _metersPerPixel) + 1f, 2f);
+        return System.Math.Clamp(StarVisualRadius * scale, 12f, 60f);
+    }
+
+    private static float StationDotRadius(Galaxy.StationSize size) => size switch
+    {
+        Galaxy.StationSize.Small  => 4f,
+        Galaxy.StationSize.Medium => 5f,
+        Galaxy.StationSize.Large  => 7f,
+        _                         => 4f,
+    };
 
     private static Color BodyColor(OrbitalBody body) => body.BodyType switch
     {
