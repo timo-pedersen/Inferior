@@ -36,10 +36,15 @@ public sealed class OpenPort
 
 public sealed class PlacedModule
 {
-    public required StationModuleDefinition Definition { get; init; }
-    public required Matrix                  Transform  { get; init; }
-    public required int                     Seed       { get; init; }
-    public          int                     Depth      { get; init; }
+    public required StationModuleDefinition Definition   { get; init; }
+    public required Matrix                  Transform    { get; init; }
+    public required int                     Seed         { get; init; }
+    // Chamfer bevel depth (5–50cm), seeded per module — single source of truth for the
+    // hull panel inset (BuildHullMesh), edge trim geometry (GenerateEdgeTrimStrips), panel
+    // seam length (GeneratePanelSeams), and container placement margin (PlaceContainer).
+    // Computed once at construction (StationGenerator), not re-derived per consumer.
+    public required float                   ChamferDepth { get; init; }
+    public          int                     Depth        { get; init; }
     public          Vector3                 AabbMin    { get; init; }
     public          Vector3                 AabbMax    { get; init; }
     public          List<OpenPort>          OpenPorts      { get; } = [];

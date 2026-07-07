@@ -18,6 +18,13 @@ public sealed class StationGenerator
 
     private StationGenerator(int seed) { _rng = new SeededRandom(seed); }
 
+    // Chamfer bevel depth, seeded per module (5-50cm) — single source of truth read by
+    // BuildHullMesh, GenerateEdgeTrimStrips, GeneratePanelSeams, and PlaceContainer.
+    // XOR salt keeps this independent of any other value already derived from the same
+    // module seed elsewhere.
+    private static float ChamferDepthForSeed(int seed)
+        => 0.05f + (float)new System.Random(seed ^ 0x43484D46).NextDouble() * 0.45f;
+
     public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd,
                                                double gameTime = 0.0)
     {
@@ -187,14 +194,16 @@ public sealed class StationGenerator
         // Core hub — always placed at the station origin
         var coreDefn = StationModuleRegistry.CoreHub;
         var (coreMin, coreMax) = ComputeWorldAabb(Matrix.Identity, coreDefn.BoundingBox);
+        int coreSeed = _rng.NextInt(0, 999999);
         var core = new PlacedModule
         {
-            Definition = coreDefn,
-            Transform  = Matrix.Identity,
-            Seed       = _rng.NextInt(0, 999999),
-            Depth      = 0,
-            AabbMin    = coreMin,
-            AabbMax    = coreMax,
+            Definition   = coreDefn,
+            Transform    = Matrix.Identity,
+            Seed         = coreSeed,
+            ChamferDepth = ChamferDepthForSeed(coreSeed),
+            Depth        = 0,
+            AabbMin      = coreMin,
+            AabbMax      = coreMax,
         };
         foreach (var p in coreDefn.Ports)
         {
@@ -275,11 +284,13 @@ public sealed class StationGenerator
         var (min, max) = ComputeWorldAabb(transform, candidate.BoundingBox);
         if (IntersectsAny(min, max)) return null;
 
+        int moduleSeed = _rng.NextInt(0, 999999);
         var placed = new PlacedModule
         {
             Definition     = candidate,
             Transform      = transform,
-            Seed           = _rng.NextInt(0, 999999),
+            Seed           = moduleSeed,
+            ChamferDepth   = ChamferDepthForSeed(moduleSeed),
             Depth          = parentPort.Depth + 1,
             AabbMin        = min,
             AabbMax        = max,

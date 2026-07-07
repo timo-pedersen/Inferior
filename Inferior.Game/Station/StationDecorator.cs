@@ -1508,11 +1508,11 @@ public static class StationDecorator
 
     // ── Pass 6a: Panel seam lines ─────────────────────────────────────────────
 
-    // Shared with GenerateEdgeTrimStrips below — the flat hull panel is inset by
-    // ModuleChamferWidth * 0.707f on each side to make room for the beveled edge trim,
-    // so anything else that assumes it knows the panel's true extent (seams here) needs
-    // the same inset or it runs past the flat surface and onto the angled bevel.
-    private const float ModuleChamferWidth = 0.38f;
+    // Chamfer depth now varies per module (mod.ChamferDepth, seeded — see
+    // StationGenerator.ChamferDepthForSeed), not a shared constant — the flat hull panel
+    // is inset by mod.ChamferDepth * 0.707f on each side to make room for the beveled
+    // edge trim, so anything else that assumes it knows the panel's true extent (seams
+    // here) needs the same inset or it runs past the flat surface and onto the bevel.
 
     private static void GeneratePanelSeams(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh)
@@ -1528,7 +1528,7 @@ public static class StationDecorator
         // Edge trim (Pass 6b) only insets standard box modules — custom-mesh modules
         // (octagonal etc.) have no box chamfer to stay clear of.
         float chamferInset = mod.Definition.MeshFactory == null
-            ? ModuleChamferWidth * 0.707f
+            ? mod.ChamferDepth * 0.707f
             : 0f;
         float hw = face.Width  * 0.5f - chamferInset;
         float hh = face.Height * 0.5f - chamferInset;
@@ -1612,7 +1612,8 @@ public static class StationDecorator
 
         Color trimColor = LightenColor(
             StationModuleRegistry.CategoryColor(mod.Definition.Category), 1.12f);
-        float inset = ModuleChamferWidth * 0.707f;
+        float chamferW = mod.ChamferDepth;
+        float inset    = chamferW * 0.707f;
 
         // Width of each strip = diagonal of the inset square (√2 × inset).
         // Strips are shortened at both ends by inset so adjacent strips don't overlap at corners.
@@ -2941,9 +2942,11 @@ public static class StationDecorator
         float halfFR    = footRight * 0.5f;
         float halfFU    = footUp    * 0.5f;
 
-        // Check it can fit inside the face at all
-        float marginR = face.Width  * 0.5f - halfFR;
-        float marginU = face.Height * 0.5f - halfFU;
+        // Check it can fit inside the face at all — stay clear of the chamfer bevel the
+        // same way GeneratePanelSeams does, box modules only.
+        float chamferInset = mod.Definition.MeshFactory == null ? mod.ChamferDepth * 0.707f : 0f;
+        float marginR = face.Width  * 0.5f - chamferInset - halfFR;
+        float marginU = face.Height * 0.5f - chamferInset - halfFU;
         if (marginR < 0f || marginU < 0f) return;
 
         // Try a few random positions

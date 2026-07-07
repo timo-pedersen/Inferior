@@ -195,8 +195,8 @@ public sealed partial class SystemSpaceState
     private static (VertexBuffer vb, IndexBuffer ib, int triCount) BuildHullMesh(
         GraphicsDevice gd, PlacedModule mod)
     {
-        const float UvScale      = 5.0f;
-        const float ChamferInset = 0.38f * 0.707f;  // matches StationDecorator chamferW * 0.707f
+        const float UvScale = 5.0f;
+        float ChamferInset  = mod.ChamferDepth * 0.707f;  // single source of truth: mod.ChamferDepth
         var h  = mod.Definition.BoundingBox * 0.5f;
         float si = ChamferInset;
 
