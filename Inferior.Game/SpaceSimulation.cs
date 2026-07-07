@@ -91,11 +91,11 @@ public sealed class SpaceSimulation : Simulation
     // ── Reference frame velocity (main thread → sim thread) ──────────────────
     // In space: dominant body's blended orbital velocity (Newtonian zero-point).
     // In atmosphere: dominant body's full orbital velocity (ground reference).
-    private sealed record RefVelSnapshot(double X, double Y, double Z);
+    private sealed record RefVelSnapshot(double X, double Y, double Z, string SourceId);
     private volatile RefVelSnapshot? _refVelSnapshot;
 
-    public void SetReferenceVelocity(DVec3 vel)
-        => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z);
+    public void SetReferenceVelocity(DVec3 vel, string sourceId)
+        => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z, sourceId);
 
     // ── Ship move speed (legacy — used by old velocity-target path; still read by debug cam proximity) ──
     private long _shipSpeedBits = BitConverter.DoubleToInt64Bits(5e9);
@@ -138,6 +138,15 @@ public sealed class SpaceSimulation : Simulation
     // X-Stop now holds indefinitely once threshold is crossed (see TickNewtonianPhysics),
     // so the message must not repeat every tick while holding.
     private bool _xStopCompleteAnnounced = false;
+
+    // Continuous reference-frame carry (see TickNewtonianPhysics) — tracks the previous
+    // tick's reference velocity and which object it came from, so the ship can be carried
+    // along with however the reference accelerates every tick (same principle already used
+    // for planets in atmosphere) without integrating a phantom jump when the reference
+    // SOURCE changes (e.g. crossing the 25km station-proximity boundary) rather than the
+    // same source actually changing speed.
+    private DVec3  _prevRefVel      = DVec3.Zero;
+    private string _prevRefSourceId = "";
 
     // ── SystemSlipstream state ────────────────────────────────────────────────
     private int    _slipstreamHarmonicIndex   = 0;
@@ -417,7 +426,26 @@ public sealed class SpaceSimulation : Simulation
             ? FlightConstants.Gear1AccelerationMs2
             : ship.FlightAcceleration;
 
-        DVec3 refVel  = GetRefVelocity();
+        DVec3  refVel = GetRefVelocity();
+        string refId  = GetRefSourceId();
+
+        // Carry the ship along with however the reference is currently accelerating —
+        // deliberately not simulating the ship's own true orbital mechanics (matching a
+        // station's actual curved path is unintuitive to fly against); instead the current
+        // reference is treated as perpetually stationary from the player's perspective,
+        // same principle already used for planets in atmosphere. Only applied when the
+        // reference SOURCE hasn't changed — a hard cutoff elsewhere (e.g. crossing the 25km
+        // station-proximity boundary in UpdateReferenceFrame) can make refVel jump between
+        // two unrelated objects' velocities on consecutive ticks; integrating that jump as
+        // if it were real acceleration is what produced the reported "dropped on the moon"
+        // symptom. When the source changes, resynchronize the baseline instead — apply no
+        // delta this tick, just start tracking the new source from here.
+        if (refId == _prevRefSourceId)
+            ship.Velocity += refVel - _prevRefVel;
+
+        _prevRefVel      = refVel;
+        _prevRefSourceId = refId;
+
         DVec3 relVel  = ship.Velocity - refVel;
         DVec3 fwdDir  = ship.Forward;
 
@@ -927,6 +955,12 @@ public sealed class SpaceSimulation : Simulation
     {
         var rv = _refVelSnapshot;
         return rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
+    }
+
+    private string GetRefSourceId()
+    {
+        var rv = _refVelSnapshot;
+        return rv?.SourceId ?? "";
     }
 
     /// <summary>

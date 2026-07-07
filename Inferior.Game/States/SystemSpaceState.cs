@@ -146,7 +146,13 @@ public sealed partial class SystemSpaceState : GameState
 
     // ── Reference frame (zero-speed) tracking ────────────────────────────────
     private DVec3  _refVelocity;               // current zero-speed velocity in galaxy space
-    private string _refName = "";              // name of the reference object
+    private string _refName = "";              // name of the reference object (display only)
+    // Category-tagged identity for the simulation's continuous-carry tracking — a plain
+    // name isn't quite enough (stations already dedupe among themselves, and planet/moon
+    // names are unique within a system by construction, but nothing cross-checks a station
+    // name against a body name). The tag makes cross-category collision impossible outright
+    // rather than relying on the naming schemes happening to stay disjoint.
+    private string _refSourceId = "";
     private DVec3  _prevCameraPos;
     private bool   _prevCameraPosValid;
     private DVec3  _cameraActualVelocity;      // camera position delta / dt this frame
@@ -732,7 +738,7 @@ public sealed partial class SystemSpaceState : GameState
         if (_refName != prevRefName && prevRefName.Length > 0)
             _hudAlert.AddMessage(new SystemMessage(
                 $"Zero reference speed set to {_refName}.", SystemMessagePriority.NB));
-        _simulation.SetReferenceVelocity(_refVelocity);
+        _simulation.SetReferenceVelocity(_refVelocity, _refSourceId);
 
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)

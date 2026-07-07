@@ -44,6 +44,7 @@ public sealed partial class SystemSpaceState
             {
                 _refVelocity = EclipticToGalaxy(_system.GetStationVelocity(station, _gameTimeSeconds));
                 _refName     = station.Name;
+                _refSourceId = "station:" + station.Name;
                 return;
             }
         }
@@ -58,6 +59,7 @@ public sealed partial class SystemSpaceState
         {
             _refVelocity = DVec3.Zero;
             _refName     = _star.Name;
+            _refSourceId = "star:" + _star.Name;
             return;
         }
         DVec3 gravGal = EclipticToGalaxy(gravEcl);
@@ -99,16 +101,18 @@ public sealed partial class SystemSpaceState
 
         Score(t0b, t0p, t0w); Score(t1b, t1p, t1w); Score(t2b, t2p, t2w);
 
-        DVec3 domVelocity; string domName;
+        DVec3 domVelocity; string domName; string domSourceId;
         if (bestBody == null)
         {
-            domVelocity = DVec3.Zero;
-            domName     = _star.Name;
+            domVelocity  = DVec3.Zero;
+            domName      = _star.Name;
+            domSourceId  = "star:" + _star.Name;
         }
         else
         {
-            domVelocity = GetBodyGalaxyVelocity(bestBody, _gameTimeSeconds);
-            domName     = bestBody.Name;
+            domVelocity  = GetBodyGalaxyVelocity(bestBody, _gameTimeSeconds);
+            domName      = bestBody.Name;
+            domSourceId  = "body:" + bestBody.Name;
         }
 
         // Blend: fully locked at ≤ 45°, linear fade to 0 at 90°
@@ -123,7 +127,8 @@ public sealed partial class SystemSpaceState
         _refVelocity = _simulation.CurrentFlightMode is FlightMode.AtmosphericNewtonian or FlightMode.AtmosphericSlipstream
             ? DVec3.Zero
             : domVelocity * blend;
-        _refName = domName;
+        _refName     = domName;
+        _refSourceId = domSourceId;
     }
 
     // Returns the galaxy-space position of a planet or moon at the given game time.
