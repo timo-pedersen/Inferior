@@ -35,7 +35,7 @@ public sealed class TargetingSystem
             SetRadarTarget(null);
     }
 
-    // 'C' key — select the contact whose screen projection is closest to screen centre
+    // 'T' key — select the contact whose screen projection is closest to screen centre
     public void SelectClosestToReticle(Matrix viewProjection, Viewport viewport)
     {
         var     centre   = new Vector2(viewport.Width * 0.5f, viewport.Height * 0.5f);

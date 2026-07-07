@@ -710,7 +710,7 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.UpdateDirectionBalls(_camera, _eclipticRotation, _gravDirX, _gravDirY,
             _gravDirZ, _bodyPositions, _stationPositions);
 
-        // Feed planets, moons, and stations into TargetingSystem so C-key / click-to-target work
+        // Feed planets, moons, and stations into TargetingSystem so T-key / click-to-target work
         FeedRadarContacts();
 
         // Track camera actual velocity for relative-speed display in debug mode
@@ -958,7 +958,8 @@ public sealed partial class SystemSpaceState : GameState
     {
         bool mPressed    = keys.IsKeyDown(Keys.M)    && !_prevKeys.IsKeyDown(Keys.M);
         bool nPressed    = keys.IsKeyDown(Keys.N)    && !_prevKeys.IsKeyDown(Keys.N);
-        bool cPressed    = keys.IsKeyDown(Keys.C)    && !_prevKeys.IsKeyDown(Keys.C);
+        bool tPressed    = keys.IsKeyDown(Keys.T)    && !_prevKeys.IsKeyDown(Keys.T);
+        // Keys.C is reserved for future "align ship to target" (docking assist)
         bool lPressed    = keys.IsKeyDown(Keys.L)    && !_prevKeys.IsKeyDown(Keys.L);
         bool hPressed    = keys.IsKeyDown(Keys.H)    && !_prevKeys.IsKeyDown(Keys.H);
         bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
@@ -966,7 +967,7 @@ public sealed partial class SystemSpaceState : GameState
         if (hPressed)
             _hyperspace.HandleKey(_camera, _star, _frameShipSnap);
 
-        if (cPressed)
+        if (tPressed)
         {
             var vp = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
             _targeting.SelectClosestToReticle(vp, _gd.Viewport);

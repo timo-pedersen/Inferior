@@ -1464,7 +1464,10 @@ public static class StationDecorator
             Vector3 pipeStart = pipeCtr - runDir * runHalfLen;
             Vector3 pipeEnd   = pipeCtr + runDir * runHalfLen;
 
-            mesh.AddPrismPipe(pipeStart, pipeEnd, radius, sides, colour);
+            // Both ends sit mid-face with margin — genuinely floating, not touching
+            // anything (unlike GeneratePipes' full-edge-length runs, which continue
+            // past the module edge).
+            mesh.AddPrismPipe(pipeStart, pipeEnd, radius, sides, colour, capStart: true, capEnd: true);
             AddPipeBrackets(mesh, pipeStart, pipeEnd, runDir, perpDir,
                             face.LocalNormal, radius, bracketH, colour, rng);
         }
@@ -2019,9 +2022,11 @@ public static class StationDecorator
                 mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
 
                 float pipeLen = hw * 1.4f;
+                // stubStart is the exposed far end; stubEnd sits at the equipment box
+                // (same point as its own centre) and is covered by it.
                 Vector3 stubStart = LocalPointAbs(face, cu - pipeLen, cv, boxH * 0.5f);
                 Vector3 stubEnd   = LocalPointAbs(face, cu,           cv, boxH * 0.5f);
-                mesh.AddPrismPipe(stubStart, stubEnd, 0.08f, 6, detailCol);
+                mesh.AddPrismPipe(stubStart, stubEnd, 0.08f, 6, detailCol, capStart: true);
                 break;
             }
 
@@ -2066,13 +2071,16 @@ public static class StationDecorator
                 float armW   = 0.06f;
                 float armH   = boxH + 0.10f;
 
+                // Found during the AddPrismPipe end-cap sweep: all four spoke tips
+                // are genuinely free-floating (nothing covers them), same category
+                // as ConduitEntry's stub and the surface pipe runs.
                 Vector3 hArmA = LocalPointAbs(face, cu - armLen, cv, armH);
                 Vector3 hArmB = LocalPointAbs(face, cu + armLen, cv, armH);
-                mesh.AddPrismPipe(hArmA, hArmB, armW, 4, darkCol);
+                mesh.AddPrismPipe(hArmA, hArmB, armW, 4, darkCol, capStart: true, capEnd: true);
 
                 Vector3 vArmA = LocalPointAbs(face, cu, cv - armLen, armH);
                 Vector3 vArmB = LocalPointAbs(face, cu, cv + armLen, armH);
-                mesh.AddPrismPipe(vArmA, vArmB, armW, 4, darkCol);
+                mesh.AddPrismPipe(vArmA, vArmB, armW, 4, darkCol, capStart: true, capEnd: true);
                 break;
             }
 

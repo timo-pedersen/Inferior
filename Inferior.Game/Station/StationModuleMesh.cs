@@ -161,8 +161,11 @@ public sealed class StationModuleMesh
     // Adds an N-sided prism pipe. Each lateral face is stored as an independent quad
     // so ApplyLighting computes a distinct outward normal per face — a hexagonal pipe
     // gets 6 different shading values, simulating roundness with no renderer changes.
-    // No end caps; pipes are always flush against surfaces or continue off-screen.
-    public void AddPrismPipe(Vector3 start, Vector3 end, float radius, int sides, Color color)
+    // No end caps by default; most callers have pipes flush against surfaces or
+    // continuing off-screen (into other geometry, or the module edge). For a genuinely
+    // free-floating exposed end, pass capStart/capEnd — see AddDiscCap below.
+    public void AddPrismPipe(Vector3 start, Vector3 end, float radius, int sides, Color color,
+        bool capStart = false, bool capEnd = false)
     {
         Vector3 dir    = end - start;
         float   length = dir.Length();
@@ -187,6 +190,28 @@ public sealed class StationModuleMesh
         {
             int next = (i + 1) % sides;
             AddQuad(startRing[next], startRing[i], endRing[i], endRing[next], color);
+        }
+
+        if (capStart) AddDiscCap(startRing, start, -dir, color);
+        if (capEnd)   AddDiscCap(endRing,   end,   dir,  color);
+    }
+
+    // Fills a flat disc from ring vertices. Winding is computed and verified against
+    // expectedOutward, not hand-derived — same discipline as ChamferedBox.Build earlier
+    // tonight, since manually working out cap winding is exactly the kind of thing that's
+    // gone wrong more than once already.
+    private void AddDiscCap(Vector3[] ring, Vector3 center, Vector3 expectedOutward, Color color)
+    {
+        int sides = ring.Length;
+        for (int i = 0; i < sides; i++)
+        {
+            int next = (i + 1) % sides;
+            Vector3 a = ring[i], b = ring[next];
+            Vector3 normal = Vector3.Cross(a - center, b - center);
+            if (Vector3.Dot(normal, expectedOutward) < 0)
+                AddTriangle(center, b, a, color);
+            else
+                AddTriangle(center, a, b, color);
         }
     }
 
