@@ -103,4 +103,18 @@ public static class FlightConstants
     public const double AtmoSlipstreamMinSpeed  =   200;  // m/s
     public const double AtmoSlipstreamMaxSpeed  = 2_000;  // m/s
     public const int    AtmoSlipstreamGearCount = 6;
+
+    // ── AFTERBURNER (SYSTEM NEWTONIAN) ────────────────────────────────────
+    public const double AfterburnerDurationSeconds = 2.0;
+
+    // Constant forward accel while active = current full-throttle accel (Gear1AccelerationMs2
+    // or ship.FlightAcceleration, whichever TickNewtonianPhysics is currently using) × this.
+    public const double AfterburnerAccelMultiplier = 5.0;
+
+    // Random pitch/yaw jitter added on top of mouse-look each tick while active (radians).
+    // Deliberately affects the ship's real orientation (and so its actual forward vector and
+    // travel direction) rather than being a purely cosmetic camera overlay — a Brownian-ish
+    // wobble, not a perfectly straight boosted line. Roughly 1-2 mouse-look pixels' worth
+    // per tick (MouseSensitivity in SystemSpaceState.Ship.cs is 0.0012 rad/pixel).
+    public const double AfterburnerShakeRadians = 0.0015;
 }

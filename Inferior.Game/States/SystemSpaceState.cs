@@ -72,6 +72,10 @@ public sealed partial class SystemSpaceState : GameState
     private double _er10, _er11 = 1, _er12;
     private double _er20, _er21, _er22 = 1;
 
+    // TEMP DEBUG — station spawn investigation, remove before done.
+    private DVec3 _debugTargetStationGalaxy;
+    private bool  _debugTargetStationPending;
+
     // ── Celestial body rendering ──────────────────────────────────────────────
     private RingPrimitive         _ringPrimitive    = null!;
     private CelestialBodyRenderer _celestialBodies  = null!;
@@ -291,6 +295,19 @@ public sealed partial class SystemSpaceState : GameState
                 _camera = new Camera3D(spawnPos, AspectRatio);
                 _camera.SetPose(spawnPos, spawnOri);
                 SpawnShip(spawnPos, spawnOri);
+
+                // TEMP DEBUG — remove before done.
+                System.IO.File.AppendAllText("debug_spawn.log",
+                    $"[TargetStation] {System.DateTime.Now:HH:mm:ss} station={p.TargetStation.Name} " +
+                    $"orbitParent={p.TargetStation.OrbitParent?.Name ?? "none"} gameTime={p.GameTime}\n" +
+                    $"  parentEcliptic={parentEcliptic} stationEcliptic={stationEcliptic}\n" +
+                    $"  stationGalaxy={stationGalaxy}\n" +
+                    $"  eclipticUp={eclipticUp} |eclipticUp|={eclipticUp.Length}\n" +
+                    $"  er01={_er01} er11={_er11} er21={_er21}\n" +
+                    $"  spawnPos={spawnPos} dist(spawnPos,stationGalaxy)={(spawnPos - stationGalaxy).Length}\n" +
+                    $"  spawnOri={spawnOri}\n");
+                _debugTargetStationGalaxy = stationGalaxy;
+                _debugTargetStationPending = true;
             }
             else if (_ship != null)
             {
@@ -523,6 +540,17 @@ public sealed partial class SystemSpaceState : GameState
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         BlinkClock.Update(dt);
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
+
+        // TEMP DEBUG — remove before done. Logs actual post-spawn ship position/distance
+        // once the sim thread has picked up the newly spawned ship.
+        if (_debugTargetStationPending && _frameShipSnap != null)
+        {
+            double dist = (_frameShipSnap.Position - _debugTargetStationGalaxy).Length;
+            System.IO.File.AppendAllText("debug_spawn.log",
+                $"[PostSpawn] {System.DateTime.Now:HH:mm:ss} shipPos={_frameShipSnap.Position} " +
+                $"forward={_frameShipSnap.Forward} dist-to-station={dist}\n");
+            _debugTargetStationPending = false;
+        }
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
@@ -964,7 +992,7 @@ public sealed partial class SystemSpaceState : GameState
         bool hPressed    = keys.IsKeyDown(Keys.H)    && !_prevKeys.IsKeyDown(Keys.H);
         bool homePressed = keys.IsKeyDown(Keys.Home) && !_prevKeys.IsKeyDown(Keys.Home);
 
-        if (hPressed)
+        if (hPressed && !(_frameShipSnap?.AfterburnerActive ?? false))
             _hyperspace.HandleKey(_camera, _star, _frameShipSnap);
 
         if (tPressed)

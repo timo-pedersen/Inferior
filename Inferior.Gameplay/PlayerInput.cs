@@ -15,11 +15,12 @@ public record PlayerInput(
     double PitchInput,
     double YawInput,
     bool   JumpRequested,
-    bool   FlightAssistToggle = false,
-    bool   SlipstreamToggle   = false,
-    bool   XStopToggle        = false,
-    bool   GearUp             = false,
-    bool   GearDown           = false)
+    bool   FlightAssistToggle  = false,
+    bool   SlipstreamToggle    = false,
+    bool   XStopToggle         = false,
+    bool   GearUp              = false,
+    bool   GearDown            = false,
+    bool   AfterburnerToggle   = false)
 {
     public static readonly PlayerInput Zero = new(0, 0, 0, 0, 0, 0, false);
 }

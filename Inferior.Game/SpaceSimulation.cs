@@ -47,6 +47,7 @@ public sealed class SpaceSimulation : Simulation
         int        LkmZone           = 0,   // 0=none, 1/2/3
         double     LkmComplianceTimer= 0,
         bool       XStopActive       = false,
+        bool       AfterburnerActive = false,   // blocks the H hyperspace trigger on the main thread
         // Slipstream
         int        SlipstreamHarmonicIndex = 0,
         double     ClunkPhase        = -1.0,   // -1 = inactive, 0→1 = animating
@@ -138,6 +139,12 @@ public sealed class SpaceSimulation : Simulation
     // X-Stop now holds indefinitely once threshold is crossed (see TickNewtonianPhysics),
     // so the message must not repeat every tick while holding.
     private bool _xStopCompleteAnnounced = false;
+
+    // ── Afterburner (SystemNewtonian only) ────────────────────────────────────
+    private bool               _afterburnerActive        = false;
+    private double             _afterburnerTimeRemaining = 0;
+    private bool               _prevAfterburnerToggle    = false;
+    private readonly System.Random _afterburnerShakeRng  = new();
 
     // Continuous reference-frame carry (see TickNewtonianPhysics) — tracks the previous
     // tick's reference velocity and which object it came from, so the ship can be carried
@@ -233,8 +240,39 @@ public sealed class SpaceSimulation : Simulation
             _flightModeOverride = -1;
         }
 
+        // ── Afterburner toggle (rising edge; SystemNewtonian only; no re-trigger while active) ──
+        if (input.AfterburnerToggle && !_prevAfterburnerToggle && !_afterburnerActive
+            && _currentFlightMode == FlightMode.SystemNewtonian)
+        {
+            _afterburnerActive        = true;
+            _afterburnerTimeRemaining = FlightConstants.AfterburnerDurationSeconds;
+            DataBus.System.Publish(Topics.System.All, new SystemMessage("Afterburner engaged"));
+        }
+        _prevAfterburnerToggle = input.AfterburnerToggle;
+
+        if (_afterburnerActive)
+        {
+            _afterburnerTimeRemaining -= dt;
+            if (_afterburnerTimeRemaining <= 0)
+            {
+                _afterburnerActive = false;
+                DataBus.System.Publish(Topics.System.All, new SystemMessage("Afterburner burned out"));
+            }
+        }
+
         // ── Rotation ─────────────────────────────────────────────────────
-        ship.ApplyRotation(input.PitchInput, input.YawInput, input.RollInput, dt);
+        // While the afterburner burns, add a small random pitch/yaw jitter on top of mouse-look —
+        // a Brownian-ish shake that also nudges the ship's real forward vector (and so its actual
+        // travel direction) slightly, rather than a purely cosmetic camera overlay. Roll is
+        // untouched either way.
+        double pitchInput = input.PitchInput;
+        double yawInput   = input.YawInput;
+        if (_afterburnerActive)
+        {
+            pitchInput += (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0) * FlightConstants.AfterburnerShakeRadians;
+            yawInput   += (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0) * FlightConstants.AfterburnerShakeRadians;
+        }
+        ship.ApplyRotation(pitchInput, yawInput, input.RollInput, dt);
 
         // ── Flight Assist toggle (atmospheric only, rising edge) ──────────
         if (input.FlightAssistToggle && !_prevFlightAssistToggle)
@@ -246,7 +284,7 @@ public sealed class SpaceSimulation : Simulation
         _prevFlightAssistToggle = input.FlightAssistToggle;
 
         // ── X-Stop toggle (rising edge) ───────────────────────────────────
-        if (input.XStopToggle && !_prevXStopToggle)
+        if (input.XStopToggle && !_prevXStopToggle && !_afterburnerActive)
         {
             if (_currentFlightMode == FlightMode.SystemNewtonian)
             {
@@ -259,7 +297,7 @@ public sealed class SpaceSimulation : Simulation
         _prevXStopToggle = input.XStopToggle;
 
         // ── Slipstream / flight mode toggle (rising edge) ─────────────────
-        if (input.SlipstreamToggle && !_prevSlipstreamToggle)
+        if (input.SlipstreamToggle && !_prevSlipstreamToggle && !_afterburnerActive)
         {
             switch (_currentFlightMode)
             {
@@ -403,6 +441,7 @@ public sealed class SpaceSimulation : Simulation
             _currentLkmZone,
             _lkmComplianceTimer,
             _xStopActive,
+            _afterburnerActive,
             _slipstreamHarmonicIndex,
             clunkPhase,
             snapRelSpd,
@@ -445,6 +484,17 @@ public sealed class SpaceSimulation : Simulation
 
         _prevRefVel      = refVel;
         _prevRefSourceId = refId;
+
+        // Afterburner — constant forward accel at AfterburnerAccelMultiplier × the current
+        // full-throttle accel above, applied automatically for the whole burn. Not
+        // player-steerable: WASD and X-Stop are entirely skipped while active (their toggles
+        // are also gated in TickPhysics so they can't be engaged/cancelled mid-burn either).
+        if (_afterburnerActive)
+        {
+            ship.Velocity += ship.Forward * (accel * FlightConstants.AfterburnerAccelMultiplier * dt);
+            ship.Position += ship.Velocity * dt;
+            return;
+        }
 
         DVec3 relVel  = ship.Velocity - refVel;
         DVec3 fwdDir  = ship.Forward;
