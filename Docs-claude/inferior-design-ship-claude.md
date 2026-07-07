@@ -25,14 +25,33 @@ Ship class determines: available component sizes, hardpoint locations, cockpit p
 
 ## Size classes
 
-| Size class | Count | Length | Component slots (approx) | Max component class | Notes |
-|---|---|---|---|---|---|
-| Small | 4 | 20–50m | ~6 | Class 2 | Fast, agile; limited power and cargo |
-| Medium | 6 | 50–100m | ~10 | Class 4 | Versatile; balanced across roles |
-| Large | 4 | 100–250m | ~16 | Class 6 | Powerful; sacrifices agility and docking access |
-| Capital | 2 | 250–300m+ | ~24 | Class 8 | Massive capability; limited to open space and large stations |
+Superseded by `Docs-claude/inferior-ship-sizes-and-mass-claude.md` for length/width/
+height and mass — that doc's container-capacity-driven classes are authoritative. Four
+classes, not five: **Shuttle, Small, Medium, Large**. Capital is explicitly out of
+scope for now (low priority; won't dock under normal circumstances) — no confirmed
+size exists for it, don't invent one.
 
-Component class values are placeholders — to be tuned per-hull once component design finalises.
+| Size class | Length | Containers | Notes |
+|---|---|---|---|
+| Shuttle | 6–10m | none (crew only) | small, side-mounted engines |
+| Small | 12–20m | 1–4 | |
+| Medium | 26–36m | 8–30 | |
+| Large | up to 72m | up to 120 | |
+
+The table below (hull-type count per class, component slots, max component class)
+predates this length redefinition — Small/Medium/Large used to span 20–250m, now
+12–72m, and Shuttle didn't exist as a class before. Treat these as stale placeholders
+that need recalibrating against the new ranges, not confirmed values:
+
+| Size class (old) | Count | Component slots (approx) | Max component class |
+|---|---|---|---|
+| Small | 4 | ~6 | Class 2 |
+| Medium | 6 | ~10 | Class 4 |
+| Large | 4 | ~16 | Class 6 |
+| Capital | 2 | ~24 | Class 8 |
+
+Component class values were placeholders even before this — to be tuned per-hull once
+component design finalises.
 
 **`ShipSizeClass` enum exists and is stored on `Ship` but not yet enforced at component install time.** `ShipBuilder` accepts any component in any slot; validation belongs in the fitting screen, not the builder. A ship that doesn't meet requirements can't be built via normal factory path, but isn't illegal.
 
