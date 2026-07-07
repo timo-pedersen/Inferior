@@ -1612,11 +1612,18 @@ public static class StationDecorator
         if (mod.Definition.MeshFactory != null) return;
 
         Vector3 half = mod.Definition.BoundingBox * 0.5f;
-
         Color trimColor = LightenColor(
             StationModuleRegistry.CategoryColor(mod.Definition.Category), 1.12f);
-        float chamferW = mod.ChamferDepth;
-        float inset    = chamferW * 0.707f;
+        AddChamferEdgeTrim(mesh, half, mod.ChamferDepth, trimColor);
+    }
+
+    // Adds the 45°-bevel edge strips (12 edges) and corner-fill triangles (8 corners) for an
+    // axis-aligned box of the given half-extents and chamfer depth. Shared by GenerateEdgeTrimStrips
+    // (standard box modules) and DockingBayHull (a MeshFactory module that builds its own chamfered
+    // hull and so bypasses GenerateEdgeTrimStrips' MeshFactory-guard entirely).
+    internal static void AddChamferEdgeTrim(StationModuleMesh mesh, Vector3 half, float chamferDepth, Color trimColor)
+    {
+        float inset = chamferDepth * 0.707f;
 
         // Width of each strip = diagonal of the inset square (√2 × inset).
         // Strips are shortened at both ends by inset so adjacent strips don't overlap at corners.
@@ -2854,7 +2861,7 @@ public static class StationDecorator
         (int)(c.B * factor),
         c.A);
 
-    private static Color LightenColor(Color c, float factor) => new(
+    internal static Color LightenColor(Color c, float factor) => new(
         (byte)Math.Min(c.R * factor, 255),
         (byte)Math.Min(c.G * factor, 255),
         (byte)Math.Min(c.B * factor, 255),

@@ -304,6 +304,33 @@ public static class StationModuleRegistry
         ]
     };
 
+    // ── docking-bay ───────────────────────────────────────────────────────────
+    // 48×32×100 — the first hollow module. Ships fly in through a 40×24 door on the -Z
+    // face and dock inside. Placed once per station via a dedicated pre-growth step
+    // (StationGenerator.Run), never through organic WeightedPickModule selection — see the
+    // Category exclusion there. MinScale = Port matches CoreHubLarge's Large-tier ports,
+    // the only root this module can actually attach to (CoreHub's ports max out at Medium).
+    public static readonly StationModuleDefinition DockingBay = new()
+    {
+        Id          = "docking-bay",
+        Category    = "docking-bay",
+        BoundingBox = new Vector3(48, 32, 100),
+        MinScale    = StationScale.Port,
+        MeshFactory = seed => DockingBayHull.Build(seed),
+        Ports       =
+        [
+            new StationPort { Id = "px", LocalPosition = new Vector3(+24, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
+            new StationPort { Id = "nx", LocalPosition = new Vector3(-24, 0, 0),  OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
+            new StationPort { Id = "py", LocalPosition = new Vector3(0, +16, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Large },
+            new StationPort { Id = "ny", LocalPosition = new Vector3(0, -16, 0),  OutwardNormal = -Vector3.UnitY, Size = PortSize.Large },
+            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +50),  OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+            // Interior docking port — no port at all on the door face (-Z); PopulateLandingPads
+            // maps this to a LandingPad regardless of it sitting inside the hollow cavity.
+            new StationPort { Id = "dock", LocalPosition = new Vector3(0, 0, 0), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large,
+                              IsDocking = true, IsTerminal = true },
+        ]
+    };
+
     // ── Octagonal prism mesh factory ──────────────────────────────────────────
     // 8 quad side faces + top triangle fan. No bottom cap (always internal/terminal).
     private static void AddOctagonalPrism(StationModuleMesh mesh,
@@ -354,7 +381,7 @@ public static class StationModuleRegistry
         CoreHub, ConnectorLong, ConnectorShort, HabBlock,
         CargoBay, DockingArm, ScienceBlock, IndustrialBlock,
         CoreHubLarge, ConnectorLongLarge, HabBlockLarge, CargoBayLarge, IndustrialBlockLarge,
-        HabBlockOctagonal, ScienceBlockOctagonal,
+        HabBlockOctagonal, ScienceBlockOctagonal, DockingBay,
     ];
 
     public static Color CategoryColor(string category) => category switch
@@ -364,6 +391,7 @@ public static class StationModuleRegistry
         "hab"        => new Color(220, 210, 190),
         "cargo"      => new Color(180, 150, 80),
         "docking"    => new Color(160, 180, 200),
+        "docking-bay" => new Color(160, 180, 200),
         "science"    => new Color(150, 170, 210),
         "industrial" => new Color(130, 110, 70),
         _            => new Color(150, 150, 150),

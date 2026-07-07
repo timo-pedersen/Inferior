@@ -16,13 +16,18 @@ public sealed class StationGenerator
     private readonly SeededRandom     _rng;
     private readonly List<PlacedModule> _placed = [];
 
+    // Reserved approach corridor in front of a docking bay's door — kept separate from _placed
+    // so every pass that iterates _placed expecting real modules (AssignTextures, BakeLighting,
+    // ValidatePlacement, PopulateLandingPads) needs no changes. Only IntersectsAny checks it.
+    private readonly List<(Vector3 min, Vector3 max)> _reservedVolumes = [];
+
     private StationGenerator(int seed) { _rng = new SeededRandom(seed); }
 
     // Chamfer bevel depth, seeded per module (5-50cm) — single source of truth read by
     // BuildHullMesh, GenerateEdgeTrimStrips, GeneratePanelSeams, and PlaceContainer.
     // XOR salt keeps this independent of any other value already derived from the same
     // module seed elsewhere.
-    private static float ChamferDepthForSeed(int seed)
+    internal static float ChamferDepthForSeed(int seed)
         => 0.05f + (float)new System.Random(seed ^ 0x43484D46).NextDouble() * 0.45f;
 
     public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd,
@@ -173,9 +178,10 @@ public sealed class StationGenerator
             _                  => StationScale.Outpost,
         };
 
-        // "core" category is the station root — never attach a second core as a child module.
+        // "core" and "docking-bay" are never organically picked: core is the station root
+        // (placed below), docking-bay is placed exactly once by the pre-growth step further down.
         var availableModules = StationModuleRegistry.All
-            .Where(m => m.MinScale <= stationScale && m.Category != "core")
+            .Where(m => m.MinScale <= stationScale && m.Category != "core" && m.Category != "docking-bay")
             .ToList();
 
         if (availableModules.Count == 0) return _placed;
@@ -191,8 +197,12 @@ public sealed class StationGenerator
 
         var archetype = StationArchetypeRegistry.Pick(_rng);
 
-        // Core hub — always placed at the station origin
-        var coreDefn = StationModuleRegistry.CoreHub;
+        // Core hub — always placed at the station origin. CoreHubLarge (Large-tier ports) becomes
+        // the root at Port+ scale — this is what makes the docking bay's Large-tier ports able to
+        // attach at all; the small CoreHub's ports max out at Medium.
+        var coreDefn = stationScale >= StationScale.Port
+            ? StationModuleRegistry.CoreHubLarge
+            : StationModuleRegistry.CoreHub;
         var (coreMin, coreMax) = ComputeWorldAabb(Matrix.Identity, coreDefn.BoundingBox);
         int coreSeed = _rng.NextInt(0, 999999);
         var core = new PlacedModule
@@ -212,11 +222,37 @@ public sealed class StationGenerator
         }
         _placed.Add(core);
 
+        // Pre-growth step: attach the docking bay directly to the core, before the general
+        // frontier loop starts. Deliberate placement, not organic growth — generalizes to
+        // multiple bays later by repeating this same step in sequence.
+        OpenPort?     dockingBayPort = null;
+        PlacedModule? dockingBay     = null;
+        if (stationScale >= StationScale.Port)
+        {
+            foreach (var corePort in core.OpenPorts)
+            {
+                dockingBay = TryAttach(StationModuleRegistry.DockingBay, corePort);
+                if (dockingBay != null) { dockingBayPort = corePort; break; }
+            }
+        }
+        if (dockingBay != null)
+        {
+            _placed.Add(dockingBay);
+            _reservedVolumes.Add(ComputeReservedCorridor(dockingBay));
+        }
+
         // Priority frontier: higher archetype score → expanded sooner.
         // PriorityQueue is a min-heap, so negate the score.
         var frontier = new PriorityQueue<OpenPort, float>();
         foreach (var op in core.OpenPorts)
+        {
+            // Consumed by the pre-growth attachment above — don't re-offer it.
+            if (op == dockingBayPort) continue;
             frontier.Enqueue(op, -archetype.ScorePort(op, _placed.Count));
+        }
+        if (dockingBay != null)
+            foreach (var op in dockingBay.OpenPorts)
+                frontier.Enqueue(op, -archetype.ScorePort(op, _placed.Count));
 
         const int MaxAttemptsPerPort = 6;
 
@@ -415,8 +451,9 @@ public sealed class StationGenerator
         return (min, max);
     }
 
-    // Returns true if a candidate AABB overlaps any placed module's AABB.
-    // A small margin prevents flush-touching faces from registering as an overlap.
+    // Returns true if a candidate AABB overlaps any placed module's AABB, or any reserved
+    // volume (e.g. a docking bay's approach corridor). A small margin prevents flush-touching
+    // faces from registering as an overlap.
     private bool IntersectsAny(Vector3 candidateMin, Vector3 candidateMax, float margin = 0.5f)
     {
         var shrunkMin = candidateMin + new Vector3(margin);
@@ -429,17 +466,57 @@ public sealed class StationGenerator
                 shrunkMax.Z > m.AabbMin.Z && shrunkMin.Z < m.AabbMax.Z)
                 return true;
         }
+        foreach (var (rMin, rMax) in _reservedVolumes)
+        {
+            if (shrunkMax.X > rMin.X && shrunkMin.X < rMax.X &&
+                shrunkMax.Y > rMin.Y && shrunkMin.Y < rMax.Y &&
+                shrunkMax.Z > rMin.Z && shrunkMin.Z < rMax.Z)
+                return true;
+        }
         return false;
+    }
+
+    // Reserved approach corridor extending 150m outward from the docking bay's door (the -Z
+    // face), cross-section 50x35 for lateral/vertical maneuvering room beyond the door's own
+    // 40x24 clear opening. Computed once, in the module's local space, then transformed by its
+    // actual placed Transform — so it rotates correctly regardless of the random attach twist.
+    private static (Vector3 min, Vector3 max) ComputeReservedCorridor(PlacedModule dockingBay)
+    {
+        // Door face is at local z = -50 (half the 100m length); corridor extends a further 150m
+        // outward, so it's centred at z = -50 - 75 = -125 with half-depth 75.
+        Vector3 localCenter = new(0, 0, -125f);
+        Vector3 half        = new(25f, 17.5f, 75f);
+
+        Span<Vector3> corners = stackalloc Vector3[8];
+        corners[0] = localCenter + new Vector3(-half.X, -half.Y, -half.Z);
+        corners[1] = localCenter + new Vector3(+half.X, -half.Y, -half.Z);
+        corners[2] = localCenter + new Vector3(-half.X, +half.Y, -half.Z);
+        corners[3] = localCenter + new Vector3(+half.X, +half.Y, -half.Z);
+        corners[4] = localCenter + new Vector3(-half.X, -half.Y, +half.Z);
+        corners[5] = localCenter + new Vector3(+half.X, -half.Y, +half.Z);
+        corners[6] = localCenter + new Vector3(-half.X, +half.Y, +half.Z);
+        corners[7] = localCenter + new Vector3(+half.X, +half.Y, +half.Z);
+
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var corner in corners)
+        {
+            Vector3 world = Vector3.Transform(corner, dockingBay.Transform);
+            min = Vector3.Min(min, world);
+            max = Vector3.Max(max, world);
+        }
+        return (min, max);
     }
 
     // Fills LocalPosition/LocalNormal on each LandingPad from the matching docking port
     // in world space. Simple positional mapping — pads assigned in module iteration order.
+    // Any IsDocking port counts, regardless of category — an interior port (docking-bay) works
+    // exactly like an exterior one (docking-arm); only the port flag matters.
     private static void PopulateLandingPads(Galaxy.Station station, List<PlacedModule> modules)
     {
         int padIdx = 0;
         foreach (var mod in modules)
         {
-            if (mod.Definition.Category != "docking") continue;
             foreach (var port in mod.Definition.Ports)
             {
                 if (!port.IsDocking) continue;
