@@ -1508,6 +1508,12 @@ public static class StationDecorator
 
     // ── Pass 6a: Panel seam lines ─────────────────────────────────────────────
 
+    // Shared with GenerateEdgeTrimStrips below — the flat hull panel is inset by
+    // ModuleChamferWidth * 0.707f on each side to make room for the beveled edge trim,
+    // so anything else that assumes it knows the panel's true extent (seams here) needs
+    // the same inset or it runs past the flat surface and onto the angled bevel.
+    private const float ModuleChamferWidth = 0.38f;
+
     private static void GeneratePanelSeams(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh)
     {
@@ -1519,36 +1525,79 @@ public static class StationDecorator
         const float seamWidth  = 0.038f;
         const float seamOffset = 0.028f;
 
-        float hw = face.Width  * 0.5f;
-        float hh = face.Height * 0.5f;
+        // Edge trim (Pass 6b) only insets standard box modules — custom-mesh modules
+        // (octagonal etc.) have no box chamfer to stay clear of.
+        float chamferInset = mod.Definition.MeshFactory == null
+            ? ModuleChamferWidth * 0.707f
+            : 0f;
+        float hw = face.Width  * 0.5f - chamferInset;
+        float hh = face.Height * 0.5f - chamferInset;
         float hs = seamWidth * 0.5f;
+
+        // Defensive floor — an unusually narrow face can pass the 25m² area check above
+        // while still being thin enough in one dimension that the inset consumes it entirely.
+        if (hw <= 0f || hh <= 0f) return;
 
         int hSeams = rng.NextDouble() < 0.55 ? 2 : 1;
         for (int i = 0; i < hSeams; i++)
         {
             float t    = hSeams == 1 ? 0.5f : (i == 0 ? 0.33f : 0.67f);
-            float vOff = -hh + face.Height * t
+            float vOff = -face.Height * 0.5f + face.Height * t
                        + ((float)rng.NextDouble() - 0.5f) * face.Height * 0.08f;
 
-            Vector3 v0 = LocalPointAbs(face, -hw,  vOff - hs, seamOffset);
-            Vector3 v1 = LocalPointAbs(face, +hw,  vOff - hs, seamOffset);
-            Vector3 v2 = LocalPointAbs(face, +hw,  vOff + hs, seamOffset);
-            Vector3 v3 = LocalPointAbs(face, -hw,  vOff + hs, seamOffset);
-            mesh.AddQuad(v0, v1, v2, v3, seamColor);
+            AddSeamStrip(mesh, face, horizontal: true, vOff, hw, hs, seamOffset, seamColor, rng);
         }
 
         int vSeams = face.Width > 20f ? (rng.NextDouble() < 0.6 ? 2 : 1) : 1;
         for (int i = 0; i < vSeams; i++)
         {
             float t    = vSeams == 1 ? 0.5f : (i == 0 ? 0.33f : 0.67f);
-            float uOff = -hw + face.Width * t
+            float uOff = -face.Width * 0.5f + face.Width * t
                        + ((float)rng.NextDouble() - 0.5f) * face.Width * 0.08f;
 
-            Vector3 v0 = LocalPointAbs(face, uOff - hs, -hh, seamOffset);
-            Vector3 v1 = LocalPointAbs(face, uOff + hs, -hh, seamOffset);
-            Vector3 v2 = LocalPointAbs(face, uOff + hs, +hh, seamOffset);
-            Vector3 v3 = LocalPointAbs(face, uOff - hs, +hh, seamOffset);
-            mesh.AddQuad(v0, v1, v2, v3, seamColor);
+            AddSeamStrip(mesh, face, horizontal: false, uOff, hh, hs, seamOffset, seamColor, rng);
+        }
+    }
+
+    // Subdivides a seam into ~1.5m segments with slightly varied brightness (±15%),
+    // matching the existing wear-pattern philosophy of subtle per-region variation
+    // rather than a single flat-colour line. Deterministic per station seed — uses the
+    // same seeded rng GeneratePanelSeams was already given, not per-frame randomness.
+    private static void AddSeamStrip(StationModuleMesh mesh, FaceInfo face,
+        bool horizontal, float centerOffset, float halfLen, float halfWidth, float zOffset,
+        Color baseColor, System.Random rng)
+    {
+        float totalLen = halfLen * 2f;
+        int   segments = Math.Max(1, (int)(totalLen / 1.5f));  // ~1.5m per segment
+
+        for (int s = 0; s < segments; s++)
+        {
+            float u0 = -halfLen + totalLen * s       / segments;
+            float u1 = -halfLen + totalLen * (s + 1) / segments;
+
+            float variation = 0.85f + (float)rng.NextDouble() * 0.30f;  // ±15% brightness
+            Color segColor  = new Color(
+                (byte)Math.Clamp(baseColor.R * variation, 0, 255),
+                (byte)Math.Clamp(baseColor.G * variation, 0, 255),
+                (byte)Math.Clamp(baseColor.B * variation, 0, 255),
+                baseColor.A);
+
+            Vector3 v0, v1, v2, v3;
+            if (horizontal)
+            {
+                v0 = LocalPointAbs(face, u0, centerOffset - halfWidth, zOffset);
+                v1 = LocalPointAbs(face, u1, centerOffset - halfWidth, zOffset);
+                v2 = LocalPointAbs(face, u1, centerOffset + halfWidth, zOffset);
+                v3 = LocalPointAbs(face, u0, centerOffset + halfWidth, zOffset);
+            }
+            else
+            {
+                v0 = LocalPointAbs(face, centerOffset - halfWidth, u0, zOffset);
+                v1 = LocalPointAbs(face, centerOffset + halfWidth, u0, zOffset);
+                v2 = LocalPointAbs(face, centerOffset + halfWidth, u1, zOffset);
+                v3 = LocalPointAbs(face, centerOffset - halfWidth, u1, zOffset);
+            }
+            mesh.AddQuad(v0, v1, v2, v3, segColor);
         }
     }
 
@@ -1563,8 +1612,7 @@ public static class StationDecorator
 
         Color trimColor = LightenColor(
             StationModuleRegistry.CategoryColor(mod.Definition.Category), 1.12f);
-        const float chamferW = 0.38f;
-        float inset = chamferW * 0.707f;
+        float inset = ModuleChamferWidth * 0.707f;
 
         // Width of each strip = diagonal of the inset square (√2 × inset).
         // Strips are shortened at both ends by inset so adjacent strips don't overlap at corners.
