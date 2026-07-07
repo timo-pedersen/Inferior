@@ -10,7 +10,7 @@ namespace Inferior.Game.StationGen;
 // fully populated. ApplyAmbientOcclusion is a separate pass run after BakeLighting.
 public static class StationDecorator
 {
-    public static void Decorate(IReadOnlyList<PlacedModule> modules)
+    public static void Decorate(IReadOnlyList<PlacedModule> modules, Matrix stationRot)
     {
         foreach (var mod in modules)
         {
@@ -77,7 +77,7 @@ public static class StationDecorator
                 GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
                 GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy, greeblePlacements);
                 GenerateTanks       (mod, face, mesh, occupancy, new System.Random(tankRng.Next()));
-                GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()));
+                GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()), stationRot);
 
                 if (face.IsExposed && greeblePlacements.Count >= 2 && face.Width * face.Height >= 4f)
                     StationCableGenerator.GenerateFaceCables(
@@ -966,9 +966,9 @@ public static class StationDecorator
         ];
         foreach (var (lpos, lphase) in corners)
         {
-            AddLight(mesh, lpos + normal * (raise + 0.10f), normal, 0.22f, amberH, amber);
+            var (_, glowPos) = AddLight(mesh, lpos + normal * (raise + 0.10f), normal, 0.22f, amberH, amber);
             mod.GlowLights.Add(new StationLightInfo(
-                WorldPosition: Vector3.Transform(lpos, mod.Transform),
+                WorldPosition: Vector3.Transform(glowPos, mod.Transform),
                 Colour:        amber,
                 Type:          GlowType.AmbientMarker,
                 BaseIntensity: 0.65f,
@@ -987,9 +987,9 @@ public static class StationDecorator
         ];
         foreach (var (lpos, lphase) in thresholds)
         {
-            AddLight(mesh, lpos + normal * (raise + 0.10f), normal, 0.22f, whiteH, white);
+            var (_, glowPos) = AddLight(mesh, lpos + normal * (raise + 0.10f), normal, 0.22f, whiteH, white);
             mod.GlowLights.Add(new StationLightInfo(
-                WorldPosition: Vector3.Transform(lpos, mod.Transform),
+                WorldPosition: Vector3.Transform(glowPos, mod.Transform),
                 Colour:        white,
                 Type:          GlowType.WarningStrobe,
                 BaseIntensity: 0.80f,
@@ -2503,14 +2503,35 @@ public static class StationDecorator
         PlaceBayGuidanceLights (mod, faces, mesh);
     }
 
-    private static int AddLight(StationModuleMesh mesh,
+    // Returns the lens quad's vertex base (for AnimTags) and the position callers should
+    // register as StationLightInfo.WorldPosition for the glow sprite. That position is
+    // deliberately a little proud of the lens quad itself (see glowForwardBias below),
+    // not merely coincident with it — registering the flush `position`, or even the
+    // lens's own exact surface position, left the glow sprite sitting at essentially the
+    // same depth as the glass geometry it's meant to shine through. DepthRead (added
+    // once real depth-testing was needed) then clipped the sprite against that glass
+    // from head-on angles, where perspective gives the flat glass quad's surface a
+    // depth that's equal to or nearer than the sprite's single point at some pixels —
+    // "gradually clips out of glass moving to the side" is exactly that near-equal-
+    // depth ambiguity resolving itself as the viewing angle changes. Sitting reliably
+    // in front of the glass avoids the ambiguity entirely rather than relying on a
+    // razor-thin coincident-depth comparison.
+    private static (int vb, Vector3 glowPosition) AddLight(StationModuleMesh mesh,
         Vector3 position, Vector3 normal, float size, Color housing, Color lens)
     {
         const float depth = 0.15f;
-        mesh.AddOrientedBox(position - normal * (depth * 0.5f), normal,
+        // Shifts the housing off the surface — position sits flush with the hull/panel
+        // behind it, so an unshifted housing's outer face (at position, zero offset)
+        // z-fights with that panel. raise also doubles as the lens-proud-of-housing gap
+        // below, preserving the original 0.01m lens-proud-of-flush-housing relationship
+        // now that the housing's outer face itself sits at position + raise, not position.
+        const float raise = 0.01f;
+        const float glowForwardBias = 0.05f; // clear of the glass, not just coincident with it
+        mesh.AddOrientedBox(position + normal * (raise - depth * 0.5f), normal,
             depth, size * 1.4f, size * 1.4f, housing);
-        return mesh.AddQuad(position + normal * 0.01f, normal,
-            TangentFrame(normal).up, size, size, lens);
+        Vector3 lensCenter = position + normal * (raise * 2f);
+        int vb = mesh.AddQuad(lensCenter, normal, TangentFrame(normal).up, size, size, lens);
+        return (vb, lensCenter + normal * glowForwardBias);
     }
 
     private static void PlaceNavigationLights(PlacedModule mod, StationModuleMesh mesh)
@@ -2529,7 +2550,7 @@ public static class StationDecorator
         foreach (var (normal, pos, lens) in navLights)
         {
             if (IsFaceBlocked(mod, normal)) continue;
-            int vb = AddLight(mesh, pos, normal, 0.4f, housing, lens);
+            var (vb, glowPos) = AddLight(mesh, pos, normal, 0.4f, housing, lens);
             mesh.AnimTags.Add(new AnimTag
             {
                 Type       = AnimType.Steady,
@@ -2539,7 +2560,7 @@ public static class StationDecorator
                 Period     = 1f,
             });
             mod.GlowLights.Add(new StationLightInfo(
-                WorldPosition: Vector3.Transform(pos, mod.Transform),
+                WorldPosition: Vector3.Transform(glowPos, mod.Transform),
                 Colour:        lens,
                 Type:          GlowType.NavigationLight,
                 BaseIntensity: 0.80f,
@@ -2564,7 +2585,7 @@ public static class StationDecorator
         foreach (float zOff in offsets)
         {
             Vector3 pos = new(0, half.Y, zOff);
-            int vb = AddLight(mesh, pos, Vector3.UnitY, 0.5f, housing, amber);
+            var (vb, glowPos) = AddLight(mesh, pos, Vector3.UnitY, 0.5f, housing, amber);
             mesh.AnimTags.Add(new AnimTag
             {
                 Type       = AnimType.Strobe,
@@ -2575,7 +2596,7 @@ public static class StationDecorator
                 Phase      = phase,
             });
             mod.GlowLights.Add(new StationLightInfo(
-                WorldPosition: Vector3.Transform(pos, mod.Transform),
+                WorldPosition: Vector3.Transform(glowPos, mod.Transform),
                 Colour:        amber,
                 Type:          GlowType.WarningStrobe,
                 BaseIntensity: 0.80f,
@@ -2602,7 +2623,7 @@ public static class StationDecorator
                     + face.LocalRight * (side * face.Width * 0.25f)
                     + face.LocalNormal * 0.05f;
 
-                int vb = AddLight(mesh, pos, face.LocalNormal, 0.3f, housing, amber);
+                var (vb, _) = AddLight(mesh, pos, face.LocalNormal, 0.3f, housing, amber);
                 mesh.AnimTags.Add(new AnimTag
                 {
                     Type       = AnimType.Steady,
@@ -2643,7 +2664,7 @@ public static class StationDecorator
                     - df.LocalUp * (df.Height * 0.35f)
                     + df.LocalNormal * 0.05f;
 
-                int vb = AddLight(mesh, pos, df.LocalNormal, 0.35f, housing, white);
+                var (vb, _) = AddLight(mesh, pos, df.LocalNormal, 0.35f, housing, white);
                 mesh.AnimTags.Add(new AnimTag
                 {
                     Type       = AnimType.Pulse,
@@ -2805,7 +2826,7 @@ public static class StationDecorator
     ];
 
     private static void GenerateContainers(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Matrix stationRot)
     {
         if (!face.IsExposed) return;
         // Need at least enough space for one container laid on its smallest footprint
@@ -2840,7 +2861,7 @@ public static class StationDecorator
         double nextProb = 1.0;
         while (placed < maxContainers && rng.NextDouble() < nextProb)
         {
-            PlaceContainer(mod, face, mesh, occupancy, rng, palette[rng.Next(palette.Length)]);
+            PlaceContainer(mod, face, mesh, occupancy, rng, palette[rng.Next(palette.Length)], stationRot);
             placed++;
             nextProb = placed == 1 ? 0.60 : 0.35;
         }
@@ -2860,7 +2881,8 @@ public static class StationDecorator
     }
 
     private static void PlaceContainer(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Color color)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Color color,
+        Matrix stationRot)
     {
         // Decide orientation: long axis along Right (horizontal) or Up (vertical)
         bool longHoriz = rng.NextDouble() < 0.6;
@@ -2913,216 +2935,39 @@ public static class StationDecorator
                     centre.X,           centre.Y,           centre.Z,           1);
             }
 
-            AddContainerGeometry(mesh, t, color, rng);
+            // Same factory used for standalone/debug-spawn containers — station-placed
+            // greeble containers now get the identical chamfer/inset/fastener/text/wear
+            // geometry instead of a separately hand-maintained reimplementation (that
+            // reimplementation had drifted from the factory's own conventions, which is
+            // why station-placed container text mirrored differently than standalone).
+            // MergeTransformedAndLit detects and corrects handedness automatically, so
+            // the old manual axisY-flip check that used to live here is gone — t is
+            // passed through unchanged.
+            //
+            // Lighting needs care though: t only maps container-local space into
+            // MODULE-local space (matching what DrawStations applies at draw time via
+            // modRot*stationRot). SceneLighting.SunDirection is a world/galaxy-space
+            // direction — comparing a module-local normal against it directly (as a first
+            // pass of this fix did) ignores the module's own port-attachment twist and the
+            // station's current spin, both of which BakeLighting/ApplyLighting correctly
+            // apply for the rest of the module's geometry. A 180° twist, common from the
+            // random 0/90/180/270° rotation TryAttach applies per port, would show up as
+            // exactly inverted lighting — matching what was reported. Pre-rotate the sun
+            // direction back into module-local space instead (equivalent to rotating the
+            // normal forward, via Dot(Rv,w) = Dot(v,R⁻¹w) for the rotation R = modRot*stationRot),
+            // so container faces land on the same lighting basis as the module's own hull.
+            mod.Transform.Decompose(out _, out Quaternion modRotQ, out _);
+            Matrix  modRot       = Matrix.CreateFromQuaternion(modRotQ);
+            Matrix  fullRot      = modRot * stationRot;
+            Vector3 localSunDir  = Vector3.Normalize(
+                Vector3.TransformNormal(SceneLighting.SunDirection, Matrix.Invert(fullRot)));
+
+            var (verts, indices) = ShippingContainerFactory.GenerateVertices(
+                color, wear: (float)(0.1 + rng.NextDouble() * 0.5), sidePatternSeed: rng.Next(),
+                text: null, lockGrade: LockGrade.Civilian);
+            mesh.MergeTransformedAndLit(verts, indices, t,
+                localSunDir, SceneLighting.Ambient, SceneLighting.SunColour);
             break;
         }
-    }
-
-    // Emits one container's geometry into `mesh` using `transform` to orient it.
-    // The container in local transform space: X = long axis (6 m), Y = cross (2.5 m), Z = depth off surface (2.5 m).
-    // This is additive — all faces are added directly to the module mesh, lit by the station pipeline.
-    private static void AddContainerGeometry(StationModuleMesh mesh, Matrix t, Color color, System.Random rng)
-    {
-        float hl = ContainerL * 0.5f;  // 3.0 m half-length
-        float hs = ContainerS * 0.5f;  // 1.25 m half short dimension
-        float c  = 0.20f;              // chamfer
-
-        // Extract the three axis vectors from the transform
-        var axisX = new Vector3(t.M11, t.M12, t.M13); // long
-        var axisY = new Vector3(t.M21, t.M22, t.M23); // cross
-        var axisZ = new Vector3(t.M31, t.M32, t.M33); // depth (face normal)
-        var orig  = new Vector3(t.M41, t.M42, t.M43); // centre
-
-        // Geometry assumes a right-handed frame: cross(axisX,axisY)=axisZ.
-        // Vertical containers swap LocalRight/LocalUp, making the frame left-handed; fix it here.
-        if (Vector3.Dot(Vector3.Cross(axisX, axisY), axisZ) < 0)
-            axisY = -axisY;
-
-        Color sideColor  = color;
-        Color darkColor  = DarkenColor(color, 0.72f);
-        Color chamfColor = DarkenColor(color, 0.88f);
-        Color doorColor  = new Color(
-            (byte)(color.R * 0.85f),
-            (byte)(color.G * 0.85f),
-            (byte)(color.B * 0.85f));
-        Color latchColor = new Color(
-            (byte)Math.Min(color.R * 0.5f + 80, 255),
-            (byte)Math.Min(color.G * 0.5f + 70, 255),
-            (byte)Math.Min(color.B * 0.5f + 50, 255));
-
-        // ── 4 long main faces ─────────────────────────────────────────────────
-        // Winding rule: lighting normal = cross(axisX, faceUp), must equal faceNormal.
-        // cross(axisX, -axisZ) = +axisY  →  +Y face faceUp = -axisZ
-        // cross(axisX,  axisZ) = -axisY  →  -Y face faceUp =  axisZ
-        // cross(axisX,  axisY) = +axisZ  →  +Z face faceUp =  axisY  (already correct)
-        // cross(axisX, -axisY) = -axisZ  →  -Z face faceUp = -axisY  (already correct)
-        AddBoxFace(mesh, orig, axisX,  axisY, -axisZ, hl - c, hs - c, hs, sideColor);  // +Y
-        AddBoxFace(mesh, orig, axisX, -axisY,  axisZ, hl - c, hs - c, hs, darkColor);  // -Y
-        AddBoxFace(mesh, orig, axisX,  axisZ,  axisY, hl - c, hs - c, hs, sideColor);  // +Z
-        AddBoxFace(mesh, orig, axisX, -axisZ, -axisY, hl - c, hs - c, hs, darkColor);  // -Z
-
-        // ── 2 end faces (doors) ───────────────────────────────────────────────
-        AddDoorFace(mesh, orig + axisX * hl, axisX,  axisY, axisZ, hs - c, doorColor, latchColor);
-        AddDoorFace(mesh, orig - axisX * hl, -axisX, axisY, axisZ, hs - c, doorColor, latchColor);
-
-        // ── 4 long chamfer strips (along X) ───────────────────────────────────
-        float lext = hl - c;
-        AddLongChamfStrip(mesh, orig, axisX,  axisY,  axisZ, lext, hs, c, chamfColor);
-        AddLongChamfStrip(mesh, orig, axisX,  axisY, -axisZ, lext, hs, c, chamfColor);
-        AddLongChamfStrip(mesh, orig, axisX, -axisY,  axisZ, lext, hs, c, chamfColor);
-        AddLongChamfStrip(mesh, orig, axisX, -axisY, -axisZ, lext, hs, c, chamfColor);
-
-        // ── 8 short chamfer strips (end × face = 2 × 4) ───────────────────────
-        foreach (float sx in new[] { 1f, -1f })
-        {
-            AddShortChamfStrip(mesh, orig, axisX, sx,  axisY, axisZ, hl, hs, c, chamfColor);
-            AddShortChamfStrip(mesh, orig, axisX, sx, -axisY, axisZ, hl, hs, c, chamfColor);
-            AddShortChamfStrip(mesh, orig, axisX, sx,  axisZ, axisY, hl, hs, c, chamfColor);
-            AddShortChamfStrip(mesh, orig, axisX, sx, -axisZ, axisY, hl, hs, c, chamfColor);
-        }
-
-        // ── 8 corner triangles ─────────────────────────────────────────────────
-        foreach (float sx in new[] { 1f, -1f })
-        foreach (float sy in new[] { 1f, -1f })
-        foreach (float sz in new[] { 1f, -1f })
-            AddCornerTriangle(mesh, orig, axisX, axisY, axisZ, sx, sy, sz, hl, hs, c, chamfColor);
-
-        // ── Manufacturer label on ±Y faces ────────────────────────────────────
-        string label = ShippingContainerFactory.GenerateManufacturerName(rng.Next());
-
-        // Stencil-paint palette — pick one per container.
-        Color[] textPalette =
-        [
-            new Color(220, 215, 190),  // weathered cream
-            new Color(245, 245, 240),  // near-white
-            new Color(240, 210,  50),  // stencil yellow
-            new Color(230,  90,  30),  // hazmat orange
-            new Color(200,  30,  30),  // fire-code red
-            new Color( 30, 180,  90),  // customs green
-            new Color( 55,  55,  55),  // stencil black
-        ];
-        Color textColor = textPalette[rng.Next(textPalette.Length)];
-
-        int   cc = Math.Max(1, label.Length);
-        float ps = Math.Clamp((hl - c) * 2f * 0.80f / (cc * (BitmapFonts.CharW + 1)), 0.022f, 0.072f);
-        float tw = cc * (BitmapFonts.CharW + 1) * ps;
-        float th = BitmapFonts.CharH * ps;
-        const float labelRaise = 0.015f;
-
-        // textUp = +axisZ (away from module surface) so letters read right-side-up
-        // when the viewer stands on the same face as the container.
-        // Origin starts at bottom of text block (axisZ * -th*0.5 from face centre).
-        // +Y face: text reads left→right along +axisX
-        AddTextGeometry(mesh, label,
-            orig + axisY * (hs + labelRaise) - axisX * (tw * 0.5f) - axisZ * (th * 0.5f),
-            axisX, axisZ, axisY, ps, textColor);
-        // -Y face: mirror axisX so text reads left→right when viewed from the other side
-        AddTextGeometry(mesh, label,
-            orig - axisY * (hs + labelRaise) + axisX * (tw * 0.5f) - axisZ * (th * 0.5f),
-            -axisX, axisZ, -axisY, ps, textColor);
-    }
-
-    // A rectangular face of the container body.
-    // `faceNormal` is the outward normal; `faceUp` is the up direction on the face.
-    // The face spans ±halfLen along axisX and ±halfShort along faceUp.
-    // `offset` is the distance from centre in the faceNormal direction.
-    private static void AddBoxFace(StationModuleMesh mesh,
-        Vector3 orig, Vector3 axisX, Vector3 faceNormal, Vector3 faceUp,
-        float halfLen, float halfShort, float offset, Color color)
-    {
-        Vector3 c = orig + faceNormal * offset;
-        Vector3 hl = axisX   * halfLen;
-        Vector3 hs = faceUp  * halfShort;
-
-        // CW from outside (faceNormal points outward): v0=BL, v1=BR, v2=TR, v3=TL
-        mesh.AddQuad(c - hl - hs, c + hl - hs, c + hl + hs, c - hl + hs, color);
-    }
-
-    // Two-panel door face with a thin central latch bar.
-    private static void AddDoorFace(StationModuleMesh mesh,
-        Vector3 faceCenter, Vector3 faceNormal, Vector3 faceUp, Vector3 faceRight,
-        float hs, Color panelColor, Color latchColor)
-    {
-        float gapW = 0.03f;
-        float panW = hs - gapW * 0.5f;
-        const float recess = 0.012f;
-
-        // Left panel
-        Vector3 lCtr = faceCenter + faceRight * (-(panW * 0.5f + gapW * 0.25f));
-        mesh.AddQuad(lCtr - faceNormal * recess, faceNormal, faceUp, panW, hs * 2f, panelColor);
-        // Right panel
-        Vector3 rCtr = faceCenter + faceRight * (panW * 0.5f + gapW * 0.25f);
-        mesh.AddQuad(rCtr - faceNormal * recess, faceNormal, faceUp, panW, hs * 2f, panelColor);
-        // Central latch bar
-        mesh.AddQuad(faceCenter, faceNormal, faceUp, gapW * 1.5f, hs * 1.0f, latchColor);
-        // Horizontal latch bars on each panel
-        float barLen = panW * 0.6f;
-        mesh.AddQuad(lCtr + faceNormal * 0.015f + faceUp * (hs * 0.5f),
-                     faceNormal, faceRight, barLen, 0.06f, latchColor);
-        mesh.AddQuad(lCtr + faceNormal * 0.015f - faceUp * (hs * 0.5f),
-                     faceNormal, faceRight, barLen, 0.06f, latchColor);
-        mesh.AddQuad(rCtr + faceNormal * 0.015f + faceUp * (hs * 0.5f),
-                     faceNormal, faceRight, barLen, 0.06f, latchColor);
-        mesh.AddQuad(rCtr + faceNormal * 0.015f - faceUp * (hs * 0.5f),
-                     faceNormal, faceRight, barLen, 0.06f, latchColor);
-    }
-
-    // Long chamfer strip along the X axis, between axisA face and axisB face.
-    // Vertices are derived from adjacent face corners to avoid gaps.
-    private static void AddLongChamfStrip(StationModuleMesh mesh,
-        Vector3 orig, Vector3 axisX, Vector3 axisA, Vector3 axisB,
-        float halfLen, float hs, float c, Color color)
-    {
-        Vector3 edgeA = axisA * hs       + axisB * (hs - c);  // corner of axisA face
-        Vector3 edgeB = axisA * (hs - c) + axisB * hs;        // corner of axisB face
-
-        var v00 = orig - axisX * halfLen + edgeA;
-        var v10 = orig + axisX * halfLen + edgeA;
-        var v11 = orig + axisX * halfLen + edgeB;
-        var v01 = orig - axisX * halfLen + edgeB;
-
-        var faceNormal = Vector3.Cross(v10 - v00, v01 - v00);
-        if (Vector3.Dot(faceNormal, axisA + axisB) < 0)
-            mesh.AddQuad(v01, v11, v10, v00, color);
-        else
-            mesh.AddQuad(v00, v10, v11, v01, color);
-    }
-
-    // Short chamfer strip at one end of the container, between the end face and a long face.
-    // sx = ±1 selects which end; faceN = outward normal of the long face;
-    // faceU = axis along which the strip runs (the third axis perpendicular to both axisX and faceN).
-    private static void AddShortChamfStrip(StationModuleMesh mesh,
-        Vector3 orig, Vector3 axisX, float sx, Vector3 faceN, Vector3 faceU,
-        float hl, float hs, float c, Color color)
-    {
-        float hsc = hs - c;
-        var v00 = orig + sx * (hl - c) * axisX + faceN * hs  - faceU * hsc;
-        var v10 = orig + sx * (hl - c) * axisX + faceN * hs  + faceU * hsc;
-        var v11 = orig + sx *  hl      * axisX + faceN * hsc + faceU * hsc;
-        var v01 = orig + sx *  hl      * axisX + faceN * hsc - faceU * hsc;
-
-        var faceNormal = Vector3.Cross(v10 - v00, v01 - v00);
-        if (Vector3.Dot(faceNormal, sx * axisX + faceN) < 0)
-            mesh.AddQuad(v01, v11, v10, v00, color);
-        else
-            mesh.AddQuad(v00, v10, v11, v01, color);
-    }
-
-    // Corner triangle closing the gap at one octant of the container.
-    // The three vertices are the shared corners of the three adjacent chamfer strips.
-    // Winding is derived analytically: flipped when sx*sy*sz < 0.
-    private static void AddCornerTriangle(StationModuleMesh mesh,
-        Vector3 orig, Vector3 axisX, Vector3 axisY, Vector3 axisZ,
-        float sx, float sy, float sz, float hl, float hs, float c, Color color)
-    {
-        float hsc = hs - c;
-        var A = orig + sx * (hl - c) * axisX + sy * hs  * axisY + sz * hsc * axisZ;
-        var B = orig + sx * (hl - c) * axisX + sy * hsc * axisY + sz * hs  * axisZ;
-        var C = orig + sx *  hl      * axisX + sy * hsc * axisY + sz * hsc * axisZ;
-
-        if (sx * sy * sz > 0)
-            mesh.AddTriangle(A, B, C, color);
-        else
-            mesh.AddTriangle(A, C, B, color);
     }
 }

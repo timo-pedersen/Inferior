@@ -40,18 +40,7 @@ public static class ShippingContainerFactory
         LockGrade lockGrade = LockGrade.Civilian)
     {
         string manufacturerText = text ?? GenerateManufacturerName(sidePatternSeed);
-
-        var mesh = new StationModuleMesh { Texture = SurfaceTexture.CleanPanel };
-
-        BuildChamferedBox      (mesh, color);
-        BuildFasteners         (mesh, color);
-        BuildLongFaceInsets    (mesh, color, sidePatternSeed);
-        BuildEndDoors          (mesh, color);
-        AddContainerText       (mesh, manufacturerText);
-
-        ApplyWear(mesh, wear, sidePatternSeed);
-
-        var (verts, indices) = mesh.ToArraysWithNormals();
+        var (verts, indices) = GenerateVertices(color, wear, sidePatternSeed, manufacturerText, lockGrade);
 
         return new ShippingContainer
         {
@@ -67,6 +56,26 @@ public static class ShippingContainerFactory
             Vertices         = verts,
             Indices          = indices,
         };
+    }
+
+    // Geometry-only entry point — shared by the standalone/debug-spawn path above and
+    // by StationDecorator, so station-placed greeble containers get the exact same
+    // chamfer/inset/fastener/text/wear geometry as standalone ones, instead of a
+    // separately hand-maintained reimplementation that had drifted (mirrored text).
+    internal static (VertexPositionNormalColorTexture[] verts, short[] indices) GenerateVertices(
+        Color color, float wear, int sidePatternSeed, string? text, LockGrade lockGrade)
+    {
+        var mesh = new StationModuleMesh { Texture = SurfaceTexture.CleanPanel };
+
+        BuildChamferedBox  (mesh, color);
+        BuildFasteners     (mesh, color);
+        BuildLongFaceInsets(mesh, color, sidePatternSeed);
+        BuildEndDoors      (mesh, color);
+        AddContainerText   (mesh, text ?? GenerateManufacturerName(sidePatternSeed));
+
+        ApplyWear(mesh, wear, sidePatternSeed);
+
+        return mesh.ToArraysWithNormals();
     }
 
     public static ShippingContainer[] Generate(
@@ -223,21 +232,28 @@ public static class ShippingContainerFactory
         float zc = zCorner - sz * Chamfer * 0.5f;
 
         const float FW = 0.10f, FH = 0.08f, FD = 0.015f;
+        const float SurroundRaise = 0.005f; // pulls the surround off the chamfer strip's plane
 
-        var  normal = Vector3.Normalize(new Vector3(0f, sy, sz));
-        var  right  = Vector3.UnitX;
-        var  up     = Vector3.Normalize(Vector3.Cross(right, normal));
-        var  centre = new Vector3(x, yc, zc);
+        var normal = Vector3.Normalize(new Vector3(0f, sy, sz));
+        var right  = Vector3.UnitX;
+        var up     = Vector3.Cross(right, normal);
+        var centre = new Vector3(x, yc, zc);
 
-        mesh.AddQuad(centre,                normal, right, FW + 0.04f, FH + 0.04f, surroundColor);
-        mesh.AddQuad(centre - normal * FD,  normal, right, FW,         FH,         innerColor);
-        AddRecessWalls(mesh, centre, centre - normal * FD, normal, right, FW, FH, innerColor);
+        AddFastenerQuads(mesh, centre, normal, right, up, FW, FH, FD, SurroundRaise,
+            surroundColor, innerColor);
     }
 
     private static void AddEndEdgeFastener(StationModuleMesh mesh,
         float x, float yCorner, float zCorner, Color surroundColor, Color innerColor)
     {
         float xn = MathF.Sign(x);
+        // The short chamfer strip this fastener sits on tilts from the true end-face
+        // corner (x = xn*HLx) inward to the long-face corner (x = xn*(HLx-Chamfer)) —
+        // its own X extent, not a single X value. Same "pull back from the corner by
+        // half the chamfer" treatment already applied to yc/zc below, just along X:
+        // without it the fastener sits flush with the door edge instead of centred on
+        // the strip.
+        float xc = x - xn * Chamfer * 0.5f;
         bool  isZEdge = MathF.Abs(yCorner) < 0.01f;
         bool  isYEdge = MathF.Abs(zCorner) < 0.01f;
 
@@ -261,11 +277,47 @@ public static class ShippingContainerFactory
         }
 
         const float FW = 0.08f, FH = 0.08f, FD = 0.015f;
-        var centre = new Vector3(x, yc, zc);
+        const float SurroundRaise = 0.005f;
+        var up     = Vector3.Cross(right, normal);
+        var centre = new Vector3(xc, yc, zc);
 
-        mesh.AddQuad(centre,               normal, right, FW + 0.04f, FH + 0.04f, surroundColor);
-        mesh.AddQuad(centre - normal * FD, normal, right, FW,         FH,         innerColor);
-        AddRecessWalls(mesh, centre, centre - normal * FD, normal, right, FW, FH, innerColor);
+        AddFastenerQuads(mesh, centre, normal, right, up, FW, FH, FD, SurroundRaise,
+            surroundColor, innerColor);
+    }
+
+    // Shared by both fastener types — builds the surround, inner, and recess-wall
+    // geometry explicitly from right/up, avoiding the (center, normal, up, width,
+    // height) convenience overload's easy-to-misread parameter order (its third
+    // argument is "up", not "right" — passing right into that slot silently swaps
+    // which axis becomes width vs height, and for end-chamfer fasteners the
+    // resulting direction has no relationship to the actual geometry at all).
+    private static void AddFastenerQuads(StationModuleMesh mesh,
+        Vector3 centre, Vector3 normal, Vector3 right, Vector3 up,
+        float width, float height, float depth, float surroundRaise,
+        Color surroundColor, Color innerColor)
+    {
+        Vector3 outerCentre = centre + normal * surroundRaise;
+        Vector3 innerCentre = centre - normal * depth;
+
+        // Winding: with up = Cross(right, normal), Cross(right, up) = -normal (up and
+        // right are perpendicular unit vectors, so this reduces to the vector triple
+        // product identity Cross(A, Cross(A, N)) = -N). A "right then up" (BL,BR,TR,TL)
+        // vertex order gives a face normal of Cross(right, up) = -normal — inward-facing,
+        // hence invisible from outside. "Up then right" (BL,TL,TR,BR) gives Cross(up,
+        // right) = +normal instead, matching the intended outward-facing surface.
+        Vector3 hwOuter = right * ((width  + 0.04f) * 0.5f);
+        Vector3 hhOuter = up    * ((height + 0.04f) * 0.5f);
+        mesh.AddQuad(outerCentre - hwOuter - hhOuter, outerCentre - hwOuter + hhOuter,
+                     outerCentre + hwOuter + hhOuter, outerCentre + hwOuter - hhOuter,
+                     surroundColor);
+
+        Vector3 hwInner = right * (width  * 0.5f);
+        Vector3 hhInner = up    * (height * 0.5f);
+        mesh.AddQuad(innerCentre - hwInner - hhInner, innerCentre - hwInner + hhInner,
+                     innerCentre + hwInner + hhInner, innerCentre + hwInner - hhInner,
+                     innerColor);
+
+        AddRecessWalls(mesh, centre, innerCentre, normal, right, width, height, innerColor);
     }
 
     private static void AddRecessWalls(StationModuleMesh mesh,

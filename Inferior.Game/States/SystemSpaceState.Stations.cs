@@ -299,17 +299,31 @@ public sealed partial class SystemSpaceState
         }
     }
 
-    // Draws additive screen-space glow sprites over all station nav lights and warning strobes.
-    // Must be called after DrawStations() so the additive blend brightens visible geometry.
-    private void DrawStationGlows(SpriteBatch sb)
+    // Draws additive screen-space glow sprites over all station nav lights and warning
+    // strobes. Called once per render pass (see DrawFarPassContent/DrawMidPassContent/
+    // DrawNearPassContent), filtered to that pass's own real-metre distance range —
+    // required because each pass clears and rebuilds its own depth buffer, so a light's
+    // glow can only be correctly depth-tested against the SAME pass that drew its host
+    // geometry; testing it against a later pass's buffer would compare it against
+    // "cleared to far" everywhere that pass didn't itself draw anything, i.e. almost
+    // everywhere for lights outside that pass's own range, defeating the depth test.
+    // Must run after DrawStations() in the same pass so the additive blend brightens
+    // visible geometry and depth-tests against it correctly.
+    private void DrawStationGlows(SpriteBatch sb, float nearBoundReal, float farBoundReal)
     {
         if (_stationPositions.Count == 0) return;
 
-        Matrix   viewProj  = _effect.View * _camera.ProjectionMatrix;
+        // Active pass's projection (_effect.Projection), not camera.ProjectionMatrix —
+        // that's only a representative mid-tier projection now that rendering uses three
+        // independent per-pass projections. Same fix as ShipMeshRenderer/DrawTestContainers.
+        Matrix   viewProj  = _effect.View * _effect.Projection;
         Viewport viewport  = _gd.Viewport;
         Vector2  texCentre = new(_navGlowTex.Width * 0.5f, _navGlowTex.Height * 0.5f);
 
-        sb.Begin(SpriteSortMode.Deferred, BlendState.Additive);
+        // DepthRead so these sprites are occluded by hull geometry in front of them —
+        // read-only depth test (DepthBufferEnable=true, DepthBufferWriteEnable=false),
+        // since they're a 2D overlay, not real geometry that should write new depth.
+        sb.Begin(SpriteSortMode.Deferred, BlendState.Additive, null, DepthStencilState.DepthRead);
         foreach (var (station, universePos) in _stationPositions)
         {
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
@@ -325,6 +339,7 @@ public sealed partial class SystemSpaceState
                     Vector3 relPos   = stationRel + Vector3.Transform(light.WorldPosition, stRotQ);
                     float   distance = relPos.Length();
                     if (distance < 0.1f) continue;
+                    if (distance < nearBoundReal || distance >= farBoundReal) continue;
 
                     Vector2? screen = TargetingSystem.ProjectToScreen(relPos, viewProj, viewport);
                     if (screen == null) continue;
@@ -343,9 +358,17 @@ public sealed partial class SystemSpaceState
                     float size  = MathHelper.Clamp(baseSize / distance, 6f, 140f);
                     float scale = size / _navGlowTex.Width;
 
+                    // Real depth for this pass's depth test. Without this every sprite
+                    // draws at layerDepth 0 (nearest possible depth value), which would
+                    // always pass DepthRead regardless of what's actually in front of it —
+                    // the state change alone (above) isn't sufficient without this.
+                    Vector3 renderPos  = relPos * (float)Camera3D.RenderScale;
+                    Vector4 clip       = Vector4.Transform(new Vector4(renderPos, 1f), viewProj);
+                    float   layerDepth = MathHelper.Clamp(clip.Z / clip.W, 0f, 1f);
+
                     sb.Draw(_navGlowTex, screen.Value, null,
                             light.Colour * intensity, 0f, texCentre, scale,
-                            SpriteEffects.None, 0f);
+                            SpriteEffects.None, layerDepth);
                 }
             }
         }

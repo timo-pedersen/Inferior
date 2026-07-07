@@ -288,7 +288,7 @@ internal static class StationCableGenerator
         Vector3 startPos = FacePoint(seg.Start, 0f, faceOrigin, faceU, faceV, faceNormal);
         Vector3 endPos   = FacePoint(seg.End,   0f, faceOrigin, faceU, faceV, faceNormal);
         Vector3 cableDir = Vector3.Normalize(endPos - startPos);
-        Vector3 facePerp = Vector3.Normalize(Vector3.Cross(faceNormal, cableDir));
+        Vector3 facePerp = Vector3.Normalize(Vector3.Cross(cableDir, faceNormal));
 
         Vector3 midPos = FacePoint((seg.Start + seg.End) * 0.5f,
             surfaceOffset + thick * 0.5f, faceOrigin, faceU, faceV, faceNormal);

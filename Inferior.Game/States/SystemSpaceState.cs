@@ -176,6 +176,12 @@ public sealed partial class SystemSpaceState : GameState
     // single consistent value so no two decisions in the same frame see different positions.
     private SpaceSimulation.ShipSnapshot? _frameShipSnap;
 
+    // SpriteBatch captured once at the top of Draw() — DrawStationGlows now runs once
+    // per render pass (see DrawFarPassContent/DrawMidPassContent/DrawNearPassContent),
+    // not as a single one-shot call after the pass loop, so it needs sb inside those
+    // methods rather than only as a local Draw() parameter.
+    private SpriteBatch? _frameSpriteBatch;
+
     // Colour-invert blend for the crosshair: result = src - dest.
     // With white source this gives (1-R, 1-G, 1-B) — readable against any background.
     // Static to follow the MonoGame convention for built-in BlendState singletons;
@@ -768,6 +774,7 @@ public sealed partial class SystemSpaceState : GameState
 
     public override void Draw(GameTime gameTime, GraphicsDevice gd, SpriteBatch sb)
     {
+        _frameSpriteBatch = sb;
         gd.Clear(ColBackground);
 
         // ── 3D scene ──────────────────────────────────────────────────────────
@@ -828,10 +835,14 @@ public sealed partial class SystemSpaceState : GameState
             pass.DrawCallback(pass.Level);
         }
 
-        // One-shot overlays that don't participate in per-pass depth clipping — use
-        // the mid tier's representative projection (already on _camera.ProjectionMatrix).
+        // DrawStationGlows now runs once per pass (see DrawFarPassContent/DrawMidPassContent/
+        // DrawNearPassContent below), each filtered to that pass's own distance range and
+        // depth-tested against that pass's own freshly-populated depth buffer — running it
+        // once here, after the loop, would depth-test every light against whatever the LAST
+        // pass (near tier) left behind, which is "cleared to far" everywhere the near tier
+        // didn't actually draw (i.e. everywhere ordinary, non-close-up station structure is),
+        // so lights on any mid/far-tier module would never be occluded at all.
         _effect.Projection = _camera.ProjectionMatrix;
-        DrawStationGlows(sb);
 
         // Transparent pass (no depth write/read — shader ray-sphere handles visibility).
         // Uses the mid tier's representative projection, already set above.
@@ -904,6 +915,7 @@ public sealed partial class SystemSpaceState : GameState
             _celestialBodies.DrawPlanet(_camera, body, pos, level);
 
         DrawStations(level);
+        DrawStationGlows(_frameSpriteBatch!, (float)MidTierFar, float.MaxValue);
     }
 
     // Mid tier: station/ship-scale structure — individual modules/greebles/panels
@@ -920,6 +932,7 @@ public sealed partial class SystemSpaceState : GameState
         if (_thirdPersonMode && _frameShipSnap != null)
             _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
                 _frameShipSnap.Position, _frameShipSnap.Orientation, level);
+        DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 
     // Near tier: extreme close-up inspection — fasteners, container insets, rivets.
@@ -930,6 +943,7 @@ public sealed partial class SystemSpaceState : GameState
         _gd.DepthStencilState = DepthStencilState.Default;
         DrawStations(level);
         DrawTestContainers(level);
+        DrawStationGlows(_frameSpriteBatch!, 0f, (float)NearTierFar);
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────

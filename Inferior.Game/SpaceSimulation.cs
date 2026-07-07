@@ -134,6 +134,10 @@ public sealed class SpaceSimulation : Simulation
     private int  _lkmMaxGear     = int.MaxValue;
     private bool _xStopActive    = false;
     private bool _prevXStopToggle = false;
+    // Tracks whether "X-Stop complete" has already been sent for the current activation —
+    // X-Stop now holds indefinitely once threshold is crossed (see TickNewtonianPhysics),
+    // so the message must not repeat every tick while holding.
+    private bool _xStopCompleteAnnounced = false;
 
     // ── SystemSlipstream state ────────────────────────────────────────────────
     private int    _slipstreamHarmonicIndex   = 0;
@@ -238,6 +242,7 @@ public sealed class SpaceSimulation : Simulation
             if (_currentFlightMode == FlightMode.SystemNewtonian)
             {
                 _xStopActive = !_xStopActive;
+                if (_xStopActive) _xStopCompleteAnnounced = false;
                 DataBus.System.Publish(Topics.System.All,
                     new SystemMessage(_xStopActive ? "X-Stop active" : "X-Stop cancelled"));
             }
@@ -425,15 +430,22 @@ public sealed class SpaceSimulation : Simulation
             DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop cancelled"));
         }
 
-        // X-Stop: maximum braking toward reference velocity
+        // X-Stop: maximum braking toward reference velocity, then hold indefinitely.
+        // refVel is live (UpdateReferenceFrame recomputes it every tick from the actual
+        // station orbit), so re-assigning ship.Velocity = refVel every tick here keeps the
+        // ship locked to a moving target rather than freezing at one instant's value and
+        // drifting away as the true reference velocity keeps evolving after that.
         if (_xStopActive)
         {
             double relSpeed = relVel.Length;
             if (relSpeed < FlightConstants.XStopSnapThreshold)
             {
+                if (!_xStopCompleteAnnounced)
+                {
+                    _xStopCompleteAnnounced = true;
+                    DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop complete"));
+                }
                 ship.Velocity = refVel;
-                _xStopActive  = false;
-                DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop complete"));
             }
             else
             {

@@ -348,6 +348,56 @@ public sealed class StationModuleMesh
         }
     }
 
+    // Transforms external geometry into this mesh's local space and bakes directional
+    // lighting into it using each vertex's own normal (more accurate than this mesh's own
+    // per-face lighting, since real per-vertex normals are available). No _faces entry is
+    // added — matches how other raised decoration (tanks, dishes, antennas) already isn't
+    // individually face-addressable after being added.
+    //
+    // Automatically detects and corrects a mirrored (improper / negative-determinant)
+    // transform by negating one basis row, restoring a proper rotation before anything
+    // is transformed through it — callers should not need to pre-correct handedness
+    // themselves (e.g. PlaceContainer building a frame by swapping which face axis
+    // becomes "long" vs "cross", which flips handedness for one of the two orientations).
+    //
+    // This does NOT just reverse triangle winding. An improper transform doesn't just
+    // affect which side a face is visible from — it geometrically mirrors the shape
+    // itself. That's invisible for symmetric content (chamfers, box faces: a mirrored
+    // box looks identical to the original, just wound backwards), but for asymmetric
+    // content — text — a mirrored "R" is a different, wrong shape, not merely a
+    // backwards-facing correct one; fixing only the winding leaves it readable as
+    // backwards text. Restoring properness at the transform itself, before any vertex
+    // is moved, fixes both symmetric and asymmetric content the same way.
+    public void MergeTransformedAndLit(
+        VertexPositionNormalColorTexture[] verts, short[] indices, Matrix transform,
+        Vector3 sunDirection, float ambient, Vector3 sunColour)
+    {
+        if (transform.Determinant() < 0)
+        {
+            transform.M21 = -transform.M21;
+            transform.M22 = -transform.M22;
+            transform.M23 = -transform.M23;
+        }
+
+        int vbOffset = _verts.Count;
+
+        foreach (var v in verts)
+        {
+            Vector3 pos = Vector3.Transform(v.Position, transform);
+            Vector3 nrm = Vector3.Normalize(Vector3.TransformNormal(v.Normal, transform));
+            float   factor = MathF.Max(Vector3.Dot(nrm, sunDirection), ambient);
+            Color   c = v.Color;
+            Color lit = new Color(
+                (byte)MathF.Min(c.R * factor * sunColour.X, 255f),
+                (byte)MathF.Min(c.G * factor * sunColour.Y, 255f),
+                (byte)MathF.Min(c.B * factor * sunColour.Z, 255f), c.A);
+            _verts.Add(new VertexPositionNormalColorTexture(pos, nrm, lit, v.TextureCoordinate));
+        }
+
+        for (int i = 0; i < indices.Length; i += 3)
+            _idx.AddRange([vbOffset + indices[i], vbOffset + indices[i + 1], vbOffset + indices[i + 2]]);
+    }
+
     // Returns raw CPU-side arrays without requiring a GraphicsDevice.
     // Indices are converted from int to short (safe up to 32 767 vertices).
     public (VertexPositionColorTexture[] verts, short[] indices) ToArrays()
