@@ -3,18 +3,24 @@ using Microsoft.Xna.Framework;
 namespace Inferior.Game.StationGen;
 
 // Builds the complete hull for the "docking-bay" module — the first hollow station module:
-// 5 solid exterior walls, a framed opening on the -Z face (no solid panel there), and interior
-// wall surfaces so the cavity is visible from inside. MeshFactory modules own their entire hull
-// (see HabBlockOctagonal) — there is no separate box-hull draw path for them (SystemSpaceState.cs
-// skips BuildHullMesh whenever Definition.MeshFactory != null).
+// 5 solid exterior walls, a chamfered-rectangle (octagon-by-construction) framed opening on the
+// -Z face, and interior wall surfaces so the cavity is visible from inside. MeshFactory modules
+// own their entire hull (see HabBlockOctagonal) — there is no separate box-hull draw path for
+// them (SystemSpaceState.cs skips BuildHullMesh whenever Definition.MeshFactory != null).
+//
+// Envelope and door size come from the DockingBayLayout computed once in
+// StationModuleRegistry.CreateDockingBay (pad-mix driven) — this factory just builds geometry
+// from those numbers, it doesn't decide them.
 internal static class DockingBayHull
 {
     // Wall thickness, seeded per module (20-50cm) — same pattern as StationGenerator.ChamferDepthForSeed.
     // Only consumed here (baked into geometry once), so it doesn't need to live on PlacedModule.
+    // (StationModuleRegistry.CreateDockingBay uses a fixed nominal value instead, for the envelope
+    // used during attachment/collision — this is the real, seeded value used for the actual mesh.)
     private static float WallThicknessForSeed(int seed)
         => 0.20f + (float)new System.Random(seed ^ 0x444F434B).NextDouble() * 0.30f;
 
-    public static StationModuleMesh Build(int seed, Vector2 doorOpening)
+    public static StationModuleMesh Build(int seed, DockingBayLayout layout)
     {
         var mesh = new StationModuleMesh();
 
@@ -22,8 +28,18 @@ internal static class DockingBayHull
         float t       = WallThicknessForSeed(seed);
         float si      = chamfer * 0.707f;   // same inset convention as BuildHullMesh (Stations.cs)
 
-        Vector3 h = new(24f, 16f, 50f);     // half of the 48x32x100 bounding box
-        float doorHalfW = doorOpening.X * 0.5f, doorHalfH = doorOpening.Y * 0.5f;
+        Vector3 h = new(
+            layout.CavityWidth  * 0.5f + t,
+            layout.CavityHeight * 0.5f + t,
+            layout.CavityDepth  * 0.5f + t);
+
+        float doorHalfW = layout.DoorWidth  * 0.5f;
+        float doorHalfH = layout.DoorHeight * 0.5f;
+
+        // Corner chamfer as a % of door height (seeded once per station, see DockingBayLayout),
+        // clamped well short of degenerate so an extreme seed can't invert the octagon.
+        float doorChamfer = System.Math.Min(layout.ChamferFraction * layout.DoorHeight,
+                                             System.Math.Min(doorHalfW, doorHalfH) * 0.9f);
 
         Color hullColor     = StationModuleRegistry.CategoryColor("docking-bay");
         Color interiorColor = Color.Lerp(hullColor, Color.Black, 0.15f);
@@ -49,44 +65,16 @@ internal static class DockingBayHull
         mesh.AddQuad(new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si),
                      new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), hullColor);
 
-        // ── Door frame at -Z: 4 strips between the inset outer rectangle (flush with the
-        // other 5 panels' bevel) and the door opening. No inset on the door's own edges —
-        // that boundary stays crisp per the brief, unlike every other edge on this hull.
-        // Each strip gets both an outer- and inner-facing surface, separated by the module's
-        // own wall thickness t — the same treatment already applied to the other 5 walls
-        // (outer panel + AddInwardQuad interior panel below). The original MVP pass only
-        // built the outer half here, leaving the frame invisible from inside the bay.
+        // ── Door frame at -Z: an octagon-by-construction hole (rectangle chamfered at all 4
+        // corners) between the door opening and the inset outer rectangle (flush with the other
+        // 5 panels' bevel). No inset on the door's own edges — that boundary stays crisp per the
+        // brief, unlike every other edge on this hull. Both an outer- and inner-facing surface,
+        // separated by the module's own wall thickness — same treatment as the other 5 walls.
         float outerX = h.X - si, outerY = h.Y - si;
-        float outerZ = -h.Z;
-        float innerZ = -h.Z + t;
-
-        // Top strip (full width, above the door)
-        mesh.AddQuad(new(outerX, doorHalfH, outerZ), new(-outerX, doorHalfH, outerZ),
-                     new(-outerX, outerY,   outerZ), new(outerX,  outerY,   outerZ), hullColor);
-        AddInwardQuad(mesh, new(outerX, doorHalfH, innerZ), new(-outerX, doorHalfH, innerZ),
-                     new(-outerX, outerY,   innerZ), new(outerX,  outerY,   innerZ),
-                     Vector3.UnitZ, interiorColor);
-
-        // Bottom strip (full width, below the door)
-        mesh.AddQuad(new(outerX, -outerY,  outerZ), new(-outerX, -outerY,  outerZ),
-                     new(-outerX, -doorHalfH, outerZ), new(outerX, -doorHalfH, outerZ), hullColor);
-        AddInwardQuad(mesh, new(outerX, -outerY,  innerZ), new(-outerX, -outerY,  innerZ),
-                     new(-outerX, -doorHalfH, innerZ), new(outerX, -doorHalfH, innerZ),
-                     Vector3.UnitZ, interiorColor);
-
-        // Left strip (door height only, avoids overlapping the top/bottom corners)
-        mesh.AddQuad(new(-doorHalfW, -doorHalfH, outerZ), new(-outerX, -doorHalfH, outerZ),
-                     new(-outerX, doorHalfH, outerZ), new(-doorHalfW, doorHalfH, outerZ), hullColor);
-        AddInwardQuad(mesh, new(-doorHalfW, -doorHalfH, innerZ), new(-outerX, -doorHalfH, innerZ),
-                     new(-outerX, doorHalfH, innerZ), new(-doorHalfW, doorHalfH, innerZ),
-                     Vector3.UnitZ, interiorColor);
-
-        // Right strip
-        mesh.AddQuad(new(outerX, -doorHalfH, outerZ), new(doorHalfW, -doorHalfH, outerZ),
-                     new(doorHalfW, doorHalfH, outerZ), new(outerX, doorHalfH, outerZ), hullColor);
-        AddInwardQuad(mesh, new(outerX, -doorHalfH, innerZ), new(doorHalfW, -doorHalfH, innerZ),
-                     new(doorHalfW, doorHalfH, innerZ), new(outerX, doorHalfH, innerZ),
-                     Vector3.UnitZ, interiorColor);
+        AddDoorFrame(mesh, doorHalfW, doorHalfH, doorChamfer, outerX, outerY,
+                     -h.Z,     -Vector3.UnitZ, hullColor);
+        AddDoorFrame(mesh, doorHalfW, doorHalfH, doorChamfer, outerX, outerY,
+                     -h.Z + t,  Vector3.UnitZ, interiorColor);
 
         // ── Chamfer bevel — all 12 edges + 8 corners. The door hole sits well inside the -Z
         // face, so the box's outer silhouette (and this bevel) is completely unaffected by it.
@@ -98,15 +86,15 @@ internal static class DockingBayHull
         float cx = h.X - t, cy = h.Y - t;
         float backZ = h.Z - t;
 
-        AddInwardQuad(mesh, new(-cx,-cy,backZ), new(cx,-cy,backZ), new(cx,cy,backZ), new(-cx,cy,backZ),
+        AddWoundQuad(mesh, new(-cx,-cy,backZ), new(cx,-cy,backZ), new(cx,cy,backZ), new(-cx,cy,backZ),
                       -Vector3.UnitZ, interiorColor);                                          // back wall
-        AddInwardQuad(mesh, new(h.X-t,-cy,-h.Z), new(h.X-t,cy,-h.Z), new(h.X-t,cy,backZ), new(h.X-t,-cy,backZ),
+        AddWoundQuad(mesh, new(h.X-t,-cy,-h.Z), new(h.X-t,cy,-h.Z), new(h.X-t,cy,backZ), new(h.X-t,-cy,backZ),
                       -Vector3.UnitX, interiorColor);                                          // +X side
-        AddInwardQuad(mesh, new(-(h.X-t),-cy,-h.Z), new(-(h.X-t),cy,-h.Z), new(-(h.X-t),cy,backZ), new(-(h.X-t),-cy,backZ),
+        AddWoundQuad(mesh, new(-(h.X-t),-cy,-h.Z), new(-(h.X-t),cy,-h.Z), new(-(h.X-t),cy,backZ), new(-(h.X-t),-cy,backZ),
                       Vector3.UnitX, interiorColor);                                           // -X side
-        AddInwardQuad(mesh, new(-cx,h.Y-t,-h.Z), new(cx,h.Y-t,-h.Z), new(cx,h.Y-t,backZ), new(-cx,h.Y-t,backZ),
+        AddWoundQuad(mesh, new(-cx,h.Y-t,-h.Z), new(cx,h.Y-t,-h.Z), new(cx,h.Y-t,backZ), new(-cx,h.Y-t,backZ),
                       -Vector3.UnitY, interiorColor);                                          // +Y side
-        AddInwardQuad(mesh, new(-cx,-(h.Y-t),-h.Z), new(cx,-(h.Y-t),-h.Z), new(cx,-(h.Y-t),backZ), new(-cx,-(h.Y-t),backZ),
+        AddWoundQuad(mesh, new(-cx,-(h.Y-t),-h.Z), new(cx,-(h.Y-t),-h.Z), new(cx,-(h.Y-t),backZ), new(-cx,-(h.Y-t),backZ),
                       Vector3.UnitY, interiorColor);                                           // -Y side
 
         // BaseFaceCount intentionally left at 0 (the default). StationDecorator.ComputeFaces
@@ -116,10 +104,58 @@ internal static class DockingBayHull
         return mesh;
     }
 
+    // Builds one face of the door frame (either the outer or inner surface) at a fixed z plane:
+    // 4 shortened strips spanning the octagon's flat edges, plus 4 corner fills (a quad + a
+    // triangle each) connecting the sharp outer rectangle corners to the chamfered door corners.
+    // Same 2D decomposition StationDecorator.AddChamferEdgeTrim uses for the hull's 3D edges,
+    // one dimension down.
+    private static void AddDoorFrame(StationModuleMesh mesh, float doorHalfW, float doorHalfH,
+        float dc, float outerX, float outerY, float z, Vector3 normal, Color color)
+    {
+        float flatW = doorHalfW - dc;
+        float flatH = doorHalfH - dc;
+
+        // Top strip (flat portion of the top edge)
+        AddWoundQuad(mesh, new(flatW, doorHalfH, z), new(-flatW, doorHalfH, z),
+                     new(-flatW, outerY, z), new(flatW, outerY, z), normal, color);
+        // Bottom strip
+        AddWoundQuad(mesh, new(flatW, -outerY, z), new(-flatW, -outerY, z),
+                     new(-flatW, -doorHalfH, z), new(flatW, -doorHalfH, z), normal, color);
+        // Left strip (flat portion of the left edge)
+        AddWoundQuad(mesh, new(-doorHalfW, -flatH, z), new(-outerX, -flatH, z),
+                     new(-outerX, flatH, z), new(-doorHalfW, flatH, z), normal, color);
+        // Right strip
+        AddWoundQuad(mesh, new(outerX, -flatH, z), new(doorHalfW, -flatH, z),
+                     new(doorHalfW, flatH, z), new(outerX, flatH, z), normal, color);
+
+        // 4 corners — sx/sy pick which quadrant. Each corner = the outer square minus the small
+        // triangular notch the chamfer cuts off, built as a quad (bulk of the corner) plus a
+        // triangle (the wedge reaching the two chamfer vertices).
+        AddDoorCorner(mesh, +1, +1, flatW, flatH, doorHalfW, doorHalfH, outerX, outerY, z, normal, color);
+        AddDoorCorner(mesh, -1, +1, flatW, flatH, doorHalfW, doorHalfH, outerX, outerY, z, normal, color);
+        AddDoorCorner(mesh, -1, -1, flatW, flatH, doorHalfW, doorHalfH, outerX, outerY, z, normal, color);
+        AddDoorCorner(mesh, +1, -1, flatW, flatH, doorHalfW, doorHalfH, outerX, outerY, z, normal, color);
+    }
+
+    private static void AddDoorCorner(StationModuleMesh mesh, float sx, float sy,
+        float flatW, float flatH, float doorHalfW, float doorHalfH,
+        float outerX, float outerY, float z, Vector3 normal, Color color)
+    {
+        AddWoundQuad(mesh,
+            new(sx * outerX, sy * flatH,  z), new(sx * flatW, sy * flatH,  z),
+            new(sx * flatW,  sy * outerY, z), new(sx * outerX, sy * outerY, z),
+            normal, color);
+        AddWoundTriangle(mesh,
+            new(sx * flatW, sy * flatH,     z),
+            new(sx * flatW, sy * doorHalfH, z),
+            new(sx * doorHalfW, sy * flatH, z),
+            normal, color);
+    }
+
     // Adds a quad, reversing vertex order if the naive winding doesn't match the expected
-    // (inward-facing) normal — same discipline as ChamferedBox.WindFace/StationModuleMesh.AddDiscCap,
-    // rather than hand-deriving winding per interior wall.
-    private static void AddInwardQuad(StationModuleMesh mesh, Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
+    // normal — same discipline as ChamferedBox.WindFace/StationModuleMesh.AddDiscCap, rather
+    // than hand-deriving winding per face.
+    private static void AddWoundQuad(StationModuleMesh mesh, Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
                                        Vector3 expectedNormal, Color color)
     {
         Vector3 n = Vector3.Cross(v1 - v0, v2 - v0);
@@ -127,5 +163,16 @@ internal static class DockingBayHull
             mesh.AddQuad(v0, v3, v2, v1, color);
         else
             mesh.AddQuad(v0, v1, v2, v3, color);
+    }
+
+    // Same auto-winding discipline as AddWoundQuad, for the door corner triangles.
+    private static void AddWoundTriangle(StationModuleMesh mesh, Vector3 v0, Vector3 v1, Vector3 v2,
+                                          Vector3 expectedNormal, Color color)
+    {
+        Vector3 n = Vector3.Cross(v1 - v0, v2 - v0);
+        if (Vector3.Dot(n, expectedNormal) < 0)
+            mesh.AddTriangle(v0, v2, v1, color);
+        else
+            mesh.AddTriangle(v0, v1, v2, color);
     }
 }

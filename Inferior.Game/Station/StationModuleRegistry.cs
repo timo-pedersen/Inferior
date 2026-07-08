@@ -305,36 +305,53 @@ public static class StationModuleRegistry
     };
 
     // ── docking-bay ───────────────────────────────────────────────────────────
-    // 48×32×100 — the first hollow module. Ships fly in through a door on the -Z face and
-    // dock inside. Placed once per station via a dedicated pre-growth step
-    // (StationGenerator.Run), never through organic WeightedPickModule selection — see the
-    // Category exclusion there. MinScale = Port matches CoreHubLarge's Large-tier ports,
-    // the only root this module can actually attach to (CoreHub's ports max out at Medium).
-    // Door size lives here, not as a constant inside DockingBayHull, so the mesh factory and
-    // anything reading DockingBay.DoorOpening (e.g. system-map station stats) can never drift.
-    private static readonly Vector2 DockingBayDoorOpening = new(40, 24);
+    // The first hollow module — ships fly in through a door on the -Z face and dock inside.
+    // Placed once per station via a dedicated pre-growth step (StationGenerator.Run), never
+    // through organic WeightedPickModule selection — see the Category exclusion there.
+    // MinScale = Port matches CoreHubLarge's Large-tier ports, the only root this module can
+    // actually attach to (CoreHub's ports max out at Medium).
+    //
+    // Envelope, door size, and door-corner chamfer are all derived from a seeded pad mix
+    // (DockingBayLayout) rather than fixed constants — bigger stations get roomier bays, and
+    // bays that actually serve Large-class ships get a taller door than medium-only ones.
+    // stationSeed must be independent of StationGenerator's _rng draw stream: the envelope is
+    // needed for the AABB/collision check during attachment, before the module's own _rng-drawn
+    // seed exists yet. Nominal (not per-module-seeded) wall thickness is used to derive the
+    // exterior envelope from the cavity — close enough (~15cm) for collision purposes; the real
+    // per-module wall thickness is still seeded independently inside DockingBayHull for the
+    // actual mesh, unchanged from the MVP.
+    private const float NominalWallThickness = 0.35f;   // midpoint of DockingBayHull's 0.20-0.50m range
 
-    public static readonly StationModuleDefinition DockingBay = new()
+    public static StationModuleDefinition CreateDockingBay(int stationSeed, StationScale stationScale)
     {
-        Id          = "docking-bay",
-        Category    = "docking-bay",
-        BoundingBox = new Vector3(48, 32, 100),
-        MinScale    = StationScale.Port,
-        DoorOpening = DockingBayDoorOpening,
-        MeshFactory = seed => DockingBayHull.Build(seed, DockingBayDoorOpening),
-        Ports       =
-        [
-            new StationPort { Id = "px", LocalPosition = new Vector3(+24, 0, 0),  OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
-            new StationPort { Id = "nx", LocalPosition = new Vector3(-24, 0, 0),  OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
-            new StationPort { Id = "py", LocalPosition = new Vector3(0, +16, 0),  OutwardNormal = Vector3.UnitY,  Size = PortSize.Large },
-            new StationPort { Id = "ny", LocalPosition = new Vector3(0, -16, 0),  OutwardNormal = -Vector3.UnitY, Size = PortSize.Large },
-            new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +50),  OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
-            // Interior docking port — no port at all on the door face (-Z); PopulateLandingPads
-            // maps this to a LandingPad regardless of it sitting inside the hollow cavity.
-            new StationPort { Id = "dock", LocalPosition = new Vector3(0, 0, 0), OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large,
-                              IsDocking = true, IsTerminal = true },
-        ]
-    };
+        var layout = DockingBayLayout.Compute(stationSeed, stationScale);
+
+        float halfW = layout.CavityWidth  * 0.5f + NominalWallThickness;
+        float halfH = layout.CavityHeight * 0.5f + NominalWallThickness;
+        float halfD = layout.CavityDepth  * 0.5f + NominalWallThickness;
+
+        return new StationModuleDefinition
+        {
+            Id          = "docking-bay",
+            Category    = "docking-bay",
+            BoundingBox = new Vector3(halfW * 2f, halfH * 2f, halfD * 2f),
+            MinScale    = StationScale.Port,
+            DoorOpening = new Vector2(layout.DoorWidth, layout.DoorHeight),
+            MeshFactory = seed => DockingBayHull.Build(seed, layout),
+            Ports       =
+            [
+                new StationPort { Id = "px", LocalPosition = new Vector3(+halfW, 0, 0), OutwardNormal = Vector3.UnitX,  Size = PortSize.Large },
+                new StationPort { Id = "nx", LocalPosition = new Vector3(-halfW, 0, 0), OutwardNormal = -Vector3.UnitX, Size = PortSize.Large },
+                new StationPort { Id = "py", LocalPosition = new Vector3(0, +halfH, 0), OutwardNormal = Vector3.UnitY,  Size = PortSize.Large },
+                new StationPort { Id = "ny", LocalPosition = new Vector3(0, -halfH, 0), OutwardNormal = -Vector3.UnitY, Size = PortSize.Large },
+                new StationPort { Id = "pz", LocalPosition = new Vector3(0, 0, +halfD), OutwardNormal = Vector3.UnitZ,  Size = PortSize.Large },
+                // Interior docking port — no port at all on the door face (-Z); PopulateLandingPads
+                // maps this to a LandingPad regardless of it sitting inside the hollow cavity.
+                new StationPort { Id = "dock", LocalPosition = Vector3.Zero, OutwardNormal = -Vector3.UnitZ, Size = PortSize.Large,
+                                  IsDocking = true, IsTerminal = true },
+            ]
+        };
+    }
 
     // ── Octagonal prism mesh factory ──────────────────────────────────────────
     // 8 quad side faces + top triangle fan. No bottom cap (always internal/terminal).
@@ -386,7 +403,9 @@ public static class StationModuleRegistry
         CoreHub, ConnectorLong, ConnectorShort, HabBlock,
         CargoBay, DockingArm, ScienceBlock, IndustrialBlock,
         CoreHubLarge, ConnectorLongLarge, HabBlockLarge, CargoBayLarge, IndustrialBlockLarge,
-        HabBlockOctagonal, ScienceBlockOctagonal, DockingBay,
+        HabBlockOctagonal, ScienceBlockOctagonal,
+        // docking-bay intentionally excluded — it's created per-station via CreateDockingBay
+        // (pad-mix-derived envelope, not a fixed definition), never through this static list.
     ];
 
     public static Color CategoryColor(string category) => category switch

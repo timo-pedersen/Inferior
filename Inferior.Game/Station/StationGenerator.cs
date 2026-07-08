@@ -14,6 +14,7 @@ namespace Inferior.Game.StationGen;
 public sealed class StationGenerator
 {
     private readonly SeededRandom     _rng;
+    private readonly int              _seed;
     private readonly List<PlacedModule> _placed = [];
 
     // Reserved approach corridor in front of a docking bay's door — kept separate from _placed
@@ -21,7 +22,10 @@ public sealed class StationGenerator
     // ValidatePlacement, PopulateLandingPads) needs no changes. Only IntersectsAny checks it.
     private readonly List<(Vector3 min, Vector3 max)> _reservedVolumes = [];
 
-    private StationGenerator(int seed) { _rng = new SeededRandom(seed); }
+    // _seed is kept separately from _rng (which mutates as it's drawn from) so the docking bay's
+    // pad-mix/envelope can be derived deterministically without depending on how many other draws
+    // happened first — needed before the bay's own module seed exists (see Run()).
+    private StationGenerator(int seed) { _rng = new SeededRandom(seed); _seed = seed; }
 
     // Chamfer bevel depth, seeded per module (5-50cm) — single source of truth read by
     // BuildHullMesh, GenerateEdgeTrimStrips, GeneratePanelSeams, and PlaceContainer.
@@ -245,9 +249,10 @@ public sealed class StationGenerator
         PlacedModule? dockingBay     = null;
         if (stationScale >= StationScale.Port)
         {
+            var dockingBayDefn = StationModuleRegistry.CreateDockingBay(_seed, stationScale);
             foreach (var corePort in core.OpenPorts)
             {
-                dockingBay = TryAttach(StationModuleRegistry.DockingBay, corePort);
+                dockingBay = TryAttach(dockingBayDefn, corePort);
                 if (dockingBay != null) { dockingBayPort = corePort; break; }
             }
         }
@@ -494,13 +499,16 @@ public sealed class StationGenerator
 
     // Reserved approach corridor extending 150m outward from the docking bay's door (the -Z
     // face), cross-section 50x35 for lateral/vertical maneuvering room beyond the door's own
-    // 40x24 clear opening. Computed once, in the module's local space, then transformed by its
-    // actual placed Transform — so it rotates correctly regardless of the random attach twist.
+    // clear opening — door width is always 40m (Medium/Large ships share the same max width)
+    // and height is at most 24m, so 50x35 comfortably exceeds every door variant without
+    // needing to scale with it. Computed once, in the module's local space, then transformed by
+    // its actual placed Transform — so it rotates correctly regardless of the random attach twist.
     private static (Vector3 min, Vector3 max) ComputeReservedCorridor(PlacedModule dockingBay)
     {
-        // Door face is at local z = -50 (half the 100m length); corridor extends a further 150m
-        // outward, so it's centred at z = -50 - 75 = -125 with half-depth 75.
-        Vector3 localCenter = new(0, 0, -125f);
+        // Door face is at local z = -halfDepth (the bay's own computed depth, no longer fixed);
+        // corridor extends a further 150m outward, so it's centred at z = -halfDepth - 75.
+        float   halfDepth   = dockingBay.Definition.BoundingBox.Z * 0.5f;
+        Vector3 localCenter = new(0, 0, -halfDepth - 75f);
         Vector3 half        = new(25f, 17.5f, 75f);
 
         Span<Vector3> corners = stackalloc Vector3[8];
