@@ -9,7 +9,7 @@
 
 | System | Status | Notes |
 |---|---|---|
-| Galaxy map | ✓ Done | 2048 stars, fixed seed, deterministic |
+| Galaxy map | ✓ Done | 20480 stars, fixed seed, deterministic |
 | System map | ✓ Done | Bodies, orbits |
 | 3D flight state (`SystemSpaceState`) | ✓ Done | Newtonian, origin-shifting render |
 | UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, Panel, Window, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState |
