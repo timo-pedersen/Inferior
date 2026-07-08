@@ -52,21 +52,41 @@ internal static class DockingBayHull
         // ── Door frame at -Z: 4 strips between the inset outer rectangle (flush with the
         // other 5 panels' bevel) and the door opening. No inset on the door's own edges —
         // that boundary stays crisp per the brief, unlike every other edge on this hull.
+        // Each strip gets both an outer- and inner-facing surface, separated by the module's
+        // own wall thickness t — the same treatment already applied to the other 5 walls
+        // (outer panel + AddInwardQuad interior panel below). The original MVP pass only
+        // built the outer half here, leaving the frame invisible from inside the bay.
         float outerX = h.X - si, outerY = h.Y - si;
-        float z = -h.Z;
+        float outerZ = -h.Z;
+        float innerZ = -h.Z + t;
 
         // Top strip (full width, above the door)
-        mesh.AddQuad(new(outerX, doorHalfH, z), new(-outerX, doorHalfH, z),
-                     new(-outerX, outerY,   z), new(outerX,  outerY,   z), hullColor);
+        mesh.AddQuad(new(outerX, doorHalfH, outerZ), new(-outerX, doorHalfH, outerZ),
+                     new(-outerX, outerY,   outerZ), new(outerX,  outerY,   outerZ), hullColor);
+        AddInwardQuad(mesh, new(outerX, doorHalfH, innerZ), new(-outerX, doorHalfH, innerZ),
+                     new(-outerX, outerY,   innerZ), new(outerX,  outerY,   innerZ),
+                     Vector3.UnitZ, interiorColor);
+
         // Bottom strip (full width, below the door)
-        mesh.AddQuad(new(outerX, -outerY,  z), new(-outerX, -outerY,  z),
-                     new(-outerX, -doorHalfH, z), new(outerX, -doorHalfH, z), hullColor);
+        mesh.AddQuad(new(outerX, -outerY,  outerZ), new(-outerX, -outerY,  outerZ),
+                     new(-outerX, -doorHalfH, outerZ), new(outerX, -doorHalfH, outerZ), hullColor);
+        AddInwardQuad(mesh, new(outerX, -outerY,  innerZ), new(-outerX, -outerY,  innerZ),
+                     new(-outerX, -doorHalfH, innerZ), new(outerX, -doorHalfH, innerZ),
+                     Vector3.UnitZ, interiorColor);
+
         // Left strip (door height only, avoids overlapping the top/bottom corners)
-        mesh.AddQuad(new(-doorHalfW, -doorHalfH, z), new(-outerX, -doorHalfH, z),
-                     new(-outerX, doorHalfH, z), new(-doorHalfW, doorHalfH, z), hullColor);
+        mesh.AddQuad(new(-doorHalfW, -doorHalfH, outerZ), new(-outerX, -doorHalfH, outerZ),
+                     new(-outerX, doorHalfH, outerZ), new(-doorHalfW, doorHalfH, outerZ), hullColor);
+        AddInwardQuad(mesh, new(-doorHalfW, -doorHalfH, innerZ), new(-outerX, -doorHalfH, innerZ),
+                     new(-outerX, doorHalfH, innerZ), new(-doorHalfW, doorHalfH, innerZ),
+                     Vector3.UnitZ, interiorColor);
+
         // Right strip
-        mesh.AddQuad(new(outerX, -doorHalfH, z), new(doorHalfW, -doorHalfH, z),
-                     new(doorHalfW, doorHalfH, z), new(outerX, doorHalfH, z), hullColor);
+        mesh.AddQuad(new(outerX, -doorHalfH, outerZ), new(doorHalfW, -doorHalfH, outerZ),
+                     new(doorHalfW, doorHalfH, outerZ), new(outerX, doorHalfH, outerZ), hullColor);
+        AddInwardQuad(mesh, new(outerX, -doorHalfH, innerZ), new(doorHalfW, -doorHalfH, innerZ),
+                     new(doorHalfW, doorHalfH, innerZ), new(outerX, doorHalfH, innerZ),
+                     Vector3.UnitZ, interiorColor);
 
         // ── Chamfer bevel — all 12 edges + 8 corners. The door hole sits well inside the -Z
         // face, so the box's outer silhouette (and this bevel) is completely unaffected by it.
