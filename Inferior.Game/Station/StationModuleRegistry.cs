@@ -317,10 +317,12 @@ public static class StationModuleRegistry
     // stationSeed must be independent of StationGenerator's _rng draw stream: the envelope is
     // needed for the AABB/collision check during attachment, before the module's own _rng-drawn
     // seed exists yet. Nominal (not per-module-seeded) wall thickness is used to derive the
-    // exterior envelope from the cavity — close enough (~15cm) for collision purposes; the real
+    // exterior envelope from the cavity — close enough (~0.5m) for collision purposes; the real
     // per-module wall thickness is still seeded independently inside DockingBayHull for the
-    // actual mesh, unchanged from the MVP.
-    private const float NominalWallThickness = 0.35f;   // midpoint of DockingBayHull's 0.20-0.50m range
+    // actual mesh.
+    // internal: StationDecorator also reads this to approximate the door throat's mid-depth
+    // when mounting the door guidance lights (see PlaceDockingBayDoorDecoration).
+    internal const float NominalWallThickness = 1.0f;   // midpoint of DockingBayHull's 0.5-1.5m range
 
     public static StationModuleDefinition CreateDockingBay(int stationSeed, StationScale stationScale)
     {

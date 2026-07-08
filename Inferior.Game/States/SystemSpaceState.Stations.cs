@@ -353,6 +353,7 @@ public sealed partial class SystemSpaceState
                         StationGen.GlowType.WarningStrobe   => 700f,
                         StationGen.GlowType.AviationWarning => 800f,
                         StationGen.GlowType.AmbientMarker   => 400f,
+                        StationGen.GlowType.DockGuidance    => 600f,   // AmbientMarker x1.5, per Timo's ask
                         _                                   => 400f,
                     };
                     float size  = MathHelper.Clamp(baseSize / distance, 6f, 140f);

@@ -144,11 +144,89 @@ public sealed class StationGenerator
             if (mod.Mesh == null) continue;
             mod.Transform.Decompose(out _, out Quaternion rot, out _);
             Matrix modRot = Matrix.CreateFromQuaternion(rot);
+            Matrix worldRot = modRot * stationRot;
             mod.Mesh.ApplyLighting(
-                modRot * stationRot,
+                worldRot,
                 SceneLighting.SunDirection,
                 SceneLighting.Ambient,
                 SceneLighting.SunColour);
+
+            if (mod.Mesh.AmbientOverrideFaceCount > 0)
+                BoostAmbientForFaceRange(mod.Mesh, worldRot, SceneLighting.Ambient, mod.Seed);
+        }
+    }
+
+    // Re-derives what ApplyLighting's per-face factor would have been with a higher, per-face
+    // ambient floor, for a sub-range of faces the mesh flagged via AmbientOverrideFace* (e.g. a
+    // hollow module's interior walls). Scales the already-baked color by the ratio between the
+    // two factors rather than re-lighting from scratch, since ApplyLighting already ran and only
+    // the lit result is available. Replaces the earlier flat-boost version: the flat ambient made
+    // the interior visible but unreadable (no sense of depth, no up/down cue, no corner detail).
+    // Three additive terms instead, each a per-face constant (flat-shaded, matching the rest of
+    // this mesh — not a per-vertex gradient):
+    //   - doorProximity: linear falloff from the door plane to the far wall, derived from the
+    //     flagged faces' own Z spread (no hardcoded door location) — brighter near the door.
+    //   - overheadCue: faces whose normal points down (the ceiling, in this convention) read
+    //     brighter than the floor — an up/down orientation cue, not a real light source.
+    //   - cornerNoise: seeded per-face jitter, same per-face-constant technique as
+    //     ShippingContainerFactory.ApplyWear, weighted heaviest on the back wall (insertion
+    //     order index 0 in DockingBayHull.Build) per the reported "can't see corners" complaint.
+    // Still fully disposable once real interior-light-fixture baking exists.
+    private const float InteriorBaseFloor   = 0.45f;
+    private const float DoorProximityWeight = 0.35f;
+    private const float OverheadCueWeight   = 0.25f;
+    private const float CornerNoiseWeight   = 0.15f;
+
+    private static void BoostAmbientForFaceRange(StationModuleMesh mesh, Matrix worldRotation,
+        float baseAmbient, int seed)
+    {
+        int start = mesh.AmbientOverrideFaceStart;
+        int count = mesh.AmbientOverrideFaceCount;
+        if (count <= 0) return;
+
+        count = System.Math.Min(count, mesh.FaceCount - start);
+        if (count <= 0) return;
+
+        float minZ = float.MaxValue, maxZ = float.MinValue;
+        var centers = new Vector3[count];
+        for (int i = 0; i < count; i++)
+        {
+            var (center, _, _) = mesh.GetFaceBounds(start + i);
+            centers[i] = center;
+            minZ = MathF.Min(minZ, center.Z);
+            maxZ = MathF.Max(maxZ, center.Z);
+        }
+        float depth = MathF.Max(maxZ - minZ, 0.01f);
+
+        // Independent salt from ChamferDepthForSeed/WallThicknessForSeed's own draws — a fresh,
+        // disposable stream, not shared with anything that affects geometry.
+        var noiseRng = new System.Random(seed ^ 0x4C4F5754);
+
+        for (int i = 0; i < count; i++)
+        {
+            int f = start + i;
+            Vector3 localN = mesh.LocalFaceNormal(f);
+            if (localN == Vector3.Zero) continue;
+
+            float doorProximity = 1f - MathHelper.Clamp((centers[i].Z - minZ) / depth, 0f, 1f);
+            float overheadCue   = MathF.Max(0f, Vector3.Dot(localN, -Vector3.UnitY));
+            float noiseWeight   = i == 0 ? 1f : 0.3f;
+            float cornerNoise   = ((float)noiseRng.NextDouble() * 2f - 1f) * noiseWeight;
+
+            float brightness = InteriorBaseFloor
+                + doorProximity * DoorProximityWeight
+                + overheadCue   * OverheadCueWeight
+                + cornerNoise   * CornerNoiseWeight;
+            brightness = MathHelper.Clamp(brightness, baseAmbient, 1f);
+
+            Vector3 worldN = Vector3.Normalize(Vector3.TransformNormal(localN, worldRotation));
+            float sunDot   = Vector3.Dot(worldN, SceneLighting.SunDirection);
+
+            float originalFactor = MathF.Max(sunDot, baseAmbient);
+            float boostedFactor  = MathF.Max(sunDot, brightness);
+            if (originalFactor <= 0f) continue;
+
+            mesh.MultiplyFaceColor(f, boostedFactor / originalFactor);
         }
     }
 

@@ -90,6 +90,7 @@ public static class StationDecorator
             GeneratePipes         (mod, faces, pipeRng,     mesh);
             GenerateLights        (mod, faces, lightRng,    mesh);
             GenerateEdgeTrimStrips(mod, mesh);
+            PlaceDockingBayDoorDecoration(mod, mesh);
 
             RegisterModuleAmbientLights(mod, faces, ambientLightRng);
 
@@ -2740,6 +2741,88 @@ public static class StationDecorator
                 });
             }
         }
+    }
+
+    // Guidance lights + hazard signage around the docking-bay's door. Can't reuse
+    // PlaceBayGuidanceLights as-is: that function finds its target via the generic
+    // ComputeFaces/base-face list, but the docking-bay's door is a framed opening, not a
+    // solid base face, so it never appears in that list. The door's own geometry (position,
+    // size) is known directly from the definition instead, so this calls AddLight the same
+    // way, just without going through the face lookup.
+    private static void PlaceDockingBayDoorDecoration(PlacedModule mod, StationModuleMesh mesh)
+    {
+        if (mod.Definition.Category != "docking-bay") return;
+
+        float halfDepth = mod.Definition.BoundingBox.Z * 0.5f;
+        float doorW     = mod.Definition.DoorOpening.X;
+        float doorH     = mod.Definition.DoorOpening.Y;
+
+        Vector3 doorNormal = -Vector3.UnitZ;
+        Vector3 doorCenter = new(0, 0, -halfDepth);
+        var (right, up)    = TangentFrame(doorNormal);
+
+        // Guidance lights — 4 pulsing white lights above the opening and 4 below, mounted flush
+        // on the door THROAT (the recessed prism wall between the frame's outer and inner
+        // faces — see DockingBayHull.AddDoorThroat), not on the frame's outward-facing strips.
+        // A light flush with the frame face only really reads face-on from outside; recessed
+        // into the throat, facing inward (perpendicular to the door's own normal), it's visible
+        // looking down the tunnel from either side. Z sits at the throat's approximate
+        // mid-depth — NominalWallThickness is the same non-seeded approximation already used to
+        // size the envelope (StationModuleRegistry.CreateDockingBay), not the real per-module
+        // seeded thickness, which this decoration pass has no access to and doesn't need to
+        // match exactly. u stays well inside the flat strip, away from the chamfered corners.
+        Color white   = new(230, 240, 255);
+        Color housing = new(35, 35, 35);
+        float throatMidZ = -halfDepth + StationModuleRegistry.NominalWallThickness * 0.5f;
+        foreach (float rowSign in new[] { 1f, -1f })
+        {
+            Vector3 mountNormal = -up * rowSign;   // top row faces down into the throat, bottom row faces up
+            for (int i = 0; i < 4; i++)
+            {
+                float u = ((float)i / 3f - 0.5f) * doorW * 0.7f;
+                Vector3 pos = right * u + up * rowSign * (doorH * 0.5f)
+                            + new Vector3(0, 0, throatMidZ) + mountNormal * 0.05f;
+
+                var (vb, glowPos) = AddLight(mesh, pos, mountNormal, 0.35f, housing, white);
+                mesh.AnimTags.Add(new AnimTag
+                {
+                    Type       = AnimType.Pulse,
+                    VertexBase = vb,
+                    OnColor    = white,
+                    OffColor   = new Color(20, 22, 30),
+                    Period     = 2f,
+                    Phase      = (float)i / 4f,
+                });
+                // Missing previously — the pulsing housing/lens geometry existed, but with no
+                // GlowLights entry the billboard glow sprite (ComputeGlowIntensity /
+                // SystemSpaceState.Stations.cs) never drew, so the light never actually "shone".
+                mod.GlowLights.Add(new StationLightInfo(
+                    WorldPosition: Vector3.Transform(glowPos, mod.Transform),
+                    Colour:        white,
+                    Type:          GlowType.DockGuidance,
+                    BaseIntensity: 1.0f,
+                    Rate:          1f / 2f,
+                    Phase:         (float)i / 4f,
+                    Pattern:       LightPattern.SlowPulse));
+            }
+        }
+
+        // Hazard signage — a color-coded placard on the frame above the opening, reusing the
+        // same per-pixel bitmap-font geometry already proven on shipping containers rather
+        // than a new rendering capability. The guidance lights no longer sit on this face (moved
+        // into the throat above), so this offset is just clearance from the opening itself now.
+        const string text      = "CAUTION - BAY";
+        Color        signColor = new(230, 180, 40);
+        const float signMargin = 0.6f;
+        float pixelSize = System.Math.Clamp(
+            doorW * 0.6f / (text.Length * (BitmapFonts.CharW + 1)), 0.05f, 0.30f);
+        float textW = text.Length * (BitmapFonts.CharW + 1) * pixelSize;
+        Vector3 textOrigin = doorCenter - right * (textW * 0.5f)
+                            + up * (doorH * 0.5f + signMargin)
+                            + doorNormal * 0.02f;   // proud of the frame surface, avoids z-fighting
+
+        ShippingContainerFactory.AddTextGeometry(mesh, text, textOrigin,
+            textRight: right, textUp: up, textNormal: doorNormal, pixelSize, signColor);
     }
 
     // ── Pass 8: Ambient position markers ─────────────────────────────────────

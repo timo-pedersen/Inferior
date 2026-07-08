@@ -559,7 +559,9 @@ public static class ShippingContainerFactory
             pixelSize, textColor);
     }
 
-    private static void AddTextGeometry(StationModuleMesh mesh,
+    // internal: reused by StationDecorator for the docking-bay's door signage — same
+    // per-pixel bitmap-font geometry technique, no need for a second implementation.
+    internal static void AddTextGeometry(StationModuleMesh mesh,
         string text, Vector3 origin, Vector3 textRight, Vector3 textUp, Vector3 textNormal,
         float pixelSize, Color textColor)
     {

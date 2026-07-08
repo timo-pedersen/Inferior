@@ -38,6 +38,16 @@ public sealed class StationModuleMesh
     // ApplyAmbientOcclusion only processes faces 0..BaseFaceCount-1.
     public int BaseFaceCount { get; set; } = 0;
 
+    // Optional sub-range of faces wanting a richer ambient treatment than the rest of the mesh
+    // during lighting bake — e.g. a hollow module's interior walls, which the sun rarely reaches
+    // directly and would otherwise bake near-black. AmbientOverrideFaceCount = 0 (default) means
+    // "no override." Set by the module's own MeshFactory; StationGenerator.BakeLighting reads
+    // these after the normal whole-mesh ApplyLighting pass (see
+    // StationGenerator.BoostAmbientForFaceRange for the per-face formula) — see DockingBayHull
+    // for the one current use.
+    public int AmbientOverrideFaceStart { get; set; } = -1;
+    public int AmbientOverrideFaceCount { get; set; } = 0;
+
     // Adds a flat quad from four explicit corner vertices (CW from normal side).
     // UV coordinates are projected from the face plane; 1 UV unit = 5 metres.
     // Returns the index of v0 in the vertex array.

@@ -3,7 +3,10 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace Inferior.Game.StationGen;
 
-public enum GlowType { NavigationLight, WarningStrobe, AviationWarning, AmbientMarker }
+// DockGuidance is distinct from AmbientMarker so its glow sprite can be sized independently
+// (see the baseSize switch in SystemSpaceState.Stations.cs) — bumping AmbientMarker itself
+// would also enlarge every unrelated ambient position marker on the station.
+public enum GlowType { NavigationLight, WarningStrobe, AviationWarning, AmbientMarker, DockGuidance }
 
 public enum LightPattern
 {
