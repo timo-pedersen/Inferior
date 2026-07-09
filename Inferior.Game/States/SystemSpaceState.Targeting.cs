@@ -138,4 +138,120 @@ public sealed partial class SystemSpaceState
         DataBus.Instruments.Publish(Topics.Docking.PadDirectionZ, _padDirection.Z);
         DataBus.Instruments.Publish(Topics.Docking.PadSizeClass,  pad.PadSize == Galaxy.PadSize.Large ? 1.0 : 0.0);
     }
+
+    private void RequestStationProximityDiagnostic()
+    {
+        var snap = _frameShipSnap;
+        var sim = _simulation.LastStationProximityTickDiagnostic;
+
+        Galaxy.Station? targetStation = null;
+        DVec3 displayedTargetGalaxyPos = DVec3.Zero;
+        double displayedTargetDistance = double.NaN;
+
+        if (_targeting.CurrentRadarTarget is { Type: ContactType.Station } contact)
+        {
+            displayedTargetDistance = contact.RelativePosition.Length();
+            string stationName = contact.DisplayName;
+            foreach (var (station, pos) in _stationPositions)
+            {
+                if (!string.Equals(station.Name, stationName, StringComparison.Ordinal)) continue;
+                targetStation = station;
+                displayedTargetGalaxyPos = pos;
+                break;
+            }
+        }
+
+        double snapshotTime = snap?.SimTime ?? _gameTimeSeconds;
+        DVec3 targetEclipticAtSnapshot = targetStation != null
+            ? _system.GetStationPosition(targetStation, snapshotTime)
+            : DVec3.Zero;
+        DVec3 targetGalaxyAtSnapshot = targetStation != null
+            ? EclipticToGalaxy(targetEclipticAtSnapshot)
+            : DVec3.Zero;
+        DVec3 cameraPos = _camera.UniversePosition;
+        DVec3? shipSnapshotPos = snap?.Position;
+        double snapshotShipToStationDistance = targetStation != null && shipSnapshotPos.HasValue
+            ? (targetGalaxyAtSnapshot - shipSnapshotPos.Value).Length
+            : double.NaN;
+
+        bool sameTick = snap != null && sim != null && snap.TickSequence == sim.TickSequence;
+        bool sameStationReference = targetStation != null && sim?.NearestStation != null
+            && ReferenceEquals(targetStation, sim.NearestStation);
+        bool sameStationName = targetStation?.Name != null && sim?.NearestStationName != null
+            && string.Equals(targetStation.Name, sim.NearestStationName, StringComparison.Ordinal);
+        bool sameStationId = targetStation?.PersistenceId != null && sim?.NearestStationId != null
+            && string.Equals(targetStation.PersistenceId, sim.NearestStationId, StringComparison.Ordinal);
+        DVec3 stationDelta = sim != null
+            ? targetGalaxyAtSnapshot - sim.StationGalaxyPosition
+            : DVec3.Zero;
+        DVec3 shipDelta = snap != null && sim != null
+            ? snap.Position - sim.SnapshotShipPosition
+            : DVec3.Zero;
+
+        string classification;
+        if (snap == null)
+            classification = "NO_MAIN_SHIP_SNAPSHOT";
+        else if (sim == null)
+            classification = "NO_SIM_TICK_DIAGNOSTIC";
+        else if (!sameTick)
+            classification = "NO_MATCHING_SIM_TICK_FOR_MAIN_SNAPSHOT";
+        else if (!sameStationReference && !sameStationName && !sameStationId)
+            classification = "DIFFERENT_STATION_IDENTITY";
+        else if (stationDelta.Length > 1.0)
+            classification = "SAME_TICK_DIFFERENT_STATION_POSITION";
+        else if (shipDelta.Length > 1.0)
+            classification = "SAME_TICK_DIFFERENT_SHIP_POSITION";
+        else
+            classification = "SAME_TICK_COHERENT";
+
+        static string V(DVec3 v) => $"({v.X:R}, {v.Y:R}, {v.Z:R}) |len|={v.Length:R}";
+        static string MaybeV(DVec3? v) => v.HasValue ? V(v.Value) : "<null>";
+        string path = System.IO.Path.Combine(AppContext.BaseDirectory, "station_proximity_coherent.log");
+        string text =
+            "=== Coherent station proximity diagnostic ===\n" +
+            $"requestedUtc={DateTime.UtcNow:O}\n" +
+            $"classification={classification}\n\n" +
+            "[Main current snapshot]\n" +
+            $"snapshotTick={(snap != null ? snap.TickSequence.ToString() : "<null>")}\n" +
+            $"snapshotSimTime={(snap != null ? snap.SimTime.ToString("R") : "<null>")}\n" +
+            $"snapshotShipPosition={MaybeV(shipSnapshotPos)}\n" +
+            $"targetName={targetStation?.Name ?? "<none>"}\n" +
+            $"targetId={targetStation?.PersistenceId ?? "<null>"}\n" +
+            $"targetEclipticAtSnapshot={V(targetEclipticAtSnapshot)}\n" +
+            $"targetGalaxyAtSnapshot={V(targetGalaxyAtSnapshot)}\n" +
+            $"displayedTargetGalaxyCached={V(displayedTargetGalaxyPos)}\n" +
+            $"displayedTargetDistance={displayedTargetDistance:R}\n" +
+            $"snapshotShipToStationDistance={snapshotShipToStationDistance:R}\n" +
+            $"cameraUniverse={V(cameraPos)}\n\n" +
+            "[Sim same-tick calculation]\n" +
+            $"tick={(sim != null ? sim.TickSequence.ToString() : "<null>")}\n" +
+            $"environmentSimTime={(sim != null ? sim.EnvironmentSimTime.ToString("R") : "<null>")}\n" +
+            $"environmentShipPosition={(sim != null ? V(sim.EnvironmentShipPosition) : "<null>")}\n" +
+            $"nearestName={sim?.NearestStationName ?? "<none>"}\n" +
+            $"nearestId={sim?.NearestStationId ?? "<null>"}\n" +
+            $"stationEcliptic={(sim != null ? V(sim.StationEclipticPosition) : "<null>")}\n" +
+            $"stationGalaxy={(sim != null ? V(sim.StationGalaxyPosition) : "<null>")}\n" +
+            $"rawCentreDistance={(sim != null ? sim.RawCentreDistance.ToString("R") : "<null>")}\n" +
+            $"physicalRadius={(sim != null ? sim.PhysicalRadius.ToString("R") : "<null>")}\n" +
+            $"surfaceDistance={(sim != null ? sim.SurfaceDistance.ToString("R") : "<null>")}\n" +
+            $"publishedLkmZone={(sim != null ? sim.PublishedLkmZone.ToString() : "<null>")}\n" +
+            $"publishedMaxGearIndex={(sim != null && sim.PublishedMaxGearIndex != int.MaxValue ? sim.PublishedMaxGearIndex.ToString() : "<none>")}\n" +
+            $"snapshotSimTime={(sim != null ? sim.SnapshotSimTime.ToString("R") : "<null>")}\n" +
+            $"snapshotShipPosition={(sim != null ? V(sim.SnapshotShipPosition) : "<null>")}\n" +
+            $"shipMovementDuringTick={(sim != null ? V(sim.ShipMovementDuringTick) : "<null>")}\n" +
+            $"publishedFlightMode={(sim != null ? sim.PublishedFlightMode.ToString() : "<null>")}\n\n" +
+            "[Direct same-tick comparison]\n" +
+            $"sameTick={sameTick}\n" +
+            $"sameStationReference={sameStationReference}\n" +
+            $"sameStationName={sameStationName}\n" +
+            $"sameStationId={sameStationId}\n" +
+            $"mainStationAtSnapshotMinusSimStation={V(stationDelta)}\n" +
+            $"mainSnapshotShipMinusSimSnapshotShip={V(shipDelta)}\n" +
+            "============================================\n\n";
+
+        System.IO.File.AppendAllText(path, text);
+
+        DataBus.System.Publish(Topics.System.All,
+            new SystemMessage($"Coherent station proximity diagnostic written: {path}", SystemMessagePriority.Info));
+    }
 }

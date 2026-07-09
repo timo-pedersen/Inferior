@@ -65,13 +65,6 @@ public sealed partial class SystemSpaceState : GameState
     private Effect?     _atmosEffect;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
-    // Double-precision 3×3 rotation matrix for EclipticToGalaxy.
-    // Avoids float quantisation (~9 km at 1 AU) that caused station jumpiness.
-    // Rows: galaxy-space X/Y/Z expressed in ecliptic basis.
-    private double _er00 = 1, _er01, _er02;
-    private double _er10, _er11 = 1, _er12;
-    private double _er20, _er21, _er22 = 1;
-
     // TEMP DEBUG — station spawn investigation, remove before done.
     private DVec3 _debugTargetStationGalaxy;
     private bool  _debugTargetStationPending;
@@ -288,7 +281,7 @@ public sealed partial class SystemSpaceState : GameState
                 DVec3 stationGalaxy   = EclipticToGalaxy(stationEcliptic);
 
                 // Place spawn 2 km above the ecliptic plane relative to the station
-                DVec3 eclipticUp = new DVec3(_er01, _er11, _er21); // ecliptic +Y in galaxy space
+                DVec3 eclipticUp = EclipticToGalaxy(DVec3.UnitY) - EclipticToGalaxy(DVec3.Zero);
                 DVec3 spawnPos   = stationGalaxy + eclipticUp * 2000.0;
 
                 Quaternion spawnOri = QuatLookAt(stationGalaxy - spawnPos);
@@ -303,7 +296,6 @@ public sealed partial class SystemSpaceState : GameState
                     $"  parentEcliptic={parentEcliptic} stationEcliptic={stationEcliptic}\n" +
                     $"  stationGalaxy={stationGalaxy}\n" +
                     $"  eclipticUp={eclipticUp} |eclipticUp|={eclipticUp.Length}\n" +
-                    $"  er01={_er01} er11={_er11} er21={_er21}\n" +
                     $"  spawnPos={spawnPos} dist(spawnPos,stationGalaxy)={(spawnPos - stationGalaxy).Length}\n" +
                     $"  spawnOri={spawnOri}\n");
                 _debugTargetStationGalaxy = stationGalaxy;
@@ -566,6 +558,7 @@ public sealed partial class SystemSpaceState : GameState
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
+        bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
         bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
 
@@ -574,6 +567,8 @@ public sealed partial class SystemSpaceState : GameState
             _uiMouseMode = !_uiMouseMode;
             _cockpitUI.ApplyUiMode(_uiMouseMode);
         }
+        if (f10JustPressed)
+            RequestStationProximityDiagnostic();
         if (f11JustPressed)
         {
             if (_debugCameraMode)

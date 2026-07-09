@@ -42,37 +42,24 @@ public sealed partial class SystemSpaceState
             0f,
             MathF.Sin(_system.EclipticTiltAzimuthRadians));
         _eclipticRotation = Matrix.CreateFromAxisAngle(tiltAxis, _system.EclipticTiltRadians);
-
-        // Build double-precision rotation from the same axis/angle to avoid float
-        // quantisation (~9 km at 1 AU) when transforming large universe coordinates.
-        // Rodrigues formula for axis (ux, 0, uz) — uy = 0 by construction (tilt axis is horizontal).
-        double ux  = tiltAxis.X, uz = tiltAxis.Z;
-        double a   = _system.EclipticTiltRadians;
-        double cos = System.Math.Cos(a), sin = System.Math.Sin(a), ic = 1.0 - cos;
-        _er00 = cos + ux * ux * ic;  _er01 = -uz * sin;       _er02 = ux * uz * ic;
-        _er10 = uz * sin;            _er11 = cos;              _er12 = -ux * sin;
-        _er20 = ux * uz * ic;        _er21 = ux * sin;         _er22 = cos + uz * uz * ic;
     }
 
     // Full double-precision ecliptic-to-galaxy rotation.
-    private DVec3 EclipticToGalaxy(DVec3 pos) => new(
-        _er00 * pos.X + _er01 * pos.Y + _er02 * pos.Z,
-        _er10 * pos.X + _er11 * pos.Y + _er12 * pos.Z,
-        _er20 * pos.X + _er21 * pos.Y + _er22 * pos.Z);
+    private DVec3 EclipticToGalaxy(DVec3 pos)
+        => CoordinateTransforms.EclipticToGalaxy(
+            pos, _system.EclipticTiltAzimuthRadians, _system.EclipticTiltRadians);
 
-    // Inverse rotation (transpose of the rotation matrix — orthogonal matrix property).
     // Used to convert galaxy-space relative positions back to ecliptic plane for the landing radar.
-    private DVec3 GalaxyToEcliptic(DVec3 pos) => new(
-        _er00 * pos.X + _er10 * pos.Y + _er20 * pos.Z,
-        _er01 * pos.X + _er11 * pos.Y + _er21 * pos.Z,
-        _er02 * pos.X + _er12 * pos.Y + _er22 * pos.Z);
+    private DVec3 GalaxyToEcliptic(DVec3 pos)
+        => CoordinateTransforms.GalaxyToEcliptic(
+            pos, _system.EclipticTiltAzimuthRadians, _system.EclipticTiltRadians);
 
     // Enters a different star system, re-using OnEnter logic without a full state transition.
     private void EnterSystem(Star star, DVec3 spawnPos, Quaternion spawnOri, FlightMode mode)
     {
         _star   = star;
         _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
-        _eclipticRotation = Matrix.Identity;  // reset until proper ecliptic rotation is set
+        ComputeEclipticRotation();
         _simulation.InstallSystem(_star, _system);
 
         // Rebuild skybox for new star
