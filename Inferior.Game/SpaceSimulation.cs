@@ -20,6 +20,50 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
+    public sealed record StationProximityTickDiagnostic(
+        long TickSequence,
+        double EnvironmentSimTime,
+        DVec3 EnvironmentShipPosition,
+        string? NearestStationName,
+        string? NearestStationId,
+        Station? NearestStation,
+        DVec3 StationEclipticPosition,
+        DVec3 StationGalaxyPosition,
+        double RawCentreDistance,
+        double PhysicalRadius,
+        double SurfaceDistance,
+        int PublishedLkmZone,
+        int PublishedMaxGearIndex,
+        double SnapshotSimTime,
+        DVec3 SnapshotShipPosition,
+        DVec3 ShipMovementDuringTick,
+        FlightMode PublishedFlightMode);
+
+    public sealed record MainStationProximityDiagnostic(
+        DateTime RequestedAtUtc,
+        Star MainStar,
+        StarSystem MainSystem,
+        string? TargetStationName,
+        string? TargetStationId,
+        Station? TargetStation,
+        double MainTime,
+        DVec3 TargetStationEclipticPosition,
+        DVec3 TargetStationGalaxyPosition,
+        DVec3 CameraUniversePosition,
+        DVec3? ShipSnapshotPosition,
+        double CameraToStationDistance,
+        double? ShipSnapshotToStationDistance);
+
+    private readonly record struct StationProximitySample(
+        Station? Station,
+        DVec3 EclipticPosition,
+        DVec3 GalaxyPosition,
+        double CentreDistance,
+        double PhysicalRadius,
+        double SurfaceDistance);
+
+    internal readonly record struct LkmClassification(int Zone, int MaxGear);
+
     private double _nextMessageAt = 8.0;
     private bool   _startupPublished;
     private double _lastHeartbeat;
@@ -38,6 +82,7 @@ public sealed class SpaceSimulation : Simulation
         DVec3      Forward,
         DVec3      Up,
         double     SimTime,
+        long       TickSequence      = 0,
         FlightMode FlightMode        = FlightMode.SystemNewtonian,
         bool       FlightAssistOn    = true,
         // Newtonian / LKM
@@ -93,6 +138,11 @@ public sealed class SpaceSimulation : Simulation
     public void InstallSystem(Star star, StarSystem system)
         => _pendingSystemContext = new SystemContext(star, system);
 
+    private volatile MainStationProximityDiagnostic? _stationProximityDiagnosticRequest;
+
+    public void RequestStationProximityDiagnostic(MainStationProximityDiagnostic diagnostic)
+        => _stationProximityDiagnosticRequest = diagnostic;
+
     // ── Ship move speed (legacy — used by old velocity-target path; still read by debug cam proximity) ──
     private long _shipSpeedBits = BitConverter.DoubleToInt64Bits(5e9);
 
@@ -101,6 +151,19 @@ public sealed class SpaceSimulation : Simulation
 
     // ── Nearest station surface distance (sim-owned; used by LKM and Slipstream) ──
     private double _nearestStationDistance = double.MaxValue;
+    private Station? _nearestStation;
+    private DVec3 _nearestStationEclipticPosition;
+    private DVec3 _nearestStationGalaxyPosition;
+    private DVec3 _nearestStationShipPosition;
+    private double _nearestStationSimTime;
+    private double _nearestStationCentreDistance = double.MaxValue;
+    private double _nearestStationPhysicalRadius;
+    private long _stationProximityTickSequence;
+    private long _currentStationProximityTickSequence;
+    private volatile StationProximityTickDiagnostic? _lastStationProximityTickDiagnostic;
+
+    public StationProximityTickDiagnostic? LastStationProximityTickDiagnostic
+        => _lastStationProximityTickDiagnostic;
 
     // ── Flight mode (sim-internal) ────────────────────────────────────────────
     private FlightMode _currentFlightMode = FlightMode.SystemNewtonian;
@@ -424,16 +487,22 @@ public sealed class SpaceSimulation : Simulation
         double snapAccel  = dt > 0 ? (snapFwdSpd - _prevFwdSpeedMs) / dt : 0.0;
         _prevFwdSpeedMs   = snapFwdSpd;
 
+        long snapTickSequence = _currentStationProximityTickSequence;
+        DVec3 shipMovementDuringTick = ship.Position - _nearestStationShipPosition;
+        var postPhysicsProximity = ComputeNearestStationProximity(ship.Position, GameClock.SimTime);
+        var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
+
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
             ship.Forward, ship.Up,
             GameClock.SimTime,
+            snapTickSequence,
             snapMode,
             _flightAssistEnabled,
             _newtonianGear,
             ship.NewtonianGears.Length,
-            _lkmMaxGear,
-            _currentLkmZone,
+            postPhysicsLkm.MaxGear,
+            postPhysicsLkm.Zone,
             _lkmComplianceTimer,
             _xStopActive,
             _afterburnerActive,
@@ -445,6 +514,25 @@ public sealed class SpaceSimulation : Simulation
             snapRelSpd,
             snapFwdSpd,
             snapAccel);
+
+        _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
+            snapTickSequence,
+            _nearestStationSimTime,
+            _nearestStationShipPosition,
+            _nearestStation?.Name,
+            _nearestStation?.PersistenceId,
+            _nearestStation,
+            _nearestStationEclipticPosition,
+            _nearestStationGalaxyPosition,
+            _nearestStationCentreDistance,
+            _nearestStationPhysicalRadius,
+            _nearestStationDistance,
+            postPhysicsLkm.Zone,
+            postPhysicsLkm.MaxGear,
+            GameClock.SimTime,
+            ship.Position,
+            shipMovementDuringTick,
+            snapMode);
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────
@@ -767,20 +855,9 @@ public sealed class SpaceSimulation : Simulation
 
     private void UpdateLkmZones(Ship ship, double dt)
     {
-        var    zones      = FlightConstants.StationLkmZones;
-        double dist       = _nearestStationDistance;
-        int    newMax     = int.MaxValue;
-        int    activeZone = 0;
-
-        for (int z = zones.Length - 1; z >= 0; z--)
-        {
-            if (dist < zones[z].radius)
-            {
-                newMax     = zones[z].maxGearIndex;
-                activeZone = z + 1;
-                break;
-            }
-        }
+        var classification = ClassifyLkm(_nearestStationDistance);
+        int newMax = classification.MaxGear;
+        int activeZone = classification.Zone;
 
         // Zone entry: message + start compliance window
         if (activeZone > _currentLkmZone)
@@ -826,6 +903,18 @@ public sealed class SpaceSimulation : Simulation
                 FlagLkmViolation();
             }
         }
+    }
+
+    internal static LkmClassification ClassifyLkm(double stationSurfaceDistance)
+    {
+        var zones = FlightConstants.StationLkmZones;
+        for (int z = zones.Length - 1; z >= 0; z--)
+        {
+            if (stationSurfaceDistance < zones[z].radius)
+                return new LkmClassification(z + 1, zones[z].maxGearIndex);
+        }
+
+        return new LkmClassification(0, int.MaxValue);
     }
 
     private static void FlagLkmViolation()
@@ -1179,30 +1268,10 @@ public sealed class SpaceSimulation : Simulation
     }
 
     private DVec3 EclipticToGalaxy(DVec3 ecl)
-    {
-        double kx   = System.Math.Cos(_eclipticAz);
-        double kz   = System.Math.Sin(_eclipticAz);
-        double cosT = System.Math.Cos(_eclipticTilt);
-        double sinT = System.Math.Sin(_eclipticTilt);
-        double dot  = kx * ecl.X + kz * ecl.Z;
-        return new DVec3(
-            ecl.X * cosT - kz * ecl.Y * sinT + kx * dot * (1.0 - cosT),
-            ecl.Y * cosT + (kz * ecl.X - kx * ecl.Z) * sinT,
-            ecl.Z * cosT + kx * ecl.Y * sinT + kz * dot * (1.0 - cosT));
-    }
+        => CoordinateTransforms.EclipticToGalaxy(ecl, _eclipticAz, _eclipticTilt);
 
     private DVec3 GalaxyToEcliptic(DVec3 gal)
-    {
-        double kx   = System.Math.Cos(_eclipticAz);
-        double kz   = System.Math.Sin(_eclipticAz);
-        double cosT = System.Math.Cos(-_eclipticTilt);
-        double sinT = System.Math.Sin(-_eclipticTilt);
-        double dot  = kx * gal.X + kz * gal.Z;
-        return new DVec3(
-            gal.X * cosT - kz * gal.Y * sinT + kx * dot * (1.0 - cosT),
-            gal.Y * cosT + (kz * gal.X - kx * gal.Z) * sinT,
-            gal.Z * cosT + kx * gal.Y * sinT + kz * dot * (1.0 - cosT));
-    }
+        => CoordinateTransforms.GalaxyToEcliptic(gal, _eclipticAz, _eclipticTilt);
 
     // ── Power ─────────────────────────────────────────────────────────────────
 
@@ -1221,6 +1290,8 @@ public sealed class SpaceSimulation : Simulation
         var ship = _ship;
         if (ship == null) return;
         double simTime = GameClock.SimTime;
+        long tickSequence = ++_stationProximityTickSequence;
+        _currentStationProximityTickSequence = tickSequence;
 
         var world = SensorEnvironment.World;
         world.MassiveBodies.Clear();
@@ -1284,16 +1355,57 @@ public sealed class SpaceSimulation : Simulation
             }
         }
 
-        _nearestStationDistance = double.MaxValue;
-        foreach (var station in context.System.Stations)
-        {
-            DVec3 stationPos = EclipticToGalaxy(context.System.GetStationPosition(station, simTime));
-            double surfDist = System.Math.Max((stationPos - pos).Length - StationPhysicalRadius(station), 0.0);
-            if (surfDist < _nearestStationDistance)
-                _nearestStationDistance = surfDist;
-        }
+        var stationProximity = ComputeNearestStationProximity(pos, simTime);
+        _nearestStationDistance = stationProximity.SurfaceDistance;
+        _nearestStation = stationProximity.Station;
+        _nearestStationEclipticPosition = stationProximity.EclipticPosition;
+        _nearestStationGalaxyPosition = stationProximity.GalaxyPosition;
+        _nearestStationShipPosition = pos;
+        _nearestStationSimTime = simTime;
+        _nearestStationCentreDistance = stationProximity.CentreDistance;
+        _nearestStationPhysicalRadius = stationProximity.PhysicalRadius;
 
         SensorEnvironment.UpdateFromSimThread(world, shipEcliptic, vel);
+    }
+
+    private StationProximitySample ComputeNearestStationProximity(DVec3 shipPosition, double simTime)
+    {
+        var context = _systemContext;
+        if (context == null)
+            return new StationProximitySample(null, DVec3.Zero, DVec3.Zero, double.MaxValue, 0.0, double.MaxValue);
+
+        Station? nearestStation = null;
+        DVec3 nearestEclipticPosition = DVec3.Zero;
+        DVec3 nearestGalaxyPosition = DVec3.Zero;
+        double nearestCentreDistance = double.MaxValue;
+        double nearestPhysicalRadius = 0.0;
+        double nearestSurfaceDistance = double.MaxValue;
+
+        foreach (var station in context.System.Stations)
+        {
+            DVec3 stationEclipticPos = context.System.GetStationPosition(station, simTime);
+            DVec3 stationPos = EclipticToGalaxy(stationEclipticPos);
+            double radius = StationPhysicalRadius(station);
+            double centreDist = (stationPos - shipPosition).Length;
+            double surfDist = System.Math.Max(centreDist - radius, 0.0);
+            if (surfDist < nearestSurfaceDistance)
+            {
+                nearestSurfaceDistance = surfDist;
+                nearestStation = station;
+                nearestEclipticPosition = stationEclipticPos;
+                nearestGalaxyPosition = stationPos;
+                nearestCentreDistance = centreDist;
+                nearestPhysicalRadius = radius;
+            }
+        }
+
+        return new StationProximitySample(
+            nearestStation,
+            nearestEclipticPosition,
+            nearestGalaxyPosition,
+            nearestCentreDistance,
+            nearestPhysicalRadius,
+            nearestSurfaceDistance);
     }
 
     private static double StationPhysicalRadius(Station station) => station.Size switch
@@ -1400,10 +1512,105 @@ public sealed class SpaceSimulation : Simulation
             DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
         }
 
+        WriteStationProximityDiagnosticIfRequested();
+
         if (t >= _nextMessageAt)
         {
             DataBus.System.Publish(Topics.System.All, new($"T+{t:F0}s - all systems nominal"));
             _nextMessageAt += 8.0;
         }
+    }
+
+    private void WriteStationProximityDiagnosticIfRequested()
+    {
+        var main = _stationProximityDiagnosticRequest;
+        if (main == null) return;
+        _stationProximityDiagnosticRequest = null;
+
+        var context = _systemContext;
+        var ship = _ship;
+        Station? simStation = _nearestStation;
+
+        bool sameSystemRef = context != null && ReferenceEquals(main.MainSystem, context.System);
+        bool sameStarRef = context != null && ReferenceEquals(main.MainStar, context.Star);
+        bool sameStationRef = main.TargetStation != null && simStation != null && ReferenceEquals(main.TargetStation, simStation);
+        bool sameStationName = main.TargetStationName != null && simStation != null
+            && string.Equals(main.TargetStationName, simStation.Name, StringComparison.Ordinal);
+        bool sameStationId = main.TargetStationId != null && simStation?.PersistenceId != null
+            && string.Equals(main.TargetStationId, simStation.PersistenceId, StringComparison.Ordinal);
+
+        DVec3 stationDelta = simStation != null
+            ? main.TargetStationGalaxyPosition - _nearestStationGalaxyPosition
+            : DVec3.Zero;
+        DVec3? shipDelta = ship != null && main.ShipSnapshotPosition.HasValue
+            ? main.ShipSnapshotPosition.Value - _nearestStationShipPosition
+            : null;
+        double timeDelta = main.MainTime - _nearestStationSimTime;
+
+        string classification;
+        if (context == null)
+            classification = "NO_SIM_SYSTEM_CONTEXT";
+        else if (!sameSystemRef || !sameStarRef)
+            classification = "DIFFERENT_INSTALLED_SYSTEM_OR_STAR";
+        else if (!sameStationRef && !sameStationName && !sameStationId)
+            classification = "DIFFERENT_STATION_IDENTITY";
+        else if (stationDelta.Length > 1.0)
+            classification = "SAME_STATION_NAME_OR_ID_DIFFERENT_WORLD_POSITION";
+        else if (shipDelta.HasValue && shipDelta.Value.Length > 1.0)
+            classification = "SAME_STATION_POSITION_DIFFERENT_SHIP_POSITION";
+        else if (_currentLkmZone == 1 && _nearestStationDistance >= FlightConstants.StationLkmZones[1].radius)
+            classification = "EXPECTED_LKM1_FROM_SIM_DISTANCE";
+        else
+            classification = "SAME_CONTEXT_UNEXPECTED_DISTANCE_OR_ZONE";
+
+        string V(DVec3 v) => $"({v.X:R}, {v.Y:R}, {v.Z:R}) |len|={v.Length:R}";
+        string MaybeV(DVec3? v) => v.HasValue ? V(v.Value) : "<null>";
+
+        string path = System.IO.Path.Combine(AppContext.BaseDirectory, "station_proximity_diagnostic.log");
+        var text =
+            "=== Station proximity diagnostic ===\n" +
+            $"requestedUtc={main.RequestedAtUtc:O} capturedUtc={DateTime.UtcNow:O}\n" +
+            $"classification={classification}\n\n" +
+            "[Main selected target]\n" +
+            $"star={main.MainStar.Name}#{main.MainStar.GalaxyIndex}\n" +
+            $"systemStationCount={main.MainSystem.Stations.Count}\n" +
+            $"targetName={main.TargetStationName ?? "<none>"}\n" +
+            $"targetId={main.TargetStationId ?? "<null>"}\n" +
+            $"mainTime={main.MainTime:R}\n" +
+            $"targetEcliptic={V(main.TargetStationEclipticPosition)}\n" +
+            $"targetGalaxy={V(main.TargetStationGalaxyPosition)}\n" +
+            $"cameraUniverse={V(main.CameraUniversePosition)}\n" +
+            $"shipSnapshotPosition={MaybeV(main.ShipSnapshotPosition)}\n" +
+            $"cameraToStationDistance={main.CameraToStationDistance:R}\n" +
+            $"shipSnapshotToStationDistance={(main.ShipSnapshotToStationDistance.HasValue ? main.ShipSnapshotToStationDistance.Value.ToString("R") : "<null>")}\n\n" +
+            "[Simulation nearest station]\n" +
+            $"star={(context?.Star.Name ?? "<none>")}#{(context?.Star.GalaxyIndex.ToString() ?? "<none>")}\n" +
+            $"stationCount={(context?.System.Stations.Count.ToString() ?? "<none>")}\n" +
+            $"nearestName={simStation?.Name ?? "<none>"}\n" +
+            $"nearestId={simStation?.PersistenceId ?? "<null>"}\n" +
+            $"simTime={_nearestStationSimTime:R}\n" +
+            $"stationEcliptic={V(_nearestStationEclipticPosition)}\n" +
+            $"stationGalaxy={V(_nearestStationGalaxyPosition)}\n" +
+            $"shipPositionUsed={V(_nearestStationShipPosition)}\n" +
+            $"currentShipPosition={(ship != null ? V(ship.Position) : "<null>")}\n" +
+            $"rawCentreDistance={_nearestStationCentreDistance:R}\n" +
+            $"stationPhysicalRadius={_nearestStationPhysicalRadius:R}\n" +
+            $"nearestStationDistance={_nearestStationDistance:R}\n" +
+            $"lkmZone={_currentLkmZone}\n" +
+            $"maxGearIndex={(_lkmMaxGear == int.MaxValue ? "<none>" : _lkmMaxGear.ToString())}\n\n" +
+            "[Direct comparison]\n" +
+            $"sameStarReference={sameStarRef}\n" +
+            $"sameSystemReference={sameSystemRef}\n" +
+            $"sameStationReference={sameStationRef}\n" +
+            $"sameStationName={sameStationName}\n" +
+            $"sameStationId={sameStationId}\n" +
+            $"mainTargetGalaxyMinusSimNearestGalaxy={V(stationDelta)}\n" +
+            $"mainShipSnapshotMinusSimShipUsed={MaybeV(shipDelta)}\n" +
+            $"mainTimeMinusSimTime={timeDelta:R}\n" +
+            "====================================\n\n";
+
+        System.IO.File.AppendAllText(path, text);
+        DataBus.System.Publish(Topics.System.All,
+            new SystemMessage($"Station proximity diagnostic written: {path}", SystemMessagePriority.Info));
     }
 }
