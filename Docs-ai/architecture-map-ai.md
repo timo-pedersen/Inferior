@@ -1,7 +1,7 @@
 # Inferior — Architecture Map
 
 > A flat table of contents to the codebase: one line per file, what it is, nothing more.
-> Distinct from `inferior-current-state.md`, which tracks *why* things changed and what's
+> Distinct from `!current-state.md`, which tracks *why* things changed and what's
 > in progress — this doc only answers "where do I look for X?" Regenerate wholesale when
 > it drifts noticeably from `git ls-files`; don't hand-patch it per brief.
 

@@ -1,6 +1,6 @@
 # Inferior — Shipping Container Design Reference
 
-> Compressed reference for Claude and Claude Code.
+> Compressed reference for AI.
 > Containers are generated objects — universe items, not tied to any parent system.
 > Same deterministic generation pipeline as stations.
 

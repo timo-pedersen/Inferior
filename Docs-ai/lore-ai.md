@@ -1,6 +1,6 @@
 # Inferior — Lore Reference
 
-> Compressed reference for Claude. Full narrative version in docs/inferior-lore.md.
+> Compressed reference for AI. Full narrative version in Docs/inferior-lore.md.
 > All lore is load-bearing — every element solves a gameplay problem or creates a system.
 
 ---

@@ -1,6 +1,6 @@
 # Inferior — Docking System Design
 
-> Design reference for Claude and Claude Code.
+> Design reference for AI.
 > Covers docking philosophy, pad types, the docking instrument, navigation,
 > landing detection, and development steps.
 

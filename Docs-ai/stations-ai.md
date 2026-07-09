@@ -1,7 +1,7 @@
 # Inferior — Station Design Reference
 
-> Compressed reference for Claude and Claude Code.
-> Full design history in session briefs (docs-claude outputs).
+> Compressed reference for AI.
+> Full design history in session briefs (Docs-ai outputs).
 > Stations are generated once from system seed and saved — same seed = same station.
 
 ---

@@ -1,6 +1,6 @@
 # Inferior — Design Overview
 
-> Compressed reference for Claude. Full version with rationale in docs/inferior-design.md.
+> Compressed reference for AI. Full version with rationale in Docs/inferior-design.md.
 
 ---
 

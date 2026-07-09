@@ -1,6 +1,6 @@
 # Inferior — Ship Components and Sensors
 
-> Compressed reference for Claude. Full version in docs/inferior-components-and-sensors.md.
+> Compressed reference for AI. Full version in Docs/inferior-components-and-sensors.md.
 > All components report to message buses and listen to the command bus.
 
 ---

@@ -1,9 +1,9 @@
 # Inferior — Ship Size Classes & Mass Estimation
 
-> Compressed reference for Claude. Full version in Docs/inferior-ship-sizes-and-mass.md.
+> Compressed reference for AI. Full version in Docs/inferior-ship-sizes-and-mass.md.
 
 **This doc is authoritative for ship size classes and length ranges.**
-`Docs-claude/inferior-design-ship-claude.md` previously defined a conflicting scheme
+`Docs-ai/ship-ai.md` previously defined a conflicting scheme
 (Small/Medium/Large/Capital, 20–300m+) — it's been updated to defer to this doc's
 classes (Shuttle/Small/Medium/Large, 6–72m; Capital deferred, unsized). That doc still
 carries its own component-slot/hull-count figures, flagged there as stale pending

@@ -1,6 +1,6 @@
 # Inferior — Ship Design Reference
 
-> Compressed reference for Claude. Full version in docs/inferior-design-ship.md.
+> Compressed reference for AI. Full version in Docs/inferior-design-ship.md.
 
 ---
 
@@ -25,7 +25,7 @@ Ship class determines: available component sizes, hardpoint locations, cockpit p
 
 ## Size classes
 
-Superseded by `Docs-claude/inferior-ship-sizes-and-mass-claude.md` for length/width/
+Superseded by `Docs-ai/ship-sizes-and-mass-ai.md` for length/width/
 height and mass — that doc's container-capacity-driven classes are authoritative. Four
 classes, not five: **Shuttle, Small, Medium, Large**. Capital is explicitly out of
 scope for now (low priority; won't dock under normal circumstances) — no confirmed

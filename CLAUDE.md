@@ -1,33 +1,71 @@
 # CLAUDE.md
 
-This file provides guidance to You, Claude Code (claude.ai/code) when working with code in
-this repository.
+This file provides guidance to Claude Code when working in this repository.
 
-Primary documentation is available in the "Docs-claude" folder.
-This includes a file "inferior-current-state.md" which you are solely responsible for,
-meaning you edit this whenever you like, and add it to commits.
-It may list current state of development, what area to focus on now, what is postponed, and
-anything else you find useful to work efficiently.
-When updating this doc, give me a note and I will upload it to Claude Projects.
+## Required context
 
-Additional info is available in these two folders:
-- Docs
-- Docs-archive
+Primary AI-facing documentation lives in `Docs-ai/`.
 
-"Docs-claude" documents are maintained largely by You.
-They are usually created from docs in the Docs folder (not true for inferior-current-state.md),
-but with less noise and dead weight.
-Files in this folder are named after this pattern: "inferior-<something>-claude.md".
-In the main docs folder there may be a similar named file "inferior-<something>.md". This implies
-a relationship between these files.
+Before substantial work, read in this order:
 
-"Docs" contains documents that I may maintain and update. They are too noisy for regular AI use
-(e.g. may contain a full design discussion with reasons), but may occasionally be read by You,
-when deemed necessary by me or explicitly stated in a task. You may request to use these docs.
+1. `Docs-ai/!invariants.md`
+2. `Docs-ai/!current-state.md`
+3. `Docs-ai/architecture-map-ai.md`
+4. The active `*-ai.md` subsystem reference relevant to the task
 
-"Docs-archive" contains documents that may be outdated or already implemented.
-May be occasionally referred to when deemed necessary by me or explicitly stated in a task.
-You may request to use these docs.
+You are the implicit owner of `Docs-ai/!current-state.md`. Update it whenever useful
+and include changes in commits.
+
+Maintain it as needed:
+- update current development state,
+- remove completed work once it no longer helps active development,
+- record known gaps and deferred work,
+- keep it concise enough to remain useful as working memory.
+
+Tell Timo whenever you change it so the updated version can be uploaded to Claude Projects.
+
+`Docs-ai/` documents are compact AI references. They are often derived from a related
+file in `Docs/`, but may also be native AI-maintained documents. The naming pattern is
+usually `<something>-ai.md`.
+
+`Docs/` contains fuller design material, often with rationale and discussion. Do not load it
+by default. Read it when:
+
+- Timo explicitly asks;
+- an active compact reference points there;
+- rationale is needed to resolve a design question.
+
+`Docs-archive/` is historical context only. It may contain superseded or already implemented
+designs. Do not use it as current authority unless explicitly instructed.
+
+## Document authority
+
+For what the code currently does:
+
+1. Repository code
+2. `architecture-map-ai.md`
+3. `!current-state.md`
+4. Active subsystem references
+5. Full historical design documents
+
+The architecture map is authoritative for code location and structure. Current-state is 
+authoritative for development status, known regressions, and active transition state.
+
+For intended design:
+
+1. Timo's current instructions and the current development brief
+2. `!invariants.md`
+3. The authoritative active subsystem reference
+4. `design-ai.md`
+5. Full design/lore documents for rationale
+6. Archived documents only as historical context
+
+Never average, merge, or creatively reconcile conflicting claims. State the conflict and use
+the higher-authority source. If code conflicts with newer authoritative design, report a
+design/code mismatch rather than rewriting the design to match old code.
+
+Exact code identifiers, file locations, and APIs must be verified against the repository before
+use.
 
 ## Build & Run
 
@@ -45,96 +83,138 @@ dotnet build Inferior.slnx -c Release
 MonoGame content (fonts, textures) is compiled via `MonoGame.Content.Builder.Task`
 automatically on build. Content source is in `Inferior.Game/Content/Content.mgcb`.
 
-One test project exists: `Inferior.Game.Test` (xUnit).
+Test project: `Inferior.Game.Test` (xUnit).
 
 ## Architecture
 
-**Inferior** is a space exploration game built on MonoGame (.NET 10.0). Projects:
+Inferior is a space exploration game built on MonoGame (.NET 10). The architecture map is the
+current source for file-level structure; do not duplicate its details here. Broadly:
 
-- **Inferior.Core** — math primitives (`DVec3`, `DMath`, `Units`), `SeededRandom`,
-  `GameStateMachine` (`GameState.cs`), `DataBus` (typed message buses, 8 buses),
-  `CommandBus`, `Topics`, `GameClock`, `Noise`, `PowerPriority`.
-- **Inferior.Galaxy** — procedural universe generation: `GalaxyGenerator` creates ~2048
-  stars in spiral arms using `SeededRandom`, plus `Star`, `StarSystem`, `OrbitalBody`,
-  `StarPhysics`, `LandingPad`, `Station`, and `PlanetData`/`PlanetFactory`/`PlanetType`.
-- **Inferior.Gameplay** — simulation layer. `Simulation` runs the 60 Hz background
-  thread. `PlayerInput` (immutable snapshot). `FlightMode` enum + `FlightConstants`.
-  `Physics/` holds `CelestialBody` and `SimWorld`. `SensorData/` holds `Environment`
-  (world query class) and `GravityCalculations`. `Sensors/` holds `PassiveSensor` and
-  all sensor implementations. `Components/` holds `ShipComponent`, `PowerReactor`,
-  `PowerBus`, `EngineComponent`, `ShieldComponent`, `HyperspaceHeatSink`,
-  `CoolantSystem`, etc. `Hull/` holds `HullDefinition`, `HullSlot`, `SlotCategory`.
-  `Ship/` holds `Ship`.
-- **Inferior.Rendering** — 3D rendering utilities: `Camera3D` (quaternion free-look,
-  origin-shift rendering), `MeshFactory` (sphere, ring, quad mesh generation),
-  `GeometryBuilder` (face/winding helpers, BuildDynamic/BuildBaked),
-  `MeshRenderer` (DrawBaked/DrawDynamic), `Type1HullFactory`.
-- **Inferior.Persistence** — pure IO, no live objects: `ShipRecord` and related data
-  records, `LocalFileShipRepository`, `LocalFileShipLogRepository`, `ShipRecordMigrator`.
-- **Inferior.UI** — self-contained UI framework: `UIManager` tracks focus/hover,
-  `UIRenderer` draws controls, `Theme` controls visuals, `InputState`, `BlinkClock`.
-  Controls: `Label`, `Button`, `ToggleButton`, `TextBox`, `Panel`, `Window`,
-  `InstrumentMeter`, `AnalogueNeedle`, `SpectrumGraph`, `SystemConsole`,
-  `DirectionBall`, `EdgePanelHost`, `LedIndicator`, `CockpitRail`,
-  `LandingRadarPanel`, `DockingInstrument`, `RadarDisplay`, `HudAlertDisplay`.
-- **Inferior.Game** — the executable. `InferiorGame` owns the game loop and three
-  game states. `SpaceSimulation` (extends `Simulation`) wires sensors to the live
-  star system each tick. `ShipBuilder` is the sole construction path for `Ship`.
-  `StationGenerator`, `StationDecorator`, `StationModuleRegistry` in `Station/`.
-- **Inferior.Game.Test** — xUnit tests. `ShipRecordContainmentTests`.
+- `Inferior.Core` — foundational math, units, deterministic random, game state, buses, clock.
+- `Inferior.Galaxy` — deterministic procedural galaxy and star-system data.
+- `Inferior.Gameplay` — simulation domain, ship, physics, components, sensors.
+- `Inferior.Rendering` — 3D rendering helpers and mesh/render owners.
+- `Inferior.Persistence` — persistence records and IO; no live gameplay objects.
+- `Inferior.UI` — self-contained retained-mode UI framework.
+- `Inferior.Game` — executable composition layer, game states, station generation, UI wiring.
+- `Inferior.Game.Test` — xUnit tests.
 
-### Dependency graph
+Dependency direction is intentionally layered:
 
-```
+```text
 Core  ←  Galaxy  ←  Gameplay  ←  Persistence
 Core  ←  Galaxy  ←  Gameplay  ←  Rendering
 Core  ←─────────────────────────  UI
 Core  ←  Galaxy  ←  Gameplay  ←  Game  (references everything)
 ```
 
-### Game State Flow
+Do not rely on the architecture summary above for exact current file names or implemented
+features; use the architecture map and code.
 
-Three states currently implemented (see `inferior-current-state.md` for full planned enum):
+## How to work
 
-| State | Purpose |
-|---|---|
-| `GalaxyMapState` | Top-level galaxy overview, star selection |
-| `SystemMapState` | 2D orbital map of a selected star system |
-| `SystemSpaceState` | In-system 3D flight |
+- Inspect relevant code before proposing or implementing changes.
+- Preserve working behaviour outside the requested scope.
+- Prefer the smallest coherent solution.
+- Do not create duplicate implementations of the same concept.
+- Do not build generic infrastructure before a concrete use case requires it.
+- Do not silently fix unrelated issues; report them separately unless they block the task.
+- Separate design discussion from implementation. When design is unsettled, do not make a
+  permanent architecture choice silently.
 
-Navigation: Galaxy map → (double-click star) → System map → (double-click body) →
-System flight, spawning near the selected body.
+For simulation, threading, or reference-frame work, first map ownership and data flow:
 
-State transitions go through `GameStateMachine` in `Inferior.Core`. Each state is a
-discrete class; the machine holds the active state and calls `Update`/`Draw` on it.
+- who owns the value;
+- who writes it;
+- who reads it;
+- how it crosses thread boundaries;
+- whether a frame change is a coordinate transform or a physical effect.
 
-### Key Design Notes
+For 3D geometry, reason before generating vertices:
 
-- All physics/position math uses **double precision** (`DVec3`) — not MonoGame's
-  single-precision `Vector3`. Cast to `Vector3` only at render time after subtracting
-  the camera universe position.
-- Galaxy generation is **fully deterministic** via `SeededRandom`; same seed → same
-  universe.
-- `Camera3D` uses a **quaternion orientation** — no pitch clamp, no gimbal lock,
-  true 6DOF look.
-- `DataBus` is the inter-system message bus (8 buses: System, Instruments,
-  InstrumentState, InstrumentRanges, Radar, RadarLost, Spectra, Target). The simulation
-  thread publishes freely; the main thread calls `DataBus.Drain()` once per `Update()`.
-- `Directory.Build.props` enables nullable reference types and implicit usings globally.
+1. Define local coordinate axes.
+2. Separate points from directions.
+3. Define outward normals and winding.
+4. Define parent/child transform order.
+5. Define attachment port position and orientation independently from mesh construction.
+6. Define collision and clearance volumes.
+7. Identify degenerate cases.
+8. Add mathematical invariants/tests where practical.
 
----
+Useful geometry invariants include:
+
+- no NaN or infinity vertices;
+- no unintended near-zero-area triangles;
+- expected outward winding;
+- connected port world positions coincide within tolerance;
+- connected port normals oppose within tolerance.
+
+## Core project rules
+
+Detailed rules live in `!invariants.md`. Important highlights:
+
+- The simulation thread is the intended owner of mutable live universe state.
+- Rendering/UI should consume snapshots or presentation data; input/commands flow back.
+- Do not introduce competing world authority on the main thread.
+- All universe position/physics math uses double precision where required (`DVec3`); cast to
+  `Vector3` only after origin shifting for rendering.
+- Use raw SI internally. Temperature is kelvin internally; Celsius is presentation only.
+- Persistent procedural generation must not use `System.HashCode`, `HashCode.Combine`, runtime
+  object hashes, or other process-dependent hashing.
+- Derive deterministic child seeds semantically so changes in one random subsystem do not
+  reshuffle unrelated output.
+- Deterministic procedural baselines are normally regenerated; persist meaningful deltas.
+- Live gameplay objects do not know persistence DTOs or serialization formats.
+- Render depth tier and geometric detail/LOD are separate systems.
+- The thermal system's gameplay topology is established, but detailed equations remain
+  provisional; do not fossilize current formulas into new architecture.
+- The dark, industrial, asymmetrical, detail-rich station aesthetic is intentional.
+- Do not hard-code fire rate or shield recharge where those should emerge from capacitor state.
+
+## Current-state maintenance
+
+`!current-state.md` should answer: **where is development now?**
+
+Keep it useful as working memory, not as permanent history.
+
+- Remove stable, finished implementation narratives once they no longer help current work.
+- Keep current work, known regressions, design gaps, deferred issues, and near-term next steps.
+- Move long completed-session history elsewhere rather than letting the file grow indefinitely.
+- Distinguish implementation status clearly, for example:
+  - stable/verified;
+  - working but design incomplete;
+  - broken/regressed;
+  - experimental;
+  - designed but not implemented;
+  - open design.
+
+Do not mark something visually confirmed unless Timo has actually seen it in-engine.
+
+## Verification language
+
+Do not blur these together:
+
+- implemented;
+- builds;
+- automated tests pass;
+- inspected/reasoned about;
+- visually confirmed by Timo in-engine.
+
+Never claim visual verification from code inspection alone. A mathematically plausible result is
+not necessarily visually correct.
 
 ## What NOT to do
 
-- Do not simulate the full universe while the player is away — use seeded randomness
-  instead. Only player-touched state is persistent (see world state model in
-  `inferior-design-claude.md`).
-- Do not use `float` for universe coordinates — precision errors compound badly at scale.
-- Do not mix state logic across `GameState` boundaries.
-- Do not hard-code fire rate or shield recharge — these emerge from capacitor charge state.
-- Do not add MW or MJ unit conversions in code — raw SI (watts, joules) throughout.
+- Do not simulate the full universe while the player is away; use deterministic generation and
+  persistent deltas where appropriate.
+- Do not use `float` for universe coordinates.
+- Do not mix mutable state logic across game-state or thread-ownership boundaries.
+- Do not add MW/MJ scaling to simulation code; display code handles presentation units.
+- Do not treat archived or superseded documents as active design.
+- Do not silently make a provisional design permanent because the current code happens to use it.
 
-## Developer console (planned, not from day one)
+## Developer console (planned)
 
-Essential for tuning. Commands will include:
+Useful tuning commands may eventually include:
+
 `goto sol` / `timescale 10000` / `spawn ship pirate` / `planet earth`

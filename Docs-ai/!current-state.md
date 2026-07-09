@@ -1,7 +1,6 @@
 # Inferior — Current State
 
-> Updated per design session. Tells Claude and Claude Code what is done,
-> what is in progress, and what is next.
+> Updated per design session. Tells AI what is done, what is in progress, and what is next.
 
 ---
 
@@ -24,7 +23,7 @@
 | Persistence layer | ✓ Partial | Architecture designed; file implementations in progress |
 | ShipSizeClass enum | ✓ Stubbed | Exists, not yet enforced |
 | **Power system** | ✓ Done | PowerCore → PowerBus → Connector → Shield chain working; cold start sequence; PowerPriorityManager; instruments reporting to DataBus; CommandBus integration |
-| **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `inferior-design-stations-claude.md` |
+| **Station generation** | ✓ Done (ongoing refinement) | Full procedural generation pipeline; see `stations-ai.md` |
 | **Yagi antenna greeble** | ✓ Done | 5 element types (I/X/O/S/H), 7 base types; straight mast (0.3–1.2 m) + tilted boom (0–25° from normal); O-element discs fully solid (side + cap faces); seeded brightness variation per antenna; connectable for cable system |
 | **Station cables / conduits** | ✓ Done | Grid-routed bundles and conduits on module faces; junction boxes; fasteners; edge clamps; parabolic dish and mast antenna bases registered as connectable endpoints; octagonal module side-face cables working (degenerate cap faces guarded at cable call only); muted industrial colour palette |
 | **Directional lighting** | ✓ Done | Applied to station meshes at generation time; pre-baked vertex colours; SunDirection pre-set in OnEnter before baking; stationRot included in world normal transform |
@@ -198,7 +197,7 @@ converging in `Game` (which also depends on `Galaxy`/`Gameplay` directly).
 
 ## Station generation — architecture summary
 
-See `inferior-design-stations-claude.md` for full reference. Key facts:
+See `stations-ai.md` for full reference. Key facts:
 
 - **Generation is deterministic** — same seed always produces same station
 - **Pre-baked lighting** — directional light and AO applied at generation time to vertex colours; renderer draws static meshes
@@ -239,15 +238,17 @@ See `inferior-design-stations-claude.md` for full reference. Key facts:
 
 | File | Where | Purpose |
 |---|---|---|
-| `inferior-current-state.md` | docs-claude | This file — active state, conventions, next steps |
-| `inferior-architecture-map-claude.md` | docs-claude | Flat one-line-per-file map of every project — "where do I look for X?" |
-| `inferior-design-claude.md` | docs-claude | Design decisions, philosophy, all major systems |
-| `inferior-lore-claude.md` | docs-claude | Lore reference — bands, species, drive, materials |
-| `inferior-components-claude.md` | docs-claude | Component specs, properties, units |
-| `inferior-design-ship-claude.md` | docs-claude | Ship classes, roles, hull system |
-| `inferior-design-stations-claude.md` | docs-claude | Station generation — architecture, modules, decoration |
-| `inferior-design.md` | docs | Full design doc with rationale |
-| `inferior-lore.md` | docs | Full lore with narrative |
-| `inferior-classes.md` | docs-archive | Class sketches — may be stale; repo is authoritative |
-| `inferior-design-persistence.md` | docs-archive | Persistence design — implemented |
-| `inferior-design-ui.md` | docs-archive | UI design — implemented |
+| `!current-state.md` | Docs-ai | This file — active state, conventions, next steps |
+| `architecture-map-ai.md` | Docs-ai | Flat one-line-per-file map of every project — "where do I look for X?" |
+| `design-ai.md` | Docs-ai | Design decisions, philosophy, all major systems |
+| `lore-ai.md` | Docs-ai | Lore reference — bands, species, drive, materials |
+| `components-ai.md` | Docs-ai | Component specs, properties, units |
+| `ship-ai.md` | Docs-ai | Ship classes, roles, hull system |
+| `stations-ai.md` | Docs-ai | Station generation — architecture, modules, decoration |
+| `inferior-design.md` | Docs | Full design doc with rationale |
+| `inferior-lore.md` | Docs | Full lore with narrative |
+| `inferior-classes.md` | Docs-archive | Class sketches — may be stale; repo is authoritative |
+| `inferior-design-persistence.md` | Docs-archive | Persistence design — implemented |
+| `inferior-design-ui.md` | Docs-archive | UI design — implemented |
+
+
