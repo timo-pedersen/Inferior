@@ -51,6 +51,9 @@ public sealed class SpaceSimulation : Simulation
         // Slipstream
         int        SlipstreamHarmonicIndex = 0,
         double     ClunkPhase        = -1.0,   // -1 = inactive, 0→1 = animating
+        DVec3      ReferenceVelocity = default,
+        string     ReferenceName     = "",
+        string     ReferenceSourceId = "",
         // Speeds relative to reference frame
         double     RelativeSpeedMs   = 0.0,    // |vel - refVel| in m/s
         double     ForwardSpeedMs    = 0.0,    // dot(vel - refVel, forward) — signed
@@ -82,21 +85,13 @@ public sealed class SpaceSimulation : Simulation
     /// </summary>
     public void SetFlightMode(FlightMode mode) => _flightModeOverride = (int)mode;
 
-    // ── World state snapshot (written by main thread, read by sim thread) ─────
-    private sealed record WorldSnapshot(Star Star, StarSystem System, DVec3 ShipPos, double GameTime);
-    private volatile WorldSnapshot? _worldSnapshot;
+    // ── System context install (requested by main thread, applied by sim thread) ─────
+    private sealed record SystemContext(Star Star, StarSystem System);
+    private volatile SystemContext? _pendingSystemContext;
+    private SystemContext? _systemContext;
 
-    public void SetWorldState(Star star, StarSystem system, DVec3 refPos, double gameTime)
-        => _worldSnapshot = new WorldSnapshot(star, system, refPos, gameTime);
-
-    // ── Reference frame velocity (main thread → sim thread) ──────────────────
-    // In space: dominant body's blended orbital velocity (Newtonian zero-point).
-    // In atmosphere: dominant body's full orbital velocity (ground reference).
-    private sealed record RefVelSnapshot(double X, double Y, double Z, string SourceId);
-    private volatile RefVelSnapshot? _refVelSnapshot;
-
-    public void SetReferenceVelocity(DVec3 vel, string sourceId)
-        => _refVelSnapshot = new RefVelSnapshot(vel.X, vel.Y, vel.Z, sourceId);
+    public void InstallSystem(Star star, StarSystem system)
+        => _pendingSystemContext = new SystemContext(star, system);
 
     // ── Ship move speed (legacy — used by old velocity-target path; still read by debug cam proximity) ──
     private long _shipSpeedBits = BitConverter.DoubleToInt64Bits(5e9);
@@ -104,14 +99,8 @@ public sealed class SpaceSimulation : Simulation
     public void SetShipMoveSpeed(double speedMs)
         => System.Threading.Interlocked.Exchange(ref _shipSpeedBits, BitConverter.DoubleToInt64Bits(speedMs));
 
-    // ── Nearest station distance (main thread → sim thread) ──────────────────
-    private long _nearestStationDistBits = BitConverter.DoubleToInt64Bits(double.MaxValue);
-
-    public void SetNearestStationDistance(double meters)
-        => System.Threading.Interlocked.Exchange(ref _nearestStationDistBits, BitConverter.DoubleToInt64Bits(meters));
-
-    private double GetNearestStationDistance()
-        => BitConverter.Int64BitsToDouble(System.Threading.Interlocked.Read(ref _nearestStationDistBits));
+    // ── Nearest station surface distance (sim-owned; used by LKM and Slipstream) ──
+    private double _nearestStationDistance = double.MaxValue;
 
     // ── Flight mode (sim-internal) ────────────────────────────────────────────
     private FlightMode _currentFlightMode = FlightMode.SystemNewtonian;
@@ -154,6 +143,9 @@ public sealed class SpaceSimulation : Simulation
     // same source actually changing speed.
     private DVec3  _prevRefVel      = DVec3.Zero;
     private string _prevRefSourceId = "";
+    private DVec3  _referenceVelocity;
+    private string _referenceSourceId = "";
+    private string _referenceName     = "";
 
     // ── SystemSlipstream state ────────────────────────────────────────────────
     private int    _slipstreamHarmonicIndex   = 0;
@@ -239,6 +231,8 @@ public sealed class SpaceSimulation : Simulation
             _currentFlightMode  = (FlightMode)modeOverride;
             _flightModeOverride = -1;
         }
+
+        UpdateReferenceFrame(ship);
 
         // ── Afterburner toggle (rising edge; SystemNewtonian only; no re-trigger while active) ──
         if (input.AfterburnerToggle && !_prevAfterburnerToggle && !_afterburnerActive
@@ -386,6 +380,7 @@ public sealed class SpaceSimulation : Simulation
             }
 
             _currentFlightMode = newMode;
+            UpdateReferenceFrame(ship);
             DataBus.System.Publish(Topics.System.All, new SystemMessage(
                 newMode == FlightMode.AtmosphericNewtonian ? "Entering atmosphere" : "Leaving atmosphere"));
         }
@@ -444,6 +439,9 @@ public sealed class SpaceSimulation : Simulation
             _afterburnerActive,
             _slipstreamHarmonicIndex,
             clunkPhase,
+            _referenceVelocity,
+            _referenceName,
+            _referenceSourceId,
             snapRelSpd,
             snapFwdSpd,
             snapAccel);
@@ -595,7 +593,7 @@ public sealed class SpaceSimulation : Simulation
         }
 
         // Forced dropout — stations
-        if (GetNearestStationDistance() < FlightConstants.SlipstreamStationDropoutRange)
+        if (_nearestStationDistance < FlightConstants.SlipstreamStationDropoutRange)
         {
             DataBus.System.Publish(Topics.System.All,
                 new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
@@ -770,7 +768,7 @@ public sealed class SpaceSimulation : Simulation
     private void UpdateLkmZones(Ship ship, double dt)
     {
         var    zones      = FlightConstants.StationLkmZones;
-        double dist       = GetNearestStationDistance();
+        double dist       = _nearestStationDistance;
         int    newMax     = int.MaxValue;
         int    activeZone = 0;
 
@@ -908,7 +906,7 @@ public sealed class SpaceSimulation : Simulation
         // Clamp exit speed near stations so the ship can brake without overshooting.
         // capVelocity is set when the dropout was triggered by a speed-advance check
         // (station may be further than 10 km but still too close for current speed).
-        if (capVelocity || GetNearestStationDistance() < 10_000.0)
+        if (capVelocity || _nearestStationDistance < 10_000.0)
         {
             DVec3  relVel = ship.Velocity - refVel;
             double relSpd = relVel.Length;
@@ -1002,16 +1000,158 @@ public sealed class SpaceSimulation : Simulation
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private DVec3 GetRefVelocity()
-    {
-        var rv = _refVelSnapshot;
-        return rv != null ? new DVec3(rv.X, rv.Y, rv.Z) : DVec3.Zero;
-    }
+        => _referenceVelocity;
 
     private string GetRefSourceId()
+        => _referenceSourceId;
+
+    private void ApplyPendingSystemContext()
     {
-        var rv = _refVelSnapshot;
-        return rv?.SourceId ?? "";
+        var context = _pendingSystemContext;
+        if (context == null) return;
+        _systemContext = context;
+        _pendingSystemContext = null;
     }
+
+    private void UpdateReferenceFrame(Ship ship)
+    {
+        const double StationDist = 25_000.0;
+
+        var context = _systemContext;
+        if (context == null)
+        {
+            _referenceVelocity = DVec3.Zero;
+            _referenceName     = "";
+            _referenceSourceId = "";
+            return;
+        }
+
+        double simTime = GameClock.SimTime;
+        DVec3 shipPos = ship.Position;
+
+        foreach (var station in context.System.Stations)
+        {
+            DVec3 stPos = EclipticToGalaxy(context.System.GetStationPosition(station, simTime));
+            if ((stPos - shipPos).Length < StationDist)
+            {
+                _referenceVelocity = EclipticToGalaxy(context.System.GetStationVelocity(station, simTime));
+                _referenceName     = station.Name;
+                _referenceSourceId = "station:" + station.Name;
+                return;
+            }
+        }
+
+        DVec3 shipEcliptic = GalaxyToEcliptic(shipPos);
+        DVec3 gravEcl = Inferior.Gameplay.SensorData.GravityCalculations
+            .GravityAt(shipEcliptic, SensorEnvironment.World.MassiveBodies);
+        if (gravEcl.Length < 0.01)
+        {
+            _referenceVelocity = DVec3.Zero;
+            _referenceName     = context.Star.Name;
+            _referenceSourceId = "star:" + context.Star.Name;
+            return;
+        }
+
+        DVec3 gravGal = EclipticToGalaxy(gravEcl);
+
+        OrbitalBody? t0b = null, t1b = null, t2b = null;
+        DVec3 t0p = DVec3.Zero, t1p = DVec3.Zero, t2p = DVec3.Zero;
+        double t0w = 0, t1w = 0, t2w = 0;
+
+        void Keep(OrbitalBody? body, DVec3 pos, double w)
+        {
+            if (w > t0w) { t2b = t1b; t2p = t1p; t2w = t1w; t1b = t0b; t1p = t0p; t1w = t0w; t0b = body; t0p = pos; t0w = w; }
+            else if (w > t1w) { t2b = t1b; t2p = t1p; t2w = t1w; t1b = body; t1p = pos; t1w = w; }
+            else if (w > t2w) { t2b = body; t2p = pos; t2w = w; }
+        }
+
+        double starDist = shipPos.Length;
+        if (starDist > 100.0) Keep(null, DVec3.Zero, context.Star.MassKg / (starDist * starDist));
+        foreach (var (body, eclipticPos) in SensorEnvironment.World.OrbitalBodies)
+        {
+            DVec3 pos = EclipticToGalaxy(eclipticPos);
+            double d = (pos - shipPos).Length;
+            if (d > 100.0) Keep(body, pos, body.MassKg / (d * d));
+        }
+
+        OrbitalBody? bestBody = null;
+        double bestScore = 0.0;
+        double winCos = 1.0;
+
+        void Score(OrbitalBody? body, DVec3 pos, double w)
+        {
+            if (w == 0.0) return;
+            DVec3 to = pos - shipPos;
+            double d = to.Length;
+            if (d < 100.0) return;
+            var dir = new DVec3(to.X / d, to.Y / d, to.Z / d);
+            double cos = dir.X * gravGal.X + dir.Y * gravGal.Y + dir.Z * gravGal.Z;
+            if (cos <= 0.0) return;
+            double score = w * cos;
+            if (score > bestScore) { bestScore = score; winCos = cos; bestBody = body; }
+        }
+
+        Score(t0b, t0p, t0w);
+        Score(t1b, t1p, t1w);
+        Score(t2b, t2p, t2w);
+
+        DVec3 domVelocity;
+        string domName;
+        string domSourceId;
+        if (bestBody == null)
+        {
+            domVelocity = DVec3.Zero;
+            domName = context.Star.Name;
+            domSourceId = "star:" + context.Star.Name;
+        }
+        else
+        {
+            domVelocity = GetBodyGalaxyVelocity(bestBody, simTime);
+            domName = bestBody.Name;
+            domSourceId = "body:" + bestBody.Name;
+        }
+
+        double angle = System.Math.Acos(System.Math.Clamp(winCos, -1.0, 1.0));
+        double lockRad = System.Math.PI / 4.0;
+        double zeroRad = System.Math.PI / 2.0;
+        double blend = angle <= lockRad ? 1.0
+            : angle < zeroRad ? 1.0 - (angle - lockRad) / (zeroRad - lockRad)
+            : 0.0;
+
+        _referenceVelocity = _currentFlightMode is FlightMode.AtmosphericNewtonian or FlightMode.AtmosphericSlipstream
+            ? DVec3.Zero
+            : domVelocity * blend;
+        _referenceName = domName;
+        _referenceSourceId = domSourceId;
+    }
+
+    private DVec3 GetBodyGalaxyVelocity(OrbitalBody body, double gameTime)
+    {
+        var context = _systemContext;
+        if (context == null) return DVec3.Zero;
+
+        foreach (var planet in context.System.Planets)
+        {
+            if (ReferenceEquals(planet, body))
+                return EclipticToGalaxy(PlanetVelocityEcl(planet, gameTime));
+            foreach (var moon in planet.Children)
+            {
+                if (ReferenceEquals(moon, body))
+                {
+                    var pv = PlanetVelocityEcl(planet, gameTime);
+                    var mv = SimpleOrbitalVelocityEcl(moon, gameTime);
+                    return EclipticToGalaxy(pv + mv);
+                }
+            }
+        }
+
+        return EclipticToGalaxy(SimpleOrbitalVelocityEcl(body, gameTime));
+    }
+
+    private static DVec3 PlanetVelocityEcl(OrbitalBody planet, double gameTime)
+        => planet.SemiMajorAxis > 0.0 && planet.ParentMassKg > 0.0
+            ? planet.ComputeVelocity(gameTime, Units.G * planet.ParentMassKg, DVec3.Zero)
+            : SimpleOrbitalVelocityEcl(planet, gameTime);
 
     /// <summary>
     /// Returns [0, 1] proximity damping for Slipstream speed.
@@ -1021,7 +1161,7 @@ public sealed class SpaceSimulation : Simulation
     private double ComputeProximityScale()
     {
         double dropoff = FlightConstants.SlipstreamProximityDropoffM;
-        double minDist = GetNearestStationDistance();
+        double minDist = _nearestStationDistance;
         if (_nearBodyAltitude < minDist) minDist = _nearBodyAltitude;
         if (minDist >= dropoff) return 1.0;
         double t = minDist / dropoff;  // 0 near object, 1 at dropoff edge
@@ -1051,6 +1191,19 @@ public sealed class SpaceSimulation : Simulation
             ecl.Z * cosT + kx * ecl.Y * sinT + kz * dot * (1.0 - cosT));
     }
 
+    private DVec3 GalaxyToEcliptic(DVec3 gal)
+    {
+        double kx   = System.Math.Cos(_eclipticAz);
+        double kz   = System.Math.Sin(_eclipticAz);
+        double cosT = System.Math.Cos(-_eclipticTilt);
+        double sinT = System.Math.Sin(-_eclipticTilt);
+        double dot  = kx * gal.X + kz * gal.Z;
+        return new DVec3(
+            gal.X * cosT - kz * gal.Y * sinT + kx * dot * (1.0 - cosT),
+            gal.Y * cosT + (kz * gal.X - kx * gal.Z) * sinT,
+            gal.Z * cosT + kx * gal.Y * sinT + kz * dot * (1.0 - cosT));
+    }
+
     // ── Power ─────────────────────────────────────────────────────────────────
 
     protected override void TickPower(double dt)
@@ -1062,8 +1215,12 @@ public sealed class SpaceSimulation : Simulation
 
     protected override void UpdateEnvironment()
     {
-        var snap = _worldSnapshot;
-        if (snap == null) return;
+        ApplyPendingSystemContext();
+        var context = _systemContext;
+        if (context == null) return;
+        var ship = _ship;
+        if (ship == null) return;
+        double simTime = GameClock.SimTime;
 
         var world = SensorEnvironment.World;
         world.MassiveBodies.Clear();
@@ -1072,21 +1229,20 @@ public sealed class SpaceSimulation : Simulation
         world.MassiveBodies.Add(new CelestialBody
         {
             Position       = DVec3.Zero,
-            Mass           = snap.Star.MassKg,
-            Radius         = snap.Star.RadiusMeters,
-            Class          = snap.Star.SpectralClass,
+            Mass           = context.Star.MassKg,
+            Radius         = context.Star.RadiusMeters,
+            Class          = context.Star.SpectralClass,
             RotationPeriod = 2.192e6,
         });
 
-        foreach (var planet in snap.System.Planets)
-            CollectBody(world, planet, DVec3.Zero, snap.GameTime);
+        foreach (var planet in context.System.Planets)
+            CollectBody(world, planet, DVec3.Zero, simTime);
 
-        var ship  = _ship;
-        DVec3 pos = snap.ShipPos;
-        DVec3 vel = ship?.Velocity ?? DVec3.Zero;
+        DVec3 pos = ship.Position;
+        DVec3 vel = ship.Velocity;
 
-        double az   = snap.System.EclipticTiltAzimuthRadians;
-        double tilt = snap.System.EclipticTiltRadians;
+        double az   = context.System.EclipticTiltAzimuthRadians;
+        double tilt = context.System.EclipticTiltRadians;
         double kx   = System.Math.Cos(az), kz = System.Math.Sin(az);
         double cosA = System.Math.Cos(-tilt), sinA = System.Math.Sin(-tilt);
         double dot  = kx * pos.X + kz * pos.Z;
@@ -1128,8 +1284,25 @@ public sealed class SpaceSimulation : Simulation
             }
         }
 
+        _nearestStationDistance = double.MaxValue;
+        foreach (var station in context.System.Stations)
+        {
+            DVec3 stationPos = EclipticToGalaxy(context.System.GetStationPosition(station, simTime));
+            double surfDist = System.Math.Max((stationPos - pos).Length - StationPhysicalRadius(station), 0.0);
+            if (surfDist < _nearestStationDistance)
+                _nearestStationDistance = surfDist;
+        }
+
         SensorEnvironment.UpdateFromSimThread(world, shipEcliptic, vel);
     }
+
+    private static double StationPhysicalRadius(Station station) => station.Size switch
+    {
+        StationSize.Small  =>  250.0,
+        StationSize.Medium =>  800.0,
+        StationSize.Large  => 2500.0,
+        _                  =>  250.0,
+    };
 
     private static void CollectBody(SimWorld world, OrbitalBody body, DVec3 parentPos, double gameTime)
     {

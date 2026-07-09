@@ -339,6 +339,8 @@ public sealed partial class SystemSpaceState : GameState
             SpawnShip(fallbackPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
         }
 
+        _simulation.InstallSystem(_star, _system);
+
         // BasicEffect — our shader
         _effect = new BasicEffect(_gd)
         {
@@ -472,7 +474,7 @@ public sealed partial class SystemSpaceState : GameState
         // Start in ship-control mode — panels retracted, handles and buttons hidden
         _cockpitUI.ApplyUiMode(false);
 
-        // Gravity-direction subscriptions stay here — UpdateReferenceFrame needs them too
+        // Gravity-direction subscriptions stay here for cockpit direction balls.
         _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
             $"GravitySensor.{Topics.GravitySensor.DirectionX}", v => _gravDirX = v));
         _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
@@ -540,6 +542,16 @@ public sealed partial class SystemSpaceState : GameState
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         BlinkClock.Update(dt);
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
+        if (_frameShipSnap != null)
+        {
+            string prevRefName = _refName;
+            _refVelocity = _frameShipSnap.ReferenceVelocity;
+            _refName     = _frameShipSnap.ReferenceName;
+            _refSourceId = _frameShipSnap.ReferenceSourceId;
+            if (_refName != prevRefName && prevRefName.Length > 0)
+                _hudAlert.AddMessage(new SystemMessage(
+                    $"Zero reference speed set to {_refName}.", SystemMessagePriority.NB));
+        }
 
         // TEMP DEBUG — remove before done. Logs actual post-spawn ship position/distance
         // once the sim thread has picked up the newly spawned ship.
@@ -566,8 +578,8 @@ public sealed partial class SystemSpaceState : GameState
         {
             if (_debugCameraMode)
             {
-                // Leaving debug cam — teleport ship to where the camera is now
-                _simulation.TeleportShip(_camera.UniversePosition, _camera.Orientation);
+                if (_frameShipSnap != null)
+                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
             }
             _debugCameraMode = !_debugCameraMode;
             if (_debugCameraMode) _thirdPersonMode = false;  // can't combine with debug cam
@@ -702,19 +714,6 @@ public sealed partial class SystemSpaceState : GameState
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio,
             (float)(MidTierNear * Camera3D.RenderScale), (float)(MidTierFar * Camera3D.RenderScale));
 
-        // Push nearest station surface distance to sim thread (LKM zones and Slipstream dropout)
-        {
-            DVec3  shipPosForDist     = _frameShipSnap?.Position ?? _camera.UniversePosition;
-            double nearestStationDist = double.MaxValue;
-            foreach (var (station, stPos) in _stationPositions)
-            {
-                double r    = StationPhysicalRadius(station);
-                double dist = System.Math.Max((stPos - shipPosForDist).Length - r, 0.0);
-                if (dist < nearestStationDist) nearestStationDist = dist;
-            }
-            _simulation.SetNearestStationDistance(nearestStationDist);
-        }
-
         // Rebuild test container contacts — if newly populated this frame, repopulate
         if (_testContainers.Count == 0 && _stationPositions.Count > 0)
             SpawnTestContainers();
@@ -760,14 +759,6 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.UpdateTargetingAndRadar(_camera, shipPosForTargeting, _frameShipSnap,
             _padWorldPos, _padDistance, _padDirection);
 
-        // Update reference frame (zero-speed object); alert HUD when it changes.
-        string prevRefName = _refName;
-        UpdateReferenceFrame(_camera.UniversePosition);
-        if (_refName != prevRefName && prevRefName.Length > 0)
-            _hudAlert.AddMessage(new SystemMessage(
-                $"Zero reference speed set to {_refName}.", SystemMessagePriority.NB));
-        _simulation.SetReferenceVelocity(_refVelocity, _refSourceId);
-
         // Proximity speed scale — applied to debug camera each frame
         if (_debugCameraMode)
             _camera.ProximitySpeedScale = ComputeProximityScale();
@@ -778,13 +769,6 @@ public sealed partial class SystemSpaceState : GameState
             DVec3 shipPos = _frameShipSnap?.Position ?? _camera.UniversePosition;
             _simulation.SetShipMoveSpeed(ComputeShipSpeed(shipPos));
         }
-
-        // Feed world state to simulation — use ship snapshot position in ship mode,
-        // camera position in debug mode (sensors track whoever is "there")
-        DVec3 refPos = _debugCameraMode
-            ? _camera.UniversePosition
-            : _frameShipSnap?.Position ?? _camera.UniversePosition;
-        _simulation.SetWorldState(_star, _system, refPos, _gameTimeSeconds);
 
         if (!_uiMouseMode)
             HandleKeyboard(keys, mouse);
