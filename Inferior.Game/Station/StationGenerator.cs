@@ -61,7 +61,7 @@ public sealed class StationGenerator
         var stationRot = Matrix.CreateFromQuaternion(stRotQ);
 
         StationDecorator.Decorate(modules, stationRot);
-        BakeLighting(modules, stationRot);
+        // Runtime station rendering now owns directional sunlight and static shadows.
         // ApplyAmbientOcclusion intentionally NOT called here — the caller (SystemSpaceState)
         // builds a flat GPU snapshot first, then calls it, then builds the graded snapshot,
         // so both DetailLevel variants exist from one generation pass.

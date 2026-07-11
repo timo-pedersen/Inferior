@@ -20,9 +20,8 @@ public sealed class AnimTag
 
 // CPU-side mesh accumulator for per-module decoration geometry.
 // Vertices are in local module space (metres). Call Build() to produce GPU buffers.
-// Uses VertexPositionColorTexture — render with LightingEnabled=false,
-// VertexColorEnabled=true, TextureEnabled=true.
-// Lighting is baked into vertex colours by ApplyLighting() before Build().
+// Uses vertex colours for material, wear, and AO. Directional lighting is applied by the
+// station shadow shader at draw time so static shadows and N.L use the same basis.
 // UV coordinates are generated automatically from face geometry (5 m per tile).
 public sealed class StationModuleMesh
 {
@@ -433,6 +432,29 @@ public sealed class StationModuleMesh
             _idx.AddRange([vbOffset + indices[i], vbOffset + indices[i + 1], vbOffset + indices[i + 2]]);
     }
 
+    public void MergeTransformed(
+        VertexPositionNormalColorTexture[] verts, short[] indices, Matrix transform)
+    {
+        if (transform.Determinant() < 0)
+        {
+            transform.M21 = -transform.M21;
+            transform.M22 = -transform.M22;
+            transform.M23 = -transform.M23;
+        }
+
+        int vbOffset = _verts.Count;
+
+        foreach (var v in verts)
+        {
+            Vector3 pos = Vector3.Transform(v.Position, transform);
+            Vector3 nrm = Vector3.Normalize(Vector3.TransformNormal(v.Normal, transform));
+            _verts.Add(new VertexPositionNormalColorTexture(pos, nrm, v.Color, v.TextureCoordinate));
+        }
+
+        for (int i = 0; i < indices.Length; i += 3)
+            _idx.AddRange([vbOffset + indices[i], vbOffset + indices[i + 1], vbOffset + indices[i + 2]]);
+    }
+
     // Returns raw CPU-side arrays without requiring a GraphicsDevice.
     // Indices are converted from int to short (safe up to 32 767 vertices).
     public (VertexPositionColorTexture[] verts, short[] indices) ToArrays()
@@ -455,6 +477,25 @@ public sealed class StationModuleMesh
         return (verts, indices);
     }
 
+    public bool TryGetLocalBounds(out Vector3 min, out Vector3 max)
+    {
+        if (_verts.Count == 0)
+        {
+            min = Vector3.Zero;
+            max = Vector3.Zero;
+            return false;
+        }
+
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+        foreach (var v in _verts)
+        {
+            min = Vector3.Min(min, v.Position);
+            max = Vector3.Max(max, v.Position);
+        }
+        return true;
+    }
+
     // Builds GPU buffers from accumulated geometry. Returns null if the mesh is empty.
     public (VertexBuffer vb, IndexBuffer ib, int triCount)? Build(GraphicsDevice gd)
     {
@@ -464,6 +505,24 @@ public sealed class StationModuleMesh
         var indices = _idx.ToArray();
 
         var vb = new VertexBuffer(gd, VertexPositionColorTexture.VertexDeclaration,
+                                  verts.Length, BufferUsage.WriteOnly);
+        vb.SetData(verts);
+
+        var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits,
+                                 indices.Length, BufferUsage.WriteOnly);
+        ib.SetData(indices);
+
+        return (vb, ib, indices.Length / 3);
+    }
+
+    public (VertexBuffer vb, IndexBuffer ib, int triCount)? BuildWithNormals(GraphicsDevice gd)
+    {
+        if (_verts.Count == 0) return null;
+
+        var verts = _verts.ToArray();
+        var indices = _idx.ToArray();
+
+        var vb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
                                   verts.Length, BufferUsage.WriteOnly);
         vb.SetData(verts);
 

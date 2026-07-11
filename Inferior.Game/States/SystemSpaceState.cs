@@ -62,6 +62,7 @@ public sealed partial class SystemSpaceState : GameState
     // ── 3D infrastructure ─────────────────────────────────────────────────────
     private Camera3D    _camera = null!;
     private BasicEffect _effect = null!;
+    private Effect      _stationShadowEffect = null!;
     private Effect?     _atmosEffect;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
@@ -108,6 +109,9 @@ public sealed partial class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
     // GPU-side hull meshes (VertexPositionNormalTexture) for real-time BasicEffect lighting.
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
+    private readonly Dictionary<Galaxy.Station, StationShadowMap> _stationShadows = [];
+    private bool _showStationShadowDebug;
+    private StationShadowDebugMode _stationShadowDebugMode = StationShadowDebugMode.ShadowMapDepth;
 
     // ── Container rendering ───────────────────────────────────────────────────
     // Renderer shared with ship/hull draw calls. Each test container owns its own
@@ -369,58 +373,13 @@ public sealed partial class SystemSpaceState : GameState
             _content.Load<Texture2D>("Textures/cargopanel"));
         StationTextureRegistry.SetTexture(SurfaceTexture.WornPanel,
             _content.Load<Texture2D>("Textures/wornpanel"));
+        _stationShadowEffect = _content.Load<Effect>("Effects/StationShadow");
 
         // Station module layouts — generated once from name-derived seed.
         // StationGenerator.Generate also runs StationDecorator internally.
         // Pre-set SunDirection now so BakeLighting uses the correct world-space direction.
         // Draw() would set it per-frame, but Generate() runs in OnEnter before any Draw().
-        {
-            Vector3 srp = _camera.ToRenderSpace(DVec3.Zero);
-            Vector3 ld  = srp == Vector3.Zero ? -Vector3.UnitZ : Vector3.Normalize(-srp);
-            SceneLighting.SunDirection = -ld;
-        }
-        _stationGeometry.Clear();
-        foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        _decoMeshes.Clear();
-        _decoMeshesFlat.Clear();
-        _glassMeshes.Clear();
-        _hullMeshes.Clear();
-        foreach (var station in _system.Stations)
-        {
-            var modules = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
-            _stationGeometry[station] = modules;
-
-            // Flat (ungraded) snapshot — captured before ambient occlusion darkens
-            // faces below — used for Medium/Minimal DetailLevel. Same generator,
-            // fewer steps, same principle already established for containers.
-            foreach (var mod in modules)
-            {
-                var flatGpu = mod.Mesh?.Build(_gd);
-                if (flatGpu.HasValue)
-                    _decoMeshesFlat[mod] = flatGpu.Value;
-            }
-
-            StationDecorator.ApplyAmbientOcclusion(modules);
-
-            foreach (var mod in modules)
-            {
-                var gpu = mod.Mesh?.Build(_gd);
-                if (gpu.HasValue)
-                    _decoMeshes[mod] = gpu.Value;
-
-                var glassGpu = mod.GlassMesh?.Build(_gd);
-                if (glassGpu.HasValue)
-                    _glassMeshes[mod] = glassGpu.Value;
-
-                // Custom-mesh modules (MeshFactory) include the hull in mod.Mesh,
-                // rendered by the deco pass with baked lighting — skip box hull.
-                if (mod.Definition.MeshFactory == null)
-                    _hullMeshes[mod] = BuildHullMesh(_gd, mod);
-            }
-        }
+        RebuildStationGeometry();
         _stationPositions.Clear();
         foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
         _testContainers.Clear();
@@ -496,14 +455,7 @@ public sealed partial class SystemSpaceState : GameState
         _celestialBodies?.Dispose();
 
         _effect?.Dispose();
-        foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        _decoMeshes.Clear();
-        _decoMeshesFlat.Clear();
-        _glassMeshes.Clear();
-        _hullMeshes.Clear();
+        DisposeStationGeometry();
         foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
         _testContainers.Clear();
         _meshRenderer?.Dispose();
@@ -511,6 +463,7 @@ public sealed partial class SystemSpaceState : GameState
         _shipMeshRenderer?.Dispose();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
+        _stationShadowEffect = null!;
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
     }
 
@@ -558,6 +511,8 @@ public sealed partial class SystemSpaceState : GameState
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
+        bool f8JustPressed  = keys.IsKeyDown(Keys.F8)  && !_prevKeys.IsKeyDown(Keys.F8);
+        bool f9JustPressed  = keys.IsKeyDown(Keys.F9)  && !_prevKeys.IsKeyDown(Keys.F9);
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
         bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
@@ -569,6 +524,13 @@ public sealed partial class SystemSpaceState : GameState
         }
         if (f10JustPressed)
             RequestStationProximityDiagnostic();
+        if (f8JustPressed)
+        {
+            _showStationShadowDebug = true;
+            _stationShadowDebugMode = NextStationShadowDebugMode(_stationShadowDebugMode);
+        }
+        if (f9JustPressed)
+            _showStationShadowDebug = !_showStationShadowDebug;
         if (f11JustPressed)
         {
             if (_debugCameraMode)
@@ -827,6 +789,7 @@ public sealed partial class SystemSpaceState : GameState
 
         // SunDirection = from scene toward star = opposite of "light travels" direction
         SceneLighting.SunDirection = -lightDir;
+        RefreshStationShadowsForCurrentSun();
 
         // Three render passes — far, mid, near — each with its own independently
         // scoped near/far (see BuildActivePasses in SystemSpaceState.Helpers.cs).
@@ -877,6 +840,7 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.DrawTargetingHud(sb, _camera, _effect.View, _padWorldPos, _padDistance);
         DrawSkyboxStarOverlay(sb);
         _hyperspace.DrawOverlay(sb);
+        DrawStationShadowDebugView(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background

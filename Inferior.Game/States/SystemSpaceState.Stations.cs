@@ -25,6 +25,16 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    private enum StationShadowDebugMode
+    {
+        ShadowMapDepth,
+        ZeroBiasShadow,
+        ReceiverDepth,
+        SampledCasterDepth,
+        DepthDifference,
+        SlopeFactor,
+        FinalBiasedShadow,
+    }
 
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
@@ -38,156 +48,353 @@ public sealed partial class SystemSpaceState
         _                         =>  250f,
     };
 
+    // Keep normalized depth bias small; grazing self-shadowing is handled by a station-local
+    // receiver normal offset expressed in metres so it does not scale with the fitted depth span.
+    private const float StationBaseShadowBias  = 0.00008f;
+    private const float StationSlopeShadowBias = 0.00012f;
+    private const float StationMaxShadowBias   = 0.00020f;
+    private const float StationNormalShadowOffsetMetres = 0.16f;
+    private const float StationShadowDebugDifferenceScale = 500f;
+
     private void DrawStations(DetailLevel level)
     {
         if (_stationPositions.Count == 0) return;
 
         float rs = (float)Camera3D.RenderScale;
+        var decoMeshesForLevel = level == DetailLevel.Full ? _decoMeshes : _decoMeshesFlat;
 
-        // Hull pass — real-time BasicEffect N·L lighting with procedural texture.
-        // Uses VertexPositionNormalTexture so normals are in the vertex data.
-        // DirectionalLight0.Direction is already set from the star position in Draw().
-        _effect.LightingEnabled                = true;
-        _effect.TextureEnabled                 = true;
-        _effect.VertexColorEnabled             = false;
-        _effect.DiffuseColor                   = Vector3.One;
-        _effect.DirectionalLight0.DiffuseColor = SceneLighting.SunColour;
-        _effect.AmbientLightColor              = new Vector3(SceneLighting.Ambient);
+        _stationShadowEffect.Parameters["View"]?.SetValue(_effect.View);
+        _stationShadowEffect.Parameters["Projection"]?.SetValue(_effect.Projection);
+        _stationShadowEffect.Parameters["SunDirection"]?.SetValue(SceneLighting.SunDirection);
+        _stationShadowEffect.Parameters["SunColour"]?.SetValue(SceneLighting.SunColour);
+        _stationShadowEffect.Parameters["Ambient"]?.SetValue(SceneLighting.Ambient);
+        _stationShadowEffect.Parameters["BaseShadowBias"]?.SetValue(StationBaseShadowBias);
+        _stationShadowEffect.Parameters["SlopeShadowBias"]?.SetValue(StationSlopeShadowBias);
+        _stationShadowEffect.Parameters["MaxShadowBias"]?.SetValue(StationMaxShadowBias);
+        _stationShadowEffect.Parameters["NormalShadowOffsetMetres"]?.SetValue(StationNormalShadowOffsetMetres);
+        _stationShadowEffect.Parameters["ShadowDebugMode"]?.SetValue(ShaderStationShadowDebugMode());
+        _stationShadowEffect.Parameters["ShadowDebugDifferenceScale"]?.SetValue(StationShadowDebugDifferenceScale);
 
         foreach (var (station, universePos) in _stationPositions)
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+            if (!_stationShadows.TryGetValue(station, out var shadow)) continue;
 
             var sysQ   = station.GetOrientation(_gameTimeSeconds);
             var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
             Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+
+            _stationShadowEffect.Parameters["LightViewProjection"]?.SetValue(shadow.LightViewProjection);
+            _stationShadowEffect.Parameters["LightView"]?.SetValue(shadow.LightView);
+            _stationShadowEffect.Parameters["LightDepthNear"]?.SetValue(shadow.DepthRange.Near);
+            _stationShadowEffect.Parameters["LightDepthFar"]?.SetValue(shadow.DepthRange.Far);
+            _stationShadowEffect.Parameters["ShadowMap"]?.SetValue(shadow.Texture);
 
             foreach (var mod in modules)
             {
                 if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
                 if (mod.TextureInstance == null) continue;
 
-                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-                _effect.World =
-                    Matrix.CreateScale(rs) *
-                    Matrix.CreateFromQuaternion(modRot) *
-                    stationRot *
-                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
-                    Matrix.CreateTranslation(renderPos);
-
-                _effect.Texture = mod.TextureInstance;
-
-                _gd.SetVertexBuffer(hull.vb);
-                _gd.Indices = hull.ib;
-
-                foreach (var pass in _effect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    _gd.DrawIndexedPrimitives(
-                        PrimitiveType.TriangleList,
-                        baseVertex: 0, startIndex: 0,
-                        primitiveCount: hull.triCount);
-                }
+                Matrix world = StationRenderWorld(mod, stationRot, renderPos, rs);
+                DrawStationMesh("StationHull", hull.vb, hull.ib, hull.triCount, world,
+                    mod.Transform, mod.TextureInstance, emissive: false);
             }
-        }
-
-        // Decoration pass — pre-baked lighting in vertex colours; texture modulates.
-        // Full uses the wear/ambient-occlusion-graded mesh; Medium/Minimal use the flat
-        // (ungraded) variant built before that pass ran — same generator, fewer steps,
-        // same principle already established for containers and station decoration.
-        var decoMeshesForLevel = level == DetailLevel.Full ? _decoMeshes : _decoMeshesFlat;
-
-        _effect.LightingEnabled    = false;
-        _effect.VertexColorEnabled = true;
-        _effect.TextureEnabled     = true;
-
-        foreach (var (station, universePos) in _stationPositions)
-        {
-            Vector3 renderPos = _camera.ToRenderSpace(universePos);
-            if (renderPos.Length() > 30_000f) continue;
-
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
-
-            var sysQ   = station.GetOrientation(_gameTimeSeconds);
-            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
-            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
 
             foreach (var mod in modules)
             {
                 if (!decoMeshesForLevel.TryGetValue(mod, out var deco)) continue;
 
-                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-
-                _effect.World =
-                    Matrix.CreateScale(rs) *
-                    Matrix.CreateFromQuaternion(modRot) *
-                    stationRot *
-                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
-                    Matrix.CreateTranslation(renderPos);
-
-                _effect.Texture = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
-
-                _gd.SetVertexBuffer(deco.vb);
-                _gd.Indices = deco.ib;
-
-                foreach (var pass in _effect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    _gd.DrawIndexedPrimitives(
-                        PrimitiveType.TriangleList,
-                        baseVertex: 0, startIndex: 0,
-                        primitiveCount: deco.triCount);
-                }
+                Matrix world = StationRenderWorld(mod, stationRot, renderPos, rs);
+                DrawStationMesh("StationBaked", deco.vb, deco.ib, deco.triCount, world,
+                    mod.Transform, mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture),
+                    emissive: false);
             }
-        }
-
-        // Glass pass — windows, portholes; White texture so vertex colours are unmodified.
-        _effect.Texture = StationTextureRegistry.White;
-
-        foreach (var (station, universePos) in _stationPositions)
-        {
-            Vector3 renderPos = _camera.ToRenderSpace(universePos);
-            if (renderPos.Length() > 30_000f) continue;
-
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
-
-            var sysQ   = station.GetOrientation(_gameTimeSeconds);
-            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
-            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
 
             foreach (var mod in modules)
             {
                 if (!_glassMeshes.TryGetValue(mod, out var glass)) continue;
 
-                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-
-                _effect.World =
-                    Matrix.CreateScale(rs) *
-                    Matrix.CreateFromQuaternion(modRot) *
-                    stationRot *
-                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
-                    Matrix.CreateTranslation(renderPos);
-
-                _gd.SetVertexBuffer(glass.vb);
-                _gd.Indices = glass.ib;
-
-                foreach (var pass in _effect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    _gd.DrawIndexedPrimitives(
-                        PrimitiveType.TriangleList,
-                        baseVertex: 0, startIndex: 0,
-                        primitiveCount: glass.triCount);
-                }
+                Matrix world = StationRenderWorld(mod, stationRot, renderPos, rs);
+                DrawStationMesh("StationBaked", glass.vb, glass.ib, glass.triCount, world,
+                    mod.Transform, StationTextureRegistry.White, emissive: true);
             }
         }
-
-        _effect.TextureEnabled     = false;
-        _effect.VertexColorEnabled = false;
-        _effect.LightingEnabled    = true;
     }
+
+    private Matrix StationRenderWorld(PlacedModule mod, Matrix stationRot, Vector3 renderPos, float renderScale)
+    {
+        mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
+        return Matrix.CreateScale(renderScale)
+             * Matrix.CreateFromQuaternion(modRot)
+             * stationRot
+             * Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * renderScale)
+             * Matrix.CreateTranslation(renderPos);
+    }
+
+    private void DrawStationMesh(
+        string technique, VertexBuffer vb, IndexBuffer ib, int triCount,
+        Matrix world, Matrix stationLocalWorld, Texture2D texture, bool emissive)
+    {
+        _stationShadowEffect.CurrentTechnique = _stationShadowEffect.Techniques[technique];
+        _stationShadowEffect.Parameters["World"]?.SetValue(world);
+        _stationShadowEffect.Parameters["StationLocalWorld"]?.SetValue(stationLocalWorld);
+        _stationShadowEffect.Parameters["DiffuseTexture"]?.SetValue(texture);
+        _stationShadowEffect.Parameters["EmissiveSurface"]?.SetValue(emissive ? 1f : 0f);
+
+        _gd.SetVertexBuffer(vb);
+        _gd.Indices = ib;
+        foreach (var pass in _stationShadowEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawIndexedPrimitives(
+                PrimitiveType.TriangleList,
+                baseVertex: 0, startIndex: 0,
+                primitiveCount: triCount);
+        }
+    }
+
+    private void DrawStationShadowDebugView(SpriteBatch sb)
+    {
+        if (!_showStationShadowDebug || _stationShadows.Count == 0)
+            return;
+
+        if (!TrySelectStationShadowDebugTarget(out var station, out var shadow) || shadow == null)
+            return;
+
+        int size = Math.Min(256, Math.Min(_gd.Viewport.Width, _gd.Viewport.Height) / 3);
+        if (size <= 0) return;
+
+        sb.Draw(shadow.Texture, new Rectangle(12, 12, size, size), Color.White);
+        sb.Draw(_pixel, new Rectangle(12, 12, size, 1), Color.White);
+        sb.Draw(_pixel, new Rectangle(12, 12 + size - 1, size, 1), Color.White);
+        sb.Draw(_pixel, new Rectangle(12, 12, 1, size), Color.White);
+        sb.Draw(_pixel, new Rectangle(12 + size - 1, 12, 1, size), Color.White);
+
+        float depthMetres = shadow.DepthRange.Length;
+        float baseBiasMetres = StationBaseShadowBias * depthMetres;
+        float slopeBiasMetres = StationSlopeShadowBias * depthMetres;
+        float maxBiasMetres = StationMaxShadowBias * depthMetres;
+        string stationName = station?.Name ?? "<unknown>";
+        string text =
+            $"Station shadow debug: {stationName} / {StationShadowDebugModeName(_stationShadowDebugMode)}\n" +
+            "F9 show/hide, F8 cycle\n" +
+            $"target={shadow.Texture.Width}x{shadow.Texture.Height} format={shadow.SurfaceFormat}\n" +
+            $"near={shadow.DepthRange.Near:0.###}m far={shadow.DepthRange.Far:0.###}m span={depthMetres:0.###}m\n" +
+            $"bias norm base={StationBaseShadowBias:0.000000} slope={StationSlopeShadowBias:0.000000} max={StationMaxShadowBias:0.000000}\n" +
+            $"bias metres base={baseBiasMetres:0.###} slope={slopeBiasMetres:0.###} max={maxBiasMetres:0.###}\n" +
+            $"normal offset={StationNormalShadowOffsetMetres:0.###}m * slope\n" +
+            $"diff scale={StationShadowDebugDifferenceScale:0.#}";
+        Vector2 pos = new(12, 20 + size);
+        sb.DrawString(_font, text, pos + new Vector2(1, 1), Color.Black);
+        sb.DrawString(_font, text, pos, Color.White);
+    }
+
+    private bool TrySelectStationShadowDebugTarget(out Galaxy.Station? station, out StationShadowMap? shadow)
+    {
+        station = null;
+        shadow = null;
+
+        Galaxy.Station? bestStation = null;
+        StationShadowMap? bestShadow = null;
+        int bestRank = int.MaxValue;
+        double bestScore = double.MaxValue;
+
+        foreach (var (candidate, universePos) in _stationPositions)
+        {
+            if (!_stationShadows.TryGetValue(candidate, out var candidateShadow)) continue;
+            if (!TryGetStationDebugLocalView(candidate, universePos, out var localCamera, out var localForward)) continue;
+
+            double distanceToBoundsSquared = DistanceSquaredToBounds(localCamera, candidateShadow.Bounds);
+            bool rayHit = RayIntersectsBounds(localCamera, localForward, candidateShadow.Bounds, out float rayDistance);
+
+            int rank;
+            double score;
+            if (distanceToBoundsSquared <= 50.0 * 50.0)
+            {
+                rank = 0;
+                score = distanceToBoundsSquared;
+            }
+            else if (rayHit)
+            {
+                rank = 1;
+                score = rayDistance;
+            }
+            else
+            {
+                rank = 2;
+                score = distanceToBoundsSquared;
+            }
+
+            if (rank > bestRank || rank == bestRank && score >= bestScore) continue;
+
+            bestRank = rank;
+            bestScore = score;
+            bestStation = candidate;
+            bestShadow = candidateShadow;
+        }
+
+        if (bestShadow != null)
+        {
+            station = bestStation;
+            shadow = bestShadow;
+            return true;
+        }
+
+        if (_targeting.CurrentRadarTarget is { Type: ContactType.Station } contact &&
+            TrySelectStationShadowDebugTargetByName(contact.DisplayName, out station, out shadow))
+        {
+            return true;
+        }
+
+        var padStation = _targeting.TargetedPadStation;
+        if (padStation != null && _stationShadows.TryGetValue(padStation, out shadow))
+        {
+            station = padStation;
+            return true;
+        }
+
+        var navStation = _targeting.NavStationTarget;
+        if (navStation != null && _stationShadows.TryGetValue(navStation, out shadow))
+        {
+            station = navStation;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TrySelectStationShadowDebugTargetByName(
+        string stationName,
+        out Galaxy.Station? station,
+        out StationShadowMap? shadow)
+    {
+        foreach (var (candidate, _) in _stationPositions)
+        {
+            if (!string.Equals(candidate.Name, stationName, StringComparison.Ordinal)) continue;
+            if (!_stationShadows.TryGetValue(candidate, out shadow)) continue;
+
+            station = candidate;
+            return true;
+        }
+
+        station = null;
+        shadow = null;
+        return false;
+    }
+
+    private bool TryGetStationDebugLocalView(
+        Galaxy.Station station,
+        DVec3 universePos,
+        out Vector3 localCamera,
+        out Vector3 localForward)
+    {
+        var sysQ = station.GetOrientation(_gameTimeSeconds);
+        var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+        Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+        Matrix.Invert(ref stationRot, out Matrix inverseStationRot);
+
+        localCamera = Vector3.Transform((_camera.UniversePosition - universePos).ToVector3(), inverseStationRot);
+        localForward = Vector3.TransformNormal(_camera.Forward, inverseStationRot);
+        float len = localForward.Length();
+        if (len < 1e-6f)
+            return false;
+
+        localForward /= len;
+        return true;
+    }
+
+    private static double DistanceSquaredToBounds(Vector3 point, StationShadowBounds bounds)
+    {
+        double dx = DistanceToRange(point.X, bounds.Min.X, bounds.Max.X);
+        double dy = DistanceToRange(point.Y, bounds.Min.Y, bounds.Max.Y);
+        double dz = DistanceToRange(point.Z, bounds.Min.Z, bounds.Max.Z);
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private static double DistanceToRange(float value, float min, float max)
+    {
+        if (value < min) return min - value;
+        if (value > max) return value - max;
+        return 0.0;
+    }
+
+    private static bool RayIntersectsBounds(
+        Vector3 origin,
+        Vector3 direction,
+        StationShadowBounds bounds,
+        out float distance)
+    {
+        float tMin = 0f;
+        float tMax = float.MaxValue;
+        distance = 0f;
+
+        if (!RaySlab(origin.X, direction.X, bounds.Min.X, bounds.Max.X, ref tMin, ref tMax)) return false;
+        if (!RaySlab(origin.Y, direction.Y, bounds.Min.Y, bounds.Max.Y, ref tMin, ref tMax)) return false;
+        if (!RaySlab(origin.Z, direction.Z, bounds.Min.Z, bounds.Max.Z, ref tMin, ref tMax)) return false;
+
+        distance = tMin;
+        return tMax >= 0f;
+    }
+
+    private static bool RaySlab(
+        float origin,
+        float direction,
+        float min,
+        float max,
+        ref float tMin,
+        ref float tMax)
+    {
+        const float Epsilon = 1e-6f;
+        if (MathF.Abs(direction) < Epsilon)
+            return origin >= min && origin <= max;
+
+        float inv = 1f / direction;
+        float t1 = (min - origin) * inv;
+        float t2 = (max - origin) * inv;
+        if (t1 > t2)
+            (t1, t2) = (t2, t1);
+
+        tMin = MathF.Max(tMin, t1);
+        tMax = MathF.Min(tMax, t2);
+        return tMin <= tMax;
+    }
+
+    private int ShaderStationShadowDebugMode()
+    {
+        if (!_showStationShadowDebug)
+            return 0;
+
+        return _stationShadowDebugMode switch
+        {
+            StationShadowDebugMode.ZeroBiasShadow => 1,
+            StationShadowDebugMode.ReceiverDepth => 2,
+            StationShadowDebugMode.SampledCasterDepth => 3,
+            StationShadowDebugMode.DepthDifference => 4,
+            StationShadowDebugMode.SlopeFactor => 5,
+            StationShadowDebugMode.FinalBiasedShadow => 6,
+            _ => 0,
+        };
+    }
+
+    private static StationShadowDebugMode NextStationShadowDebugMode(StationShadowDebugMode mode)
+        => mode == StationShadowDebugMode.FinalBiasedShadow
+            ? StationShadowDebugMode.ShadowMapDepth
+            : (StationShadowDebugMode)((int)mode + 1);
+
+    private static string StationShadowDebugModeName(StationShadowDebugMode mode)
+        => mode switch
+        {
+            StationShadowDebugMode.ShadowMapDepth => "stored shadow-map depth",
+            StationShadowDebugMode.ZeroBiasShadow => "zero-bias shadow factor",
+            StationShadowDebugMode.ReceiverDepth => "receiver normalized light depth",
+            StationShadowDebugMode.SampledCasterDepth => "sampled caster depth",
+            StationShadowDebugMode.DepthDifference => "receiver minus caster depth",
+            StationShadowDebugMode.SlopeFactor => "ndotl / slope factor",
+            StationShadowDebugMode.FinalBiasedShadow => "final biased shadow factor",
+            _ => mode.ToString(),
+        };
 
     // Builds a VertexPositionNormalTexture hull mesh for one module (6 box faces, 24 verts).
     // Normals are local-space outward per face; BasicEffect transforms them at draw time.

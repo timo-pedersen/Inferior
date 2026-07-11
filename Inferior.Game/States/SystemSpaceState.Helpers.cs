@@ -66,8 +66,11 @@ public sealed partial class SystemSpaceState
         var (skyPoints, skyGlow, targetable) = SkyboxRenderer.Build(_star, GalaxyGenerator.Generate());
         _skyboxRenderer.Load(skyPoints, skyGlow);
         _targetableStars = targetable;
-
         _camera.SetPose(spawnPos, spawnOri);
+        RebuildStationGeometry();
+        _stationPositions.Clear();
+        foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
+        _testContainers.Clear();
         _simulation.TeleportShip(spawnPos, spawnOri);
         _simulation.SetFlightMode(mode);
 

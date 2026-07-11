@@ -3105,17 +3105,10 @@ public static class StationDecorator
             // direction back into module-local space instead (equivalent to rotating the
             // normal forward, via Dot(Rv,w) = Dot(v,R⁻¹w) for the rotation R = modRot*stationRot),
             // so container faces land on the same lighting basis as the module's own hull.
-            mod.Transform.Decompose(out _, out Quaternion modRotQ, out _);
-            Matrix  modRot       = Matrix.CreateFromQuaternion(modRotQ);
-            Matrix  fullRot      = modRot * stationRot;
-            Vector3 localSunDir  = Vector3.Normalize(
-                Vector3.TransformNormal(SceneLighting.SunDirection, Matrix.Invert(fullRot)));
-
             var (verts, indices) = ShippingContainerFactory.GenerateVertices(
                 color, wear: (float)(0.1 + rng.NextDouble() * 0.5), sidePatternSeed: rng.Next(),
                 text: null, lockGrade: LockGrade.Civilian);
-            mesh.MergeTransformedAndLit(verts, indices, t,
-                localSunDir, SceneLighting.Ambient, SceneLighting.SunColour);
+            mesh.MergeTransformed(verts, indices, t);
             break;
         }
     }
