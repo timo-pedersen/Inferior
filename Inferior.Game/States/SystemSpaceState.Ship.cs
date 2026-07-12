@@ -4,6 +4,7 @@ using Inferior.Core.Math;
 using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Inferior.Game.Hyperspace;
+using Inferior.Game.Input;
 using Inferior.Game.Ships;
 using Inferior.Game.StationGen;
 using Inferior.Game.UI;
@@ -99,40 +100,17 @@ public sealed partial class SystemSpaceState
 
     private const float MouseSensitivity = 0.0012f;
 
-    private PlayerInput BuildShipInput(MouseState mouse, KeyboardState keys)
+    private PlayerInput BuildShipInput(MouseState mouse, KeyboardState keys, bool focused)
     {
         // Rotation — cursor is locked to window centre each frame; accumulate delta from centre.
-        int    cx         = _gd.Viewport.Width  / 2;
-        int    cy         = _gd.Viewport.Height / 2;
-        double yawInput   = -(mouse.X - cx) * MouseSensitivity;
-        double pitchInput = -(mouse.Y - cy) * MouseSensitivity;
+        var lookInput = _shipMouseLook.Sample(
+            mouse,
+            new Point(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2),
+            active: true,
+            focused,
+            MouseSensitivity);
 
-        // Thrust — keyboard axes, -1..1
-        // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = roll
-        double fwd  = (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
-        double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
-        double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
-        double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
-
-        // V = Flight Assist toggle, G = Slipstream/mode toggle, X = X-Stop, Z = Afterburner
-        // (all rising-edge sent to sim; sim owns the actual enabled/active state)
-        bool faToggle          = keys.IsKeyDown(Keys.V) && !_prevKeys.IsKeyDown(Keys.V);
-        bool slipstreamToggle  = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
-        bool xStopToggle       = keys.IsKeyDown(Keys.X) && !_prevKeys.IsKeyDown(Keys.X);
-        bool afterburnerToggle = keys.IsKeyDown(Keys.Z) && !_prevKeys.IsKeyDown(Keys.Z);
-
-        // Scroll wheel → one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
-        int  scroll   = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
-        bool gearUp   = scroll > 0;
-        bool gearDown = scroll < 0;
-
-        return new PlayerInput(fwd, lat, vert, roll, pitchInput, yawInput, false,
-            FlightAssistToggle: faToggle,
-            SlipstreamToggle:   slipstreamToggle,
-            XStopToggle:        xStopToggle,
-            GearUp:             gearUp,
-            GearDown:           gearDown,
-            AfterburnerToggle:  afterburnerToggle);
+        return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput);
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
