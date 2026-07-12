@@ -110,7 +110,20 @@ public sealed partial class SystemSpaceState
             focused,
             MouseSensitivity);
 
-        return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput);
+        int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+        int gearChangeSteps = scroll / 120;
+        if (gearChangeSteps == 0 && scroll != 0)
+            gearChangeSteps = scroll > 0 ? 1 : -1;
+
+        long gearSequence = 0;
+        if (gearChangeSteps != 0)
+            gearSequence = ++_gearInputSequence;
+
+        return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput) with
+        {
+            GearChangeSequence = gearSequence,
+            GearChangeSteps = gearChangeSteps
+        };
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
