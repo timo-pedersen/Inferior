@@ -7,6 +7,7 @@ internal sealed class StationCycleController(double surfaceStandOffMeters)
 {
     private object? _systemKey;
     private int _nextIndex;
+    private bool _platformChordWasDown;
 
     public double SurfaceStandOffMeters { get; } = surfaceStandOffMeters;
 
@@ -14,15 +15,17 @@ internal sealed class StationCycleController(double surfaceStandOffMeters)
     {
         _systemKey = null;
         _nextIndex = 0;
+        _platformChordWasDown = false;
     }
 
     public StationCycleResult Handle(
         KeyboardState keys,
         KeyboardState prevKeys,
         StarSystem system,
-        Func<StationCycleRequest, bool> requestRelocation)
+        Func<StationCycleRequest, bool> requestRelocation,
+        bool platformChordDown = false)
     {
-        return Handle(keys, prevKeys, system, system.Stations, requestRelocation);
+        return Handle(keys, prevKeys, system, system.Stations, requestRelocation, platformChordDown);
     }
 
     internal StationCycleResult Handle(
@@ -30,7 +33,8 @@ internal sealed class StationCycleController(double surfaceStandOffMeters)
         KeyboardState prevKeys,
         object systemKey,
         IEnumerable<Station> stations,
-        Func<StationCycleRequest, bool> requestRelocation)
+        Func<StationCycleRequest, bool> requestRelocation,
+        bool platformChordDown = false)
     {
         if (!ReferenceEquals(_systemKey, systemKey))
         {
@@ -38,7 +42,10 @@ internal sealed class StationCycleController(double surfaceStandOffMeters)
             _nextIndex = 0;
         }
 
-        if (!IsCyclePressed(keys, prevKeys))
+        bool cyclePressed = IsCyclePressed(keys, prevKeys, platformChordDown, _platformChordWasDown);
+        _platformChordWasDown = platformChordDown;
+
+        if (!cyclePressed)
             return StationCycleResult.NoInput;
 
         Station[] orderedStations = OrderedStations(stations).ToArray();
@@ -70,11 +77,18 @@ internal sealed class StationCycleController(double surfaceStandOffMeters)
             .ThenBy(station => station.PersistenceId ?? string.Empty, StringComparer.Ordinal);
 
     internal static bool IsCyclePressed(KeyboardState keys, KeyboardState prevKeys)
+        => IsCyclePressed(keys, prevKeys, platformChordDown: false, platformChordWasDown: false);
+
+    internal static bool IsCyclePressed(
+        KeyboardState keys,
+        KeyboardState prevKeys,
+        bool platformChordDown,
+        bool platformChordWasDown)
     {
         bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
         bool prevCtrlDown = prevKeys.IsKeyDown(Keys.LeftControl) || prevKeys.IsKeyDown(Keys.RightControl);
-        bool chordDown = ctrlDown && keys.IsKeyDown(Keys.F12);
-        bool prevChordDown = prevCtrlDown && prevKeys.IsKeyDown(Keys.F12);
+        bool chordDown = platformChordDown || (ctrlDown && keys.IsKeyDown(Keys.F12));
+        bool prevChordDown = platformChordWasDown || (prevCtrlDown && prevKeys.IsKeyDown(Keys.F12));
         return chordDown && !prevChordDown;
     }
 }

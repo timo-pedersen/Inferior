@@ -29,6 +29,37 @@ public sealed class StationCycleControllerTests
     }
 
     [Fact]
+    public void PlatformChordFallbackProducesOneRequestWhenKeyboardStateMissesKeys()
+    {
+        var controller = new StationCycleController(StandOffMeters);
+        var requests = new List<StationCycleRequest>();
+        object system = new();
+        Station[] stations = [Station("Alpha", "a")];
+
+        StationCycleResult first = Handle(
+            controller,
+            system,
+            stations,
+            KeysDown(),
+            KeysDown(),
+            requests,
+            platformChordDown: true);
+        StationCycleResult held = Handle(
+            controller,
+            system,
+            stations,
+            KeysDown(),
+            KeysDown(),
+            requests,
+            platformChordDown: true);
+
+        Assert.Equal(StationCycleResultKind.Requested, first.Kind);
+        Assert.Equal(StationCycleResultKind.NoInput, held.Kind);
+        Assert.Single(requests);
+        Assert.Equal("a", requests[0].StationPersistenceId);
+    }
+
+    [Fact]
     public void ReleasingAndPressingAgainAdvancesOnce()
     {
         var controller = new StationCycleController(StandOffMeters);
@@ -41,6 +72,21 @@ public sealed class StationCycleControllerTests
         Handle(controller, system, stations, chord, none, requests);
         Handle(controller, system, stations, none, chord, requests);
         Handle(controller, system, stations, chord, none, requests);
+
+        Assert.Equal(["a", "b"], requests.Select(request => request.StationPersistenceId));
+    }
+
+    [Fact]
+    public void PlatformChordReleaseAndRepressAdvancesOnce()
+    {
+        var controller = new StationCycleController(StandOffMeters);
+        var requests = new List<StationCycleRequest>();
+        object system = new();
+        Station[] stations = [Station("Alpha", "a"), Station("Beta", "b")];
+
+        Handle(controller, system, stations, KeysDown(), KeysDown(), requests, platformChordDown: true);
+        Handle(controller, system, stations, KeysDown(), KeysDown(), requests, platformChordDown: false);
+        Handle(controller, system, stations, KeysDown(), KeysDown(), requests, platformChordDown: true);
 
         Assert.Equal(["a", "b"], requests.Select(request => request.StationPersistenceId));
     }
@@ -270,7 +316,8 @@ public sealed class StationCycleControllerTests
         KeyboardState keys,
         KeyboardState prevKeys,
         List<StationCycleRequest> requests,
-        Func<StationCycleRequest, bool>? requestRelocation = null)
+        Func<StationCycleRequest, bool>? requestRelocation = null,
+        bool platformChordDown = false)
         => controller.Handle(
             keys,
             prevKeys,
@@ -283,7 +330,8 @@ public sealed class StationCycleControllerTests
 
                 requests.Add(request);
                 return true;
-            });
+            },
+            platformChordDown);
 
     private static Station Station(string name, string persistenceId)
         => new() { Name = name, PersistenceId = persistenceId };
