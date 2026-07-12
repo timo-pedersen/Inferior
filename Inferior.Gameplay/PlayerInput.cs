@@ -5,8 +5,8 @@ namespace Inferior.Gameplay;
 /// Reference assignment is atomic on 64-bit .NET — no partial reads.
 /// FlightAssist and Slipstream are sim-internal state; only rising-edge toggle signals
 /// are sent here so the sim owns the actual enabled/disabled state.
-/// GearUp/GearDown are set when the scroll wheel fires. GearChangeSequence/Steps identify
-/// distinct wheel events so the sim can consume a retained input snapshot once.
+/// XStopToggleSequence and GearChangeSequence/Steps identify distinct edge events so the
+/// sim can consume a retained input snapshot once.
 /// </summary>
 public record PlayerInput(
     double ThrustForward,
@@ -19,6 +19,7 @@ public record PlayerInput(
     bool   FlightAssistToggle  = false,
     bool   SlipstreamToggle    = false,
     bool   XStopToggle         = false,
+    long   XStopToggleSequence = 0,
     bool   GearUp              = false,
     bool   GearDown            = false,
     bool   AfterburnerToggle   = false,

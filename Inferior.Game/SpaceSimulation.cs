@@ -73,6 +73,15 @@ public sealed class SpaceSimulation : Simulation
         double TransitionTimer,
         long LastConsumedGearChangeSequence);
 
+    internal readonly record struct XStopDebugState(
+        FlightMode FlightMode,
+        bool XStopActive,
+        bool AfterburnerActive,
+        double AfterburnerTimeRemaining,
+        bool XStopCompleteAnnounced,
+        long LastConsumedXStopToggleSequence,
+        DVec3 ReferenceVelocity);
+
     private double _nextMessageAt = 8.0;
     private bool   _startupPublished;
     private double _lastHeartbeat;
@@ -202,7 +211,6 @@ public sealed class SpaceSimulation : Simulation
     private int  _newtonianGear  = 0;          // 0-based
     private int  _lkmMaxGear     = int.MaxValue;
     private bool _xStopActive    = false;
-    private bool _prevXStopToggle = false;
     // Tracks whether "X-Stop complete" has already been sent for the current activation —
     // X-Stop now holds indefinitely once threshold is crossed (see TickNewtonianPhysics),
     // so the message must not repeat every tick while holding.
@@ -225,6 +233,7 @@ public sealed class SpaceSimulation : Simulation
     private DVec3  _referenceVelocity;
     private string _referenceSourceId = "";
     private string _referenceName     = "";
+    private DVec3? _debugReferenceVelocityOverride;
 
     // ── SystemSlipstream state ────────────────────────────────────────────────
     private int    _slipstreamHarmonicIndex   = 0;
@@ -281,6 +290,7 @@ public sealed class SpaceSimulation : Simulation
 
     private double _lastDt;
     private long _lastConsumedGearChangeSequence;
+    private long _lastConsumedXStopToggleSequence;
 
     // ── Physics constants ─────────────────────────────────────────────────────
     private const double PhysG               = 6.674e-11;
@@ -375,18 +385,14 @@ public sealed class SpaceSimulation : Simulation
         }
         _prevFlightAssistToggle = input.FlightAssistToggle;
 
-        // ── X-Stop toggle (rising edge) ───────────────────────────────────
-        if (input.XStopToggle && !_prevXStopToggle && !_afterburnerActive)
+        // ── X-Stop toggle (one consumed event per distinct key press) ─────
+        if (ConsumeXStopToggle(input) && _currentFlightMode == FlightMode.SystemNewtonian)
         {
-            if (_currentFlightMode == FlightMode.SystemNewtonian)
-            {
-                _xStopActive = !_xStopActive;
-                if (_xStopActive) _xStopCompleteAnnounced = false;
-                DataBus.System.Publish(Topics.System.All,
-                    new SystemMessage(_xStopActive ? "X-Stop active" : "X-Stop cancelled"));
-            }
+            _xStopActive = !_xStopActive;
+            if (_xStopActive) _xStopCompleteAnnounced = false;
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage(_xStopActive ? "X-Stop active" : "X-Stop cancelled"));
         }
-        _prevXStopToggle = input.XStopToggle;
 
         // ── Slipstream / flight mode toggle (rising edge) ─────────────────
         if (input.SlipstreamToggle && !_prevSlipstreamToggle && !_afterburnerActive)
@@ -1075,6 +1081,16 @@ public sealed class SpaceSimulation : Simulation
         return input.GearChangeSteps;
     }
 
+    private bool ConsumeXStopToggle(PlayerInput input)
+    {
+        if (input.XStopToggleSequence <= 0 ||
+            input.XStopToggleSequence == _lastConsumedXStopToggleSequence)
+            return false;
+
+        _lastConsumedXStopToggleSequence = input.XStopToggleSequence;
+        return input.XStopToggle;
+    }
+
     internal void DebugTickPhysics(PlayerInput input, double dt) => TickPhysics(input, dt);
 
     internal void DebugPublish() => Publish();
@@ -1107,6 +1123,24 @@ public sealed class SpaceSimulation : Simulation
         _slipstreamTransitioning,
         _slipstreamTransitionTimer,
         _lastConsumedGearChangeSequence);
+
+    internal XStopDebugState DebugXStopState => new(
+        _currentFlightMode,
+        _xStopActive,
+        _afterburnerActive,
+        _afterburnerTimeRemaining,
+        _xStopCompleteAnnounced,
+        _lastConsumedXStopToggleSequence,
+        _referenceVelocity);
+
+    internal void DebugSetReferenceVelocity(DVec3 referenceVelocity, string sourceId = "debug")
+    {
+        _debugReferenceVelocityOverride = referenceVelocity;
+        _referenceVelocity = referenceVelocity;
+        _referenceSourceId = sourceId;
+        _referenceName = sourceId;
+        _prevRefSourceId = sourceId;
+    }
 
     private void TriggerClunk(double durationMs)
     {
@@ -1313,6 +1347,14 @@ public sealed class SpaceSimulation : Simulation
 
     private void UpdateReferenceFrame(Ship ship)
     {
+        if (_debugReferenceVelocityOverride is { } debugReferenceVelocity)
+        {
+            _referenceVelocity = debugReferenceVelocity;
+            _referenceName = "debug";
+            _referenceSourceId = "debug";
+            return;
+        }
+
         const double StationDist = 25_000.0;
 
         var context = _systemContext;

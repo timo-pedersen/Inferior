@@ -123,9 +123,10 @@ public sealed partial class SystemSpaceState
         bool slipstreamToggle  = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
         bool xStopToggle       = keys.IsKeyDown(Keys.X) && !_prevKeys.IsKeyDown(Keys.X);
         bool afterburnerToggle = keys.IsKeyDown(Keys.Z) && !_prevKeys.IsKeyDown(Keys.Z);
+        long xStopSequence     = xStopToggle ? ++_xStopInputSequence : 0;
 
         // Scroll wheel → one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
-        int  scroll          = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+        int scroll          = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
         int  gearChangeSteps = scroll / 120;
         if (gearChangeSteps == 0 && scroll != 0)
             gearChangeSteps = scroll > 0 ? 1 : -1;
@@ -135,7 +136,13 @@ public sealed partial class SystemSpaceState
         bool gearUp   = gearChangeSteps > 0;
         bool gearDown = gearChangeSteps < 0;
 
-        return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput, gearSequence);
+        return ShipInputMapper.Build(
+            keys,
+            _prevKeys,
+            lookInput,
+            gearSequence,
+            gearChangeSteps,
+            xStopSequence);
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
