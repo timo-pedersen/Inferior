@@ -66,10 +66,6 @@ public sealed partial class SystemSpaceState : GameState
     private Effect?     _atmosEffect;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
-    // TEMP DEBUG — station spawn investigation, remove before done.
-    private DVec3 _debugTargetStationGalaxy;
-    private bool  _debugTargetStationPending;
-
     // ── Celestial body rendering ──────────────────────────────────────────────
     private RingPrimitive         _ringPrimitive    = null!;
     private CelestialBodyRenderer _celestialBodies  = null!;
@@ -89,7 +85,7 @@ public sealed partial class SystemSpaceState : GameState
 
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
-    private bool _waitingForStarterRelocationSnapshot;
+    private bool _waitingForStationRelocationSnapshot;
 
     // ── Cached body positions ─────────────────────────────────────────────────
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
@@ -223,11 +219,13 @@ public sealed partial class SystemSpaceState : GameState
     public override void OnEnter(object? payload)
     {
         SystemSpacePayload? initialStarterRelocationPayload = null;
+        StationArrivalTarget? stationArrivalPayload = null;
 
         if (payload is SystemSpacePayload p)
         {
             if (IsInitialNewGameStarterEntry(p))
                 initialStarterRelocationPayload = p;
+            stationArrivalPayload = p.StationArrival;
             _star            = p.Star;
             _system          = StarSystem.Generate(p.Star, GalaxyGenerator.SystemSeed(p.Star));
             _gameTimeSeconds = p.GameTime;
@@ -271,42 +269,16 @@ public sealed partial class SystemSpaceState : GameState
                 _camera.SetPose(startPos, bodyOri);
                 SpawnShip(startPos, bodyOri);
             }
-            else if (p.TargetStation != null)
+            else if (p.StationArrival != null)
             {
-                // Approach a station from system map double-click — spawn 2 km away, facing it
+                // Approach a station from system map double-click. The simulation
+                // owns station resolution, position, velocity, reference and facing.
                 _ship = null;
-                DVec3 parentEcliptic = DVec3.Zero;
-                if (p.TargetStation.OrbitParent != null)
-                {
-                    DVec3 grandparent = DVec3.Zero;
-                    foreach (var planet in _system.Planets)
-                        if (planet.Children.Any(c => c.Name == p.TargetStation.OrbitParent.Name))
-                            grandparent = planet.GetPosition(p.GameTime, DVec3.Zero);
-                    parentEcliptic = p.TargetStation.OrbitParent.GetPosition(p.GameTime, grandparent);
-                }
-                DVec3 stationEcliptic = p.TargetStation.GetPosition(p.GameTime, parentEcliptic);
-                DVec3 stationGalaxy   = EclipticToGalaxy(stationEcliptic);
-
-                // Place spawn 2 km above the ecliptic plane relative to the station
-                DVec3 eclipticUp = EclipticToGalaxy(DVec3.UnitY) - EclipticToGalaxy(DVec3.Zero);
-                DVec3 spawnPos   = stationGalaxy + eclipticUp * 2000.0;
-
-                Quaternion spawnOri = QuatLookAt(stationGalaxy - spawnPos);
-                _camera = new Camera3D(spawnPos, AspectRatio);
-                _camera.SetPose(spawnPos, spawnOri);
-                SpawnShip(spawnPos, spawnOri);
-
-                // TEMP DEBUG — remove before done.
-                System.IO.File.AppendAllText("debug_spawn.log",
-                    $"[TargetStation] {System.DateTime.Now:HH:mm:ss} station={p.TargetStation.Name} " +
-                    $"orbitParent={p.TargetStation.OrbitParent?.Name ?? "none"} gameTime={p.GameTime}\n" +
-                    $"  parentEcliptic={parentEcliptic} stationEcliptic={stationEcliptic}\n" +
-                    $"  stationGalaxy={stationGalaxy}\n" +
-                    $"  eclipticUp={eclipticUp} |eclipticUp|={eclipticUp.Length}\n" +
-                    $"  spawnPos={spawnPos} dist(spawnPos,stationGalaxy)={(spawnPos - stationGalaxy).Length}\n" +
-                    $"  spawnOri={spawnOri}\n");
-                _debugTargetStationGalaxy = stationGalaxy;
-                _debugTargetStationPending = true;
+                var startPos = new DVec3(0, 0.5e11, 3e11);
+                var startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+                _camera = new Camera3D(startPos, AspectRatio);
+                _camera.SetPose(startPos, startOri);
+                SpawnShip(startPos, startOri);
             }
             else if (_ship != null)
             {
@@ -339,10 +311,12 @@ public sealed partial class SystemSpaceState : GameState
         }
 
         _simulation.InstallSystem(_star, _system);
-        _waitingForStarterRelocationSnapshot = false;
+        _waitingForStationRelocationSnapshot = false;
 
         if (initialStarterRelocationPayload != null)
-            _waitingForStarterRelocationSnapshot = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
+            _waitingForStationRelocationSnapshot = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
+        else if (stationArrivalPayload != null)
+            _waitingForStationRelocationSnapshot = QueueStationArrivalRelocation(stationArrivalPayload.Value);
 
         // BasicEffect — our shader
         _effect = new BasicEffect(_gd)
@@ -546,8 +520,8 @@ public sealed partial class SystemSpaceState : GameState
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         BlinkClock.Update(dt);
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
-        if (_waitingForStarterRelocationSnapshot && _frameShipSnap != null)
-            _waitingForStarterRelocationSnapshot = false;
+        if (_waitingForStationRelocationSnapshot && _frameShipSnap != null)
+            _waitingForStationRelocationSnapshot = false;
         if (_frameShipSnap != null)
         {
             string prevRefName = _refName;
@@ -559,16 +533,6 @@ public sealed partial class SystemSpaceState : GameState
                     $"Zero reference speed set to {_refName}.", SystemMessagePriority.NB));
         }
 
-        // TEMP DEBUG — remove before done. Logs actual post-spawn ship position/distance
-        // once the sim thread has picked up the newly spawned ship.
-        if (_debugTargetStationPending && _frameShipSnap != null)
-        {
-            double dist = (_frameShipSnap.Position - _debugTargetStationGalaxy).Length;
-            System.IO.File.AppendAllText("debug_spawn.log",
-                $"[PostSpawn] {System.DateTime.Now:HH:mm:ss} shipPos={_frameShipSnap.Position} " +
-                $"forward={_frameShipSnap.Forward} dist-to-station={dist}\n");
-            _debugTargetStationPending = false;
-        }
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
@@ -811,7 +775,7 @@ public sealed partial class SystemSpaceState : GameState
     {
         _frameSpriteBatch = sb;
         gd.Clear(ColBackground);
-        if (_waitingForStarterRelocationSnapshot)
+        if (_waitingForStationRelocationSnapshot)
             return;
 
         // ── 3D scene ──────────────────────────────────────────────────────────

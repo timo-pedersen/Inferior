@@ -27,6 +27,7 @@ public sealed partial class SystemSpaceState
 {
     internal const string InitialStarterStationName = "Far Station";
     internal const double InitialStarterStationStandOffMeters = 500.0;
+    internal const double SystemMapStationArrivalStandOffMeters = 2_000.0;
 
     internal readonly record struct StarterStationRelocationPlan(
         bool ShouldRelocate,
@@ -43,7 +44,7 @@ public sealed partial class SystemSpaceState
     internal static bool IsInitialNewGameStarterEntry(SystemSpacePayload payload)
         => payload.InitialNewGameStarterEntry
         && payload.TargetBody == null
-        && payload.TargetStation == null
+        && payload.StationArrival == null
         && payload.SpawnPos == null
         && payload.SpawnOrientation == null
         && payload.Layout == null;
@@ -93,6 +94,33 @@ public sealed partial class SystemSpaceState
         _simulation.RequestStationRelocation(
             plan.StationPersistenceId!,
             InitialStarterStationStandOffMeters);
+        return true;
+    }
+
+    private bool QueueStationArrivalRelocation(StationArrivalTarget target)
+    {
+        if (string.IsNullOrWhiteSpace(target.PersistenceId))
+        {
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage(
+                    "Station arrival rejected: destination has no stable persistence id.",
+                    SystemMessagePriority.ImportantWarning));
+            return false;
+        }
+
+        if (!double.IsFinite(target.SurfaceStandOffMeters) || target.SurfaceStandOffMeters < 0.0)
+        {
+            string name = target.DisplayName ?? target.PersistenceId;
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage(
+                    $"Station arrival rejected: {name} has invalid stand-off {target.SurfaceStandOffMeters:R} m.",
+                    SystemMessagePriority.ImportantWarning));
+            return false;
+        }
+
+        _simulation.RequestStationRelocation(
+            target.PersistenceId,
+            target.SurfaceStandOffMeters);
         return true;
     }
 
