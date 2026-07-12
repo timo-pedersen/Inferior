@@ -106,7 +106,6 @@ public sealed class StarterStationRelocationTests
     public void ReturningFromMapsAndExplicitArrivalsDoNotTriggerStarterRelocation()
     {
         var star = StarterStar();
-        var targetStation = new Station { Name = "Far Station", PersistenceId = "far" };
         var targetBody = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star)).Planets.FirstOrDefault();
         var returnOrientation = Quaternion.Identity;
 
@@ -122,7 +121,10 @@ public sealed class StarterStationRelocationTests
             star,
             null,
             0.0,
-            TargetStation: targetStation,
+            StationArrival: new StationArrivalTarget(
+                "far",
+                SystemSpaceState.SystemMapStationArrivalStandOffMeters,
+                "Far Station"),
             InitialNewGameStarterEntry: true);
         var normalSystemTransition = new SystemSpacePayload(star, null, 0.0, null);
 

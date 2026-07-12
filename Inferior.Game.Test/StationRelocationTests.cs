@@ -3,6 +3,7 @@ using Inferior.Core.Math;
 using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Inferior.Game;
+using Inferior.Game.States;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
@@ -50,6 +51,65 @@ public sealed class StationRelocationTests
 
         Assert.Same(installedStation, result.Diagnostic.NearestStation);
         Assert.Equal(installedStation.PersistenceId, result.Diagnostic.NearestStationId);
+    }
+
+    [Fact]
+    public void StationArrivalPayloadCarriesStableIdentityAndStandOffOnly()
+    {
+        var payload = new SystemSpacePayload(
+            GalaxyGenerator.Generate().First(),
+            null,
+            12.5,
+            StationArrival: new StationArrivalTarget(
+                "station-id",
+                SystemSpaceState.SystemMapStationArrivalStandOffMeters,
+                "Display Station"));
+
+        Assert.Equal("station-id", payload.StationArrival?.PersistenceId);
+        Assert.Equal(2_000.0, payload.StationArrival?.SurfaceStandOffMeters);
+        Assert.Equal("Display Station", payload.StationArrival?.DisplayName);
+        Assert.DoesNotContain(
+            typeof(StationArrivalTarget).GetProperties(),
+            property => property.PropertyType == typeof(Station)
+                || property.PropertyType == typeof(DVec3)
+                || property.PropertyType == typeof(Quaternion));
+    }
+
+    [Fact]
+    public void StationMapArrivalUsesInstalledSystemAndCurrentSimTime()
+    {
+        var source = FindStation(station => station.PersistenceId != null);
+        var installedSystem = StarSystem.Generate(source.Star, GalaxyGenerator.SystemSeed(source.Star));
+        var installedStation = installedSystem.Stations.Single(station => station.PersistenceId == source.Station.PersistenceId);
+
+        var result = RunRelocation(
+            source.Star,
+            installedSystem,
+            source.Station.PersistenceId!,
+            OldShipPosition(),
+            preAdvanceSeconds: 37.0);
+
+        DVec3 stationGalaxy = EclipticToGalaxy(
+            installedSystem,
+            installedSystem.GetStationPosition(installedStation, result.Snapshot.SimTime));
+        double surfaceDistance = (result.Snapshot.Position - stationGalaxy).Length
+            - SpaceSimulation.StationPhysicalRadius(installedStation);
+
+        Assert.Same(installedStation, result.Diagnostic.NearestStation);
+        Assert.Equal(installedStation.PersistenceId, result.Diagnostic.NearestStationId);
+        Assert.True(result.Snapshot.SimTime > 37.0);
+        Assert.InRange(System.Math.Abs(surfaceDistance - SystemSpaceState.SystemMapStationArrivalStandOffMeters), 0.0, 0.01);
+    }
+
+    [Fact]
+    public void BodyArrivalPayloadRemainsBodyArrival()
+    {
+        var star = GalaxyGenerator.Generate().First();
+        var body = new OrbitalBody { Name = "Target Body" };
+        var payload = new SystemSpacePayload(star, body, 12.5);
+
+        Assert.Same(body, payload.TargetBody);
+        Assert.Null(payload.StationArrival);
     }
 
     [Fact]
@@ -123,6 +183,28 @@ public sealed class StationRelocationTests
         }
 
         Assert.DoesNotContain(messages, message => message.Text == "X-Stop complete");
+    }
+
+    [Fact]
+    public void StationMapArrivalStateCodeDoesNotReimplementStationRelocation()
+    {
+        string stateSource = File.ReadAllText(Path.Combine(RepoRoot(), "Inferior.Game", "States", "SystemSpaceState.cs"));
+        string mapSource = File.ReadAllText(Path.Combine(RepoRoot(), "Inferior.Game", "States", "SystemMapState.cs"));
+        string arrivalBlock = stateSource[
+            stateSource.IndexOf("else if (p.StationArrival != null)", StringComparison.Ordinal)..
+            stateSource.IndexOf("else if (_ship != null)", StringComparison.Ordinal)];
+
+        Assert.Contains("StationArrival", mapSource);
+        Assert.DoesNotContain("TargetStation:", mapSource);
+        Assert.DoesNotContain("GetStationPosition", arrivalBlock);
+        Assert.DoesNotContain(".GetPosition", arrivalBlock);
+        Assert.DoesNotContain("GetStationVelocity", arrivalBlock);
+        Assert.DoesNotContain("OrbitParent", arrivalBlock);
+        Assert.DoesNotContain("QuatLookAt", arrivalBlock);
+        Assert.DoesNotContain("TeleportShip", arrivalBlock);
+        Assert.DoesNotContain("EclipticToGalaxy", arrivalBlock);
+        Assert.DoesNotContain("stationGalaxy", arrivalBlock);
+        Assert.DoesNotContain("spawnOri", arrivalBlock);
     }
 
     [Fact]
@@ -213,7 +295,8 @@ public sealed class StationRelocationTests
         StarSystem system,
         string stationPersistenceId,
         DVec3 oldShipPosition,
-        PlayerInput? input = null)
+        PlayerInput? input = null,
+        double preAdvanceSeconds = 0.0)
     {
         GameClock.Reset();
         DataBus.Drain();
@@ -227,6 +310,8 @@ public sealed class StationRelocationTests
 
         simulation.SetShip(ship);
         simulation.InstallSystem(star, system);
+        if (preAdvanceSeconds > 0.0)
+            simulation.TickForTests(PlayerInput.Zero, preAdvanceSeconds);
         simulation.RequestStationRelocation(stationPersistenceId, StandOffMeters);
         simulation.TickForTests(input ?? PlayerInput.Zero, 1.0 / 60.0);
 

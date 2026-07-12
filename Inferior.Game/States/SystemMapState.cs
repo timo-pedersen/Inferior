@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using Inferior.Core;
+using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
 using Inferior.Game.StationGen;
@@ -333,11 +334,25 @@ public sealed class SystemMapState : GameState
 
             if (isDouble && hitStation != null)
             {
+                if (string.IsNullOrWhiteSpace(hitStation.PersistenceId))
+                {
+                    DataBus.System.Publish(Topics.System.All,
+                        new SystemMessage(
+                            $"Station arrival rejected: {hitStation.Name} has no stable persistence id.",
+                            SystemMessagePriority.ImportantWarning));
+                    return;
+                }
+
                 // Launch into system flight near this station
                 _pendingTransition = StateTransition.To(
                     GameStateId.SystemSpace,
                     new SystemSpacePayload(_star, null, _gameTimeSeconds, _cockpitLayout,
-                        NavBody: _navBody, NavStation: _navStation, TargetStation: hitStation));
+                        NavBody: _navBody,
+                        NavStation: _navStation,
+                        StationArrival: new StationArrivalTarget(
+                            hitStation.PersistenceId,
+                            SystemSpaceState.SystemMapStationArrivalStandOffMeters,
+                            hitStation.Name)));
                 return;
             }
 
