@@ -117,7 +117,12 @@ public sealed partial class SystemSpaceState
 
     private void HandleStationCycleInput(KeyboardState keys)
     {
-        StationCycleResult result = _stationCycle.Handle(keys, _prevKeys, _system, QueueStationCycleRelocation);
+        StationCycleResult result = _stationCycle.Handle(
+            keys,
+            _prevKeys,
+            _system,
+            QueueStationCycleRelocation,
+            IsGameActive && StationCyclePlatformInput.IsCtrlF12Down());
         switch (result.Kind)
         {
             case StationCycleResultKind.NoStations:
