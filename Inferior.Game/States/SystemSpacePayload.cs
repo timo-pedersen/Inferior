@@ -21,4 +21,5 @@ public record SystemSpacePayload(
     Quaternion?    SpawnOrientation = null,
     OrbitalBody?   NavBody          = null,
     Station?       NavStation       = null,
-    Station?       TargetStation    = null);
+    Station?       TargetStation    = null,
+    bool           InitialNewGameStarterEntry = false);
