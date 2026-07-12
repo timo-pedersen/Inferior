@@ -115,6 +115,48 @@ public sealed partial class SystemSpaceState
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
 
+    private void HandleStationCycleInput(KeyboardState keys)
+    {
+        StationCycleResult result = _stationCycle.Handle(keys, _prevKeys, _system, QueueStationCycleRelocation);
+        switch (result.Kind)
+        {
+            case StationCycleResultKind.NoStations:
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage("Station cycle: current system has no stations.",
+                        SystemMessagePriority.ImportantWarning));
+                break;
+
+            case StationCycleResultKind.InvalidStation:
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage(
+                        $"Station cycle rejected: {result.StationName ?? "<unnamed>"} has no stable persistence id.",
+                        SystemMessagePriority.ImportantWarning));
+                break;
+
+            case StationCycleResultKind.Requested:
+                StationCycleRequest request = result.Request!.Value;
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage(
+                        $"Station cycle: {request.StationName} ({request.OneBasedIndex}/{request.TotalCount})",
+                        SystemMessagePriority.NB));
+                break;
+        }
+    }
+
+    private bool QueueStationCycleRelocation(StationCycleRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.StationPersistenceId))
+            return false;
+
+        if (!double.IsFinite(request.SurfaceStandOffMeters) || request.SurfaceStandOffMeters < 0.0)
+            return false;
+
+        _simulation.RequestStationRelocation(
+            request.StationPersistenceId,
+            request.SurfaceStandOffMeters);
+        return true;
+    }
+
     private (DVec3? pos, Quaternion? ori) CaptureShipState()
     {
         var snap = _simulation.ShipState;

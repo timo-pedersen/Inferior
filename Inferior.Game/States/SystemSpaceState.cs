@@ -167,6 +167,8 @@ public sealed partial class SystemSpaceState : GameState
     private bool _prevIsGameActive = true;
     private bool _prevUiMouseMode;
     private readonly MouseLookRebaser _shipMouseLook = new();
+    private readonly StationCycleController _stationCycle =
+        new(SystemMapStationArrivalStandOffMeters);
 
     // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
@@ -228,6 +230,7 @@ public sealed partial class SystemSpaceState : GameState
             stationArrivalPayload = p.StationArrival;
             _star            = p.Star;
             _system          = StarSystem.Generate(p.Star, GalaxyGenerator.SystemSeed(p.Star));
+            _stationCycle.Reset();
             _gameTimeSeconds = p.GameTime;
             ComputeEclipticRotation();
 
@@ -304,6 +307,7 @@ public sealed partial class SystemSpaceState : GameState
             // Fallback: entered directly with just a star (shouldn't happen in normal flow)
             _star    = star;
             _system  = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            _stationCycle.Reset();
             ComputeEclipticRotation();
             var fallbackPos = new DVec3(0, 0.5e11, 3e11);
             _camera  = new Camera3D(fallbackPos, AspectRatio);
@@ -468,6 +472,7 @@ public sealed partial class SystemSpaceState : GameState
     {
         // Stop ship from drifting while browsing maps
         _simulation.SetInput(PlayerInput.Zero);
+        _stationCycle.Reset();
 
         _cockpitUI?.Dispose();
 
@@ -648,6 +653,7 @@ public sealed partial class SystemSpaceState : GameState
         {
             // Ship mode — input goes to the simulation; camera follows cockpit or third-person orbit.
             // Cursor is locked to window centre so mouse can't escape the window.
+            HandleStationCycleInput(keys);
             _lastFlightInput = BuildShipInput(lookMouse, keys, IsGameActive);
             _simulation.SetInput(_lastFlightInput);
             if (_frameShipSnap != null)
