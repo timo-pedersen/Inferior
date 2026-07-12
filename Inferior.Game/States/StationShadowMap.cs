@@ -86,14 +86,7 @@ internal sealed class StationShadowMap : IDisposable
 
     private static RenderTarget2D CreateDepthTarget(GraphicsDevice gd, int size)
     {
-        try
-        {
-            return new RenderTarget2D(gd, size, size, false, SurfaceFormat.Single, DepthFormat.Depth24);
-        }
-        catch (Exception)
-        {
-            return new RenderTarget2D(gd, size, size, false, SurfaceFormat.HalfSingle, DepthFormat.Depth24);
-        }
+        return new RenderTarget2D(gd, size, size, false, SurfaceFormat.Color, DepthFormat.Depth24);
     }
 
     private void Draw(Effect effect, VertexBuffer vb, IndexBuffer ib, int triCount)
