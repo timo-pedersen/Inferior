@@ -13,9 +13,9 @@
 | Language | C# / .NET 10 |
 | Platform | Windows (for now) |
 | Units | Metres, 0.01 m precision |
-| Galaxy | 2048 stars, fixed seed, deterministic per-star seed from coords |
-| Visual style | Low-poly flat-shaded 3D, original Elite aesthetic |
-| Rendering | BasicEffect only — no custom shaders |
+| Galaxy | 20480 stars, fixed seed, deterministic per-star seed from coords |
+| Visual style | Low-poly 3D with some modern features like shadows and specular highlights |
+| Rendering | Moving from BasicEffect only to custom shaders for shadows and specular highlight |
 
 ---
 
@@ -28,7 +28,8 @@
 - Iterative build — get a triangle flying first, layer complexity on top.
 - Do not lock design early. Avoid hardcoding anything that can be data-driven.
 
-Key difference from Elite Dangerous: ED ships are a stat sheet you buy. In Inferior, your ship is a personal investment of knowledge and tuning time. A griefer can buy the same hull, but not the 200 hours of understanding.
+Key difference from Elite Dangerous: ED ships are a stat sheet you buy. In Inferior, your ship is a personal 
+investment of knowledge and tuning time. A griefer can buy the same hull, but not the 200 hours of understanding.
 
 ---
 
@@ -39,7 +40,7 @@ Lighting targets (initial, intentionally left open for future improvement):
 | Element | Target |
 |---|---|
 | Directional light | One per system, colour and intensity from star type |
-| Ambient | 5–10% — space is dark |
+| Ambient | 5 - 10%,  space is dark. Ambient comes from nearby planet or moon, no planet or moon - darker ambient |
 | Specular | Ship hull, station solar panels, windows |
 | Planet terminator | Self-shadowing sphere |
 | Ship shadow | On nearby surfaces when landing |
@@ -49,7 +50,8 @@ Lighting targets (initial, intentionally left open for future improvement):
 ## Flight & physics
 
 ### Newtonian flight with flight assist
-Full Newtonian physics. No hard speed cap — the drive's standing-wave stability degrades at high offsets, giving a natural soft ceiling. "Flight assist off" available as an expert mode.
+Full Newtonian physics. No hard speed cap — the drive's standing-wave stability degrades at high offsets, giving a 
+natural soft ceiling. "Flight assist off" available as an expert mode.
 
 ### The drive
 Not a rocket. Creates a **standing wave of ionised metal ions** partially switched through A-band hyperspace. The asymmetry produces thrust.
