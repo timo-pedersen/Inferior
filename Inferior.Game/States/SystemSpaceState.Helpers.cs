@@ -25,6 +25,13 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    internal const string InitialStarterStationName = "Far Station";
+    internal const double InitialStarterStationStandOffMeters = 500.0;
+
+    internal readonly record struct StarterStationRelocationPlan(
+        bool ShouldRelocate,
+        string? StationPersistenceId,
+        string? Diagnostic);
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -32,6 +39,62 @@ public sealed partial class SystemSpaceState
         (float)_gd.Viewport.Width / _gd.Viewport.Height;
 
     private void UpdateUI() { }
+
+    internal static bool IsInitialNewGameStarterEntry(SystemSpacePayload payload)
+        => payload.InitialNewGameStarterEntry
+        && payload.TargetBody == null
+        && payload.TargetStation == null
+        && payload.SpawnPos == null
+        && payload.SpawnOrientation == null
+        && payload.Layout == null;
+
+    internal static StarterStationRelocationPlan CreateInitialStarterStationRelocationPlan(
+        SystemSpacePayload payload,
+        IEnumerable<Galaxy.Station> stations)
+    {
+        if (!IsInitialNewGameStarterEntry(payload))
+            return new StarterStationRelocationPlan(false, null, null);
+
+        var matches = stations
+            .Where(station => string.Equals(station.Name, InitialStarterStationName, StringComparison.Ordinal))
+            .ToArray();
+
+        if (matches.Length != 1)
+        {
+            string diagnostic = matches.Length == 0
+                ? $"{InitialStarterStationName} not found in generated starter system; preserving default starter spawn."
+                : $"{InitialStarterStationName} is ambiguous in generated starter system ({matches.Length} matches); preserving default starter spawn.";
+            return new StarterStationRelocationPlan(false, null, diagnostic);
+        }
+
+        string? persistenceId = matches[0].PersistenceId;
+        if (string.IsNullOrWhiteSpace(persistenceId))
+        {
+            return new StarterStationRelocationPlan(
+                false,
+                null,
+                $"{InitialStarterStationName} has no stable persistence id; preserving default starter spawn.");
+        }
+
+        return new StarterStationRelocationPlan(true, persistenceId, null);
+    }
+
+    private bool QueueInitialStarterStationRelocation(SystemSpacePayload payload)
+    {
+        var plan = CreateInitialStarterStationRelocationPlan(payload, _system.Stations);
+
+        if (plan.Diagnostic != null)
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage(plan.Diagnostic, SystemMessagePriority.ImportantWarning));
+
+        if (!plan.ShouldRelocate)
+            return false;
+
+        _simulation.RequestStationRelocation(
+            plan.StationPersistenceId!,
+            InitialStarterStationStandOffMeters);
+        return true;
+    }
 
     // ── Ecliptic tilt ─────────────────────────────────────────────────────────
 

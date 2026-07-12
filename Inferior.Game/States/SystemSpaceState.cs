@@ -89,6 +89,7 @@ public sealed partial class SystemSpaceState : GameState
 
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
+    private bool _waitingForStarterRelocationSnapshot;
 
     // ── Cached body positions ─────────────────────────────────────────────────
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
@@ -223,8 +224,12 @@ public sealed partial class SystemSpaceState : GameState
 
     public override void OnEnter(object? payload)
     {
+        SystemSpacePayload? initialStarterRelocationPayload = null;
+
         if (payload is SystemSpacePayload p)
         {
+            if (IsInitialNewGameStarterEntry(p))
+                initialStarterRelocationPayload = p;
             _star            = p.Star;
             _system          = StarSystem.Generate(p.Star, GalaxyGenerator.SystemSeed(p.Star));
             _gameTimeSeconds = p.GameTime;
@@ -336,6 +341,10 @@ public sealed partial class SystemSpaceState : GameState
         }
 
         _simulation.InstallSystem(_star, _system);
+        _waitingForStarterRelocationSnapshot = false;
+
+        if (initialStarterRelocationPayload != null)
+            _waitingForStarterRelocationSnapshot = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
 
         // BasicEffect — our shader
         _effect = new BasicEffect(_gd)
@@ -487,6 +496,8 @@ public sealed partial class SystemSpaceState : GameState
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         BlinkClock.Update(dt);
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
+        if (_waitingForStarterRelocationSnapshot && _frameShipSnap != null)
+            _waitingForStarterRelocationSnapshot = false;
         if (_frameShipSnap != null)
         {
             string prevRefName = _refName;
@@ -751,6 +762,8 @@ public sealed partial class SystemSpaceState : GameState
     {
         _frameSpriteBatch = sb;
         gd.Clear(ColBackground);
+        if (_waitingForStarterRelocationSnapshot)
+            return;
 
         // ── 3D scene ──────────────────────────────────────────────────────────
 
