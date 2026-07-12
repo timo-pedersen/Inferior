@@ -1220,35 +1220,42 @@ public sealed class SpaceSimulation : Simulation
             : Quaternion.Identity;
 
         var currentRot = Matrix.CreateFromQuaternion(current);
+        var currentForwardV = Vector3.Transform(-Vector3.UnitZ, currentRot);
+        DVec3 currentForward = IsFinite(currentForwardV)
+            ? new DVec3(currentForwardV.X, currentForwardV.Y, currentForwardV.Z)
+            : new DVec3(0, 0, -1);
+        if (!TryNormalize(currentForward, out currentForward))
+            currentForward = new DVec3(0, 0, -1);
+
+        double dot = System.Math.Clamp(DVec3.Dot(currentForward, forward), -1.0, 1.0);
+        if (dot > 0.999999)
+            return current;
+
         var currentUpV = Vector3.Transform(Vector3.UnitY, currentRot);
-        DVec3 upHint = IsFinite(currentUpV)
+        DVec3 currentUp = IsFinite(currentUpV)
             ? new DVec3(currentUpV.X, currentUpV.Y, currentUpV.Z)
             : DVec3.UnitY;
+        if (!TryNormalize(currentUp, out currentUp))
+            currentUp = DVec3.UnitY;
 
-        DVec3 up = upHint - forward * DVec3.Dot(upHint, forward);
-        if (!TryNormalize(up, out up))
+        DVec3 axis = DVec3.Cross(currentForward, forward);
+        if (!TryNormalize(axis, out axis))
         {
-            DVec3 fallbackUp = System.Math.Abs(DVec3.Dot(forward, DVec3.UnitY)) < 0.9
-                ? DVec3.UnitY
-                : DVec3.UnitX;
-            up = fallbackUp - forward * DVec3.Dot(fallbackUp, forward);
-            if (!TryNormalize(up, out up))
-                up = DVec3.UnitZ;
+            axis = dot < 0.0 ? currentUp : DVec3.UnitY;
+            axis -= currentForward * DVec3.Dot(axis, currentForward);
+            if (!TryNormalize(axis, out axis))
+                axis = System.Math.Abs(DVec3.Dot(currentForward, DVec3.UnitY)) < 0.9
+                    ? DVec3.UnitY
+                    : DVec3.UnitX;
         }
 
-        DVec3 right = DVec3.Cross(forward, up);
-        if (!TryNormalize(right, out right))
-            right = DVec3.UnitX;
-        up = DVec3.Cross(right, forward);
-        TryNormalize(up, out up);
-
-        var m = new Matrix(
-             (float)right.X,   (float)right.Y,   (float)right.Z,   0f,
-             (float)up.X,      (float)up.Y,      (float)up.Z,      0f,
-            -(float)forward.X, -(float)forward.Y, -(float)forward.Z, 0f,
-             0f,               0f,               0f,               1f);
-
-        return Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(m));
+        float angle = dot < -0.999999
+            ? MathF.PI
+            : (float)System.Math.Acos(dot);
+        var delta = Quaternion.CreateFromAxisAngle(
+            new Vector3((float)axis.X, (float)axis.Y, (float)axis.Z),
+            angle);
+        return Quaternion.Normalize(delta * current);
     }
 
     private void UpdateReferenceFrame(Ship ship)
