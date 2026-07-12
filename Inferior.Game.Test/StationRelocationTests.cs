@@ -1,0 +1,281 @@
+using Inferior.Core.DataBus;
+using Inferior.Core.Math;
+using Inferior.Core.Simulation;
+using Inferior.Galaxy;
+using Inferior.Game;
+using Inferior.Gameplay;
+using Inferior.Gameplay.Ship;
+using Microsoft.Xna.Framework;
+using Xunit;
+
+namespace Inferior.Game.Test;
+
+public sealed class StationRelocationTests
+{
+    private const double StandOffMeters = 2_000.0;
+
+    [Fact]
+    public void RelocationPlacesShipAtRequestedStandOffForStarStation()
+    {
+        var sample = FindStation(station => station.OrbitParent == null);
+        AssertRelocatedToStation(sample);
+    }
+
+    [Fact]
+    public void RelocationPlacesShipAtRequestedStandOffForPlanetStation()
+    {
+        var sample = FindStation((system, station) =>
+            station.OrbitParent != null && system.Planets.Contains(station.OrbitParent));
+        AssertRelocatedToStation(sample);
+    }
+
+    [Fact]
+    public void RelocationPlacesShipAtRequestedStandOffForMoonStation()
+    {
+        var sample = FindStation((system, station) =>
+            station.OrbitParent != null
+            && system.Planets.Any(planet => planet.Children.Contains(station.OrbitParent)));
+        AssertRelocatedToStation(sample);
+    }
+
+    [Fact]
+    public void RelocationResolvesIdentityAgainstInstalledSystemInstance()
+    {
+        var source = FindStation(station => station.PersistenceId != null);
+        var installedSystem = StarSystem.Generate(source.Star, GalaxyGenerator.SystemSeed(source.Star));
+        var installedStation = installedSystem.Stations.Single(station => station.PersistenceId == source.Station.PersistenceId);
+
+        var result = RunRelocation(source.Star, installedSystem, source.Station.PersistenceId!, OldShipPosition());
+
+        Assert.Same(installedStation, result.Diagnostic.NearestStation);
+        Assert.Equal(installedStation.PersistenceId, result.Diagnostic.NearestStationId);
+    }
+
+    [Fact]
+    public void FacingOrientationHandlesParallelAndAntiparallelCases()
+    {
+        AssertFacing(Quaternion.Identity, new DVec3(0, 0, -1));
+        AssertFacing(Quaternion.Identity, new DVec3(0, 0, 1));
+        AssertFacing(Quaternion.Identity, DVec3.UnitY);
+    }
+
+    [Fact]
+    public void MatchShipVelocityToReferenceIsSharedOperation()
+    {
+        var ship = new Ship { Velocity = new DVec3(1, 2, 3) };
+        var referenceVelocity = new DVec3(-4, 5, -6);
+
+        SpaceSimulation.MatchShipVelocityToReference(ship, referenceVelocity);
+
+        AssertVecClose(referenceVelocity, ship.Velocity, 0.0);
+    }
+
+    [Fact]
+    public void RelocationDoesNotPublishXStopComplete()
+    {
+        var sample = FindStation(station => station.PersistenceId != null);
+        var messages = new List<SystemMessage>();
+        void Handler(SystemMessage message) => messages.Add(message);
+
+        DataBus.Drain();
+        DataBus.System.Subscribe(Topics.System.All, Handler);
+        try
+        {
+            RunRelocation(sample.Star, sample.System, sample.Station.PersistenceId!, OldShipPosition());
+            DataBus.Drain();
+        }
+        finally
+        {
+            DataBus.System.Unsubscribe(Topics.System.All, Handler);
+        }
+
+        Assert.DoesNotContain(messages, message => message.Text == "X-Stop complete");
+    }
+
+    [Fact]
+    public void RelocationSnapshotIsNotDisturbedByHeldInput()
+    {
+        var sample = FindStation(station => station.PersistenceId != null);
+        var noisyInput = PlayerInput.Zero with
+        {
+            PitchInput = 2.0,
+            YawInput = -1.0,
+            RollInput = 1.0,
+            ThrustForward = 1.0,
+            XStopToggle = true,
+            AfterburnerToggle = true,
+        };
+
+        var result = RunRelocation(
+            sample.Star,
+            sample.System,
+            sample.Station.PersistenceId!,
+            OldShipPosition(),
+            noisyInput);
+        DVec3 stationGalaxy = EclipticToGalaxy(
+            sample.System,
+            sample.System.GetStationPosition(sample.Station, result.Snapshot.SimTime));
+        double facingDot = DVec3.Dot(
+            result.Snapshot.Forward,
+            (stationGalaxy - result.Snapshot.Position).Normalized());
+
+        Assert.True(facingDot >= 0.9999, $"Ship forward dot to station was {facingDot:R}");
+        AssertVecClose(result.Snapshot.ReferenceVelocity, result.Snapshot.Velocity, 1e-6);
+        Assert.InRange(result.Snapshot.RelativeSpeedMs, 0.0, 1e-6);
+    }
+
+    [Fact]
+    public void RelocationAndXStopUseSharedVelocityMatchAndNoStationParentTraversal()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoRoot(), "Inferior.Game", "SpaceSimulation.cs"));
+
+        Assert.Contains("MatchShipVelocityToReference(ship, refVel);", source);
+        Assert.Contains("MatchShipVelocityToReference(ship, GetRefVelocity());", source);
+        Assert.DoesNotContain("ship.Velocity = refVel;", source);
+        Assert.DoesNotContain("OrbitParent", source);
+    }
+
+    [Fact]
+    public void GenericTeleportPathStillZeroesVelocity()
+    {
+        string source = File.ReadAllText(Path.Combine(RepoRoot(), "Inferior.Game", "SpaceSimulation.cs"));
+
+        Assert.Contains("private sealed record TeleportRequest(DVec3 Position, Quaternion Orientation);", source);
+        Assert.Contains("var teleport = _teleportRequest;", source);
+        Assert.Contains("ship.Position = teleport.Position;", source);
+        Assert.Contains("ship.Velocity = DVec3.Zero;", source);
+        Assert.Contains("ship.SetOrientation(teleport.Orientation);", source);
+    }
+
+    private static void AssertRelocatedToStation(StationSample sample)
+    {
+        var result = RunRelocation(sample.Star, sample.System, sample.Station.PersistenceId!, OldShipPosition());
+        var snapshot = result.Snapshot;
+        var diagnostic = result.Diagnostic;
+        DVec3 stationGalaxy = EclipticToGalaxy(sample.System, sample.System.GetStationPosition(sample.Station, snapshot.SimTime));
+        double radius = SpaceSimulation.StationPhysicalRadius(sample.Station);
+        double centreDistance = (snapshot.Position - stationGalaxy).Length;
+        double surfaceDistance = centreDistance - radius;
+        DVec3 desiredForward = (stationGalaxy - snapshot.Position).Normalized();
+        double facingDot = DVec3.Dot(snapshot.Forward, desiredForward);
+
+        Assert.InRange(System.Math.Abs(surfaceDistance - StandOffMeters), 0.0, 0.01);
+        Assert.True(facingDot >= 0.9999, $"Ship forward dot to station was {facingDot:R}");
+        AssertFiniteNormalized(snapshot.Orientation);
+        AssertVecClose(snapshot.ReferenceVelocity, snapshot.Velocity, 1e-6);
+        Assert.InRange(snapshot.RelativeSpeedMs, 0.0, 1e-6);
+        Assert.Equal(sample.Station.Name, snapshot.ReferenceName);
+        Assert.Equal("station:" + sample.Station.Name, snapshot.ReferenceSourceId);
+
+        Assert.Equal(snapshot.SimTime, diagnostic.SnapshotSimTime);
+        AssertVecClose(snapshot.Position, diagnostic.SnapshotShipPosition, 0.0);
+        Assert.Equal(sample.Station.PersistenceId, diagnostic.NearestStationId);
+        Assert.InRange(System.Math.Abs(diagnostic.SurfaceDistance - StandOffMeters), 0.0, 0.01);
+        Assert.Equal(snapshot.LkmZone, diagnostic.PublishedLkmZone);
+        Assert.Equal(snapshot.LkmMaxGear, diagnostic.PublishedMaxGearIndex);
+    }
+
+    private static RelocationResult RunRelocation(
+        Star star,
+        StarSystem system,
+        string stationPersistenceId,
+        DVec3 oldShipPosition,
+        PlayerInput? input = null)
+    {
+        GameClock.Reset();
+        DataBus.Drain();
+
+        var simulation = new SpaceSimulation();
+        var ship = new Ship
+        {
+            Position = oldShipPosition,
+            Velocity = new DVec3(123.0, -456.0, 789.0),
+        };
+
+        simulation.SetShip(ship);
+        simulation.InstallSystem(star, system);
+        simulation.RequestStationRelocation(stationPersistenceId, StandOffMeters);
+        simulation.TickForTests(input ?? PlayerInput.Zero, 1.0 / 60.0);
+
+        Assert.NotNull(simulation.ShipState);
+        Assert.NotNull(simulation.LastStationProximityTickDiagnostic);
+        return new RelocationResult(simulation.ShipState!, simulation.LastStationProximityTickDiagnostic!);
+    }
+
+    private static void AssertFacing(Quaternion currentOrientation, DVec3 desiredForward)
+    {
+        Quaternion orientation = SpaceSimulation.CreateShipFacingOrientation(currentOrientation, desiredForward);
+        var transformedForward = Vector3.Transform(-Vector3.UnitZ, Matrix.CreateFromQuaternion(orientation));
+        var forward = new DVec3(transformedForward.X, transformedForward.Y, transformedForward.Z).Normalized();
+        double dot = DVec3.Dot(forward, desiredForward.Normalized());
+
+        Assert.True(dot >= 0.9999, $"Ship local -Z dot to desired forward was {dot:R}");
+        AssertFiniteNormalized(orientation);
+    }
+
+    private static StationSample FindStation(Func<Station, bool> predicate)
+        => FindStation((_, station) => predicate(station));
+
+    private static StationSample FindStation(Func<StarSystem, Station, bool> predicate)
+    {
+        foreach (var star in GalaxyGenerator.Generate())
+        {
+            var system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+            foreach (var station in system.Stations)
+            {
+                if (station.PersistenceId != null && predicate(system, station))
+                    return new StationSample(star, system, station);
+            }
+        }
+
+        throw new InvalidOperationException("No generated station matched the requested case.");
+    }
+
+    private static DVec3 OldShipPosition()
+        => new(1.0e9, 2.0e9, -3.0e9);
+
+    private static DVec3 EclipticToGalaxy(StarSystem system, DVec3 ecliptic)
+        => CoordinateTransforms.EclipticToGalaxy(
+            ecliptic,
+            system.EclipticTiltAzimuthRadians,
+            system.EclipticTiltRadians);
+
+    private static void AssertVecClose(DVec3 expected, DVec3 actual, double tolerance)
+    {
+        Assert.InRange(System.Math.Abs(expected.X - actual.X), 0.0, tolerance);
+        Assert.InRange(System.Math.Abs(expected.Y - actual.Y), 0.0, tolerance);
+        Assert.InRange(System.Math.Abs(expected.Z - actual.Z), 0.0, tolerance);
+    }
+
+    private static void AssertFiniteNormalized(Quaternion quaternion)
+    {
+        Assert.True(float.IsFinite(quaternion.X));
+        Assert.True(float.IsFinite(quaternion.Y));
+        Assert.True(float.IsFinite(quaternion.Z));
+        Assert.True(float.IsFinite(quaternion.W));
+
+        double length = System.Math.Sqrt(
+            quaternion.X * quaternion.X
+            + quaternion.Y * quaternion.Y
+            + quaternion.Z * quaternion.Z
+            + quaternion.W * quaternion.W);
+        Assert.InRange(System.Math.Abs(length - 1.0), 0.0, 1e-5);
+    }
+
+    private static string RepoRoot()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "Inferior.slnx")))
+            directory = directory.Parent;
+
+        if (directory == null)
+            throw new InvalidOperationException("Could not locate repository root.");
+
+        return directory.FullName;
+    }
+
+    private sealed record StationSample(Star Star, StarSystem System, Station Station);
+    private sealed record RelocationResult(
+        SpaceSimulation.ShipSnapshot Snapshot,
+        SpaceSimulation.StationProximityTickDiagnostic Diagnostic);
+}
