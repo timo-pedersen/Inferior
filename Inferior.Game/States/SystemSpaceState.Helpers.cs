@@ -150,6 +150,7 @@ public sealed partial class SystemSpaceState
     {
         _star   = star;
         _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+        _stationCycle.Reset();
         ComputeEclipticRotation();
         _simulation.InstallSystem(_star, _system);
 
