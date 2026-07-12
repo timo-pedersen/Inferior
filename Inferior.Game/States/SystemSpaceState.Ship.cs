@@ -119,8 +119,12 @@ public sealed partial class SystemSpaceState
         if (gearChangeSteps != 0)
             gearSequence = ++_gearInputSequence;
 
+        bool xStopToggle = keys.IsKeyDown(Keys.X) && !_prevKeys.IsKeyDown(Keys.X);
+        long xStopSequence = xStopToggle ? ++_xStopInputSequence : 0;
+
         return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput) with
         {
+            XStopToggleSequence = xStopSequence,
             GearChangeSequence = gearSequence,
             GearChangeSteps = gearChangeSteps
         };
