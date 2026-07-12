@@ -5,6 +5,7 @@ using Inferior.Galaxy;
 using Inferior.Game;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Ship;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -57,6 +58,38 @@ public sealed class StationRelocationTests
         AssertFacing(Quaternion.Identity, new DVec3(0, 0, -1));
         AssertFacing(Quaternion.Identity, new DVec3(0, 0, 1));
         AssertFacing(Quaternion.Identity, DVec3.UnitY);
+        AssertFacing(Quaternion.Identity, -DVec3.UnitY);
+    }
+
+    [Fact]
+    public void FacingOrientationMatchesShipCameraAndRenderedMeshConventions()
+    {
+        DVec3[] directions =
+        [
+            DVec3.UnitX,
+            -DVec3.UnitX,
+            DVec3.UnitY,
+            -DVec3.UnitY,
+            DVec3.UnitZ,
+            -DVec3.UnitZ,
+            new DVec3(0.37, -0.21, 0.91).Normalized(),
+        ];
+
+        foreach (DVec3 direction in directions)
+            AssertFacing(Quaternion.Identity, direction);
+    }
+
+    [Fact]
+    public void OppositeDirectionDoesNotPassFacingConvention()
+    {
+        DVec3 desiredForward = new DVec3(0.37, -0.21, 0.91).Normalized();
+        Quaternion orientation = SpaceSimulation.CreateShipFacingOrientation(
+            Quaternion.Identity,
+            desiredForward);
+
+        Assert.False(ShipForwardPasses(orientation, -desiredForward));
+        Assert.False(CameraForwardPasses(orientation, -desiredForward));
+        Assert.False(RenderedMeshNosePasses(orientation, -desiredForward));
     }
 
     [Fact]
@@ -205,12 +238,38 @@ public sealed class StationRelocationTests
     private static void AssertFacing(Quaternion currentOrientation, DVec3 desiredForward)
     {
         Quaternion orientation = SpaceSimulation.CreateShipFacingOrientation(currentOrientation, desiredForward);
-        var transformedForward = Vector3.Transform(-Vector3.UnitZ, Matrix.CreateFromQuaternion(orientation));
-        var forward = new DVec3(transformedForward.X, transformedForward.Y, transformedForward.Z).Normalized();
-        double dot = DVec3.Dot(forward, desiredForward.Normalized());
 
-        Assert.True(dot >= 0.9999, $"Ship local -Z dot to desired forward was {dot:R}");
+        Assert.True(ShipForwardPasses(orientation, desiredForward), "Ship.Forward did not match desired forward.");
+        Assert.True(CameraForwardPasses(orientation, desiredForward), "Camera forward did not match desired forward.");
+        Assert.True(RenderedMeshNosePasses(orientation, desiredForward), "Rendered mesh nose did not match desired forward.");
         AssertFiniteNormalized(orientation);
+    }
+
+    private static bool ShipForwardPasses(Quaternion orientation, DVec3 desiredForward)
+    {
+        var ship = new Ship();
+        ship.SetOrientation(orientation);
+        double dot = DVec3.Dot(ship.Forward, desiredForward.Normalized());
+        return dot >= 0.9999;
+    }
+
+    private static bool CameraForwardPasses(Quaternion orientation, DVec3 desiredForward)
+    {
+        var camera = new Camera3D(DVec3.Zero, 16f / 9f);
+        camera.SetPose(DVec3.Zero, orientation);
+        var forward = new DVec3(camera.Forward.X, camera.Forward.Y, camera.Forward.Z);
+        double dot = DVec3.Dot(forward.Normalized(), desiredForward.Normalized());
+        return dot >= 0.9999;
+    }
+
+    private static bool RenderedMeshNosePasses(Quaternion orientation, DVec3 desiredForward)
+    {
+        var meshNoseV = Vector3.Transform(
+            Vector3.UnitZ,
+            Matrix.CreateRotationY(MathF.PI) * Matrix.CreateFromQuaternion(orientation));
+        var meshNose = new DVec3(meshNoseV.X, meshNoseV.Y, meshNoseV.Z);
+        double dot = DVec3.Dot(meshNose.Normalized(), desiredForward.Normalized());
+        return dot >= 0.9999;
     }
 
     private static StationSample FindStation(Func<Station, bool> predicate)
