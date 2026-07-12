@@ -3,6 +3,7 @@ using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Core.Simulation;
 using Inferior.Galaxy;
+using Inferior.Game.Input;
 using Inferior.Game.Hyperspace;
 using Inferior.Game.StationGen;
 using Inferior.Game.UI;
@@ -169,6 +170,7 @@ public sealed partial class SystemSpaceState : GameState
     private bool  _tpCamPosValid;
     private bool _prevIsGameActive = true;
     private bool _prevUiMouseMode;
+    private readonly MouseLookRebaser _shipMouseLook = new();
 
     // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
@@ -459,6 +461,7 @@ public sealed partial class SystemSpaceState : GameState
             GalaxyToEcliptic, on => { if (_shield != null) _shield.PowerOn = on; });
         _uiMouseMode     = false;
         _debugCameraMode = false;
+        _shipMouseLook.RequestRebase();
 
         // Restore panel layout if returning from system map
         if (payload is SystemSpacePayload { Layout: { } layout })
@@ -586,6 +589,7 @@ public sealed partial class SystemSpaceState : GameState
             {
                 if (_frameShipSnap != null)
                     _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+                _shipMouseLook.RequestRebase();
             }
             _debugCameraMode = !_debugCameraMode;
             if (_debugCameraMode) _thirdPersonMode = false;  // can't combine with debug cam
@@ -605,8 +609,12 @@ public sealed partial class SystemSpaceState : GameState
         // Also suppress look-input on the first frame after focus is regained — the OS
         // typically delivers a large accumulated delta on that frame (alt-tab / snipping tool).
         bool focusJustRegained = IsGameActive && !_prevIsGameActive;
+        if (focusJustRegained)
+            _shipMouseLook.RequestRebase();
         _prevIsGameActive = IsGameActive;
         bool justExitedUiMode = _prevUiMouseMode && !_uiMouseMode;
+        if (justExitedUiMode)
+            _shipMouseLook.RequestRebase();
         _prevUiMouseMode = _uiMouseMode;
         var lookMouse = (IsGameActive && !focusJustRegained && !justExitedUiMode) ? mouse : new MouseState(
             _gd.Viewport.Width / 2, _gd.Viewport.Height / 2,
@@ -616,6 +624,7 @@ public sealed partial class SystemSpaceState : GameState
 
         if (_uiMouseMode)
         {
+            _shipMouseLook.RequestRebase();
             // UI mode — UI gets mouse/keyboard; ship rotation is frozen.
             _cockpitUI.HandleUiInput(dt, new InputState(mouse, _prevMouse, keys, _prevKeys));
             if (_debugCameraMode)
@@ -653,6 +662,7 @@ public sealed partial class SystemSpaceState : GameState
         }
         else if (_debugCameraMode)
         {
+            _shipMouseLook.RequestRebase();
             // Debug camera — free-look, ship receives no input and stays put.
             // Cursor is locked to window centre (same as ship mode) so look is always-on.
             _camera.BaseVelocity = _refVelocity;
@@ -664,6 +674,7 @@ public sealed partial class SystemSpaceState : GameState
         }
         else if (_hyperspace.Mode is FlightMode.EnteringFlatHyperspace or FlightMode.FlatHyperspace)
         {
+            _shipMouseLook.RequestRebase();
             // Hyperspace — sim is frozen; camera is driven directly by UpdateEnteringHyperspace /
             // UpdateFlatHyperspace. Do NOT let ship-follow overwrite the camera pose here.
             _simulation.SetInput(PlayerInput.Zero);
@@ -673,7 +684,7 @@ public sealed partial class SystemSpaceState : GameState
         {
             // Ship mode — input goes to the simulation; camera follows cockpit or third-person orbit.
             // Cursor is locked to window centre so mouse can't escape the window.
-            _lastFlightInput = BuildShipInput(lookMouse, keys);
+            _lastFlightInput = BuildShipInput(lookMouse, keys, IsGameActive);
             _simulation.SetInput(_lastFlightInput);
             if (_frameShipSnap != null)
             {
