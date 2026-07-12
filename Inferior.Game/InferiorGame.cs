@@ -68,7 +68,8 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
         var galaxy    = GalaxyGenerator.Generate();
         var startStar = FindStartStar(galaxy);
-        _stateMachine.Start(GameStateId.SystemSpace, new SystemSpacePayload(startStar, null, 0.0, null));
+        _stateMachine.Start(GameStateId.SystemSpace,
+            new SystemSpacePayload(startStar, null, 0.0, null, InitialNewGameStarterEntry: true));
     }
 
     protected override void Update(GameTime gameTime)
@@ -103,7 +104,7 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
 
     // ── Startup helper ────────────────────────────────────────────────────────
 
-    private static Star FindStartStar(Star[] galaxy)
+    internal static Star FindStartStar(Star[] galaxy)
     {
         // Target: 50% of the way from galactic centre toward the right edge (positive X)
         const double targetX = GalaxyGenerator.GalaxyRadiusLY * 0.5;
