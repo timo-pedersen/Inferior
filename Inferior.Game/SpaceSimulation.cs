@@ -120,6 +120,13 @@ public sealed class SpaceSimulation : Simulation
     public void TeleportShip(DVec3 position, Quaternion orientation)
         => _teleportRequest = new TeleportRequest(position, orientation);
 
+    private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
+    private volatile StationRelocationRequest? _stationRelocationRequest;
+    private bool _stationRelocationAppliedThisTick;
+
+    public void RequestStationRelocation(string stationPersistenceId, double surfaceStandOffMeters)
+        => _stationRelocationRequest = new StationRelocationRequest(stationPersistenceId, surfaceStandOffMeters);
+
     // ── Flight mode override (main thread → sim thread, used by hyperspace) ──
     // -1 = no override pending; otherwise cast to FlightMode.
     private volatile int _flightModeOverride = -1;
@@ -269,6 +276,19 @@ public sealed class SpaceSimulation : Simulation
     private const double PhysG               = 6.674e-11;
     private const double ShipCollisionRadius = 5.0;
 
+    internal void TickForTests(PlayerInput input, double dt)
+    {
+        CommandBus.Drain();
+        GameClock.Advance(dt);
+        UpdateEnvironment();
+        TickPhysics(input, dt);
+        TickPower(dt);
+        TickDamage(dt);
+        TickRadar();
+        TickEMP(dt);
+        Publish();
+    }
+
     // ── TickPhysics ───────────────────────────────────────────────────────────
 
     protected override void TickPhysics(PlayerInput input, double dt)
@@ -296,6 +316,11 @@ public sealed class SpaceSimulation : Simulation
         }
 
         UpdateReferenceFrame(ship);
+        if (_stationRelocationAppliedThisTick)
+        {
+            _stationRelocationAppliedThisTick = false;
+            goto PublishSnapshot;
+        }
 
         // ── Afterburner toggle (rising edge; SystemNewtonian only; no re-trigger while active) ──
         if (input.AfterburnerToggle && !_prevAfterburnerToggle && !_afterburnerActive
@@ -472,6 +497,7 @@ public sealed class SpaceSimulation : Simulation
         }
 
         // ── Snapshot ──────────────────────────────────────────────────────
+        PublishSnapshot:
         FlightMode snapMode = _currentFlightMode == FlightMode.AtmosphericNewtonian && _slipstreamModeActive
             ? FlightMode.AtmosphericSlipstream
             : _currentFlightMode;
@@ -609,7 +635,7 @@ public sealed class SpaceSimulation : Simulation
                     _xStopCompleteAnnounced = true;
                     DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop complete"));
                 }
-                ship.Velocity = refVel;
+                MatchShipVelocityToReference(ship, refVel);
             }
             else
             {
@@ -1102,6 +1128,129 @@ public sealed class SpaceSimulation : Simulation
         _pendingSystemContext = null;
     }
 
+    private void ApplyPendingStationRelocation(Ship ship, SystemContext context, double simTime)
+    {
+        var request = _stationRelocationRequest;
+        if (request == null) return;
+        _stationRelocationRequest = null;
+
+        if (string.IsNullOrWhiteSpace(request.StationPersistenceId))
+        {
+            RejectStationRelocation("invalid station identity");
+            return;
+        }
+
+        if (!double.IsFinite(request.SurfaceStandOffMeters) || request.SurfaceStandOffMeters < 0.0)
+        {
+            RejectStationRelocation("invalid stand-off distance");
+            return;
+        }
+
+        Station? station = ResolveStationByPersistenceId(context.System, request.StationPersistenceId);
+        if (station == null)
+        {
+            RejectStationRelocation($"station '{request.StationPersistenceId}' not found in installed system");
+            return;
+        }
+
+        DVec3 stationEclipticPos = context.System.GetStationPosition(station, simTime);
+        DVec3 stationGalaxyPos = EclipticToGalaxy(stationEclipticPos);
+        if (!IsFinite(stationGalaxyPos))
+        {
+            RejectStationRelocation($"station '{request.StationPersistenceId}' has non-finite live position");
+            return;
+        }
+
+        double stationRadius = StationPhysicalRadius(station);
+        if (!double.IsFinite(stationRadius) || stationRadius <= 0.0)
+        {
+            RejectStationRelocation($"station '{request.StationPersistenceId}' has invalid canonical radius");
+            return;
+        }
+
+        DVec3 offsetDirection = DirectionOrFallback(ship.Position - stationGalaxyPos);
+        double centreDistance = stationRadius + request.SurfaceStandOffMeters;
+        DVec3 relocatedPosition = stationGalaxyPos + offsetDirection * centreDistance;
+        if (!IsFinite(relocatedPosition))
+        {
+            RejectStationRelocation($"station '{request.StationPersistenceId}' relocation position is non-finite");
+            return;
+        }
+
+        Quaternion orientation = CreateShipFacingOrientation(ship.Orientation, stationGalaxyPos - relocatedPosition);
+        if (!IsFinite(orientation))
+        {
+            RejectStationRelocation($"station '{request.StationPersistenceId}' relocation orientation is non-finite");
+            return;
+        }
+
+        ship.Position = relocatedPosition;
+        ship.SetOrientation(orientation);
+
+        UpdateReferenceFrame(ship);
+        MatchShipVelocityToReference(ship, GetRefVelocity());
+        _prevRefVel = _referenceVelocity;
+        _prevRefSourceId = _referenceSourceId;
+        _stationRelocationAppliedThisTick = true;
+
+        if (_xStopActive)
+            _xStopCompleteAnnounced = true;
+    }
+
+    private static Station? ResolveStationByPersistenceId(StarSystem system, string stationPersistenceId)
+    {
+        foreach (var station in system.Stations)
+            if (string.Equals(station.PersistenceId, stationPersistenceId, StringComparison.Ordinal))
+                return station;
+        return null;
+    }
+
+    private static void RejectStationRelocation(string reason)
+        => DataBus.System.Publish(Topics.System.All,
+            new SystemMessage($"Station relocation rejected: {reason}", SystemMessagePriority.ImportantWarning));
+
+    internal static void MatchShipVelocityToReference(Ship ship, DVec3 referenceVelocity)
+        => ship.Velocity = referenceVelocity;
+
+    internal static Quaternion CreateShipFacingOrientation(Quaternion currentOrientation, DVec3 desiredWorldForward)
+    {
+        DVec3 forward = DirectionOrFallback(desiredWorldForward);
+        Quaternion current = IsFinite(currentOrientation)
+            ? Quaternion.Normalize(currentOrientation)
+            : Quaternion.Identity;
+
+        var currentRot = Matrix.CreateFromQuaternion(current);
+        var currentUpV = Vector3.Transform(Vector3.UnitY, currentRot);
+        DVec3 upHint = IsFinite(currentUpV)
+            ? new DVec3(currentUpV.X, currentUpV.Y, currentUpV.Z)
+            : DVec3.UnitY;
+
+        DVec3 up = upHint - forward * DVec3.Dot(upHint, forward);
+        if (!TryNormalize(up, out up))
+        {
+            DVec3 fallbackUp = System.Math.Abs(DVec3.Dot(forward, DVec3.UnitY)) < 0.9
+                ? DVec3.UnitY
+                : DVec3.UnitX;
+            up = fallbackUp - forward * DVec3.Dot(fallbackUp, forward);
+            if (!TryNormalize(up, out up))
+                up = DVec3.UnitZ;
+        }
+
+        DVec3 right = DVec3.Cross(forward, up);
+        if (!TryNormalize(right, out right))
+            right = DVec3.UnitX;
+        up = DVec3.Cross(right, forward);
+        TryNormalize(up, out up);
+
+        var m = new Matrix(
+             (float)right.X,   (float)right.Y,   (float)right.Z,   0f,
+             (float)up.X,      (float)up.Y,      (float)up.Z,      0f,
+            -(float)forward.X, -(float)forward.Y, -(float)forward.Z, 0f,
+             0f,               0f,               0f,               1f);
+
+        return Quaternion.Normalize(Quaternion.CreateFromRotationMatrix(m));
+    }
+
     private void UpdateReferenceFrame(Ship ship)
     {
         const double StationDist = 25_000.0;
@@ -1286,10 +1435,25 @@ public sealed class SpaceSimulation : Simulation
     {
         ApplyPendingSystemContext();
         var context = _systemContext;
-        if (context == null) return;
+        if (context == null)
+        {
+            RejectPendingStationRelocation("no system context installed");
+            return;
+        }
+
         var ship = _ship;
-        if (ship == null) return;
+        if (ship == null)
+        {
+            RejectPendingStationRelocation("no ship installed");
+            return;
+        }
+
         double simTime = GameClock.SimTime;
+        _eclipticAz = context.System.EclipticTiltAzimuthRadians;
+        _eclipticTilt = context.System.EclipticTiltRadians;
+
+        ApplyPendingStationRelocation(ship, context, simTime);
+
         long tickSequence = ++_stationProximityTickSequence;
         _currentStationProximityTickSequence = tickSequence;
 
@@ -1311,19 +1475,7 @@ public sealed class SpaceSimulation : Simulation
 
         DVec3 pos = ship.Position;
         DVec3 vel = ship.Velocity;
-
-        double az   = context.System.EclipticTiltAzimuthRadians;
-        double tilt = context.System.EclipticTiltRadians;
-        double kx   = System.Math.Cos(az), kz = System.Math.Sin(az);
-        double cosA = System.Math.Cos(-tilt), sinA = System.Math.Sin(-tilt);
-        double dot  = kx * pos.X + kz * pos.Z;
-        DVec3 shipEcliptic = new DVec3(
-            pos.X * cosA + (           - kz * pos.Y) * sinA + kx * dot * (1.0 - cosA),
-            pos.Y * cosA + (kz * pos.X - kx * pos.Z) * sinA,
-            pos.Z * cosA + (kx * pos.Y             ) * sinA + kz * dot * (1.0 - cosA));
-
-        _eclipticAz   = az;
-        _eclipticTilt = tilt;
+        DVec3 shipEcliptic = GalaxyToEcliptic(pos);
 
         // Find nearest body surface altitude (for Slipstream dropout check)
         _nearBodyAltitude = double.MaxValue;
@@ -1408,13 +1560,49 @@ public sealed class SpaceSimulation : Simulation
             nearestSurfaceDistance);
     }
 
-    private static double StationPhysicalRadius(Station station) => station.Size switch
+    private void RejectPendingStationRelocation(string reason)
+    {
+        if (_stationRelocationRequest == null)
+            return;
+
+        _stationRelocationRequest = null;
+        RejectStationRelocation(reason);
+    }
+
+    internal static double StationPhysicalRadius(Station station) => station.Size switch
     {
         StationSize.Small  =>  250.0,
         StationSize.Medium =>  800.0,
         StationSize.Large  => 2500.0,
         _                  =>  250.0,
     };
+
+    private static DVec3 DirectionOrFallback(DVec3 direction)
+        => TryNormalize(direction, out var normalized) ? normalized : DVec3.UnitY;
+
+    private static bool TryNormalize(DVec3 value, out DVec3 normalized)
+    {
+        normalized = DVec3.Zero;
+        if (!IsFinite(value))
+            return false;
+
+        double length = value.Length;
+        if (!double.IsFinite(length) || length < 1e-9)
+            return false;
+
+        normalized = value / length;
+        return IsFinite(normalized);
+    }
+
+    private static bool IsFinite(DVec3 value)
+        => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
+
+    private static bool IsFinite(Vector3 value)
+        => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private static bool IsFinite(Quaternion value)
+        => float.IsFinite(value.X) && float.IsFinite(value.Y)
+        && float.IsFinite(value.Z) && float.IsFinite(value.W);
 
     private static void CollectBody(SimWorld world, OrbitalBody body, DVec3 parentPos, double gameTime)
     {
