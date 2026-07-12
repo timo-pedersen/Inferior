@@ -10,7 +10,9 @@ internal static class ShipInputMapper
         KeyboardState prevKeys,
         MouseState mouse,
         MouseState prevMouse,
-        MouseLookInput lookInput)
+        MouseLookInput lookInput,
+        long gearChangeSequence
+        )
     {
         // Thrust: keyboard axes, -1..1
         // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = roll
@@ -26,10 +28,21 @@ internal static class ShipInputMapper
         bool xStopToggle       = keys.IsKeyDown(Keys.X) && !prevKeys.IsKeyDown(Keys.X);
         bool afterburnerToggle = keys.IsKeyDown(Keys.Z) && !prevKeys.IsKeyDown(Keys.Z);
 
-        // Scroll wheel -> one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
-        int  scroll   = mouse.ScrollWheelValue - prevMouse.ScrollWheelValue;
-        bool gearUp   = scroll > 0;
-        bool gearDown = scroll < 0;
+        //// Scroll wheel -> one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
+        //int  scroll   = mouse.ScrollWheelValue - prevMouse.ScrollWheelValue;
+        //bool gearUp   = scroll > 0;
+        //bool gearDown = scroll < 0;
+
+        // Scroll wheel → one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
+        int scroll = mouse.ScrollWheelValue - prevMouse.ScrollWheelValue;
+        int gearChangeSteps = scroll / 120;
+        if (gearChangeSteps == 0 && scroll != 0)
+            gearChangeSteps = scroll > 0 ? 1 : -1;
+        long gearSequence = 0;
+        if (gearChangeSteps != 0)
+            gearSequence = ++gearChangeSequence;
+        bool gearUp = gearChangeSteps > 0;
+        bool gearDown = gearChangeSteps < 0;
 
         return new PlayerInput(fwd, lat, vert, roll, lookInput.PitchInput, lookInput.YawInput, false,
             FlightAssistToggle: faToggle,
@@ -37,6 +50,9 @@ internal static class ShipInputMapper
             XStopToggle:        xStopToggle,
             GearUp:             gearUp,
             GearDown:           gearDown,
-            AfterburnerToggle:  afterburnerToggle);
+            AfterburnerToggle:  afterburnerToggle,
+            GearChangeSequence: gearSequence,
+            GearChangeSteps:    gearChangeSteps);
+
     }
 }

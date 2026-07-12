@@ -176,6 +176,7 @@ public sealed partial class SystemSpaceState : GameState
 
     // Last thrust input from ship mode — preserved so UI mode keeps the same velocity.
     private PlayerInput _lastFlightInput = PlayerInput.Zero;
+    private long _gearInputSequence;
 
     // ── Flat Hyperspace ───────────────────────────────────────────────────────
     private FlatHyperspaceController _hyperspace = null!;

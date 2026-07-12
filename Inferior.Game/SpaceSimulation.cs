@@ -63,6 +63,15 @@ public sealed class SpaceSimulation : Simulation
         double SurfaceDistance);
 
     internal readonly record struct LkmClassification(int Zone, int MaxGear);
+    internal readonly record struct SlipstreamDebugState(
+        FlightMode FlightMode,
+        int HarmonicIndex,
+        double CurrentSpeed,
+        double StartSpeed,
+        double TargetSpeed,
+        bool Transitioning,
+        double TransitionTimer,
+        long LastConsumedGearChangeSequence);
 
     private double _nextMessageAt = 8.0;
     private bool   _startupPublished;
@@ -271,6 +280,7 @@ public sealed class SpaceSimulation : Simulation
     public void SetPadTarget(LandingPadData? data) => _activePadTarget = data;
 
     private double _lastDt;
+    private long _lastConsumedGearChangeSequence;
 
     // ── Physics constants ─────────────────────────────────────────────────────
     private const double PhysG               = 6.674e-11;
@@ -400,6 +410,8 @@ public sealed class SpaceSimulation : Simulation
         _prevSlipstreamToggle = input.SlipstreamToggle;
 
         // ── Newtonian gear shifts ─────────────────────────────────────────
+        int gearChangeSteps = ConsumeGearChange(input);
+
         if (_currentFlightMode == FlightMode.SystemNewtonian)
         {
             double[] gears  = ship.NewtonianGears;
@@ -411,8 +423,8 @@ public sealed class SpaceSimulation : Simulation
         }
         else if (_currentFlightMode == FlightMode.SystemSlipstream)
         {
-            if (input.GearUp || input.GearDown)
-                ShiftSlipstreamHarmonic(ship, input.GearUp ? 1 : -1);
+            if (gearChangeSteps != 0)
+                ShiftSlipstreamHarmonic(ship, gearChangeSteps);
         }
 
         // ── FlightMode transition (Space ↔ Atmosphere) ───────────────────
@@ -1042,8 +1054,6 @@ public sealed class SpaceSimulation : Simulation
 
     private void ShiftSlipstreamHarmonic(Ship ship, int direction)
     {
-        if (_slipstreamTransitioning) return;  // debounce during transition
-
         double[] harmonics = ship.SlipstreamHarmonics;
         int newIdx = System.Math.Clamp(_slipstreamHarmonicIndex + direction, 0, harmonics.Length - 1);
         if (newIdx == _slipstreamHarmonicIndex) return;
@@ -1054,6 +1064,49 @@ public sealed class SpaceSimulation : Simulation
         _slipstreamTransitioning   = true;
         _slipstreamTransitionTimer = FlightConstants.SlipstreamAccelSeconds;
     }
+
+    private int ConsumeGearChange(PlayerInput input)
+    {
+        if (input.GearChangeSequence <= 0 ||
+            input.GearChangeSequence == _lastConsumedGearChangeSequence)
+            return 0;
+
+        _lastConsumedGearChangeSequence = input.GearChangeSequence;
+        return input.GearChangeSteps;
+    }
+
+    internal void DebugTickPhysics(PlayerInput input, double dt) => TickPhysics(input, dt);
+
+    internal void DebugPublish() => Publish();
+
+    internal void DebugSetFlightModeImmediately(FlightMode mode)
+    {
+        _currentFlightMode = mode;
+        _flightModeOverride = -1;
+    }
+
+    internal void DebugSetNearBodyAltitude(double altitudeM, double radiusM = 1_000_000.0)
+    {
+        _nearBodyAltitude = altitudeM;
+        _nearBodyRadius = radiusM;
+        _nearBodyEclipticPos = DVec3.Zero;
+        _nearBodyRef = null;
+    }
+
+    internal void DebugSetNearestStationDistance(double distanceM)
+    {
+        _nearestStationDistance = distanceM;
+    }
+
+    internal SlipstreamDebugState DebugSlipstreamState => new(
+        _currentFlightMode,
+        _slipstreamHarmonicIndex,
+        _slipstreamCurrentSpeed,
+        _slipstreamStartSpeed,
+        _slipstreamTargetSpeed,
+        _slipstreamTransitioning,
+        _slipstreamTransitionTimer,
+        _lastConsumedGearChangeSequence);
 
     private void TriggerClunk(double durationMs)
     {

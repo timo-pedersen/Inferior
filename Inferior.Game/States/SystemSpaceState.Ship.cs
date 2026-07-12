@@ -110,7 +110,32 @@ public sealed partial class SystemSpaceState
             focused,
             MouseSensitivity);
 
-        return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput);
+        // Thrust — keyboard axes, -1..1
+        // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = roll
+        double fwd  = (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
+        double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
+        double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
+        double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
+
+        // V = Flight Assist toggle, G = Slipstream/mode toggle, X = X-Stop, Z = Afterburner
+        // (all rising-edge sent to sim; sim owns the actual enabled/active state)
+        bool faToggle          = keys.IsKeyDown(Keys.V) && !_prevKeys.IsKeyDown(Keys.V);
+        bool slipstreamToggle  = keys.IsKeyDown(Keys.G) && !_prevKeys.IsKeyDown(Keys.G);
+        bool xStopToggle       = keys.IsKeyDown(Keys.X) && !_prevKeys.IsKeyDown(Keys.X);
+        bool afterburnerToggle = keys.IsKeyDown(Keys.Z) && !_prevKeys.IsKeyDown(Keys.Z);
+
+        // Scroll wheel → one gear shift per tick (forwarded to sim; debug cam handles its own scroll)
+        int  scroll          = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+        int  gearChangeSteps = scroll / 120;
+        if (gearChangeSteps == 0 && scroll != 0)
+            gearChangeSteps = scroll > 0 ? 1 : -1;
+        long gearSequence    = 0;
+        if (gearChangeSteps != 0)
+            gearSequence = ++_gearInputSequence;
+        bool gearUp   = gearChangeSteps > 0;
+        bool gearDown = gearChangeSteps < 0;
+
+        return ShipInputMapper.Build(keys, _prevKeys, mouse, _prevMouse, lookInput, gearSequence);
     }
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
