@@ -44,4 +44,43 @@ public sealed partial class SystemSpaceState
         tex.SetData(data);
         return tex;
     }
+
+    private static Texture2D CreateStationShadowUvGrid(GraphicsDevice gd, int size = 256)
+    {
+        var tex = new Texture2D(gd, size, size);
+        var data = new Color[size * size];
+        int gridStep = Math.Max(1, size / 8);
+
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float u = size <= 1 ? 0f : x / (float)(size - 1);
+            float v = size <= 1 ? 0f : y / (float)(size - 1);
+            bool grid = x % gridStep == 0 || y % gridStep == 0;
+            bool centre = Math.Abs(x - size / 2) <= 1 || Math.Abs(y - size / 2) <= 1;
+            Color c = new(
+                (byte)MathHelper.Clamp(u * 255f, 0f, 255f),
+                (byte)MathHelper.Clamp(v * 255f, 0f, 255f),
+                (byte)(u < 0.5f == v < 0.5f ? 48 : 160),
+                (byte)255);
+
+            if (grid)
+                c = Color.White;
+            if (centre)
+                c = Color.Yellow;
+            if (x < 10 && y < 10)
+                c = Color.Red;
+            else if (x >= size - 10 && y < 10)
+                c = Color.Lime;
+            else if (x < 10 && y >= size - 10)
+                c = Color.Blue;
+            else if (x >= size - 10 && y >= size - 10)
+                c = Color.Magenta;
+
+            data[y * size + x] = c;
+        }
+
+        tex.SetData(data);
+        return tex;
+    }
 }

@@ -22,6 +22,7 @@ public sealed partial class SystemSpaceState
         {
             var modules = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
             _stationGeometry[station] = modules;
+            LogStationModuleDebugLegend(station, modules);
 
             foreach (var mod in modules)
             {
@@ -53,7 +54,9 @@ public sealed partial class SystemSpaceState
                 Vector3.TransformNormal(SceneLighting.SunDirection, inverseStationRot));
 
             var shadow = new StationShadowMap(_gd, StationShadowMath.GetStationShadowMapSize());
-            shadow.Build(_stationShadowEffect, modules, _hullMeshes, _decoMeshes, _glassMeshes, stationLocalSun);
+            shadow.Build(StationShadowIdentity(station), _stationShadowEffect, modules,
+                _hullMeshes, _decoMeshes, _glassMeshes, stationLocalSun,
+                StationNormalShadowOffsetMetres);
             _stationShadows[station] = shadow;
         }
     }
@@ -64,12 +67,33 @@ public sealed partial class SystemSpaceState
         {
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
             if (!_stationShadows.TryGetValue(station, out var shadow)) continue;
+            if (ReferenceEquals(station, _stationShadowFrozenStation)) continue;
 
             Vector3 stationLocalSun = CurrentStationLocalSunDirection(station);
             if (Vector3.Dot(shadow.StationLocalSunDirection, stationLocalSun) >= StationShadowSunDirectionRefreshDot)
                 continue;
 
-            shadow.Build(_stationShadowEffect, modules, _hullMeshes, _decoMeshes, _glassMeshes, stationLocalSun);
+            shadow.Build(StationShadowIdentity(station), _stationShadowEffect, modules,
+                _hullMeshes, _decoMeshes, _glassMeshes, stationLocalSun,
+                StationNormalShadowOffsetMetres);
+        }
+    }
+
+    private static string StationShadowIdentity(Galaxy.Station station)
+        => station.PersistenceId ?? station.Name;
+
+    private static void LogStationModuleDebugLegend(Galaxy.Station station, IReadOnlyList<PlacedModule> modules)
+    {
+        System.Diagnostics.Debug.WriteLine(
+            $"[StationShadowModuleId] station=\"{StationShadowIdentity(station)}\" moduleCount={modules.Count}");
+
+        for (int i = 0; i < modules.Count; i++)
+        {
+            var color = ModuleDebugColor(i);
+            System.Diagnostics.Debug.WriteLine(
+                $"[StationShadowModuleId] index={i} definition={modules[i].Definition.Id} " +
+                $"category={modules[i].Definition.Category} depth={modules[i].Depth} " +
+                $"color=({color.R},{color.G},{color.B})");
         }
     }
 
@@ -83,6 +107,7 @@ public sealed partial class SystemSpaceState
 
     private void DisposeStationGeometry()
     {
+        _stationShadowFrozenStation = null;
         _stationGeometry.Clear();
         foreach (var v in _decoMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }

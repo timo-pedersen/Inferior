@@ -27,13 +27,23 @@ public sealed partial class SystemSpaceState
 {
     private enum StationShadowDebugMode
     {
-        ShadowMapDepth,
-        ZeroBiasShadow,
+        LightCameraSolid,
+        CasterCoverage,
+        ReceiverUvGrid,
         ReceiverDepth,
         SampledCasterDepth,
-        DepthDifference,
+        DepthDelta,
         SlopeFactor,
-        FinalBiasedShadow,
+        ModuleId,
+        MeshClass,
+        CasterOwnerMatch,
+        SelectedModuleHullDepthDelta,
+        BiasNoBiasNoNormalOffset,
+        BiasDepthOnlyNoNormalOffset,
+        BiasNormalOffsetOnly,
+        BiasProductionCombination,
+        AnalyticPlaneCorrectedDepthDelta,
+        AnalyticPlaneCorrectedBinary,
     }
 
     // ── 3D drawing ────────────────────────────────────────────────────────────
@@ -74,6 +84,7 @@ public sealed partial class SystemSpaceState
         _stationShadowEffect.Parameters["NormalShadowOffsetMetres"]?.SetValue(StationNormalShadowOffsetMetres);
         _stationShadowEffect.Parameters["ShadowDebugMode"]?.SetValue(ShaderStationShadowDebugMode());
         _stationShadowEffect.Parameters["ShadowDebugDifferenceScale"]?.SetValue(StationShadowDebugDifferenceScale);
+        _stationShadowEffect.Parameters["ShadowDebugTexture"]?.SetValue(_stationShadowUvGrid);
 
         foreach (var (station, universePos) in _stationPositions)
         {
@@ -90,35 +101,45 @@ public sealed partial class SystemSpaceState
             _stationShadowEffect.Parameters["LightView"]?.SetValue(shadow.LightView);
             _stationShadowEffect.Parameters["LightDepthNear"]?.SetValue(shadow.DepthRange.Near);
             _stationShadowEffect.Parameters["LightDepthFar"]?.SetValue(shadow.DepthRange.Far);
+            _stationShadowEffect.Parameters["ShadowMapSize"]?.SetValue((float)shadow.Texture.Width);
+            _stationShadowEffect.Parameters["ShadowProjectionSize"]?.SetValue(shadow.LightProjectionSize);
             _stationShadowEffect.Parameters["ShadowMap"]?.SetValue(shadow.Texture);
+            _stationShadowEffect.Parameters["CasterOwnerMap"]?.SetValue(shadow.CasterOwnerTexture);
+            _stationShadowEffect.Parameters["SelectedHullDepthMap"]?.SetValue(shadow.SelectedModuleHullDepthTexture);
 
-            foreach (var mod in modules)
+            for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
             {
+                var mod = modules[moduleIndex];
                 if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
                 if (mod.TextureInstance == null) continue;
 
                 Matrix world = StationRenderWorld(mod, stationRot, renderPos, rs);
                 DrawStationMesh("StationHull", hull.vb, hull.ib, hull.triCount, world,
-                    mod.Transform, mod.TextureInstance, emissive: false);
+                    mod.Transform, mod.TextureInstance, emissive: false,
+                    ModuleDebugColor(moduleIndex), MeshClassDebugColor(StationMeshClass.Hull));
             }
 
-            foreach (var mod in modules)
+            for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
             {
+                var mod = modules[moduleIndex];
                 if (!decoMeshesForLevel.TryGetValue(mod, out var deco)) continue;
 
                 Matrix world = StationRenderWorld(mod, stationRot, renderPos, rs);
                 DrawStationMesh("StationBaked", deco.vb, deco.ib, deco.triCount, world,
                     mod.Transform, mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture),
-                    emissive: false);
+                    emissive: false,
+                    ModuleDebugColor(moduleIndex), MeshClassDebugColor(StationMeshClass.Decoration));
             }
 
-            foreach (var mod in modules)
+            for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
             {
+                var mod = modules[moduleIndex];
                 if (!_glassMeshes.TryGetValue(mod, out var glass)) continue;
 
                 Matrix world = StationRenderWorld(mod, stationRot, renderPos, rs);
                 DrawStationMesh("StationBaked", glass.vb, glass.ib, glass.triCount, world,
-                    mod.Transform, StationTextureRegistry.White, emissive: true);
+                    mod.Transform, StationTextureRegistry.White, emissive: true,
+                    ModuleDebugColor(moduleIndex), MeshClassDebugColor(StationMeshClass.Glass));
             }
         }
     }
@@ -135,13 +156,16 @@ public sealed partial class SystemSpaceState
 
     private void DrawStationMesh(
         string technique, VertexBuffer vb, IndexBuffer ib, int triCount,
-        Matrix world, Matrix stationLocalWorld, Texture2D texture, bool emissive)
+        Matrix world, Matrix stationLocalWorld, Texture2D texture, bool emissive,
+        Color moduleDebugColor, Color meshClassDebugColor)
     {
         _stationShadowEffect.CurrentTechnique = _stationShadowEffect.Techniques[technique];
         _stationShadowEffect.Parameters["World"]?.SetValue(world);
         _stationShadowEffect.Parameters["StationLocalWorld"]?.SetValue(stationLocalWorld);
         _stationShadowEffect.Parameters["DiffuseTexture"]?.SetValue(texture);
         _stationShadowEffect.Parameters["EmissiveSurface"]?.SetValue(emissive ? 1f : 0f);
+        _stationShadowEffect.Parameters["ShadowDebugSolidColor"]?.SetValue(
+            ShaderStationShadowSolidColor(moduleDebugColor, meshClassDebugColor));
 
         _gd.SetVertexBuffer(vb);
         _gd.Indices = ib;
@@ -166,7 +190,7 @@ public sealed partial class SystemSpaceState
         int size = Math.Min(256, Math.Min(_gd.Viewport.Width, _gd.Viewport.Height) / 3);
         if (size <= 0) return;
 
-        sb.Draw(shadow.Texture, new Rectangle(12, 12, size, size), Color.White);
+        sb.Draw(StationShadowDebugPanelTexture(shadow), new Rectangle(12, 12, size, size), Color.White);
         sb.Draw(_pixel, new Rectangle(12, 12, size, 1), Color.White);
         sb.Draw(_pixel, new Rectangle(12, 12 + size - 1, size, 1), Color.White);
         sb.Draw(_pixel, new Rectangle(12, 12, 1, size), Color.White);
@@ -177,10 +201,13 @@ public sealed partial class SystemSpaceState
         float slopeBiasMetres = StationSlopeShadowBias * depthMetres;
         float maxBiasMetres = StationMaxShadowBias * depthMetres;
         string stationName = station?.Name ?? "<unknown>";
+        bool isFrozen = ReferenceEquals(station, _stationShadowFrozenStation);
+        string frozenMarker = isFrozen ? " - FROZEN" : "";
         string text =
-            $"Station shadow debug: {stationName} / {StationShadowDebugModeName(_stationShadowDebugMode)}\n" +
-            "F9 show/hide, F8 cycle\n" +
+            $"Station shadow debug: {stationName} / {StationShadowDebugModeName(_stationShadowDebugMode)}{frozenMarker}\n" +
+            "F9 show/hide, F8 cycle, Ctrl+Shift+F freeze\n" +
             $"target={shadow.Texture.Width}x{shadow.Texture.Height} format={shadow.SurfaceFormat}\n" +
+            $"solid={shadow.LightCameraSolidTexture.Width}x{shadow.LightCameraSolidTexture.Height} coverage={shadow.CasterCoverageTexture.Width}x{shadow.CasterCoverageTexture.Height}\n" +
             $"near={shadow.DepthRange.Near:0.###}m far={shadow.DepthRange.Far:0.###}m span={depthMetres:0.###}m\n" +
             $"bias norm base={StationBaseShadowBias:0.000000} slope={StationSlopeShadowBias:0.000000} max={StationMaxShadowBias:0.000000}\n" +
             $"bias metres base={baseBiasMetres:0.###} slope={slopeBiasMetres:0.###} max={maxBiasMetres:0.###}\n" +
@@ -189,12 +216,44 @@ public sealed partial class SystemSpaceState
         Vector2 pos = new(12, 20 + size);
         sb.DrawString(_font, text, pos + new Vector2(1, 1), Color.Black);
         sb.DrawString(_font, text, pos, Color.White);
+        if (isFrozen)
+            DrawStationShadowFrozenBadge(sb, pos + new Vector2(0, -18));
+
+        if (_stationShadowDebugMode == StationShadowDebugMode.ModuleId &&
+            station != null &&
+            _stationGeometry.TryGetValue(station, out var modules))
+        {
+            DrawStationModuleDebugLegend(sb, modules, new Vector2(12, pos.Y + 118));
+        }
+        else if (_stationShadowDebugMode == StationShadowDebugMode.MeshClass)
+        {
+            DrawStationMeshClassLegend(sb, new Vector2(12, pos.Y + 118));
+        }
+        else if (_stationShadowDebugMode == StationShadowDebugMode.CasterOwnerMatch)
+        {
+            DrawStationCasterOwnerLegend(sb, new Vector2(12, pos.Y + 118));
+        }
+        else if (IsStationShadowBiasDecompositionMode(_stationShadowDebugMode))
+        {
+            DrawStationBiasDecompositionLegend(sb, new Vector2(12, pos.Y + 118));
+        }
+        else if (IsStationShadowAnalyticPlaneCorrectionMode(_stationShadowDebugMode))
+        {
+            DrawStationAnalyticPlaneCorrectionLegend(sb, new Vector2(12, pos.Y + 118));
+        }
     }
 
     private bool TrySelectStationShadowDebugTarget(out Galaxy.Station? station, out StationShadowMap? shadow)
     {
         station = null;
         shadow = null;
+
+        if (_stationShadowFrozenStation != null &&
+            _stationShadows.TryGetValue(_stationShadowFrozenStation, out shadow))
+        {
+            station = _stationShadowFrozenStation;
+            return true;
+        }
 
         Galaxy.Station? bestStation = null;
         StationShadowMap? bestShadow = null;
@@ -263,6 +322,25 @@ public sealed partial class SystemSpaceState
         }
 
         return false;
+    }
+
+    private void ToggleStationShadowDiagnosticFreeze()
+    {
+        if (_stationShadowFrozenStation != null)
+        {
+            _stationShadowFrozenStation = null;
+            return;
+        }
+
+        if (!_showStationShadowDebug)
+            return;
+
+        if (TrySelectStationShadowDebugTarget(out var station, out var shadow) &&
+            station != null &&
+            shadow != null)
+        {
+            _stationShadowFrozenStation = station;
+        }
     }
 
     private bool TrySelectStationShadowDebugTargetByName(
@@ -368,33 +446,256 @@ public sealed partial class SystemSpaceState
 
         return _stationShadowDebugMode switch
         {
-            StationShadowDebugMode.ZeroBiasShadow => 1,
-            StationShadowDebugMode.ReceiverDepth => 2,
-            StationShadowDebugMode.SampledCasterDepth => 3,
-            StationShadowDebugMode.DepthDifference => 4,
-            StationShadowDebugMode.SlopeFactor => 5,
-            StationShadowDebugMode.FinalBiasedShadow => 6,
+            StationShadowDebugMode.ReceiverUvGrid => 3,
+            StationShadowDebugMode.ReceiverDepth => 4,
+            StationShadowDebugMode.SampledCasterDepth => 5,
+            StationShadowDebugMode.SlopeFactor => 6,
+            StationShadowDebugMode.DepthDelta => 7,
+            StationShadowDebugMode.ModuleId => 8,
+            StationShadowDebugMode.MeshClass => 9,
+            StationShadowDebugMode.CasterOwnerMatch => 10,
+            StationShadowDebugMode.SelectedModuleHullDepthDelta => 11,
+            StationShadowDebugMode.BiasNoBiasNoNormalOffset => 12,
+            StationShadowDebugMode.BiasDepthOnlyNoNormalOffset => 13,
+            StationShadowDebugMode.BiasNormalOffsetOnly => 14,
+            StationShadowDebugMode.BiasProductionCombination => 15,
+            StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta => 16,
+            StationShadowDebugMode.AnalyticPlaneCorrectedBinary => 17,
             _ => 0,
         };
     }
 
     private static StationShadowDebugMode NextStationShadowDebugMode(StationShadowDebugMode mode)
-        => mode == StationShadowDebugMode.FinalBiasedShadow
-            ? StationShadowDebugMode.ShadowMapDepth
+        => mode == StationShadowDebugMode.AnalyticPlaneCorrectedBinary
+            ? StationShadowDebugMode.LightCameraSolid
             : (StationShadowDebugMode)((int)mode + 1);
 
     private static string StationShadowDebugModeName(StationShadowDebugMode mode)
         => mode switch
         {
-            StationShadowDebugMode.ShadowMapDepth => "stored shadow-map depth",
-            StationShadowDebugMode.ZeroBiasShadow => "zero-bias shadow factor",
+            StationShadowDebugMode.LightCameraSolid => "LightCameraSolid",
+            StationShadowDebugMode.CasterCoverage => "CasterCoverage",
+            StationShadowDebugMode.ReceiverUvGrid => "ReceiverUvGrid",
             StationShadowDebugMode.ReceiverDepth => "receiver normalized light depth",
             StationShadowDebugMode.SampledCasterDepth => "sampled caster depth",
-            StationShadowDebugMode.DepthDifference => "receiver minus caster depth",
-            StationShadowDebugMode.SlopeFactor => "ndotl / slope factor",
-            StationShadowDebugMode.FinalBiasedShadow => "final biased shadow factor",
+            StationShadowDebugMode.DepthDelta => "receiver minus caster depth",
+            StationShadowDebugMode.SlopeFactor => "slope factor",
+            StationShadowDebugMode.ModuleId => "ModuleId",
+            StationShadowDebugMode.MeshClass => "MeshClass",
+            StationShadowDebugMode.CasterOwnerMatch => "CasterOwnerMatch",
+            StationShadowDebugMode.SelectedModuleHullDepthDelta => "module #5 hull-only receiver minus caster depth",
+            StationShadowDebugMode.BiasNoBiasNoNormalOffset => "A: binary no bias, no normal offset",
+            StationShadowDebugMode.BiasDepthOnlyNoNormalOffset => "B: binary depth bias only",
+            StationShadowDebugMode.BiasNormalOffsetOnly => "C: binary normal offset only",
+            StationShadowDebugMode.BiasProductionCombination => "D: binary current production combination",
+            StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta => "analytic plane-corrected receiver minus caster depth",
+            StationShadowDebugMode.AnalyticPlaneCorrectedBinary => "analytic plane-corrected binary, no bias or offset",
             _ => mode.ToString(),
         };
+
+    private Texture2D StationShadowDebugPanelTexture(StationShadowMap shadow)
+        => _stationShadowDebugMode switch
+        {
+            StationShadowDebugMode.LightCameraSolid => shadow.LightCameraSolidTexture,
+            StationShadowDebugMode.CasterCoverage => shadow.CasterCoverageTexture,
+            StationShadowDebugMode.ReceiverUvGrid => _stationShadowUvGrid,
+            StationShadowDebugMode.SelectedModuleHullDepthDelta => shadow.SelectedModuleHullDepthTexture,
+            _ => shadow.Texture,
+        };
+
+    private static bool IsStationShadowBiasDecompositionMode(StationShadowDebugMode mode)
+        => mode == StationShadowDebugMode.BiasNoBiasNoNormalOffset
+        || mode == StationShadowDebugMode.BiasDepthOnlyNoNormalOffset
+        || mode == StationShadowDebugMode.BiasNormalOffsetOnly
+        || mode == StationShadowDebugMode.BiasProductionCombination;
+
+    private static bool IsStationShadowAnalyticPlaneCorrectionMode(StationShadowDebugMode mode)
+        => mode == StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta
+        || mode == StationShadowDebugMode.AnalyticPlaneCorrectedBinary;
+
+    private enum StationMeshClass
+    {
+        Hull,
+        Decoration,
+        Glass,
+    }
+
+    internal static Color ModuleDebugColor(int moduleIndex)
+    {
+        ReadOnlySpan<Color> palette =
+        [
+            new Color(230, 60, 60),
+            new Color(60, 190, 80),
+            new Color(70, 120, 240),
+            new Color(235, 205, 70),
+            new Color(220, 90, 220),
+            new Color(80, 220, 220),
+            new Color(245, 140, 55),
+            new Color(170, 110, 245),
+            new Color(150, 220, 80),
+            new Color(240, 120, 150),
+            new Color(120, 170, 255),
+            new Color(210, 210, 210),
+        ];
+
+        return palette[moduleIndex % palette.Length];
+    }
+
+    private static Color MeshClassDebugColor(StationMeshClass meshClass)
+        => meshClass switch
+        {
+            StationMeshClass.Hull => Color.Red,
+            StationMeshClass.Decoration => Color.Lime,
+            StationMeshClass.Glass => Color.Blue,
+            _ => Color.White,
+        };
+
+    private Vector4 ShaderStationShadowSolidColor(Color moduleDebugColor, Color meshClassDebugColor)
+    {
+        Color c = _stationShadowDebugMode == StationShadowDebugMode.MeshClass
+            ? meshClassDebugColor
+            : moduleDebugColor;
+        return c.ToVector4();
+    }
+
+    private void DrawStationModuleDebugLegend(SpriteBatch sb, IReadOnlyList<PlacedModule> modules, Vector2 pos)
+    {
+        int count = Math.Min(modules.Count, 18);
+        for (int i = 0; i < count; i++)
+        {
+            Color c = ModuleDebugColor(i);
+            var row = pos + new Vector2(0, i * 16);
+            sb.Draw(_pixel, new Rectangle((int)row.X, (int)row.Y + 3, 10, 10), c);
+            string label = $"{i}: {modules[i].Definition.Id}";
+            sb.DrawString(_font, label, row + new Vector2(14, 1), Color.Black);
+            sb.DrawString(_font, label, row + new Vector2(13, 0), Color.White);
+        }
+
+        if (modules.Count > count)
+        {
+            string more = $"+ {modules.Count - count} more modules";
+            var row = pos + new Vector2(0, count * 16);
+            sb.DrawString(_font, more, row + new Vector2(1, 1), Color.Black);
+            sb.DrawString(_font, more, row, Color.White);
+        }
+    }
+
+    private void DrawStationMeshClassLegend(SpriteBatch sb, Vector2 pos)
+    {
+        DrawLegendRow(sb, pos + new Vector2(0, 0), Color.Red, "Hull");
+        DrawLegendRow(sb, pos + new Vector2(0, 16), Color.Lime, "Decoration");
+        DrawLegendRow(sb, pos + new Vector2(0, 32), Color.Blue, "Glass");
+    }
+
+    private void DrawStationCasterOwnerLegend(SpriteBatch sb, Vector2 pos)
+    {
+        DrawLegendRow(sb, pos + new Vector2(0, 0), Color.Lime, "sampled caster = receiver module");
+        DrawLegendRow(sb, pos + new Vector2(0, 16), Color.Red, "sampled caster = other module");
+        DrawLegendRow(sb, pos + new Vector2(0, 32), Color.Black, "no caster owner");
+    }
+
+    private void DrawStationBiasDecompositionLegend(SpriteBatch sb, Vector2 pos)
+    {
+        DrawLegendRow(sb, pos + new Vector2(0, 0), Color.White, "white = lit by binary comparison");
+        DrawLegendRow(sb, pos + new Vector2(0, 16), Color.Black, "black = shadowed by binary comparison");
+        string mode = _stationShadowDebugMode switch
+        {
+            StationShadowDebugMode.BiasNoBiasNoNormalOffset => "A uses unoffset UV/depth and zero bias",
+            StationShadowDebugMode.BiasDepthOnlyNoNormalOffset => "B uses unoffset UV/depth and current depth bias",
+            StationShadowDebugMode.BiasNormalOffsetOnly => "C uses normal-offset UV/depth and zero bias",
+            StationShadowDebugMode.BiasProductionCombination => "D uses normal-offset UV/depth and current depth bias",
+            _ => string.Empty,
+        };
+        Vector2 row = pos + new Vector2(0, 32);
+        sb.DrawString(_font, mode, row + new Vector2(1, 1), Color.Black);
+        sb.DrawString(_font, mode, row, Color.White);
+    }
+
+    private void DrawStationAnalyticPlaneCorrectionLegend(SpriteBatch sb, Vector2 pos)
+    {
+        if (_stationShadowDebugMode == StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta)
+        {
+            DrawLegendRow(sb, pos + new Vector2(0, 0), Color.Gray, "gray = corrected receiver minus stored caster depth");
+            DrawLegendRow(sb, pos + new Vector2(0, 16), Color.White, "fallback = uncorrected when light normal z is near zero");
+            return;
+        }
+
+        DrawLegendRow(sb, pos + new Vector2(0, 0), Color.White, "white = lit after analytic plane correction");
+        DrawLegendRow(sb, pos + new Vector2(0, 16), Color.Black, "black = shadowed after analytic plane correction");
+        string mode = "uses texel-center receiver depth, zero bias, no normal offset";
+        Vector2 row = pos + new Vector2(0, 32);
+        sb.DrawString(_font, mode, row + new Vector2(1, 1), Color.Black);
+        sb.DrawString(_font, mode, row, Color.White);
+    }
+
+    private void DrawLegendRow(SpriteBatch sb, Vector2 row, Color color, string label)
+    {
+        sb.Draw(_pixel, new Rectangle((int)row.X, (int)row.Y + 3, 10, 10), color);
+        sb.DrawString(_font, label, row + new Vector2(14, 1), Color.Black);
+        sb.DrawString(_font, label, row + new Vector2(13, 0), Color.White);
+    }
+
+    private void DrawStationShadowFrozenBadge(SpriteBatch sb, Vector2 pos)
+    {
+        const string label = "FROZEN";
+        Vector2 size = _font.MeasureString(label);
+        var rect = new Rectangle(
+            (int)pos.X - 2,
+            (int)pos.Y - 1,
+            (int)MathF.Ceiling(size.X) + 8,
+            (int)MathF.Ceiling(size.Y) + 2);
+        sb.Draw(_pixel, rect, new Color(0, 0, 0, 220));
+        sb.DrawString(_font, label, pos + new Vector2(5, 1), Color.Black);
+        sb.DrawString(_font, label, pos + new Vector2(4, 0), Color.Yellow);
+    }
+
+    private void DrawStationShadowFreezeIndicator(SpriteBatch sb)
+    {
+        if (_stationShadowFrozenStation == null)
+            return;
+
+        const string label = "FROZEN";
+        const float scale = 2.5f;
+        Vector2 size = _font.MeasureString(label) * scale;
+        Vector2 pos = new(
+            (_gd.Viewport.Width - size.X) * 0.5f,
+            18f);
+
+        var rect = new Rectangle(
+            (int)pos.X - 14,
+            (int)pos.Y - 8,
+            (int)MathF.Ceiling(size.X) + 28,
+            (int)MathF.Ceiling(size.Y) + 16);
+
+        sb.Draw(_pixel, rect, new Color(0, 0, 0, 230));
+        sb.DrawString(_font, label, pos + new Vector2(4, 4), Color.Black, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sb.DrawString(_font, label, pos, Color.Yellow, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+    }
+
+    private void DrawStationShadowFreezeInputDiagnostic(SpriteBatch sb)
+    {
+        if (_stationShadowFreezeInputNoticeSeconds <= 0.0)
+            return;
+
+        string label = _stationShadowFreezeInputNoticeChord
+            ? "CTRL+SHIFT+F DETECTED"
+            : "CTRL+SHIFT+F NOT DETECTED";
+        const float scale = 1.7f;
+        Vector2 size = _font.MeasureString(label) * scale;
+        Vector2 pos = new(
+            (_gd.Viewport.Width - size.X) * 0.5f,
+            92f);
+
+        var rect = new Rectangle(
+            (int)pos.X - 12,
+            (int)pos.Y - 7,
+            (int)MathF.Ceiling(size.X) + 24,
+            (int)MathF.Ceiling(size.Y) + 14);
+
+        sb.Draw(_pixel, rect, new Color(0, 0, 0, 225));
+        sb.DrawString(_font, label, pos + new Vector2(3, 3), Color.Black, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sb.DrawString(_font, label, pos, Color.Yellow, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+    }
 
     // Builds a VertexPositionNormalTexture hull mesh for one module (6 box faces, 24 verts).
     // Normals are local-space outward per face; BasicEffect transforms them at draw time.

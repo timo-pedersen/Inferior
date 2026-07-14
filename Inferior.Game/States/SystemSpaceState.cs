@@ -83,6 +83,7 @@ public sealed partial class SystemSpaceState : GameState
     // ── 2D overlay (SpriteBatch for HUD) ──────────────────────────────────────
     private Texture2D _pixel       = null!;
     private Texture2D _navGlowTex  = null!;  // cubic-falloff radial gradient for nav/strobe light glow
+    private Texture2D _stationShadowUvGrid = null!;
 
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
@@ -109,7 +110,10 @@ public sealed partial class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
     private readonly Dictionary<Galaxy.Station, StationShadowMap> _stationShadows = [];
     private bool _showStationShadowDebug;
-    private StationShadowDebugMode _stationShadowDebugMode = StationShadowDebugMode.ShadowMapDepth;
+    private StationShadowDebugMode _stationShadowDebugMode = StationShadowDebugMode.LightCameraSolid;
+    private Galaxy.Station? _stationShadowFrozenStation;
+    private double _stationShadowFreezeInputNoticeSeconds;
+    private bool _stationShadowFreezeInputNoticeChord;
 
     // ── Container rendering ───────────────────────────────────────────────────
     // Renderer shared with ship/hull draw calls. Each test container owns its own
@@ -388,6 +392,7 @@ public sealed partial class SystemSpaceState : GameState
         _hyperspace = new FlatHyperspaceController(_gd, _pixel, _simulation, _targeting, EnterSystem);
 
         _navGlowTex  = CreateNavGlowTexture(_gd, 64);
+        _stationShadowUvGrid = CreateStationShadowUvGrid(_gd);
         _atmosEffect = _content.Load<Effect>("Effects/Atmosphere");
 
         _celestialBodies = new CelestialBodyRenderer(_gd, _effect, _atmosEffect,
@@ -456,6 +461,7 @@ public sealed partial class SystemSpaceState : GameState
         _shipMeshRenderer?.Dispose();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
+        _stationShadowUvGrid?.Dispose();
         _stationShadowEffect = null!;
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
     }
@@ -500,7 +506,16 @@ public sealed partial class SystemSpaceState : GameState
         bool f9JustPressed  = keys.IsKeyDown(Keys.F9)  && !_prevKeys.IsKeyDown(Keys.F9);
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
+        bool fJustPressed = keys.IsKeyDown(Keys.F) && !_prevKeys.IsKeyDown(Keys.F);
         bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
+        bool leftCtrlDown = keys.IsKeyDown(Keys.LeftControl);
+        bool rightCtrlDown = keys.IsKeyDown(Keys.RightControl);
+        bool leftShiftDown = keys.IsKeyDown(Keys.LeftShift);
+        bool rightShiftDown = keys.IsKeyDown(Keys.RightShift);
+        bool ctrlDown = leftCtrlDown || rightCtrlDown;
+        bool shiftDown = leftShiftDown || rightShiftDown;
+        bool freezeBranch = fJustPressed && ctrlDown && shiftDown;
+        bool frozenBeforeFreezeChord = _stationShadowFrozenStation != null;
 
         if (tabJustPressed)
         {
@@ -516,6 +531,10 @@ public sealed partial class SystemSpaceState : GameState
         }
         if (f9JustPressed)
             _showStationShadowDebug = !_showStationShadowDebug;
+        if (freezeBranch)
+        {
+            ToggleStationShadowDiagnosticFreeze();
+        }
         if (f11JustPressed)
         {
             if (_debugCameraMode)
@@ -527,6 +546,24 @@ public sealed partial class SystemSpaceState : GameState
             _debugCameraMode = !_debugCameraMode;
             if (_debugCameraMode) _thirdPersonMode = false;  // can't combine with debug cam
         }
+        if (fJustPressed && ctrlDown && shiftDown)
+        {
+            bool frozenAfterFreezeChord = _stationShadowFrozenStation != null;
+            _stationShadowFreezeInputNoticeSeconds = 2.0;
+            _stationShadowFreezeInputNoticeChord = freezeBranch;
+            System.Diagnostics.Debug.WriteLine(
+                "[StationShadowFreezeInput] " +
+                "fPressed=true " +
+                $"leftCtrl={leftCtrlDown} " +
+                $"rightCtrl={rightCtrlDown} " +
+                $"ctrl={ctrlDown} " +
+                $"leftShift={leftShiftDown} " +
+                $"rightShift={rightShiftDown} " +
+                $"shift={shiftDown} " +
+                $"freezeBranch={freezeBranch} " +
+                $"frozenBefore={frozenBeforeFreezeChord} " +
+                $"frozenAfter={frozenAfterFreezeChord}");
+        }
         if (f3JustPressed && !_debugCameraMode)
         {
             _thirdPersonMode = !_thirdPersonMode;
@@ -535,6 +572,8 @@ public sealed partial class SystemSpaceState : GameState
 
         // Animations always run, regardless of input mode
         _cockpitUI.Tick(dt);
+        if (_stationShadowFreezeInputNoticeSeconds > 0.0)
+            _stationShadowFreezeInputNoticeSeconds = Math.Max(0.0, _stationShadowFreezeInputNoticeSeconds - dt);
 
         // When the window has no OS focus, substitute a centred mouse so look-input delta
         // stays at zero. The real mouse state is still stored in _prevMouse and used for UI
@@ -837,6 +876,8 @@ public sealed partial class SystemSpaceState : GameState
         DrawSkyboxStarOverlay(sb);
         _hyperspace.DrawOverlay(sb);
         DrawStationShadowDebugView(sb);
+        DrawStationShadowFreezeIndicator(sb);
+        DrawStationShadowFreezeInputDiagnostic(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
