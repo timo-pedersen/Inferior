@@ -82,12 +82,14 @@ public sealed partial class SystemSpaceState
 
     // Returns the RelocationSequence value a caller must wait for
     // (snapshot.RelocationSequence >= returned value) before the relocation this call
-    // queued is guaranteed resolved, or null if nothing was queued. Never a mere
-    // "ShouldRelocate" bool + fire-and-forget: a ShipSnapshot can be non-null (and get
-    // published several ticks) before the sim thread has even looked at the queued
-    // request — system install and station generation happen first — so "wait for a
-    // non-null snapshot" is not sufficient on its own.
-    private int? QueueInitialStarterStationRelocation(SystemSpacePayload payload)
+    // queued is guaranteed resolved, plus the resolved target Station (for the calibration
+    // cube's anchor — its identity is known synchronously here, from the already-generated
+    // _system.Stations, well before the ship's relocated position is). Null if nothing was
+    // queued. Never a mere "ShouldRelocate" bool + fire-and-forget: a ShipSnapshot can be
+    // non-null (and get published several ticks) before the sim thread has even looked at
+    // the queued request — system install and station generation happen first — so "wait
+    // for a non-null snapshot" is not sufficient on its own.
+    private (int Sequence, Galaxy.Station? Station)? QueueInitialStarterStationRelocation(SystemSpacePayload payload)
     {
         var plan = CreateInitialStarterStationRelocationPlan(payload, _system.Stations);
 
@@ -98,9 +100,25 @@ public sealed partial class SystemSpaceState
         if (!plan.ShouldRelocate)
             return null;
 
-        return _simulation.RequestStationRelocation(
+        int sequence = _simulation.RequestStationRelocation(
             plan.StationPersistenceId!,
             InitialStarterStationStandOffMeters);
+
+        // Station resolution failing here would mean plan.StationPersistenceId didn't
+        // actually come from _system.Stations moments ago — shouldn't happen, but the
+        // sequence is still valid either way, so Draw() correctly stops blocking once
+        // resolved; the calibration cube simply won't get an anchor.
+        var station = ResolveStationByPersistenceId(_system.Stations, plan.StationPersistenceId!);
+        return (sequence, station);
+    }
+
+    private static Galaxy.Station? ResolveStationByPersistenceId(
+        IReadOnlyList<Galaxy.Station> stations, string persistenceId)
+    {
+        foreach (var station in stations)
+            if (string.Equals(station.PersistenceId, persistenceId, StringComparison.Ordinal))
+                return station;
+        return null;
     }
 
     // See QueueInitialStarterStationRelocation's doc comment — same contract.

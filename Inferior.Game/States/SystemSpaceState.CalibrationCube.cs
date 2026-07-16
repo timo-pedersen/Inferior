@@ -23,19 +23,30 @@ public sealed partial class SystemSpaceState
     private VertexBuffer? _calibrationCubeVb;
     private IndexBuffer?  _calibrationCubeIb;
 
-    // Fixed universe position, computed once from the starter relocation result — it does
-    // not follow the player. Persists across OnEnter calls (unlike the GPU buffers above,
-    // which rebuild every entry like every other station-scene resource); only drawn while
-    // the current system matches the one it was placed in.
-    private DVec3? _calibrationCubePosition;
-    private int    _calibrationCubeStarIndex = -1;
-    private bool   _calibrationCubePending;
+    // Anchored to the starter station, translation only — NOT an absolute universe
+    // position. The station orbits at tens of km/s and the ship matches its reference
+    // frame; an absolute DVec3 captured once falls thousands of km behind within seconds
+    // and gets distance-culled (the reported "cube is ~2 AU away" bug was actually this —
+    // the ship's own reference-frame velocity carrying it away from a fixed point).
+    // DrawCalibrationCube recomputes universe position from the live station position
+    // every frame, exactly like SystemSpaceState.Containers.cs' PlacedContainer does.
+    // _calibrationCubeStation is null until the offset below has actually been captured
+    // (not merely once the station identity is known — see _calibrationCubePendingStation).
+    private Galaxy.Station? _calibrationCubeStation;
+    private DVec3           _calibrationCubeOffset;   // galaxy-space, station-relative, no rotation applied
+
+    private bool _calibrationCubePending;
     // The RelocationSequence a ShipSnapshot must reach (>=) before the starter relocation's
     // result is safe to read for cube placement — see SpaceSimulation.RequestStationRelocation's
     // doc comment. A dedicated field (not shared with _expectedRelocationSequence) so the
     // cube's wait is self-contained and can't be perturbed by an unrelated later relocation
     // request reusing that field.
-    private int    _calibrationCubeExpectedRelocationSequence;
+    private int _calibrationCubeExpectedRelocationSequence;
+    // Station identity is known synchronously at queue time (StarterSystemSelector runs
+    // over the already-generated _system.Stations); only the offset needs to wait for the
+    // async relocation snapshot. Held here between queueing and capture so
+    // _calibrationCubeStation never goes non-null before _calibrationCubeOffset is valid.
+    private Galaxy.Station? _calibrationCubePendingStation;
 
     // Called from OnEnter, unconditionally (geometry never changes, matches the
     // dispose-every-exit/rebuild-every-entry convention used for _pixel/_navGlowTex/etc.
@@ -98,9 +109,17 @@ public sealed partial class SystemSpaceState
     private void DrawCalibrationCube(DetailLevel level)
     {
         if (_calibrationCubeVb == null || _calibrationCubeIb == null || _meshRenderer == null) return;
-        if (_calibrationCubePosition == null || _star.GalaxyIndex != _calibrationCubeStarIndex) return;
+        if (_calibrationCubeStation == null) return;
 
-        Vector3 renderPos = _camera.ToRenderSpace(_calibrationCubePosition.Value);
+        // Same lookup as SystemSpaceState.Containers.cs' DrawContainers — live station
+        // position this frame, translation-only offset, no station-rotation applied (the
+        // cube must not swing around the station as it spins).
+        DVec3? stationPos = null;
+        foreach (var (s, sPos) in _stationPositions)
+            if (ReferenceEquals(s, _calibrationCubeStation)) { stationPos = sPos; break; }
+        if (stationPos == null) return;   // not in the currently-installed system this frame
+
+        Vector3 renderPos = _camera.ToRenderSpace(stationPos.Value + _calibrationCubeOffset);
         if (renderPos.Length() > 30_000f) return;
 
         float  rs   = (float)Camera3D.RenderScale;

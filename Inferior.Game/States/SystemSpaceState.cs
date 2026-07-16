@@ -329,20 +329,21 @@ public sealed partial class SystemSpaceState : GameState
 
         if (initialStarterRelocationPayload != null)
         {
-            int? expectedSeq = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
-            _waitingForStationRelocationSnapshot = expectedSeq != null;
-            if (expectedSeq != null)
+            var queued = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
+            _waitingForStationRelocationSnapshot = queued != null;
+            if (queued != null)
             {
-                _expectedRelocationSequence = expectedSeq.Value;
+                _expectedRelocationSequence = queued.Value.Sequence;
 
-                // Calibration cube position is computed once ever, from the first starter
+                // Calibration cube offset is computed once ever, from the first starter
                 // relocation's result (see Update()) — not re-armed on later starter entries
                 // (there aren't any: IsInitialNewGameStarterEntry is a true one-shot).
-                if (_calibrationCubePosition == null)
+                if (_calibrationCubeStation == null && _calibrationCubePendingStation == null
+                    && queued.Value.Station != null)
                 {
                     _calibrationCubePending = true;
-                    _calibrationCubeStarIndex = _star.GalaxyIndex;
-                    _calibrationCubeExpectedRelocationSequence = expectedSeq.Value;
+                    _calibrationCubeExpectedRelocationSequence = queued.Value.Sequence;
+                    _calibrationCubePendingStation = queued.Value.Station;
                 }
             }
         }
@@ -579,16 +580,35 @@ public sealed partial class SystemSpaceState : GameState
             && _frameShipSnap.RelocationSequence >= _expectedRelocationSequence)
             _waitingForStationRelocationSnapshot = false;
 
-        // Calibration cube position — computed once, from the first snapshot whose
+        // Calibration cube offset — captured once, from the first snapshot whose
         // RelocationSequence proves the starter relocation has actually been resolved
         // (same reasoning as above; a separate expected-sequence field so this wait can't
-        // be perturbed by an unrelated later relocation request).
+        // be perturbed by an unrelated later relocation request). Stored as a station-
+        // relative offset, not an absolute position — see SystemSpaceState.CalibrationCube.cs
+        // for why an absolute universe position falls behind the orbiting station within
+        // seconds and gets distance-culled.
         if (_calibrationCubePending && _frameShipSnap != null
             && _frameShipSnap.RelocationSequence >= _calibrationCubeExpectedRelocationSequence)
         {
-            _calibrationCubePending  = false;
-            _calibrationCubePosition = _frameShipSnap.Position
-                                     + _frameShipSnap.Forward * CalibrationCubeSpawnDistance;
+            _calibrationCubePending = false;
+            var station = _calibrationCubePendingStation;
+            _calibrationCubePendingStation = null;
+
+            if (station != null)
+            {
+                DVec3 stationGalaxyPos = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds));
+                DVec3 desiredWorldPos  = _frameShipSnap.Position
+                                       + _frameShipSnap.Forward * CalibrationCubeSpawnDistance;
+
+                _calibrationCubeOffset  = desiredWorldPos - stationGalaxyPos;
+                _calibrationCubeStation = station;   // now safe for DrawCalibrationCube to read
+
+                double distanceFromShip = (desiredWorldPos - _frameShipSnap.Position).Length;
+                System.Console.WriteLine(
+                    $"[CalibrationCube] Anchored to '{station.Name}' ({station.PersistenceId}); " +
+                    $"offset={_calibrationCubeOffset} (|offset|={_calibrationCubeOffset.Length:F1} m " +
+                    $"from station centre); distance from ship at capture = {distanceFromShip:F2} m.");
+            }
         }
         if (_frameShipSnap != null)
         {
