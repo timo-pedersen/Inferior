@@ -169,7 +169,7 @@ public sealed partial class SystemSpaceState
         _effect.LightingEnabled    = true;
 
         // MeshRenderer's Draw() leaves rasterizer/depth state set for its own techniques;
-        // restore what the rest of this frame's 3D passes expect (matches DrawTestContainers'
+        // restore what the rest of this frame's 3D passes expect (matches DrawContainers'
         // and ShipMeshRenderer.Draw's post-draw restore).
         _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
@@ -304,7 +304,7 @@ public sealed partial class SystemSpaceState
 
         // Active pass's projection (_effect.Projection), not camera.ProjectionMatrix —
         // that's only a representative mid-tier projection now that rendering uses three
-        // independent per-pass projections. Same fix as ShipMeshRenderer/DrawTestContainers.
+        // independent per-pass projections. Same fix as ShipMeshRenderer/DrawContainers.
         Matrix   viewProj  = _effect.View * _effect.Projection;
         Viewport viewport  = _gd.Viewport;
         Vector2  texCentre = new(_navGlowTex.Width * 0.5f, _navGlowTex.Height * 0.5f);

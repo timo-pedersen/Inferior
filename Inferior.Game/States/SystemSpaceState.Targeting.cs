@@ -60,21 +60,20 @@ public sealed partial class SystemSpaceState
             _radarContactIds.Add(id);
         }
 
-        // TODO: remove test containers — debug contacts for radar testing
-        foreach (var tc in _testContainers)
+        foreach (var pc in _containers)
         {
             DVec3 stPos = DVec3.Zero;
             foreach (var (s, sPos) in _stationPositions)
-                if (ReferenceEquals(s, tc.Station)) { stPos = sPos; break; }
-            DVec3 pos   = stPos + tc.Offset;
+                if (ReferenceEquals(s, pc.Station)) { stPos = sPos; break; }
+            DVec3 pos   = stPos + pc.Offset;
             DVec3 del   = pos - camPos;
             var   contact = new RadarContact(
-                tc.Id, tc.Name,
+                pc.Id, pc.Name,
                 new Vector3((float)del.X, (float)del.Y, (float)del.Z),
                 Vector3.Zero, ContactType.Debris);
             _targeting.OnContactUpdated(contact);
             _cockpitUI.NotifyRadarContact(contact);
-            _radarContactIds.Add(tc.Id);
+            _radarContactIds.Add(pc.Id);
         }
     }
 

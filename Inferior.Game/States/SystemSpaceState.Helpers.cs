@@ -40,6 +40,17 @@ public sealed partial class SystemSpaceState
 
     private void UpdateUI() { }
 
+    // Pure rails-kinematics orientation: an initial orientation advanced by a constant
+    // angular velocity (axis, rate) as a function of sim time — no stored/mutated state,
+    // evaluated fresh at draw/query time. Mirrors how Station.GetOrientation is a pure
+    // function of gameTime (spin phase + rate*time, tilt fixed). Shared by containers
+    // (SystemSpaceState.Containers.cs) and the calibration cube — both are fixed-position,
+    // spin-only rails props with no gameplay action that can move them yet.
+    private static Quaternion RailsOrientation(
+        Vector3 axis, float rateRadPerSec, double simTime, Quaternion initialOrientation)
+        => Quaternion.Normalize(
+            Quaternion.CreateFromAxisAngle(axis, (float)(rateRadPerSec * simTime)) * initialOrientation);
+
     internal static bool IsInitialNewGameStarterEntry(SystemSpacePayload payload)
         => payload.InitialNewGameStarterEntry
         && payload.TargetBody == null

@@ -95,8 +95,10 @@ public sealed partial class SystemSpaceState : GameState
     // Per-station placed module list — generated once per system entry from name seed.
     private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
-    // TODO: remove test containers — 3–6 debris contacts per station for radar testing
-    private readonly List<TestContainerEntry> _testContainers = [];
+    // Shipping containers placed around each station — ordinary world objects (real
+    // ShippingContainerFactory geometry, real rendering path); placement policy (near
+    // stations, 3-6 per station) is for testing, the objects themselves are not.
+    private readonly List<PlacedContainer> _containers = [];
     // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
     // _decoMeshes carries the wear/ambient-occlusion-graded colours (DetailLevel.Full);
     // _decoMeshesFlat is a second snapshot built before that pass ran (Medium/Minimal) —
@@ -110,8 +112,8 @@ public sealed partial class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
 
     // ── Container rendering ───────────────────────────────────────────────────
-    // Renderer shared with ship/hull draw calls. Each test container owns its own
-    // VertexBuffer/IndexBuffer (see TestContainerEntry) — geometry differs per instance.
+    // Renderer shared with ship/hull draw calls. Each container owns its own
+    // VertexBuffer/IndexBuffer (see PlacedContainer) — geometry differs per instance.
     private MeshRenderer?  _meshRenderer;
 
     // ── Ship mesh (three components, built once per session entry) ────────────
@@ -339,7 +341,7 @@ public sealed partial class SystemSpaceState : GameState
         _effect.DirectionalLight1.Enabled = false;
         _effect.DirectionalLight2.Enabled = false;
 
-        // Container renderer — geometry is built per-instance in SpawnTestContainers
+        // Container renderer — geometry is built per-instance in SpawnContainers
         _litSurfaceEffect = _content.Load<Effect>("Effects/LitSurface");
         _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
 
@@ -416,8 +418,8 @@ public sealed partial class SystemSpaceState : GameState
             }
         }
         _stationPositions.Clear();
-        foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
-        _testContainers.Clear();
+        foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
+        _containers.Clear();
         _prevCameraPosValid = false;
 
         // Skybox — galaxy stars projected onto a far sphere around the current system
@@ -500,8 +502,8 @@ public sealed partial class SystemSpaceState : GameState
         _decoMeshesFlat.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
-        foreach (var tc in _testContainers) { tc.Vb.Dispose(); tc.Ib.Dispose(); }
-        _testContainers.Clear();
+        foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
+        _containers.Clear();
         _meshRenderer?.Dispose();
         _meshRenderer = null;
         _shipMeshRenderer?.Dispose();
@@ -707,22 +709,12 @@ public sealed partial class SystemSpaceState : GameState
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio,
             (float)(MidTierNear * Camera3D.RenderScale), (float)(MidTierFar * Camera3D.RenderScale));
 
-        // Rebuild test container contacts — if newly populated this frame, repopulate
-        if (_testContainers.Count == 0 && _stationPositions.Count > 0)
-            SpawnTestContainers();
-
-        // Update container orientations (slow seeded tumble)
-        foreach (var tc in _testContainers)
-        {
-            double rate = tc.AngularVelocity.Length;
-            if (rate > 1e-10)
-            {
-                DVec3 axis  = tc.AngularVelocity / rate;
-                var   delta = Quaternion.CreateFromAxisAngle(
-                    new Vector3((float)axis.X, (float)axis.Y, (float)axis.Z), (float)(rate * dt));
-                tc.Orientation = Quaternion.Normalize(delta * tc.Orientation);
-            }
-        }
+        // Populate containers once station positions exist — a lazy one-time world
+        // population, not a per-frame simulation step. Orientation itself is on rails
+        // (pure function of sim time, evaluated at draw/query time — see RailsOrientation
+        // in SystemSpaceState.Helpers.cs), so there is nothing to update here per frame.
+        if (_containers.Count == 0 && _stationPositions.Count > 0)
+            SpawnContainers();
 
         // Update direction balls — after position rebuild so current-frame station positions
         // are used, not the previous frame's. Avoids the ~1-frame (~350 m) visual offset
@@ -941,7 +933,7 @@ public sealed partial class SystemSpaceState : GameState
         _gd.BlendState        = BlendState.Opaque;
         _gd.DepthStencilState = DepthStencilState.Default;
         DrawStations(level);
-        DrawTestContainers(level);
+        DrawContainers(level);
         if (_thirdPersonMode && _frameShipSnap != null)
             _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
                 _frameShipSnap.Position, _frameShipSnap.Orientation, level);
@@ -955,7 +947,7 @@ public sealed partial class SystemSpaceState : GameState
         _gd.BlendState        = BlendState.Opaque;
         _gd.DepthStencilState = DepthStencilState.Default;
         DrawStations(level);
-        DrawTestContainers(level);
+        DrawContainers(level);
         DrawStationGlows(_frameSpriteBatch!, 0f, (float)NearTierFar);
     }
 
