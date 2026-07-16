@@ -30,6 +30,12 @@ public sealed partial class SystemSpaceState
     private DVec3? _calibrationCubePosition;
     private int    _calibrationCubeStarIndex = -1;
     private bool   _calibrationCubePending;
+    // The RelocationSequence a ShipSnapshot must reach (>=) before the starter relocation's
+    // result is safe to read for cube placement — see SpaceSimulation.RequestStationRelocation's
+    // doc comment. A dedicated field (not shared with _expectedRelocationSequence) so the
+    // cube's wait is self-contained and can't be perturbed by an unrelated later relocation
+    // request reusing that field.
+    private int    _calibrationCubeExpectedRelocationSequence;
 
     // Called from OnEnter, unconditionally (geometry never changes, matches the
     // dispose-every-exit/rebuild-every-entry convention used for _pixel/_navGlowTex/etc.

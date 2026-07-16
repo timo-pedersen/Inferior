@@ -120,7 +120,12 @@ public sealed class SpaceSimulation : Simulation
         // Speeds relative to reference frame
         double     RelativeSpeedMs   = 0.0,    // |vel - refVel| in m/s
         double     ForwardSpeedMs    = 0.0,    // dot(vel - refVel, forward) — signed
-        double     AccelerationMs2   = 0.0);   // d(ForwardSpeedMs)/dt — signed, Newtonian only
+        double     AccelerationMs2   = 0.0,    // d(ForwardSpeedMs)/dt — signed, Newtonian only
+        // Station relocation — bumped once per resolved (accepted or rejected) request.
+        // Compare against the value RequestStationRelocation returned, not against
+        // "snapshot is non-null", to avoid racing snapshots published before the sim
+        // thread has resolved the request.
+        int        RelocationSequence = 0);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -142,8 +147,28 @@ public sealed class SpaceSimulation : Simulation
     private volatile StationRelocationRequest? _stationRelocationRequest;
     private bool _stationRelocationAppliedThisTick;
 
-    public void RequestStationRelocation(string stationPersistenceId, double surfaceStandOffMeters)
-        => _stationRelocationRequest = new StationRelocationRequest(stationPersistenceId, surfaceStandOffMeters);
+    // Bumped once per queued request the sim thread actually resolves — accepted or
+    // rejected, on whichever path consumes _stationRelocationRequest (ApplyPendingStationRelocation
+    // or RejectPendingStationRelocation). Published on ShipSnapshot so main-thread callers can
+    // observe "my request has been resolved" without racing an intervening snapshot that still
+    // carries the pre-relocation ship state — a mere non-null ShipState is not sufficient, since
+    // several ticks can publish snapshots before the sim thread even looks at the request (system
+    // install, station generation, etc. all happen first). Resolving via rejection still bumps
+    // this so a waiter can never hang forever on an invalid/rejected request.
+    private volatile int _relocationSequence;
+
+    /// <summary>
+    /// Queues a station relocation request and returns the RelocationSequence value that
+    /// ShipSnapshot.RelocationSequence will have reached once this request (or a later one
+    /// that supersedes it — the request slot is single-slot, last-write-wins, same as
+    /// before) has been resolved. Callers should wait for
+    /// snapshot.RelocationSequence >= the returned value, not merely for a non-null snapshot.
+    /// </summary>
+    public int RequestStationRelocation(string stationPersistenceId, double surfaceStandOffMeters)
+    {
+        _stationRelocationRequest = new StationRelocationRequest(stationPersistenceId, surfaceStandOffMeters);
+        return _relocationSequence + 1;
+    }
 
     // ── Flight mode override (main thread → sim thread, used by hyperspace) ──
     // -1 = no override pending; otherwise cast to FlightMode.
@@ -557,7 +582,8 @@ public sealed class SpaceSimulation : Simulation
             _referenceSourceId,
             snapRelSpd,
             snapFwdSpd,
-            snapAccel);
+            snapAccel,
+            _relocationSequence);
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -1221,6 +1247,7 @@ public sealed class SpaceSimulation : Simulation
         var request = _stationRelocationRequest;
         if (request == null) return;
         _stationRelocationRequest = null;
+        _relocationSequence++;
 
         if (string.IsNullOrWhiteSpace(request.StationPersistenceId))
         {
@@ -1669,6 +1696,7 @@ public sealed class SpaceSimulation : Simulation
             return;
 
         _stationRelocationRequest = null;
+        _relocationSequence++;
         RejectStationRelocation(reason);
     }
 

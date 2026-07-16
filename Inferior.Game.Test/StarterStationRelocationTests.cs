@@ -29,6 +29,60 @@ public sealed class StarterStationRelocationTests
     }
 
     [Fact]
+    public void SnapshotPublishedBeforeRelocationRequestedDoesNotSatisfyExpectedSequence()
+    {
+        GameClock.Reset();
+        var (star, system, starterStation) = StarterSystemWithStarterStation();
+
+        var simulation = new SpaceSimulation();
+        var ship = new Ship { Position = DefaultStarterSpawn };
+        simulation.SetShip(ship);
+        simulation.InstallSystem(star, system);
+
+        // A snapshot published before the relocation request even exists must not satisfy
+        // a sequence expectation captured afterward — this is the exact bug: a mere
+        // non-null ShipSnapshot was previously treated as "relocation resolved."
+        simulation.TickForTests(PlayerInput.Zero, 1.0 / 60.0);
+        var preRequestSnapshot = simulation.ShipState;
+        Assert.NotNull(preRequestSnapshot);
+
+        int expectedSequence = simulation.RequestStationRelocation(
+            starterStation.PersistenceId!, SystemSpaceState.InitialStarterStationStandOffMeters);
+
+        Assert.True(preRequestSnapshot!.RelocationSequence < expectedSequence,
+            "a snapshot published before the request existed must not satisfy it");
+
+        // The first snapshot published once the sim thread actually resolves the request
+        // must satisfy it, and must reflect the relocated position.
+        simulation.TickForTests(PlayerInput.Zero, 1.0 / 60.0);
+        var postApplySnapshot = simulation.ShipState;
+
+        Assert.NotNull(postApplySnapshot);
+        Assert.True(postApplySnapshot!.RelocationSequence >= expectedSequence);
+        Assert.True((postApplySnapshot.Position - DefaultStarterSpawn).Length > 1_000_000.0,
+            "the post-relocation snapshot should no longer be at the default starter spawn");
+    }
+
+    [Fact]
+    public void RejectedRelocationRequestStillAdvancesRelocationSequence()
+    {
+        GameClock.Reset();
+        var simulation = new SpaceSimulation();
+        var ship = new Ship { Position = DefaultStarterSpawn };
+        simulation.SetShip(ship);
+        // Deliberately no InstallSystem call — the request must be rejected (no system
+        // context installed), not merely deferred, so a waiter can never hang forever.
+
+        int expectedSequence = simulation.RequestStationRelocation("nonexistent:station:id", 500.0);
+        simulation.TickForTests(PlayerInput.Zero, 1.0 / 60.0);
+
+        var snapshot = simulation.ShipState;
+        Assert.NotNull(snapshot);
+        Assert.True(snapshot!.RelocationSequence >= expectedSequence,
+            "a rejected request must still advance RelocationSequence, or a waiter hangs forever");
+    }
+
+    [Fact]
     public void InitialNewGameRelocationFirstSnapshotIsFiveHundredMetresFromStarterStation()
     {
         var (star, system, starterStation) = StarterSystemWithStarterStation();

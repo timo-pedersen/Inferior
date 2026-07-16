@@ -80,7 +80,14 @@ public sealed partial class SystemSpaceState
         return new StarterStationRelocationPlan(true, station.PersistenceId, null);
     }
 
-    private bool QueueInitialStarterStationRelocation(SystemSpacePayload payload)
+    // Returns the RelocationSequence value a caller must wait for
+    // (snapshot.RelocationSequence >= returned value) before the relocation this call
+    // queued is guaranteed resolved, or null if nothing was queued. Never a mere
+    // "ShouldRelocate" bool + fire-and-forget: a ShipSnapshot can be non-null (and get
+    // published several ticks) before the sim thread has even looked at the queued
+    // request — system install and station generation happen first — so "wait for a
+    // non-null snapshot" is not sufficient on its own.
+    private int? QueueInitialStarterStationRelocation(SystemSpacePayload payload)
     {
         var plan = CreateInitialStarterStationRelocationPlan(payload, _system.Stations);
 
@@ -89,15 +96,15 @@ public sealed partial class SystemSpaceState
                 new SystemMessage(plan.Diagnostic, SystemMessagePriority.ImportantWarning));
 
         if (!plan.ShouldRelocate)
-            return false;
+            return null;
 
-        _simulation.RequestStationRelocation(
+        return _simulation.RequestStationRelocation(
             plan.StationPersistenceId!,
             InitialStarterStationStandOffMeters);
-        return true;
     }
 
-    private bool QueueStationArrivalRelocation(StationArrivalTarget target)
+    // See QueueInitialStarterStationRelocation's doc comment — same contract.
+    private int? QueueStationArrivalRelocation(StationArrivalTarget target)
     {
         if (string.IsNullOrWhiteSpace(target.PersistenceId))
         {
@@ -105,7 +112,7 @@ public sealed partial class SystemSpaceState
                 new SystemMessage(
                     "Station arrival rejected: destination has no stable persistence id.",
                     SystemMessagePriority.ImportantWarning));
-            return false;
+            return null;
         }
 
         if (!double.IsFinite(target.SurfaceStandOffMeters) || target.SurfaceStandOffMeters < 0.0)
@@ -115,13 +122,12 @@ public sealed partial class SystemSpaceState
                 new SystemMessage(
                     $"Station arrival rejected: {name} has invalid stand-off {target.SurfaceStandOffMeters:R} m.",
                     SystemMessagePriority.ImportantWarning));
-            return false;
+            return null;
         }
 
-        _simulation.RequestStationRelocation(
+        return _simulation.RequestStationRelocation(
             target.PersistenceId,
             target.SurfaceStandOffMeters);
-        return true;
     }
 
     // ── Ecliptic tilt ─────────────────────────────────────────────────────────

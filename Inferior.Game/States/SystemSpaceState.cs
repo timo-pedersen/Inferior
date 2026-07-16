@@ -87,6 +87,10 @@ public sealed partial class SystemSpaceState : GameState
     // ── Time ──────────────────────────────────────────────────────────────────
     private double _gameTimeSeconds;
     private bool _waitingForStationRelocationSnapshot;
+    // The RelocationSequence a ShipSnapshot must reach (>=) before the queued relocation
+    // that set _waitingForStationRelocationSnapshot is guaranteed resolved. Meaningless
+    // while _waitingForStationRelocationSnapshot is false.
+    private int  _expectedRelocationSequence;
 
     // ── Cached body positions ─────────────────────────────────────────────────
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
@@ -325,18 +329,30 @@ public sealed partial class SystemSpaceState : GameState
 
         if (initialStarterRelocationPayload != null)
         {
-            _waitingForStationRelocationSnapshot = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
-            // Calibration cube position is computed once ever, from the first starter
-            // relocation's result (see Update()) — not re-armed on later starter entries
-            // (there aren't any: IsInitialNewGameStarterEntry is a true one-shot).
-            if (_waitingForStationRelocationSnapshot && _calibrationCubePosition == null)
+            int? expectedSeq = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
+            _waitingForStationRelocationSnapshot = expectedSeq != null;
+            if (expectedSeq != null)
             {
-                _calibrationCubePending   = true;
-                _calibrationCubeStarIndex = _star.GalaxyIndex;
+                _expectedRelocationSequence = expectedSeq.Value;
+
+                // Calibration cube position is computed once ever, from the first starter
+                // relocation's result (see Update()) — not re-armed on later starter entries
+                // (there aren't any: IsInitialNewGameStarterEntry is a true one-shot).
+                if (_calibrationCubePosition == null)
+                {
+                    _calibrationCubePending = true;
+                    _calibrationCubeStarIndex = _star.GalaxyIndex;
+                    _calibrationCubeExpectedRelocationSequence = expectedSeq.Value;
+                }
             }
         }
         else if (stationArrivalPayload != null)
-            _waitingForStationRelocationSnapshot = QueueStationArrivalRelocation(stationArrivalPayload.Value);
+        {
+            int? expectedSeq = QueueStationArrivalRelocation(stationArrivalPayload.Value);
+            _waitingForStationRelocationSnapshot = expectedSeq != null;
+            if (expectedSeq != null)
+                _expectedRelocationSequence = expectedSeq.Value;
+        }
 
         // BasicEffect — our shader
         _effect = new BasicEffect(_gd)
@@ -554,13 +570,21 @@ public sealed partial class SystemSpaceState : GameState
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         BlinkClock.Update(dt);
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
-        if (_waitingForStationRelocationSnapshot && _frameShipSnap != null)
+        // A non-null snapshot alone is NOT sufficient here: several ticks can publish
+        // snapshots (system install, station generation) before the sim thread even looks
+        // at the queued relocation request, so an early snapshot still carries the
+        // pre-relocation ship state. Gate on RelocationSequence instead — see
+        // SpaceSimulation.RequestStationRelocation's doc comment.
+        if (_waitingForStationRelocationSnapshot && _frameShipSnap != null
+            && _frameShipSnap.RelocationSequence >= _expectedRelocationSequence)
             _waitingForStationRelocationSnapshot = false;
-        // Calibration cube position — computed once, from the same first-post-relocation
-        // snapshot that clears _waitingForStationRelocationSnapshot above (that flag's
-        // whole purpose is "the ship snapshot now reflects the starter relocation result",
-        // so the same condition is the correct place to capture the cube's fixed position).
-        if (_calibrationCubePending && _frameShipSnap != null)
+
+        // Calibration cube position — computed once, from the first snapshot whose
+        // RelocationSequence proves the starter relocation has actually been resolved
+        // (same reasoning as above; a separate expected-sequence field so this wait can't
+        // be perturbed by an unrelated later relocation request).
+        if (_calibrationCubePending && _frameShipSnap != null
+            && _frameShipSnap.RelocationSequence >= _calibrationCubeExpectedRelocationSequence)
         {
             _calibrationCubePending  = false;
             _calibrationCubePosition = _frameShipSnap.Position
