@@ -59,6 +59,7 @@ Procedural universe generation. Depends on Core only.
 - `StarMap.cs` — read-only query layer over the star array (radius search, nearest-N, name lookup).
 - `StarPhysics.cs` — derives stellar radius from mass/class; approximates core pressure via virial theorem.
 - `StarSystem.cs` — full system generator + position calculator for planets/moons/asteroids/stations.
+- `StarterSystemSelector.cs` — single canonical starter star/station selection (nearest G/K to galactic origin with ≥3 stations; largest-size starter station), replacing two duplicated implementations and a by-name lookup.
 - `Station.cs` — space station data: orbit, size, services, landing pads, orientation, generation factory.
 
 ---
@@ -230,7 +231,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 **Root**
 
-- `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle.
+- `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
 - `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation: `RequestStationRelocation(persistenceId, standOffMeters)` — resolves live station position, applies stand-off, matches reference-frame velocity, faces the station. Used by new-game start, system-map arrival, and debug station cycle.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
@@ -238,16 +239,17 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 **States/** — game states + payloads
 
 - `SystemSpaceState.cs` — primary file: fields, ctor, `OnEnter`/`OnExit`/`OnResize`/`Update`/`Draw`/`HandleKeyboard`. In-system 3D flight (all `FlightMode` variants).
+- `SystemSpaceState.CalibrationCube.cs` — fixed-position 10m lighting test-card cube near the starter station: six axis-coded face albedos + labels, rails orientation, `DrawDynamicLit`.
 - `SystemSpaceState.CelestialBodies.cs` — nearly empty; one Stations-owned texture helper left (`CreateNavGlowTexture`).
-- `SystemSpaceState.DebugContainers.cs` — debug radar-test container spawn/draw (flat colour, no texture — see current-state doc).
-- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`Far Station`, 500 m stand-off) and `SystemMapStationArrivalStandOffMeters` (2 km).
+- `SystemSpaceState.Containers.cs` — station-placed shipping containers: real `ShippingContainerFactory` geometry, standard rendering path, rails kinematics (`SpawnContainers`/`PlacedContainer`/`DrawContainers`).
+- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
 - `SystemSpaceState.Ship.cs` — spawn/input mapping, third-person camera math, cockpit-layout capture.
 - `SystemSpaceState.Skybox.cs` — star hover/click hyperspace-target selection (rendering itself lives in `SkyboxRenderer`).
 - `SystemSpaceState.Stations.cs` — station mesh/glow/dot drawing (next extraction candidate — see current-state doc).
 - `SystemSpaceState.Targeting.cs` — `FeedRadarContacts`/`UpdatePadTargetPosition` (world state → targeting system).
 - `CockpitLayout.cs` — snapshot of open cockpit panels + active tabs, persisted across state transitions.
 - `GalaxyMapPayload.cs` — return-to-flight payload for `GalaxyMapState` (star, time, spawn pos/orient).
-- `GalaxyMapState.cs` — top-level galaxy map: camera, star selection, search, jump targeting.
+- `GalaxyMapState.cs` — top-level galaxy map: camera, star selection, search, jump targeting; first-entry default system comes from `StarterSystemSelector.SelectStar`.
 - `SystemMapPayload.cs` — transition payload from `SystemSpaceState` to `SystemMapState`.
 - `SystemMapState.cs` — 2D orbital map of a star system: zoom/pan, time compression, nav selection.
 - `SystemSpacePayload.cs` — entry payload for `SystemSpaceState` (spawn location, nav targets).
@@ -256,6 +258,10 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `StationCycleController.cs` — debug station-cycle (Ctrl+F12 rising edge): orders system stations, issues relocation requests by `PersistenceId` via the canonical relocation path.
 - `StationCyclePlatformInput.cs` — platform chord detection helper for the cycle control.
+
+**Platform/**
+
+- `HostServices.cs` — host-system (OS) concerns kept out of game/simulation code; `SaveScreenshot(GraphicsDevice)` reads the backbuffer on the render path, backgrounds the PNG encode/file write to `Screenshots/`.
 
 **Hyperspace/**
 
@@ -281,11 +287,11 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `CommodityType.cs` — enum of cargo types (Food, Electronics, Fuel, Weapons, Contraband).
 - `ShippingContainer.cs` — real container domain model: colour, wear, lock, location, pre-built textured mesh.
-- `ShippingContainerFactory.cs` — deterministic container mesh builder with wear + text overlay (not yet wired to the debug containers in `SystemSpaceState.DebugContainers.cs`).
+- `ShippingContainerFactory.cs` — deterministic container mesh builder with wear + text overlay; used both by standalone/debug-spawn containers and station-placed ones (`SystemSpaceState.Containers.cs`, `StationDecorator.PlaceContainer`).
 
 **Station/** — procedural station generation
 
-- `BitmapFonts.cs` — 5×7 pixel bitmap font glyphs (A–Z, 0–9, space, hyphen) with lit-pixel queries.
+- `BitmapFonts.cs` — 5×7 pixel bitmap font glyphs (A–Z, 0–9, space, hyphen, plus) with lit-pixel queries.
 - `PlacedModule.cs` — a placed station module: transform, decoration meshes, lights, ports.
 - `StationArchetypes.cs` — port-scoring/category-biasing growth strategies (cluster, linear-spine, hub-spoke).
 - `StationCableGenerator.cs` — routes cable bundles between greeble connectors on module faces.
