@@ -16,44 +16,44 @@ public sealed class StarterStationRelocationTests
     private static readonly DVec3 DefaultStarterSpawn = new(0, 0.5e11, 3e11);
 
     [Fact]
-    public void InitialNewGameStarterEntryQueuesFarStationRelocation()
+    public void InitialNewGameStarterEntryQueuesStarterStationRelocation()
     {
-        var (star, system, farStation) = StarterSystemWithFarStation();
+        var (star, system, starterStation) = StarterSystemWithStarterStation();
         var payload = InitialPayload(star);
 
         var plan = SystemSpaceState.CreateInitialStarterStationRelocationPlan(payload, system.Stations);
 
         Assert.True(plan.ShouldRelocate);
-        Assert.Equal(farStation.PersistenceId, plan.StationPersistenceId);
+        Assert.Equal(starterStation.PersistenceId, plan.StationPersistenceId);
         Assert.Null(plan.Diagnostic);
     }
 
     [Fact]
-    public void InitialNewGameRelocationFirstSnapshotIsFiveHundredMetresFromFarStation()
+    public void InitialNewGameRelocationFirstSnapshotIsFiveHundredMetresFromStarterStation()
     {
-        var (star, system, farStation) = StarterSystemWithFarStation();
-        var result = RunStarterRelocation(star, system, farStation);
-        DVec3 stationGalaxy = EclipticToGalaxy(system, system.GetStationPosition(farStation, result.Snapshot.SimTime));
+        var (star, system, starterStation) = StarterSystemWithStarterStation();
+        var result = RunStarterRelocation(star, system, starterStation);
+        DVec3 stationGalaxy = EclipticToGalaxy(system, system.GetStationPosition(starterStation, result.Snapshot.SimTime));
         double surfaceDistance = (result.Snapshot.Position - stationGalaxy).Length
-            - SpaceSimulation.StationPhysicalRadius(farStation);
+            - SpaceSimulation.StationPhysicalRadius(starterStation);
         double facingDot = DVec3.Dot(
             result.Snapshot.Forward,
             (stationGalaxy - result.Snapshot.Position).Normalized());
 
         Assert.InRange(System.Math.Abs(surfaceDistance - SystemSpaceState.InitialStarterStationStandOffMeters), 0.0, 0.01);
         Assert.True((result.Snapshot.Position - DefaultStarterSpawn).Length > 1_000_000.0);
-        Assert.True(facingDot >= 0.9999, $"Ship forward dot to Far Station was {facingDot:R}");
+        Assert.True(facingDot >= 0.9999, $"Ship forward dot to starter station was {facingDot:R}");
         AssertVecClose(result.Snapshot.ReferenceVelocity, result.Snapshot.Velocity, 1e-6);
         Assert.InRange(result.Snapshot.RelativeSpeedMs, 0.0, 1e-6);
         Assert.Equal(FlightMode.SystemNewtonian, result.Snapshot.FlightMode);
-        Assert.Equal("Far Station", result.Snapshot.ReferenceName);
-        Assert.Equal(farStation.PersistenceId, result.Diagnostic.NearestStationId);
+        Assert.Equal(starterStation.Name, result.Snapshot.ReferenceName);
+        Assert.Equal(starterStation.PersistenceId, result.Diagnostic.NearestStationId);
     }
 
     [Fact]
     public void InitialNewGameRelocationDoesNotPublishXStopComplete()
     {
-        var (star, system, farStation) = StarterSystemWithFarStation();
+        var (star, system, starterStation) = StarterSystemWithStarterStation();
         var messages = new List<SystemMessage>();
         void Handler(SystemMessage message) => messages.Add(message);
 
@@ -61,7 +61,7 @@ public sealed class StarterStationRelocationTests
         DataBus.System.Subscribe(Topics.System.All, Handler);
         try
         {
-            RunStarterRelocation(star, system, farStation);
+            RunStarterRelocation(star, system, starterStation);
             DataBus.Drain();
         }
         finally
@@ -73,33 +73,33 @@ public sealed class StarterStationRelocationTests
     }
 
     [Fact]
-    public void RelocationPlanCarriesFarStationPersistenceIdNotCalculatedPosition()
+    public void RelocationPlanCarriesStationPersistenceIdNotCalculatedPosition()
     {
-        var station = new Station { Name = "Far Station", PersistenceId = "installed-far-id" };
+        var station = new Station { Name = "Any Station", PersistenceId = "installed-id" };
         var plan = SystemSpaceState.CreateInitialStarterStationRelocationPlan(
             InitialPayload(StarterStar()),
             [station]);
 
         Assert.True(plan.ShouldRelocate);
-        Assert.Equal("installed-far-id", plan.StationPersistenceId);
+        Assert.Equal("installed-id", plan.StationPersistenceId);
         Assert.DoesNotContain(
             typeof(SystemSpaceState.StarterStationRelocationPlan).GetProperties(),
             property => property.PropertyType == typeof(DVec3));
     }
 
     [Fact]
-    public void FarStationIsResolvedFromProvidedGeneratedSystemAndDoesNotRequireIndexZero()
+    public void LargestStationWinsRegardlessOfListPosition()
     {
-        var stationBefore = new Station { Name = "Near Station", PersistenceId = "not-far" };
-        var farStation = new Station { Name = "Far Station", PersistenceId = "provided-system-far" };
-        var stationAfter = new Station { Name = "Far Outpost", PersistenceId = "not-exact-far-station" };
+        var small  = new Station { Name = "Small",  Size = StationSize.Small,  PersistenceId = "small" };
+        var large  = new Station { Name = "Large",  Size = StationSize.Large,  PersistenceId = "large" };
+        var medium = new Station { Name = "Medium", Size = StationSize.Medium, PersistenceId = "medium" };
 
         var plan = SystemSpaceState.CreateInitialStarterStationRelocationPlan(
             InitialPayload(StarterStar()),
-            [stationBefore, farStation, stationAfter]);
+            [small, medium, large]);
 
         Assert.True(plan.ShouldRelocate);
-        Assert.Equal("provided-system-far", plan.StationPersistenceId);
+        Assert.Equal("large", plan.StationPersistenceId);
     }
 
     [Fact]
@@ -122,9 +122,9 @@ public sealed class StarterStationRelocationTests
             null,
             0.0,
             StationArrival: new StationArrivalTarget(
-                "far",
+                "some-id",
                 SystemSpaceState.SystemMapStationArrivalStandOffMeters,
-                "Far Station"),
+                "Test Station"),
             InitialNewGameStarterEntry: true);
         var normalSystemTransition = new SystemSpacePayload(star, null, 0.0, null);
 
@@ -144,24 +144,14 @@ public sealed class StarterStationRelocationTests
     }
 
     [Fact]
-    public void MissingOrAmbiguousFarStationPreservesDefaultSpawn()
+    public void MissingStationsPreservesDefaultSpawn()
     {
         var star = StarterStar();
         var payload = InitialPayload(star);
-        var missing = SystemSpaceState.CreateInitialStarterStationRelocationPlan(
-            payload,
-            [new Station { Name = "Near Station", PersistenceId = "near" }]);
-        var ambiguous = SystemSpaceState.CreateInitialStarterStationRelocationPlan(
-            payload,
-            [
-                new Station { Name = "Far Station", PersistenceId = "far-1" },
-                new Station { Name = "Far Station", PersistenceId = "far-2" },
-            ]);
+        var missing = SystemSpaceState.CreateInitialStarterStationRelocationPlan(payload, []);
 
         Assert.False(missing.ShouldRelocate);
-        Assert.Contains("not found", missing.Diagnostic);
-        Assert.False(ambiguous.ShouldRelocate);
-        Assert.Contains("ambiguous", ambiguous.Diagnostic);
+        Assert.Contains("no stations", missing.Diagnostic);
 
         GameClock.Reset();
         var simulation = new SpaceSimulation();
@@ -172,6 +162,18 @@ public sealed class StarterStationRelocationTests
 
         Assert.NotNull(simulation.ShipState);
         AssertVecClose(DefaultStarterSpawn, simulation.ShipState!.Position, 0.0);
+    }
+
+    [Fact]
+    public void StationWithNoPersistenceIdPreservesDefaultSpawn()
+    {
+        var payload = InitialPayload(StarterStar());
+        var plan = SystemSpaceState.CreateInitialStarterStationRelocationPlan(
+            payload,
+            [new Station { Name = "No Id Station" }]);
+
+        Assert.False(plan.ShouldRelocate);
+        Assert.Contains("no stable persistence id", plan.Diagnostic);
     }
 
     [Fact]
@@ -192,7 +194,7 @@ public sealed class StarterStationRelocationTests
         Assert.DoesNotContain("new DVec3", startupBlock);
     }
 
-    private static RelocationResult RunStarterRelocation(Star star, StarSystem system, Station farStation)
+    private static RelocationResult RunStarterRelocation(Star star, StarSystem system, Station starterStation)
     {
         GameClock.Reset();
         DataBus.Drain();
@@ -207,7 +209,7 @@ public sealed class StarterStationRelocationTests
         simulation.SetShip(ship);
         simulation.InstallSystem(star, system);
         simulation.RequestStationRelocation(
-            farStation.PersistenceId!,
+            starterStation.PersistenceId!,
             SystemSpaceState.InitialStarterStationStandOffMeters);
         simulation.TickForTests(PlayerInput.Zero, 1.0 / 60.0);
 
@@ -216,16 +218,16 @@ public sealed class StarterStationRelocationTests
         return new RelocationResult(simulation.ShipState!, simulation.LastStationProximityTickDiagnostic!);
     }
 
-    private static (Star Star, StarSystem System, Station FarStation) StarterSystemWithFarStation()
+    private static (Star Star, StarSystem System, Station StarterStation) StarterSystemWithStarterStation()
     {
         Star star = StarterStar();
         StarSystem system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
-        Station farStation = Assert.Single(system.Stations, station => station.Name == "Far Station");
-        return (star, system, farStation);
+        Station starterStation = StarterSystemSelector.SelectStarterStation(system.Stations)!;
+        return (star, system, starterStation);
     }
 
     private static Star StarterStar()
-        => InferiorGame.FindStartStar(GalaxyGenerator.Generate());
+        => StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;
 
     private static SystemSpacePayload InitialPayload(Star star)
         => new(star, null, 0.0, null, InitialNewGameStarterEntry: true);

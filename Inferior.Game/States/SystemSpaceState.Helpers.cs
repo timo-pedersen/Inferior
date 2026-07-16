@@ -25,7 +25,6 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
-    internal const string InitialStarterStationName = "Far Station";
     internal const double InitialStarterStationStandOffMeters = 500.0;
     internal const double SystemMapStationArrivalStandOffMeters = 2_000.0;
 
@@ -56,28 +55,18 @@ public sealed partial class SystemSpaceState
         if (!IsInitialNewGameStarterEntry(payload))
             return new StarterStationRelocationPlan(false, null, null);
 
-        var matches = stations
-            .Where(station => string.Equals(station.Name, InitialStarterStationName, StringComparison.Ordinal))
-            .ToArray();
-
-        if (matches.Length != 1)
-        {
-            string diagnostic = matches.Length == 0
-                ? $"{InitialStarterStationName} not found in generated starter system; preserving default starter spawn."
-                : $"{InitialStarterStationName} is ambiguous in generated starter system ({matches.Length} matches); preserving default starter spawn.";
-            return new StarterStationRelocationPlan(false, null, diagnostic);
-        }
-
-        string? persistenceId = matches[0].PersistenceId;
-        if (string.IsNullOrWhiteSpace(persistenceId))
-        {
+        var station = StarterSystemSelector.SelectStarterStation(stations.ToArray());
+        if (station == null)
             return new StarterStationRelocationPlan(
-                false,
-                null,
-                $"{InitialStarterStationName} has no stable persistence id; preserving default starter spawn.");
-        }
+                false, null,
+                "Generated starter system has no stations; preserving default starter spawn.");
 
-        return new StarterStationRelocationPlan(true, persistenceId, null);
+        if (string.IsNullOrWhiteSpace(station.PersistenceId))
+            return new StarterStationRelocationPlan(
+                false, null,
+                $"Starter station '{station.Name}' has no stable persistence id; preserving default starter spawn.");
+
+        return new StarterStationRelocationPlan(true, station.PersistenceId, null);
     }
 
     private bool QueueInitialStarterStationRelocation(SystemSpacePayload payload)

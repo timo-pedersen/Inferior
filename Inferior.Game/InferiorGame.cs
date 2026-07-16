@@ -66,10 +66,12 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         _stateMachine.Register(new SystemMapState(GraphicsDevice, _font));
         _stateMachine.Register(new SystemSpaceState(GraphicsDevice, _font, _simulation, Content));
 
-        var galaxy    = GalaxyGenerator.Generate();
-        var startStar = FindStartStar(galaxy);
+        var galaxy = GalaxyGenerator.Generate();
+        var starterResult = StarterSystemSelector.SelectStar(galaxy);
+        if (starterResult.Diagnostic != null)
+            System.Console.WriteLine($"[Starter] {starterResult.Diagnostic}");
         _stateMachine.Start(GameStateId.SystemSpace,
-            new SystemSpacePayload(startStar, null, 0.0, null, InitialNewGameStarterEntry: true));
+            new SystemSpacePayload(starterResult.Star, null, 0.0, null, InitialNewGameStarterEntry: true));
     }
 
     protected override void Update(GameTime gameTime)
@@ -100,27 +102,6 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         GraphicsDevice.Clear(Color.Black);
         _stateMachine.Draw(gameTime, GraphicsDevice, _spriteBatch!);
         base.Draw(gameTime);
-    }
-
-    // ── Startup helper ────────────────────────────────────────────────────────
-
-    internal static Star FindStartStar(Star[] galaxy)
-    {
-        // Target: 50% of the way from galactic centre toward the right edge (positive X)
-        const double targetX = GalaxyGenerator.GalaxyRadiusLY * 0.5;
-        var target = new Inferior.Core.Math.DVec3(targetX, 0, 0);
-
-        Star?  best     = null;
-        double bestDist = double.MaxValue;
-        foreach (var star in galaxy)
-        {
-            if (star.SpectralClass is not (SpectralClass.G or SpectralClass.K)) continue;
-            double d = (star.GalacticPos - target).Length;
-            if (d >= bestDist) continue;
-            bestDist = d;
-            best     = star;
-        }
-        return best ?? galaxy[0];
     }
 
     // ── Window mode cycling ───────────────────────────────────────────────────

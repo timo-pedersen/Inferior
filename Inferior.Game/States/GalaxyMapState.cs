@@ -143,7 +143,7 @@ public sealed class GalaxyMapState : GameState
         }
         else if (_currentSystem == null!)
         {
-            _currentSystem = FindStartingSystem();
+            _currentSystem = StarterSystemSelector.SelectStar(_stars).Star;
             _visitedSystems.Add(_currentSystem.GalaxyIndex);
             _cameraPos = new Vector2(
                 (float)_currentSystem.GalacticPos.X,
@@ -839,20 +839,4 @@ public sealed class GalaxyMapState : GameState
         _maxLyPerPixel = (GalaxyGenerator.GalaxyRadiusLY * 2.0 * 1.1) / minDim;
     }
 
-    private Star FindStartingSystem()
-    {
-        Star?  best     = null;
-        double bestDist = double.MaxValue;
-
-        foreach (var star in _stars)
-        {
-            if (star.SpectralClass is not (SpectralClass.G or SpectralClass.K)) continue;
-            double d = star.GalacticPos.Length;
-            if (d >= bestDist) continue;
-            bestDist = d;
-            best     = star;
-        }
-
-        return best ?? _stars[0];
-    }
 }
