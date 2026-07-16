@@ -44,6 +44,9 @@ public sealed partial class SystemSpaceState
         BiasProductionCombination,
         AnalyticPlaneCorrectedDepthDelta,
         AnalyticPlaneCorrectedBinary,
+        AnalyticPreviewZeroBias,
+        AnalyticPreviewSmallBias,
+        Module5HullFaceOwner,
     }
 
     // ── 3D drawing ────────────────────────────────────────────────────────────
@@ -65,6 +68,7 @@ public sealed partial class SystemSpaceState
     private const float StationMaxShadowBias   = 0.00020f;
     private const float StationNormalShadowOffsetMetres = 0.16f;
     private const float StationShadowDebugDifferenceScale = 500f;
+    private const float StationAnalyticPreviewSmallBias = 0.00002f;
 
     private void DrawStations(DetailLevel level)
     {
@@ -84,7 +88,10 @@ public sealed partial class SystemSpaceState
         _stationShadowEffect.Parameters["NormalShadowOffsetMetres"]?.SetValue(StationNormalShadowOffsetMetres);
         _stationShadowEffect.Parameters["ShadowDebugMode"]?.SetValue(ShaderStationShadowDebugMode());
         _stationShadowEffect.Parameters["ShadowDebugDifferenceScale"]?.SetValue(StationShadowDebugDifferenceScale);
-        _stationShadowEffect.Parameters["ShadowDebugTexture"]?.SetValue(_stationShadowUvGrid);
+        _stationShadowEffect.Parameters["AnalyticPreviewBias"]?.SetValue(
+            StationShadowAnalyticPreviewBias(_stationShadowDebugMode));
+        _stationShadowFaceOwnerEffect.Parameters["View"]?.SetValue(_effect.View);
+        _stationShadowFaceOwnerEffect.Parameters["Projection"]?.SetValue(_effect.Projection);
 
         foreach (var (station, universePos) in _stationPositions)
         {
@@ -106,9 +113,18 @@ public sealed partial class SystemSpaceState
             _stationShadowEffect.Parameters["ShadowMap"]?.SetValue(shadow.Texture);
             _stationShadowEffect.Parameters["CasterOwnerMap"]?.SetValue(shadow.CasterOwnerTexture);
             _stationShadowEffect.Parameters["SelectedHullDepthMap"]?.SetValue(shadow.SelectedModuleHullDepthTexture);
+            _stationShadowEffect.Parameters["ShadowDebugTexture"]?.SetValue(
+                _stationShadowDebugMode == StationShadowDebugMode.Module5HullFaceOwner
+                    ? shadow.Module5HullFaceOwnerTexture
+                    : _stationShadowUvGrid);
+            _stationShadowFaceOwnerEffect.Parameters["LightViewProjection"]?.SetValue(shadow.LightViewProjection);
+            _stationShadowFaceOwnerEffect.Parameters["FaceOwnerTexture"]?.SetValue(shadow.Module5HullFaceOwnerTexture);
 
             for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
             {
+                if (_stationShadowDebugMode == StationShadowDebugMode.Module5HullFaceOwner && moduleIndex != 5)
+                    continue;
+
                 var mod = modules[moduleIndex];
                 if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
                 if (mod.TextureInstance == null) continue;
@@ -121,6 +137,9 @@ public sealed partial class SystemSpaceState
 
             for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
             {
+                if (_stationShadowDebugMode == StationShadowDebugMode.Module5HullFaceOwner && moduleIndex != 5)
+                    continue;
+
                 var mod = modules[moduleIndex];
                 if (!decoMeshesForLevel.TryGetValue(mod, out var deco)) continue;
 
@@ -133,6 +152,9 @@ public sealed partial class SystemSpaceState
 
             for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
             {
+                if (_stationShadowDebugMode == StationShadowDebugMode.Module5HullFaceOwner && moduleIndex != 5)
+                    continue;
+
                 var mod = modules[moduleIndex];
                 if (!_glassMeshes.TryGetValue(mod, out var glass)) continue;
 
@@ -159,6 +181,13 @@ public sealed partial class SystemSpaceState
         Matrix world, Matrix stationLocalWorld, Texture2D texture, bool emissive,
         Color moduleDebugColor, Color meshClassDebugColor)
     {
+        if (_stationShadowDebugMode == StationShadowDebugMode.Module5HullFaceOwner)
+        {
+            DrawStationFaceOwnerMesh(technique, vb, ib, triCount, world, stationLocalWorld);
+            return;
+        }
+
+        technique = StationShadowTechniqueForDebugMode(technique);
         _stationShadowEffect.CurrentTechnique = _stationShadowEffect.Techniques[technique];
         _stationShadowEffect.Parameters["World"]?.SetValue(world);
         _stationShadowEffect.Parameters["StationLocalWorld"]?.SetValue(stationLocalWorld);
@@ -170,6 +199,33 @@ public sealed partial class SystemSpaceState
         _gd.SetVertexBuffer(vb);
         _gd.Indices = ib;
         foreach (var pass in _stationShadowEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawIndexedPrimitives(
+                PrimitiveType.TriangleList,
+                baseVertex: 0, startIndex: 0,
+                primitiveCount: triCount);
+        }
+    }
+
+    private void DrawStationFaceOwnerMesh(
+        string technique, VertexBuffer vb, IndexBuffer ib, int triCount,
+        Matrix world, Matrix stationLocalWorld)
+    {
+        string faceOwnerTechnique = technique switch
+        {
+            "StationHull" => "StationHullFaceOwner",
+            "StationBaked" => "StationBakedFaceOwner",
+            _ => "StationBakedFaceOwner",
+        };
+
+        _stationShadowFaceOwnerEffect.CurrentTechnique = _stationShadowFaceOwnerEffect.Techniques[faceOwnerTechnique];
+        _stationShadowFaceOwnerEffect.Parameters["World"]?.SetValue(world);
+        _stationShadowFaceOwnerEffect.Parameters["StationLocalWorld"]?.SetValue(stationLocalWorld);
+
+        _gd.SetVertexBuffer(vb);
+        _gd.Indices = ib;
+        foreach (var pass in _stationShadowFaceOwnerEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
             _gd.DrawIndexedPrimitives(
@@ -203,9 +259,11 @@ public sealed partial class SystemSpaceState
         string stationName = station?.Name ?? "<unknown>";
         bool isFrozen = ReferenceEquals(station, _stationShadowFrozenStation);
         string frozenMarker = isFrozen ? " - FROZEN" : "";
+        string previewText = StationShadowAnalyticPreviewText(_stationShadowDebugMode, depthMetres);
         string text =
             $"Station shadow debug: {stationName} / {StationShadowDebugModeName(_stationShadowDebugMode)}{frozenMarker}\n" +
             "F9 show/hide, F8 cycle, Ctrl+Shift+F freeze\n" +
+            previewText +
             $"target={shadow.Texture.Width}x{shadow.Texture.Height} format={shadow.SurfaceFormat}\n" +
             $"solid={shadow.LightCameraSolidTexture.Width}x{shadow.LightCameraSolidTexture.Height} coverage={shadow.CasterCoverageTexture.Width}x{shadow.CasterCoverageTexture.Height}\n" +
             $"near={shadow.DepthRange.Near:0.###}m far={shadow.DepthRange.Far:0.###}m span={depthMetres:0.###}m\n" +
@@ -240,6 +298,10 @@ public sealed partial class SystemSpaceState
         else if (IsStationShadowAnalyticPlaneCorrectionMode(_stationShadowDebugMode))
         {
             DrawStationAnalyticPlaneCorrectionLegend(sb, new Vector2(12, pos.Y + 118));
+        }
+        else if (_stationShadowDebugMode == StationShadowDebugMode.Module5HullFaceOwner)
+        {
+            DrawStationModule5HullFaceOwnerLegend(sb, new Vector2(12, pos.Y + 118));
         }
     }
 
@@ -461,12 +523,14 @@ public sealed partial class SystemSpaceState
             StationShadowDebugMode.BiasProductionCombination => 15,
             StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta => 16,
             StationShadowDebugMode.AnalyticPlaneCorrectedBinary => 17,
+            StationShadowDebugMode.AnalyticPreviewZeroBias => 18,
+            StationShadowDebugMode.AnalyticPreviewSmallBias => 19,
             _ => 0,
         };
     }
 
     private static StationShadowDebugMode NextStationShadowDebugMode(StationShadowDebugMode mode)
-        => mode == StationShadowDebugMode.AnalyticPlaneCorrectedBinary
+        => mode == StationShadowDebugMode.Module5HullFaceOwner
             ? StationShadowDebugMode.LightCameraSolid
             : (StationShadowDebugMode)((int)mode + 1);
 
@@ -490,6 +554,9 @@ public sealed partial class SystemSpaceState
             StationShadowDebugMode.BiasProductionCombination => "D: binary current production combination",
             StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta => "analytic plane-corrected receiver minus caster depth",
             StationShadowDebugMode.AnalyticPlaneCorrectedBinary => "analytic plane-corrected binary, no bias or offset",
+            StationShadowDebugMode.AnalyticPreviewZeroBias => "AnalyticPreviewZeroBias",
+            StationShadowDebugMode.AnalyticPreviewSmallBias => "AnalyticPreviewSmallBias",
+            StationShadowDebugMode.Module5HullFaceOwner => "module #5 hull sampled caster face owner",
             _ => mode.ToString(),
         };
 
@@ -500,6 +567,7 @@ public sealed partial class SystemSpaceState
             StationShadowDebugMode.CasterCoverage => shadow.CasterCoverageTexture,
             StationShadowDebugMode.ReceiverUvGrid => _stationShadowUvGrid,
             StationShadowDebugMode.SelectedModuleHullDepthDelta => shadow.SelectedModuleHullDepthTexture,
+            StationShadowDebugMode.Module5HullFaceOwner => shadow.Module5HullFaceOwnerTexture,
             _ => shadow.Texture,
         };
 
@@ -512,6 +580,39 @@ public sealed partial class SystemSpaceState
     private static bool IsStationShadowAnalyticPlaneCorrectionMode(StationShadowDebugMode mode)
         => mode == StationShadowDebugMode.AnalyticPlaneCorrectedDepthDelta
         || mode == StationShadowDebugMode.AnalyticPlaneCorrectedBinary;
+
+    private static string StationShadowAnalyticPreviewText(StationShadowDebugMode mode, float depthMetres)
+    {
+        return mode switch
+        {
+            StationShadowDebugMode.AnalyticPreviewZeroBias =>
+                "preview=AnalyticPreviewZeroBias biasNorm=0.000000 biasMetres=0.000\n",
+            StationShadowDebugMode.AnalyticPreviewSmallBias =>
+                $"preview=AnalyticPreviewSmallBias biasNorm={StationAnalyticPreviewSmallBias:0.000000} biasMetres={StationAnalyticPreviewSmallBias * depthMetres:0.###}\n",
+            _ => string.Empty,
+        };
+    }
+
+    private static float StationShadowAnalyticPreviewBias(StationShadowDebugMode mode)
+        => mode == StationShadowDebugMode.AnalyticPreviewSmallBias
+            ? StationAnalyticPreviewSmallBias
+            : 0f;
+
+    private string StationShadowTechniqueForDebugMode(string technique)
+    {
+        if (_stationShadowDebugMode != StationShadowDebugMode.AnalyticPreviewZeroBias &&
+            _stationShadowDebugMode != StationShadowDebugMode.AnalyticPreviewSmallBias)
+        {
+            return technique;
+        }
+
+        return technique switch
+        {
+            "StationHull" => "StationHullAnalyticPreview",
+            "StationBaked" => "StationBakedAnalyticPreview",
+            _ => technique,
+        };
+    }
 
     private enum StationMeshClass
     {
@@ -540,6 +641,33 @@ public sealed partial class SystemSpaceState
 
         return palette[moduleIndex % palette.Length];
     }
+
+    internal static Color Module5HullFaceDebugColor(int faceIndex)
+    {
+        ReadOnlySpan<Color> palette =
+        [
+            new Color(255, 70, 70),    // +X
+            new Color(120, 40, 40),    // -X
+            new Color(70, 255, 70),    // +Y
+            new Color(35, 120, 35),    // -Y
+            new Color(80, 120, 255),   // +Z
+            new Color(35, 55, 125),    // -Z
+        ];
+
+        return (uint)faceIndex < (uint)palette.Length ? palette[faceIndex] : Color.Magenta;
+    }
+
+    internal static string Module5HullFaceName(int faceIndex)
+        => faceIndex switch
+        {
+            0 => "+X",
+            1 => "-X",
+            2 => "+Y",
+            3 => "-Y",
+            4 => "+Z",
+            5 => "-Z",
+            _ => "<none>",
+        };
 
     private static Color MeshClassDebugColor(StationMeshClass meshClass)
         => meshClass switch
@@ -592,6 +720,15 @@ public sealed partial class SystemSpaceState
         DrawLegendRow(sb, pos + new Vector2(0, 0), Color.Lime, "sampled caster = receiver module");
         DrawLegendRow(sb, pos + new Vector2(0, 16), Color.Red, "sampled caster = other module");
         DrawLegendRow(sb, pos + new Vector2(0, 32), Color.Black, "no caster owner");
+    }
+
+    private void DrawStationModule5HullFaceOwnerLegend(SpriteBatch sb, Vector2 pos)
+    {
+        for (int i = 0; i < 6; i++)
+            DrawLegendRow(sb, pos + new Vector2(0, i * 16), Module5HullFaceDebugColor(i),
+                $"module #5 hull {Module5HullFaceName(i)} owns sampled texel");
+
+        DrawLegendRow(sb, pos + new Vector2(0, 96), Color.Black, "no module #5 hull face owner");
     }
 
     private void DrawStationBiasDecompositionLegend(SpriteBatch sb, Vector2 pos)
@@ -696,6 +833,270 @@ public sealed partial class SystemSpaceState
         sb.DrawString(_font, label, pos + new Vector2(3, 3), Color.Black, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
         sb.DrawString(_font, label, pos, Color.Yellow, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
     }
+
+    private readonly record struct StationShadowReceiverHit(
+        int ModuleIndex,
+        PlacedModule Module,
+        int FaceId,
+        Vector3 LocalPoint,
+        Vector3 LocalNormal,
+        Vector3 StationPoint,
+        Vector3 StationNormal);
+
+    private void LogStationShadowCrosshairDiagnostic()
+    {
+        if (!_showStationShadowDebug)
+            return;
+        if (!TrySelectStationShadowDebugTarget(out var station, out var shadow) || station == null || shadow == null)
+            return;
+        if (!_stationGeometry.TryGetValue(station, out var modules))
+            return;
+        if (!TryFindStationUniversePosition(station, out var stationUniversePos))
+            return;
+        if (!TryGetStationDebugLocalView(station, stationUniversePos, out var stationLocalCamera, out var stationLocalForward))
+            return;
+        if (!TryFindStationShadowReceiverHit(modules, stationLocalCamera, stationLocalForward, out var hit))
+            return;
+
+        Vector4 lightViewPos = Vector4.Transform(new Vector4(hit.StationPoint, 1f), shadow.LightView);
+        Vector4 shadowCoord = Vector4.Transform(new Vector4(hit.StationPoint, 1f), shadow.LightViewProjection);
+        Vector2 uv = StationShadowUv(shadowCoord);
+        int texelX = Math.Clamp((int)MathF.Floor(uv.X * shadow.Texture.Width), 0, shadow.Texture.Width - 1);
+        int texelY = Math.Clamp((int)MathF.Floor(uv.Y * shadow.Texture.Height), 0, shadow.Texture.Height - 1);
+        float receiverDepth = MathHelper.Clamp(
+            (-lightViewPos.Z - shadow.DepthRange.Near) / MathF.Max(shadow.DepthRange.Length, 0.000001f),
+            0f,
+            1f);
+
+        Vector3 normalLight = Vector3.Normalize(Vector3.TransformNormal(hit.StationNormal, shadow.LightView));
+        bool fallback = MathF.Abs(normalLight.Z) < 0.0001f;
+        float depthDu = 0f;
+        float depthDv = 0f;
+        float correctedReceiverDepth = receiverDepth;
+        if (!fallback)
+        {
+            float span = MathF.Max(shadow.DepthRange.Length, 0.000001f);
+            depthDu = shadow.LightProjectionSize.X * normalLight.X / (normalLight.Z * span);
+            depthDv = -shadow.LightProjectionSize.Y * normalLight.Y / (normalLight.Z * span);
+            Vector2 texelCenter = new(
+                (MathF.Floor(uv.X * shadow.Texture.Width) + 0.5f) / shadow.Texture.Width,
+                (MathF.Floor(uv.Y * shadow.Texture.Height) + 0.5f) / shadow.Texture.Height);
+            correctedReceiverDepth = receiverDepth
+                + depthDu * (texelCenter.X - uv.X)
+                + depthDv * (texelCenter.Y - uv.Y);
+        }
+
+        float storedDepth = SampleShadowDepth(shadow.Texture, texelX, texelY);
+        Color sampledCasterModuleColor = SampleShadowColor(shadow.CasterOwnerTexture, texelX, texelY);
+        Color sampledCasterFaceColor = SampleShadowColor(shadow.Module5HullFaceOwnerTexture, texelX, texelY);
+        int sampledCasterModuleIndex = DecodeModuleDebugColor(sampledCasterModuleColor, modules.Count);
+        int sampledCasterFaceId = DecodeModule5HullFaceDebugColor(sampledCasterFaceColor);
+        float correctedDelta = correctedReceiverDepth - storedDepth;
+
+        System.Diagnostics.Debug.WriteLine(
+            "[StationShadowCrosshair] " +
+            $"station=\"{station.Name}\" " +
+            $"receiverModuleIndex={hit.ModuleIndex} receiverDefinition={hit.Module.Definition.Id} " +
+            $"receiverHullFace={Module5HullFaceName(hit.FaceId)} receiverLocalNormal={FormatStationShadowVector(hit.LocalNormal)} " +
+            $"sampledCasterModuleIndex={sampledCasterModuleIndex} sampledCasterHullFace={Module5HullFaceName(sampledCasterFaceId)} " +
+            $"uv=({uv.X:0.######},{uv.Y:0.######}) shadowTexel=({texelX},{texelY}) " +
+            $"receiverDepth={receiverDepth:0.########} correctedReceiverDepth={correctedReceiverDepth:0.########} " +
+            $"storedCasterDepth={storedDepth:0.########} correctedDelta={correctedDelta:0.########} " +
+            $"normalLightZ={normalLight.Z:0.########} analyticFallback={fallback} " +
+            $"depthDu={depthDu:0.########} depthDv={depthDv:0.########}");
+    }
+
+    private bool TryFindStationUniversePosition(Galaxy.Station station, out DVec3 universePos)
+    {
+        foreach (var (candidate, pos) in _stationPositions)
+        {
+            if (!ReferenceEquals(candidate, station)) continue;
+            universePos = pos;
+            return true;
+        }
+
+        universePos = DVec3.Zero;
+        return false;
+    }
+
+    private static bool TryFindStationShadowReceiverHit(
+        IReadOnlyList<PlacedModule> modules,
+        Vector3 stationLocalCamera,
+        Vector3 stationLocalForward,
+        out StationShadowReceiverHit hit)
+    {
+        float bestT = float.MaxValue;
+        StationShadowReceiverHit best = default;
+        bool found = false;
+
+        for (int moduleIndex = 0; moduleIndex < modules.Count; moduleIndex++)
+        {
+            var mod = modules[moduleIndex];
+            Matrix moduleTransform = mod.Transform;
+            Matrix.Invert(ref moduleTransform, out Matrix inverseModule);
+            Vector3 localOrigin = Vector3.Transform(stationLocalCamera, inverseModule);
+            Vector3 localDirection = Vector3.Normalize(Vector3.TransformNormal(stationLocalForward, inverseModule));
+
+            foreach (var face in EnumerateStationShadowHullFaces(mod))
+            {
+                if (!TryIntersectStationShadowHullFace(localOrigin, localDirection, face, out float t, out Vector3 localPoint))
+                    continue;
+                if (t <= 0f || t >= bestT)
+                    continue;
+
+                Vector3 stationPoint = Vector3.Transform(localPoint, mod.Transform);
+                Vector3 stationNormal = Vector3.Normalize(Vector3.TransformNormal(face.LocalNormal, mod.Transform));
+                bestT = t;
+                best = new StationShadowReceiverHit(
+                    moduleIndex,
+                    mod,
+                    face.FaceId,
+                    localPoint,
+                    face.LocalNormal,
+                    stationPoint,
+                    stationNormal);
+                found = true;
+            }
+        }
+
+        hit = best;
+        return found;
+    }
+
+    private readonly record struct StationShadowHullFace(
+        int FaceId,
+        Vector3 LocalNormal,
+        float Plane,
+        int Axis,
+        float MinA,
+        float MaxA,
+        int AxisA,
+        float MinB,
+        float MaxB,
+        int AxisB);
+
+    private static IEnumerable<StationShadowHullFace> EnumerateStationShadowHullFaces(PlacedModule mod)
+    {
+        float si = mod.ChamferDepth * 0.707f;
+        Vector3 h = mod.Definition.BoundingBox * 0.5f;
+
+        yield return new(0, Vector3.UnitX, +h.X, 0, -h.Y + si, +h.Y - si, 1, -h.Z + si, +h.Z - si, 2);
+        yield return new(1, -Vector3.UnitX, -h.X, 0, -h.Y + si, +h.Y - si, 1, -h.Z + si, +h.Z - si, 2);
+        yield return new(2, Vector3.UnitY, +h.Y, 1, -h.X + si, +h.X - si, 0, -h.Z + si, +h.Z - si, 2);
+        yield return new(3, -Vector3.UnitY, -h.Y, 1, -h.X + si, +h.X - si, 0, -h.Z + si, +h.Z - si, 2);
+        yield return new(4, Vector3.UnitZ, +h.Z, 2, -h.X + si, +h.X - si, 0, -h.Y + si, +h.Y - si, 1);
+        yield return new(5, -Vector3.UnitZ, -h.Z, 2, -h.X + si, +h.X - si, 0, -h.Y + si, +h.Y - si, 1);
+    }
+
+    private static bool TryIntersectStationShadowHullFace(
+        Vector3 origin,
+        Vector3 direction,
+        StationShadowHullFace face,
+        out float t,
+        out Vector3 point)
+    {
+        const float Epsilon = 1e-6f;
+        float denom = Component(direction, face.Axis);
+        if (MathF.Abs(denom) < Epsilon)
+        {
+            t = 0f;
+            point = default;
+            return false;
+        }
+
+        t = (face.Plane - Component(origin, face.Axis)) / denom;
+        if (t <= 0f)
+        {
+            point = default;
+            return false;
+        }
+
+        point = origin + direction * t;
+        float a = Component(point, face.AxisA);
+        float b = Component(point, face.AxisB);
+        return a >= face.MinA - Epsilon && a <= face.MaxA + Epsilon
+            && b >= face.MinB - Epsilon && b <= face.MaxB + Epsilon;
+    }
+
+    private static float Component(Vector3 v, int axis)
+        => axis switch
+        {
+            0 => v.X,
+            1 => v.Y,
+            _ => v.Z,
+        };
+
+    private static Vector2 StationShadowUv(Vector4 shadowCoord)
+    {
+        Vector3 proj = new(
+            shadowCoord.X / shadowCoord.W,
+            shadowCoord.Y / shadowCoord.W,
+            shadowCoord.Z / shadowCoord.W);
+        return new Vector2(proj.X * 0.5f + 0.5f, -proj.Y * 0.5f + 0.5f);
+    }
+
+    private static float SampleShadowDepth(RenderTarget2D texture, int x, int y)
+    {
+        float[] pixel = new float[1];
+        texture.GetData(0, new Rectangle(x, y, 1, 1), pixel, 0, 1);
+        return pixel[0];
+    }
+
+    private static Color SampleShadowColor(RenderTarget2D texture, int x, int y)
+    {
+        Color[] pixel = new Color[1];
+        texture.GetData(0, new Rectangle(x, y, 1, 1), pixel, 0, 1);
+        return pixel[0];
+    }
+
+    private static int DecodeModuleDebugColor(Color color, int moduleCount)
+    {
+        if (color.R == 0 && color.G == 0 && color.B == 0)
+            return -1;
+
+        int bestIndex = -1;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < moduleCount; i++)
+        {
+            Color expected = ModuleDebugColor(i);
+            int dr = color.R - expected.R;
+            int dg = color.G - expected.G;
+            int db = color.B - expected.B;
+            int distance = dr * dr + dg * dg + db * db;
+            if (distance >= bestDistance) continue;
+
+            bestDistance = distance;
+            bestIndex = i;
+        }
+
+        return bestDistance <= 16 ? bestIndex : -1;
+    }
+
+    private static int DecodeModule5HullFaceDebugColor(Color color)
+    {
+        if (color.R == 0 && color.G == 0 && color.B == 0)
+            return -1;
+
+        int bestIndex = -1;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < 6; i++)
+        {
+            Color expected = Module5HullFaceDebugColor(i);
+            int dr = color.R - expected.R;
+            int dg = color.G - expected.G;
+            int db = color.B - expected.B;
+            int distance = dr * dr + dg * dg + db * db;
+            if (distance >= bestDistance) continue;
+
+            bestDistance = distance;
+            bestIndex = i;
+        }
+
+        return bestDistance <= 16 ? bestIndex : -1;
+    }
+
+    private static string FormatStationShadowVector(Vector3 v)
+        => $"({v.X:0.######},{v.Y:0.######},{v.Z:0.######})";
 
     // Builds a VertexPositionNormalTexture hull mesh for one module (6 box faces, 24 verts).
     // Normals are local-space outward per face; BasicEffect transforms them at draw time.

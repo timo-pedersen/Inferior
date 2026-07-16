@@ -64,6 +64,7 @@ public sealed partial class SystemSpaceState : GameState
     private Camera3D    _camera = null!;
     private BasicEffect _effect = null!;
     private Effect      _stationShadowEffect = null!;
+    private Effect      _stationShadowFaceOwnerEffect = null!;
     private Effect?     _atmosEffect;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
@@ -114,6 +115,7 @@ public sealed partial class SystemSpaceState : GameState
     private Galaxy.Station? _stationShadowFrozenStation;
     private double _stationShadowFreezeInputNoticeSeconds;
     private bool _stationShadowFreezeInputNoticeChord;
+    private double _stationShadowCrosshairLogSeconds;
 
     // ── Container rendering ───────────────────────────────────────────────────
     // Renderer shared with ship/hull draw calls. Each test container owns its own
@@ -369,6 +371,7 @@ public sealed partial class SystemSpaceState : GameState
         StationTextureRegistry.SetTexture(SurfaceTexture.WornPanel,
             _content.Load<Texture2D>("Textures/wornpanel"));
         _stationShadowEffect = _content.Load<Effect>("Effects/StationShadow");
+        _stationShadowFaceOwnerEffect = _content.Load<Effect>("Effects/StationShadowFaceOwner");
 
         // Station module layouts — generated once from name-derived seed.
         // StationGenerator.Generate also runs StationDecorator internally.
@@ -574,6 +577,12 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.Tick(dt);
         if (_stationShadowFreezeInputNoticeSeconds > 0.0)
             _stationShadowFreezeInputNoticeSeconds = Math.Max(0.0, _stationShadowFreezeInputNoticeSeconds - dt);
+        _stationShadowCrosshairLogSeconds -= dt;
+        if (_stationShadowCrosshairLogSeconds <= 0.0)
+        {
+            LogStationShadowCrosshairDiagnostic();
+            _stationShadowCrosshairLogSeconds = 0.25;
+        }
 
         // When the window has no OS focus, substitute a centred mouse so look-input delta
         // stays at zero. The real mouse state is still stored in _prevMouse and used for UI

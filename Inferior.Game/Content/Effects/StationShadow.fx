@@ -18,6 +18,7 @@ int    ShadowDebugMode;
 float  ShadowDebugDifferenceScale;
 float  ShadowMapSize;
 float2 ShadowProjectionSize;
+float  AnalyticPreviewBias;
 float  EmissiveSurface;
 float4 ShadowDebugSolidColor;
 
@@ -322,6 +323,18 @@ DepthVertexOutput DepthVS(HullVertexInput input)
     return o;
 }
 
+float AnalyticZeroBiasShadow(float4 shadowCoord, float receiverDepth, float3 normalLight)
+{
+    float2 uv = ShadowUv(shadowCoord);
+
+    if (!IsInsideShadowMap(uv, receiverDepth))
+        return 1.0;
+
+    float correctedReceiverDepth = AnalyticPlaneCorrectedReceiverDepth(uv, receiverDepth, normalize(normalLight));
+    float storedDepth = tex2D(ShadowSampler, uv).r;
+    return correctedReceiverDepth <= storedDepth ? 1.0 : 0.0;
+}
+
 float4 HullPS(StationVertexOutput input) : COLOR0
 {
     float3 normal = normalize(input.Normal);
@@ -329,7 +342,7 @@ float4 HullPS(StationVertexOutput input) : COLOR0
         return ShadowDebugOutput(input.ShadowCoord, input.LightDepth, input.BiasedShadowCoord, input.BiasedLightDepth, normal, input.LightNormal);
 
     float nDotL = saturate(dot(normal, normalize(SunDirection)));
-    float shadow = ShadowVisibility(input.BiasedShadowCoord, input.BiasedLightDepth, normal);
+    float shadow = AnalyticZeroBiasShadow(input.ShadowCoord, input.LightDepth, input.LightNormal);
     float3 albedo = tex2D(DiffuseSampler, input.TexCoord).rgb;
     float3 lighting = Ambient.xxx + SunColour * nDotL * shadow;
     return float4(albedo * lighting, 1.0);
@@ -342,11 +355,46 @@ float4 BakedPS(StationVertexOutput input) : COLOR0
         return ShadowDebugOutput(input.ShadowCoord, input.LightDepth, input.BiasedShadowCoord, input.BiasedLightDepth, normal, input.LightNormal);
 
     float nDotL = saturate(dot(normal, normalize(SunDirection)));
-    float shadow = ShadowVisibility(input.BiasedShadowCoord, input.BiasedLightDepth, normal);
+    float shadow = AnalyticZeroBiasShadow(input.ShadowCoord, input.LightDepth, input.LightNormal);
     float4 albedo = tex2D(DiffuseSampler, input.TexCoord) * input.Color;
     if (EmissiveSurface > 0.5)
         return albedo;
 
+    float3 lighting = Ambient.xxx + SunColour * nDotL * shadow;
+    return float4(albedo.rgb * lighting, albedo.a);
+}
+
+float AnalyticPreviewShadow(float4 shadowCoord, float receiverDepth, float3 normalLight)
+{
+    float2 uv = ShadowUv(shadowCoord);
+
+    if (!IsInsideShadowMap(uv, receiverDepth))
+        return 1.0;
+
+    float correctedReceiverDepth = AnalyticPlaneCorrectedReceiverDepth(uv, receiverDepth, normalize(normalLight));
+    float storedDepth = tex2D(ShadowSampler, uv).r;
+    return correctedReceiverDepth - AnalyticPreviewBias <= storedDepth ? 1.0 : 0.0;
+}
+
+float4 HullAnalyticPreviewPS(StationVertexOutput input) : COLOR0
+{
+    float3 normal = normalize(input.Normal);
+    float nDotL = saturate(dot(normal, normalize(SunDirection)));
+    float shadow = AnalyticPreviewShadow(input.ShadowCoord, input.LightDepth, input.LightNormal);
+    float3 albedo = tex2D(DiffuseSampler, input.TexCoord).rgb;
+    float3 lighting = Ambient.xxx + SunColour * nDotL * shadow;
+    return float4(albedo * lighting, 1.0);
+}
+
+float4 BakedAnalyticPreviewPS(StationVertexOutput input) : COLOR0
+{
+    float4 albedo = tex2D(DiffuseSampler, input.TexCoord) * input.Color;
+    if (EmissiveSurface > 0.5)
+        return albedo;
+
+    float3 normal = normalize(input.Normal);
+    float nDotL = saturate(dot(normal, normalize(SunDirection)));
+    float shadow = AnalyticPreviewShadow(input.ShadowCoord, input.LightDepth, input.LightNormal);
     float3 lighting = Ambient.xxx + SunColour * nDotL * shadow;
     return float4(albedo.rgb * lighting, albedo.a);
 }
@@ -381,6 +429,24 @@ technique StationBaked
     {
         VertexShader = compile vs_3_0 BakedVS();
         PixelShader  = compile ps_3_0 BakedPS();
+    }
+}
+
+technique StationHullAnalyticPreview
+{
+    pass P0
+    {
+        VertexShader = compile vs_3_0 HullVS();
+        PixelShader  = compile ps_3_0 HullAnalyticPreviewPS();
+    }
+}
+
+technique StationBakedAnalyticPreview
+{
+    pass P0
+    {
+        VertexShader = compile vs_3_0 BakedVS();
+        PixelShader  = compile ps_3_0 BakedAnalyticPreviewPS();
     }
 }
 

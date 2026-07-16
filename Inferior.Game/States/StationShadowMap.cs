@@ -14,6 +14,7 @@ internal sealed class StationShadowMap : IDisposable
     public RenderTarget2D CasterCoverageTexture { get; }
     public RenderTarget2D CasterOwnerTexture { get; }
     public RenderTarget2D SelectedModuleHullDepthTexture { get; }
+    public RenderTarget2D Module5HullFaceOwnerTexture { get; }
     public SurfaceFormat SurfaceFormat => Texture.Format;
     public Matrix LightView { get; private set; }
     public Matrix LightProjection { get; private set; }
@@ -31,6 +32,7 @@ internal sealed class StationShadowMap : IDisposable
         CasterCoverageTexture = CreateDiagnosticTarget(gd, size);
         CasterOwnerTexture = CreateDiagnosticTarget(gd, size);
         SelectedModuleHullDepthTexture = CreateDepthTarget(gd, size);
+        Module5HullFaceOwnerTexture = CreateDiagnosticTarget(gd, size);
     }
 
     public void Build(
@@ -68,6 +70,7 @@ internal sealed class StationShadowMap : IDisposable
             $"coverageTarget={CasterCoverageTexture.Width}x{CasterCoverageTexture.Height} format={CasterCoverageTexture.Format} clear=Black " +
             $"ownerTarget={CasterOwnerTexture.Width}x{CasterOwnerTexture.Height} format={CasterOwnerTexture.Format} clear=Black " +
             $"selectedModuleHullDepthTarget={SelectedModuleHullDepthTexture.Width}x{SelectedModuleHullDepthTexture.Height} format={SelectedModuleHullDepthTexture.Format} clear=White moduleIndex=5 meshClass=Hull " +
+            $"module5HullFaceOwnerTarget={Module5HullFaceOwnerTexture.Width}x{Module5HullFaceOwnerTexture.Height} format={Module5HullFaceOwnerTexture.Format} clear=Black moduleIndex=5 meshClass=Hull " +
             $"near={DepthRange.Near:0.###}m far={DepthRange.Far:0.###}m span={DepthRange.Length:0.###}m " +
             $"stationLocalSun={FormatVector(StationLocalSunDirection)} boundsMin={FormatVector(Bounds.Min)} boundsMax={FormatVector(Bounds.Max)} " +
             $"expectedModules={modules.Count} casterDraws={totalDraws} casterPrimitives={totalPrimitives} " +
@@ -95,6 +98,8 @@ internal sealed class StationShadowMap : IDisposable
         RenderCasterOwnerTarget(effect, CasterOwnerTexture, modules,
             hullMeshes, decoMeshes, glassMeshes);
         RenderSelectedModuleHullDepthTarget(effect, SelectedModuleHullDepthTexture, selectedModuleIndex: 5,
+            modules, hullMeshes);
+        RenderModule5HullFaceOwnerTarget(effect, Module5HullFaceOwnerTexture, selectedModuleIndex: 5,
             modules, hullMeshes);
         LogSelectedModuleHullOffsetDiagnostics(stationIdentity, selectedModuleIndex: 5, modules,
             receiverNormalOffsetMetres);
@@ -135,6 +140,7 @@ internal sealed class StationShadowMap : IDisposable
         CasterCoverageTexture.Dispose();
         CasterOwnerTexture.Dispose();
         SelectedModuleHullDepthTexture.Dispose();
+        Module5HullFaceOwnerTexture.Dispose();
     }
 
     private static RenderTarget2D CreateDepthTarget(GraphicsDevice gd, int size)
@@ -263,6 +269,53 @@ internal sealed class StationShadowMap : IDisposable
         }
     }
 
+    private void RenderModule5HullFaceOwnerTarget(
+        Effect effect,
+        RenderTarget2D target,
+        int selectedModuleIndex,
+        IReadOnlyList<PlacedModule> modules,
+        IReadOnlyDictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> hullMeshes)
+    {
+        _gd.SetRenderTarget(target);
+        _gd.Clear(Color.Black);
+        _gd.RasterizerState = RasterizerState.CullNone;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        _gd.BlendState = BlendState.Opaque;
+
+        effect.CurrentTechnique = effect.Techniques["CasterOwner"];
+        effect.Parameters["LightView"]?.SetValue(LightView);
+        effect.Parameters["LightViewProjection"]?.SetValue(LightViewProjection);
+        effect.Parameters["LightDepthNear"]?.SetValue(DepthRange.Near);
+        effect.Parameters["LightDepthFar"]?.SetValue(DepthRange.Far);
+
+        if ((uint)selectedModuleIndex >= (uint)modules.Count)
+        {
+            Debug.WriteLine(
+                $"[StationShadowModule5HullFaceOwner] skipped moduleIndex={selectedModuleIndex} moduleCount={modules.Count}");
+            return;
+        }
+
+        var mod = modules[selectedModuleIndex];
+        effect.Parameters["StationLocalWorld"]?.SetValue(mod.Transform);
+        if (!hullMeshes.TryGetValue(mod, out var hull))
+        {
+            Debug.WriteLine(
+                $"[StationShadowModule5HullFaceOwner] missing hull mesh moduleIndex={selectedModuleIndex} definition={mod.Definition.Id}");
+            return;
+        }
+
+        for (int hullFace = 0; hullFace < 6; hullFace++)
+        {
+            int faceId = Module5HullFaceIdFromHullFace(hullFace);
+            effect.Parameters["ShadowDebugSolidColor"]?.SetValue(
+                SystemSpaceState.Module5HullFaceDebugColor(faceId).ToVector4());
+            DrawRange(effect, hull.vb, hull.ib, startIndex: hullFace * 6, primitiveCount: 2);
+        }
+
+        Debug.WriteLine(
+            $"[StationShadowModule5HullFaceOwner] moduleIndex={selectedModuleIndex} definition={mod.Definition.Id} meshClass=Hull faces=6 primitives=12");
+    }
+
     private void LogSelectedModuleHullOffsetDiagnostics(
         string stationIdentity,
         int selectedModuleIndex,
@@ -384,6 +437,18 @@ internal sealed class StationShadowMap : IDisposable
            $"{m.M31:0.######},{m.M32:0.######},{m.M33:0.######},{m.M34:0.######};" +
            $"{m.M41:0.######},{m.M42:0.######},{m.M43:0.######},{m.M44:0.######}]";
 
+    private static int Module5HullFaceIdFromHullFace(int hullFace)
+        => hullFace switch
+        {
+            0 => 4, // +Z
+            1 => 5, // -Z
+            2 => 1, // -X
+            3 => 0, // +X
+            4 => 2, // +Y
+            5 => 3, // -Y
+            _ => -1,
+        };
+
     private void Draw(Effect effect, VertexBuffer vb, IndexBuffer ib, int triCount)
     {
         _gd.SetVertexBuffer(vb);
@@ -392,6 +457,21 @@ internal sealed class StationShadowMap : IDisposable
         {
             pass.Apply();
             _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, triCount);
+        }
+    }
+
+    private void DrawRange(Effect effect, VertexBuffer vb, IndexBuffer ib, int startIndex, int primitiveCount)
+    {
+        _gd.SetVertexBuffer(vb);
+        _gd.Indices = ib;
+        foreach (var pass in effect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawIndexedPrimitives(
+                PrimitiveType.TriangleList,
+                baseVertex: 0,
+                startIndex: startIndex,
+                primitiveCount: primitiveCount);
         }
     }
 }
