@@ -26,6 +26,13 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
     private const int DefaultWindowWidth  = 1600;
     private const int DefaultWindowHeight = 900;
 
+    // ── Screenshot capture ────────────────────────────────────────────────────
+    // Ctrl+C, rising edge, detected globally here (not per-state) so it works in every
+    // game state — same chord-detection shape as StationCycleController's Ctrl+F12.
+    // Flagged in Update(), captured at the end of Draw() for the same frame so the
+    // backbuffer read sees this frame's fully-rendered content.
+    private bool _screenshotRequested;
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public InferiorGame()
@@ -82,6 +89,12 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         var keys = Keyboard.GetState();
         if (keys.IsKeyDown(Keys.F12) && !_prevKeys.IsKeyDown(Keys.F12))
             CycleWindowMode();
+
+        bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
+        bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
+        if (ctrlDown && keys.IsKeyDown(Keys.C) && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.C)))
+            _screenshotRequested = true;
+
         _prevKeys = keys;
 
         Core.DataBus.DataBus.Drain();
@@ -102,6 +115,12 @@ public class InferiorGame : Microsoft.Xna.Framework.Game
         GraphicsDevice.Clear(Color.Black);
         _stateMachine.Draw(gameTime, GraphicsDevice, _spriteBatch!);
         base.Draw(gameTime);
+
+        if (_screenshotRequested)
+        {
+            Platform.HostServices.SaveScreenshot(GraphicsDevice);
+            _screenshotRequested = false;
+        }
     }
 
     // ── Window mode cycling ───────────────────────────────────────────────────
