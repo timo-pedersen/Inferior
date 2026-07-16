@@ -305,6 +305,47 @@ public sealed class StationModuleMesh
 
     public int FaceCount => _faces.Count;
 
+    public (VertexBuffer vb, IndexBuffer ib, int triCount)? BuildFaceRange(
+        GraphicsDevice gd, int firstFace, int faceCount)
+    {
+        if (faceCount <= 0 || firstFace < 0 || firstFace >= _faces.Count)
+            return null;
+
+        int lastFace = Math.Min(_faces.Count, firstFace + faceCount);
+        var verts = new List<VertexPositionNormalColorTexture>();
+        var idx = new List<int>();
+
+        for (int face = firstFace; face < lastFace; face++)
+        {
+            var (vertexBase, count) = _faces[face];
+            if (count < 3) continue;
+
+            int dstBase = verts.Count;
+            for (int i = 0; i < count; i++)
+                verts.Add(_verts[vertexBase + i]);
+
+            if (count == 3)
+            {
+                idx.AddRange([dstBase, dstBase + 1, dstBase + 2]);
+            }
+            else
+            {
+                for (int i = 1; i < count - 1; i++)
+                    idx.AddRange([dstBase, dstBase + i + 1, dstBase + i]);
+            }
+        }
+
+        if (verts.Count == 0 || idx.Count == 0)
+            return null;
+
+        var vb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
+                                  verts.Count, BufferUsage.WriteOnly);
+        vb.SetData(verts.ToArray());
+        var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, idx.Count, BufferUsage.WriteOnly);
+        ib.SetData(idx.ToArray());
+        return (vb, ib, idx.Count / 3);
+    }
+
     // Returns (localCenter, width, height) for a face.
     // For triangle faces (count == 3), returns (centroid, 0, 0).
     public (Vector3 center, float width, float height) GetFaceBounds(int faceIdx)

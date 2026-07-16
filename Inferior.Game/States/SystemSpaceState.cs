@@ -371,6 +371,7 @@ public sealed partial class SystemSpaceState : GameState
         // Container renderer — geometry is built per-instance in SpawnContainers
         _litSurfaceEffect = _content.Load<Effect>("Effects/LitSurface");
         _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
+        InitializeStationShadows();
 
         // Ship mesh — three components; built once per session entry on the main thread
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
@@ -411,6 +412,8 @@ public sealed partial class SystemSpaceState : GameState
         _decoMeshesFlat.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
+        foreach (var v in _shadowCasterMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
+        _shadowCasterMeshes.Clear();
         foreach (var station in _system.Stations)
         {
             var modules = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
@@ -443,6 +446,8 @@ public sealed partial class SystemSpaceState : GameState
                 if (mod.Definition.MeshFactory == null)
                     _hullMeshes[mod] = BuildHullMesh(_gd, mod);
             }
+
+            BuildStationShadowCasterMeshes(modules);
         }
         _stationPositions.Clear();
         foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
@@ -544,6 +549,7 @@ public sealed partial class SystemSpaceState : GameState
         _calibrationCubeIb = null;
         _meshRenderer?.Dispose();
         _meshRenderer = null;
+        DisposeStationShadows();
         _shipMeshRenderer?.Dispose();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
@@ -678,6 +684,7 @@ public sealed partial class SystemSpaceState : GameState
             _thirdPersonMode = !_thirdPersonMode;
             _tpCamPosValid   = false;  // force immediate snap on first frame
         }
+        UpdateStationShadowInput(keys);
 
         // Animations always run, regardless of input mode
         _cockpitUI.Tick(dt);
@@ -921,6 +928,7 @@ public sealed partial class SystemSpaceState : GameState
 
         // SunDirection = from scene toward star = opposite of "light travels" direction
         SceneLighting.SunDirection = -lightDir;
+        RenderStationShadowMap();
 
         // Three render passes — far, mid, near — each with its own independently
         // scoped near/far (see BuildActivePasses in SystemSpaceState.Helpers.cs).
@@ -971,6 +979,7 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.DrawTargetingHud(sb, _camera, _effect.View, _padWorldPos, _padDistance);
         DrawSkyboxStarOverlay(sb);
         _hyperspace.DrawOverlay(sb);
+        DrawStationShadowOverlay(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background

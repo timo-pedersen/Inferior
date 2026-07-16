@@ -59,6 +59,33 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx);
     }
 
+    public void DrawDynamicLitShadowed(
+        VertexBuffer vb, IndexBuffer ib,
+        Matrix world, Matrix view, Matrix projection,
+        Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        Texture2D texture, Texture2D shadowMap,
+        Matrix moduleToStationLocal, Matrix stationLocalToLightView,
+        Vector2 shadowMinXY, Vector2 shadowInvSize,
+        float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
+        float shadowCorrectionLimit, float shadowBiasDepth,
+        bool binaryShadowView, bool deltaShadowView)
+    {
+        var fx = _litSurfaceEffect;
+        fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
+        fx.Parameters["World"].SetValue(world);
+        fx.Parameters["View"].SetValue(view);
+        fx.Parameters["Projection"].SetValue(projection);
+        fx.Parameters["SunDirection"].SetValue(sunDirection);
+        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
+        fx.Parameters["Ambient"].SetValue(ambient);
+        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
+        fx.Parameters["Texture"].SetValue(texture);
+        SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
+            shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
+            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView);
+        Draw(vb, ib, fx);
+    }
+
     /// <summary>
     /// Pre-baked (albedo x AO) vertex-colour geometry (station decoration). Vertex alpha is
     /// the self-illumination floor S — see StationModuleMesh.ApplyIlluminationFlags.
@@ -81,6 +108,32 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx);
     }
 
+    public void DrawBakedColorLitShadowed(
+        VertexBuffer vb, IndexBuffer ib,
+        Matrix world, Matrix view, Matrix projection,
+        Vector3 sunDirection, Color sunColour, float ambient,
+        Texture2D texture, Texture2D shadowMap,
+        Matrix moduleToStationLocal, Matrix stationLocalToLightView,
+        Vector2 shadowMinXY, Vector2 shadowInvSize,
+        float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
+        float shadowCorrectionLimit, float shadowBiasDepth,
+        bool binaryShadowView, bool deltaShadowView)
+    {
+        var fx = _litSurfaceEffect;
+        fx.CurrentTechnique = fx.Techniques["BakedColorLitShadowed"];
+        fx.Parameters["World"].SetValue(world);
+        fx.Parameters["View"].SetValue(view);
+        fx.Parameters["Projection"].SetValue(projection);
+        fx.Parameters["SunDirection"].SetValue(sunDirection);
+        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
+        fx.Parameters["Ambient"].SetValue(ambient);
+        fx.Parameters["Texture"].SetValue(texture);
+        SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
+            shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
+            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView);
+        Draw(vb, ib, fx);
+    }
+
     public void Dispose() => _whiteTexture.Dispose();
 
     // ── Private ───────────────────────────────────────────────────────────────
@@ -98,5 +151,30 @@ public sealed class MeshRenderer : IDisposable
             pass.Apply();
             gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, ib.IndexCount / 3);
         }
+    }
+
+    private static void SetShadowParameters(
+        Effect fx, Texture2D shadowMap,
+        Matrix moduleToStationLocal, Matrix stationLocalToLightView,
+        Vector2 shadowMinXY, Vector2 shadowInvSize,
+        float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
+        float shadowCorrectionLimit, float shadowBiasDepth,
+        bool binaryShadowView, bool deltaShadowView)
+    {
+        fx.Parameters["ShadowMap"].SetValue(shadowMap);
+        fx.Parameters["ModuleToStationLocal"].SetValue(moduleToStationLocal);
+        fx.Parameters["StationLocalToLightView"].SetValue(stationLocalToLightView);
+        fx.Parameters["ShadowMinXY"].SetValue(shadowMinXY);
+        fx.Parameters["ShadowInvSize"].SetValue(shadowInvSize);
+        fx.Parameters["ShadowNear"].SetValue(shadowNear);
+        fx.Parameters["ShadowDepthSpan"].SetValue(shadowDepthSpan);
+        fx.Parameters["ShadowTexelSize"].SetValue(shadowTexelSize);
+        fx.Parameters["ShadowCorrectionLimit"].SetValue(shadowCorrectionLimit);
+        // No .fx initializer (project policy since the EclipseFactor incident) — always
+        // set explicitly, even though it's computed fresh from the same constant every
+        // single draw call right now (SystemSpaceState.Stations.cs).
+        fx.Parameters["ShadowBiasDepth"].SetValue(shadowBiasDepth);
+        fx.Parameters["ShadowBinaryView"].SetValue(binaryShadowView ? 1.0f : 0.0f);
+        fx.Parameters["ShadowDeltaView"].SetValue(deltaShadowView ? 1.0f : 0.0f);
     }
 }

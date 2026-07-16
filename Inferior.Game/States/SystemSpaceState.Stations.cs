@@ -56,26 +56,59 @@ public sealed partial class SystemSpaceState
             if (renderPos.Length() > 30_000f) continue;
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
-            var sysQ   = station.GetOrientation(_gameTimeSeconds);
-            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
-            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+            bool useShadow = _stationShadowContext != null
+                && ReferenceEquals(_stationShadowContext.Station, station)
+                && _stationShadowMap != null;
+
+            Matrix stationRot;
+            if (useShadow)
+                stationRot = _stationShadowContext!.StationRotation;
+            else
+            {
+                var sysQ   = station.GetOrientation(_gameTimeSeconds);
+                var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+                stationRot = Matrix.CreateFromQuaternion(stRotQ);
+            }
 
             foreach (var mod in modules)
             {
                 if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
                 if (mod.TextureInstance == null) continue;
 
-                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-                Matrix world =
-                    Matrix.CreateScale(rs) *
-                    Matrix.CreateFromQuaternion(modRot) *
-                    stationRot *
-                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
-                    Matrix.CreateTranslation(renderPos);
+                // mod.Transform used directly, not decomposed-then-rebuilt: the shadow
+                // caster (RenderStationShadowMap) and the receiver's ModuleToStationLocal
+                // parameter both use mod.Transform raw, so this world matrix must be built
+                // from that exact same matrix too, not a numerically-reconstructed
+                // approximation of it — otherwise the on-screen vertex position and the
+                // position the shadow system evaluates for that vertex quietly disagree by
+                // a mm-scale amount (compounded by Decompose's own precision), which eats
+                // into the shadow-correction budget independently of anything the
+                // receiver-plane correction can fix. See SystemSpaceState.Shadows.cs.
+                Matrix world = mod.Transform * Matrix.CreateScale(rs) * stationRot
+                             * Matrix.CreateTranslation(renderPos);
 
-                _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
-                    Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
-                    mod.TextureInstance);
+                if (useShadow)
+                {
+                    var ctx = _stationShadowContext!;
+                    // Normalized depth units — StationShadowBiasMetres is expressed in
+                    // metres; LitSurface.fx's ShadowBiasDepth compares in the same
+                    // normalized space as receiverDepth/storedDepth.
+                    float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
+                    _meshRenderer.DrawDynamicLitShadowed(hull.vb, hull.ib, world, view, proj,
+                        Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                        mod.TextureInstance, _stationShadowMap!, mod.Transform,
+                        ctx.StationLocalToLightView, ctx.MinXY, ctx.InvSize, ctx.Near,
+                        ctx.DepthSpan,
+                        new Vector2(1f / StationShadowMapSize, 1f / StationShadowMapSize),
+                        StationShadowCorrectionLimit, shadowBiasDepth,
+                        _stationShadowBinaryView, _stationShadowDeltaView);
+                }
+                else
+                {
+                    _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
+                        Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                        mod.TextureInstance);
+                }
             }
         }
 
@@ -94,27 +127,48 @@ public sealed partial class SystemSpaceState
 
             if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
 
-            var sysQ   = station.GetOrientation(_gameTimeSeconds);
-            var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
-            Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+            bool useShadow = _stationShadowContext != null
+                && ReferenceEquals(_stationShadowContext.Station, station)
+                && _stationShadowMap != null;
+
+            Matrix stationRot;
+            if (useShadow)
+                stationRot = _stationShadowContext!.StationRotation;
+            else
+            {
+                var sysQ   = station.GetOrientation(_gameTimeSeconds);
+                var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+                stationRot = Matrix.CreateFromQuaternion(stRotQ);
+            }
 
             foreach (var mod in modules)
             {
                 if (!decoMeshesForLevel.TryGetValue(mod, out var deco)) continue;
 
-                mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-
-                Matrix world =
-                    Matrix.CreateScale(rs) *
-                    Matrix.CreateFromQuaternion(modRot) *
-                    stationRot *
-                    Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
-                    Matrix.CreateTranslation(renderPos);
+                // See the hull pass above — mod.Transform used directly, matching the
+                // caster and ModuleToStationLocal exactly, not decomposed-then-rebuilt.
+                Matrix world = mod.Transform * Matrix.CreateScale(rs) * stationRot
+                             * Matrix.CreateTranslation(renderPos);
 
                 Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
 
-                _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
-                    SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
+                if (useShadow)
+                {
+                    var ctx = _stationShadowContext!;
+                    float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
+                    _meshRenderer.DrawBakedColorLitShadowed(deco.vb, deco.ib, world, view, proj,
+                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
+                        _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
+                        ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
+                        new Vector2(1f / StationShadowMapSize, 1f / StationShadowMapSize),
+                        StationShadowCorrectionLimit, shadowBiasDepth,
+                        _stationShadowBinaryView, _stationShadowDeltaView);
+                }
+                else
+                {
+                    _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
+                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
+                }
             }
         }
 

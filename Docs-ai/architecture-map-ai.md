@@ -149,7 +149,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `CelestialBodyRenderer.cs` — star/planet body+glow+atmosphere drawing, orbit rings, planet-sphere GPU meshes.
 - `GeometryBuilder.cs` — face/winding helpers (`AddConvexFace`/`AddFace`), `BuildDynamic` (VertexPositionNormalColorTexture, White baked, ship hull/nacelle/pylon), `BuildBaked` (VertexPositionColor, currently no callers).
 - `MeshFactory.cs` — sphere/ring mesh generation.
-- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` (DynamicLit technique — ships, containers, station hull) / `DrawBakedColorLit` (BakedColorLit technique — station decoration; vertex alpha is the self-illumination floor S).
+- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
 - `ShipMeshRenderer.cs` — owns and draws the ship hull/nacelle/pylon meshes (built via `Type1HullFactory`).
@@ -244,6 +244,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `SystemSpaceState.Containers.cs` — station-placed shipping containers: real `ShippingContainerFactory` geometry, standard rendering path, rails kinematics (`SpawnContainers`/`PlacedContainer`/`DrawContainers`).
 - `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
 - `SystemSpaceState.Ship.cs` — spawn/input mapping, third-person camera math, cockpit-layout capture.
+- `SystemSpaceState.Shadows.cs` — Phase B station shadow-map owner: 2048² StationMap render target, hull-only back-face caster pass, fitted station-local light camera, F7/F8/F9 diagnostics.
 - `SystemSpaceState.Skybox.cs` — star hover/click hyperspace-target selection (rendering itself lives in `SkyboxRenderer`).
 - `SystemSpaceState.Stations.cs` — station mesh/glow/dot drawing (next extraction candidate — see current-state doc).
 - `SystemSpaceState.Targeting.cs` — `FeedRadarContacts`/`UpdatePadTargetPosition` (world state → targeting system).
@@ -298,7 +299,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `StationDecorator.cs` — adds per-module decoration (windows, hatches, antennas, dishes, lights, pipes).
 - `StationGenerator.cs` — builds stations by port-to-port module attachment, collision detection, landing pads.
 - `StationModuleDefinition.cs` — hull definition for a module: bounding box, category, ports, mesh factory, weight.
-- `StationModuleMesh.cs` — CPU-side mesh accumulator for quads/triangles in local module space.
+- `StationModuleMesh.cs` — CPU-side mesh accumulator for quads/triangles in local module space; can build a face range for docking-bay hull-only shadow casting.
 - `StationModuleRegistry.cs` — registry of all module types (hab, cargo, docking, science, connector).
 - `StationPort.cs` — attachment point on a module: size, category filters, terminal/docking flags.
 - `StationProfile.cs` — generated station attributes: economy, age, wealth, population.
