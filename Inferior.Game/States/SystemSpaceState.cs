@@ -324,7 +324,17 @@ public sealed partial class SystemSpaceState : GameState
         _waitingForStationRelocationSnapshot = false;
 
         if (initialStarterRelocationPayload != null)
+        {
             _waitingForStationRelocationSnapshot = QueueInitialStarterStationRelocation(initialStarterRelocationPayload);
+            // Calibration cube position is computed once ever, from the first starter
+            // relocation's result (see Update()) — not re-armed on later starter entries
+            // (there aren't any: IsInitialNewGameStarterEntry is a true one-shot).
+            if (_waitingForStationRelocationSnapshot && _calibrationCubePosition == null)
+            {
+                _calibrationCubePending   = true;
+                _calibrationCubeStarIndex = _star.GalaxyIndex;
+            }
+        }
         else if (stationArrivalPayload != null)
             _waitingForStationRelocationSnapshot = QueueStationArrivalRelocation(stationArrivalPayload.Value);
 
@@ -422,6 +432,13 @@ public sealed partial class SystemSpaceState : GameState
         _containers.Clear();
         _prevCameraPosValid = false;
 
+        // Calibration cube — geometry rebuilds every entry like everything else above;
+        // its fixed universe position is computed once (see Update()) and persists across
+        // entries, not reset here.
+        _calibrationCubeVb?.Dispose();
+        _calibrationCubeIb?.Dispose();
+        BuildCalibrationCubeGpuMesh();
+
         // Skybox — galaxy stars projected onto a far sphere around the current system
         _skyboxRenderer = new SkyboxRenderer(_gd, _effect);
         var (skyPoints, skyGlow, targetable) = SkyboxRenderer.Build(_star, GalaxyGenerator.Generate());
@@ -504,6 +521,10 @@ public sealed partial class SystemSpaceState : GameState
         _hullMeshes.Clear();
         foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
         _containers.Clear();
+        _calibrationCubeVb?.Dispose();
+        _calibrationCubeIb?.Dispose();
+        _calibrationCubeVb = null;
+        _calibrationCubeIb = null;
         _meshRenderer?.Dispose();
         _meshRenderer = null;
         _shipMeshRenderer?.Dispose();
@@ -535,6 +556,16 @@ public sealed partial class SystemSpaceState : GameState
         _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
         if (_waitingForStationRelocationSnapshot && _frameShipSnap != null)
             _waitingForStationRelocationSnapshot = false;
+        // Calibration cube position — computed once, from the same first-post-relocation
+        // snapshot that clears _waitingForStationRelocationSnapshot above (that flag's
+        // whole purpose is "the ship snapshot now reflects the starter relocation result",
+        // so the same condition is the correct place to capture the cube's fixed position).
+        if (_calibrationCubePending && _frameShipSnap != null)
+        {
+            _calibrationCubePending  = false;
+            _calibrationCubePosition = _frameShipSnap.Position
+                                     + _frameShipSnap.Forward * CalibrationCubeSpawnDistance;
+        }
         if (_frameShipSnap != null)
         {
             string prevRefName = _refName;
@@ -934,6 +965,7 @@ public sealed partial class SystemSpaceState : GameState
         _gd.DepthStencilState = DepthStencilState.Default;
         DrawStations(level);
         DrawContainers(level);
+        DrawCalibrationCube(level);
         if (_thirdPersonMode && _frameShipSnap != null)
             _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
                 _frameShipSnap.Position, _frameShipSnap.Orientation, level);
@@ -948,6 +980,7 @@ public sealed partial class SystemSpaceState : GameState
         _gd.DepthStencilState = DepthStencilState.Default;
         DrawStations(level);
         DrawContainers(level);
+        DrawCalibrationCube(level);
         DrawStationGlows(_frameSpriteBatch!, 0f, (float)NearTierFar);
     }
 

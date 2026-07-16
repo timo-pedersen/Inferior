@@ -1,7 +1,7 @@
 namespace Inferior.Game.StationGen;
 
 /// <summary>
-/// 5×7 pixel bitmap font data for A-Z, 0-9, space, and hyphen.
+/// 5×7 pixel bitmap font data for A-Z, 0-9, space, hyphen, and plus.
 /// Each character is stored as 7 bytes; each byte is a 5-bit row mask (MSB = left pixel).
 /// </summary>
 public static class BitmapFonts
@@ -9,7 +9,7 @@ public static class BitmapFonts
     public const int CharW = 5;
     public const int CharH = 7;
 
-    // Indexed by character. Only A-Z (upper), 0-9, space (32), hyphen (45) are defined.
+    // Indexed by character. Only A-Z (upper), 0-9, space, hyphen, and plus are defined.
     private static readonly Dictionary<char, byte[]> _glyphs = new()
     {
         ['A'] = [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
@@ -50,6 +50,7 @@ public static class BitmapFonts
         ['9'] = [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00001, 0b01110],
         [' '] = [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
         ['-'] = [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
+        ['+'] = [0b00000, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0b00000],
     };
 
     /// Returns true if pixel (px, py) within the glyph for ch is lit.
