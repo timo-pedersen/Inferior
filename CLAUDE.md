@@ -171,6 +171,19 @@ Detailed rules live in `!invariants.md`. Important highlights:
 - The dark, industrial, asymmetrical, detail-rich station aesthetic is intentional.
 - Do not hard-code fire rate or shield recharge where those should emerge from capacitor state.
 
+## Branch awareness — station shadows
+
+Current stable work must not assume station shadows exist. Master contains no shadow code.
+
+The failed station lighting/shadow experiment is quarantined on
+`wip/station-lighting-shadows` (stable recovery branch: `recovery/no-station-lighting-shadows`).
+Treat it as read-only history — do not copy experimental shadow code back into stable
+branches.
+
+The agreed replacement design is `Docs/station-lighting-pipeline-spec.md` (fresh, phased
+implementation). Shadow/lighting work happens only through explicitly scoped tasks based
+on that spec. Historical context: `Docs-archive/Shadow_fail_retrospective.md`.
+
 ## Current-state maintenance
 
 `!current-state.md` should answer: **where is development now?**

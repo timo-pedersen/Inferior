@@ -40,8 +40,10 @@ public sealed class GeometryBuilder
     // ── Build ─────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Dynamic (real-time lit) mesh: VertexPositionNormalTexture, flat-shaded face normals.
-    /// Base colour is applied per draw call via BasicEffect.DiffuseColor.
+    /// Dynamic (real-time lit) mesh: VertexPositionNormalColorTexture, flat-shaded face normals,
+    /// vertex colour baked White (this method's tint is applied per draw call via
+    /// MeshRenderer.DrawDynamicLit's materialColor — baseColour is accepted for API parity with
+    /// callers but intentionally not baked here, unchanged from before this mesh format migrated).
     /// </summary>
     public (VertexBuffer vb, IndexBuffer ib) BuildDynamic(GraphicsDevice gd, Color baseColour = default)
     {
@@ -49,7 +51,7 @@ public sealed class GeometryBuilder
         int vertCount  = triCount * 3;
         int indexCount = triCount * 3;
 
-        var verts   = new VertexPositionNormalTexture[vertCount];
+        var verts   = new VertexPositionNormalColorTexture[vertCount];
         var indices = new int[indexCount];
 
         for (int t = 0; t < triCount; t++)
@@ -60,15 +62,15 @@ public sealed class GeometryBuilder
             // to render CW-from-outside front faces while keeping the outward normal correct.
             Vector3 normal = Vector3.Normalize(Vector3.Cross(p1 - p0, p2 - p0));
             int v = t * 3;
-            verts[v]     = new VertexPositionNormalTexture(p0, normal, Vector2.Zero);
-            verts[v + 1] = new VertexPositionNormalTexture(p1, normal, Vector2.Zero);
-            verts[v + 2] = new VertexPositionNormalTexture(p2, normal, Vector2.Zero);
+            verts[v]     = new VertexPositionNormalColorTexture(p0, normal, Color.White, Vector2.Zero);
+            verts[v + 1] = new VertexPositionNormalColorTexture(p1, normal, Color.White, Vector2.Zero);
+            verts[v + 2] = new VertexPositionNormalColorTexture(p2, normal, Color.White, Vector2.Zero);
             indices[v]     = v;
             indices[v + 1] = v + 2;  // swap 1↔2 → CW from outside = visible front face
             indices[v + 2] = v + 1;
         }
 
-        var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration, vertCount, BufferUsage.WriteOnly);
+        var vb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration, vertCount, BufferUsage.WriteOnly);
         vb.SetData(verts);
         var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, indexCount, BufferUsage.WriteOnly);
         ib.SetData(indices);

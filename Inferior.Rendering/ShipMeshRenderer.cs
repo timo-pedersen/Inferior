@@ -54,12 +54,12 @@ public sealed class ShipMeshRenderer : IDisposable
                      * Matrix.CreateTranslation(renderPos);
 
         var sunCol = new Color(SceneLighting.SunColour);
-        _meshRenderer.DrawDynamic(_shipHullVb,    _shipHullIb,    world, currentView, proj,
-            Type1HullFactory.HullColour,    SceneLighting.SunDirection, sunCol);
-        _meshRenderer.DrawDynamic(_shipNacelleVb, _shipNacelleIb, world, currentView, proj,
-            Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunCol);
-        _meshRenderer.DrawDynamic(_shipPylonVb,   _shipPylonIb,   world, currentView, proj,
-            Type1HullFactory.PylonColour,   SceneLighting.SunDirection, sunCol);
+        _meshRenderer.DrawDynamicLit(_shipHullVb,    _shipHullIb,    world, currentView, proj,
+            Type1HullFactory.HullColour,    SceneLighting.SunDirection, sunCol, SceneLighting.Ambient);
+        _meshRenderer.DrawDynamicLit(_shipNacelleVb, _shipNacelleIb, world, currentView, proj,
+            Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient);
+        _meshRenderer.DrawDynamicLit(_shipPylonVb,   _shipPylonIb,   world, currentView, proj,
+            Type1HullFactory.PylonColour,   SceneLighting.SunDirection, sunCol, SceneLighting.Ambient);
 
         _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;

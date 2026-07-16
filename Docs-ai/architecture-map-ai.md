@@ -146,9 +146,9 @@ Simulation domain model. Depends on Core, Galaxy.
 
 - `Camera3D.cs` — quaternion free-look camera, origin-shift rendering, `RenderScale` constant.
 - `CelestialBodyRenderer.cs` — star/planet body+glow+atmosphere drawing, orbit rings, planet-sphere GPU meshes.
-- `GeometryBuilder.cs` — face/winding helpers (`AddConvexFace`/`AddFace`), `BuildDynamic`/`BuildBaked`.
+- `GeometryBuilder.cs` — face/winding helpers (`AddConvexFace`/`AddFace`), `BuildDynamic` (VertexPositionNormalColorTexture, White baked, ship hull/nacelle/pylon), `BuildBaked` (VertexPositionColor, currently no callers).
 - `MeshFactory.cs` — sphere/ring mesh generation.
-- `MeshRenderer.cs` — `DrawBaked` (VertexPositionColorTexture, no lighting) / `DrawDynamic` (VertexPositionNormalTexture, BasicEffect star light).
+- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` (DynamicLit technique — ships, containers, station hull) / `DrawBakedColorLit` (BakedColorLit technique — station decoration; vertex alpha is the self-illumination floor S).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
 - `ShipMeshRenderer.cs` — owns and draws the ship hull/nacelle/pylon meshes (built via `Type1HullFactory`).
@@ -232,7 +232,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle.
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation: `RequestStationRelocation(persistenceId, standOffMeters)` — resolves live station position, applies stand-off, matches reference-frame velocity, faces the station. Used by new-game start, system-map arrival, and debug station cycle.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
@@ -240,7 +240,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `SystemSpaceState.cs` — primary file: fields, ctor, `OnEnter`/`OnExit`/`OnResize`/`Update`/`Draw`/`HandleKeyboard`. In-system 3D flight (all `FlightMode` variants).
 - `SystemSpaceState.CelestialBodies.cs` — nearly empty; one Stations-owned texture helper left (`CreateNavGlowTexture`).
 - `SystemSpaceState.DebugContainers.cs` — debug radar-test container spawn/draw (flat colour, no texture — see current-state doc).
-- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`.
+- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`Far Station`, 500 m stand-off) and `SystemMapStationArrivalStandOffMeters` (2 km).
 - `SystemSpaceState.Ship.cs` — spawn/input mapping, third-person camera math, cockpit-layout capture.
 - `SystemSpaceState.Skybox.cs` — star hover/click hyperspace-target selection (rendering itself lives in `SkyboxRenderer`).
 - `SystemSpaceState.Stations.cs` — station mesh/glow/dot drawing (next extraction candidate — see current-state doc).
@@ -251,6 +251,11 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `SystemMapPayload.cs` — transition payload from `SystemSpaceState` to `SystemMapState`.
 - `SystemMapState.cs` — 2D orbital map of a star system: zoom/pan, time compression, nav selection.
 - `SystemSpacePayload.cs` — entry payload for `SystemSpaceState` (spawn location, nav targets).
+
+**Input/**
+
+- `StationCycleController.cs` — debug station-cycle (Ctrl+F12 rising edge): orders system stations, issues relocation requests by `PersistenceId` via the canonical relocation path.
+- `StationCyclePlatformInput.cs` — platform chord detection helper for the cycle control.
 
 **Hyperspace/**
 

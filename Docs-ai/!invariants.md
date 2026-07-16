@@ -54,6 +54,14 @@ The simulation thread is the intended owner of the mutable live universe.
 
 The current code may still violate parts of this intended model. When touching world-state flow, first identify who owns and writes each value. Do not spread dual authority into new systems.
 
+Relocation-specific rules:
+
+- All station relocation paths (new-game start, system-map arrival, debug station cycle) use the same simulation-owned canonical operation.
+- Station destinations are identified by persistent identity (`PersistenceId`), not stale presentation objects.
+- Relocation establishes position, reference-frame velocity, and facing coherently in one operation.
+- Presentation code must not independently repair or reinterpret relocation results.
+- Visual systems must not become authoritative sources for station position, orientation, velocity, or relocation.
+
 ---
 
 ## 3. Reference frames
@@ -203,6 +211,13 @@ The depth-tier system and geometric detail system solve different problems.
 - Do not couple them merely because distant objects often use less detail.
 - Preserve the current multi-pass depth architecture unless a task explicitly redesigns it from first principles.
 - The game's darkness, silhouettes, lit windows, sparse glow, piping/cabling, and procedural industrial detail are part of its visual identity; do not casually normalize them toward generic bright readability.
+
+Lighting-pipeline constraints (design agreed, implementation phased — see `Docs/station-lighting-pipeline-spec.md`):
+
+- Vertex colour never contains a directional lighting term once Phase A lands; bake-time colour is albedo × AO (+ deliberate overrides) only.
+- Any shadow system must use the same authoritative station-local transforms for caster, receiver, and visible draw.
+- Receiver bias must never visibly move a contact shadow; large receiver normal offsets are forbidden as an acne workaround.
+- Planetary/moon shadowing is an analytic eclipse term, never geometry in a shadow map.
 
 ---
 

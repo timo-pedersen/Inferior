@@ -13,9 +13,17 @@ Two-level model:
 **Macro** — `StationGrowthEngine`: port-based module attachment builds the outer structure.
 **Micro** — `StationDecorator`: independent decoration passes applied to every exposed face.
 
-All decoration is **pre-baked at generation time**. Vertex colours include directional
-lighting and AO. Renderer draws static meshes. Screen-space glow is a separate
-`SpriteBatch` pass using `BlendState.Additive`.
+Decoration geometry (windows, hatches, antennas, pipes, greebles) is generated once at
+generation time and never rebuilt. Vertex colour is baked albedo×AO only (+ a
+self-illumination floor S in alpha); the directional sun term is computed every frame in
+`LitSurface.fx`, not baked — a rotating station is lit correctly. Screen-space glow is a
+separate `SpriteBatch` pass using `BlendState.Additive`.
+
+> **Lighting pipeline Phase A implemented** (`Docs/station-lighting-pipeline-spec.md`):
+> normals are kept through `Build()`, no directional term is ever baked into vertex colour.
+> Station shadows still do **not** exist on master/this branch; the failed first shadow
+> experiment is quarantined on `wip/station-lighting-shadows`
+> (`Docs-archive/Shadow_fail_retrospective.md`). Next spec phase (B) adds the shadow map.
 
 ---
 
@@ -128,10 +136,10 @@ call `occupancy.TryOccupy()` before placing. Passes that don't block others
 | 15 | `PlaceNavigationLights` | 3 extremity lights (red/green/blue-white); registered in `GlowLights` |
 | 16 | `RegisterModuleAmbientLights` | 60% of modules; 1–2 dim colour markers; continuous |
 | 17 | `PlaceLandmarkAntenna` | One tall antenna (18–27 m) per station on best science/core top face |
-| — | `ApplyDirectionalLighting` | Runs AFTER all decoration; multiplies FaceColors by `max(dot(normal, sunDir), ambient)` |
-| — | `ApplyAmbientOcclusion` | Runs after lighting; **base faces only** (`BaseFaceCount`); 0–3 enclosed adjacent faces → 0–40% darkening |
+| — | `ApplyIlluminationFlags` | Runs AFTER all decoration; writes the self-illumination floor S=0 into vertex alpha for every face (no RGB change — the sun term is real-time now, see `LitSurface.fx`) |
+| — | `ApplyAmbientOcclusion` | Runs after illumination flags; **base faces only** (`BaseFaceCount`); 0–3 enclosed adjacent faces → 0–40% darkening (RGB only, alpha/S untouched) |
 
-**Decoration pass ordering is fixed.** AO and lighting must always be last.
+**Decoration pass ordering is fixed.** AO and illumination-flags must always be last.
 
 ### Pipe geometry
 

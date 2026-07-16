@@ -40,20 +40,16 @@ public sealed partial class SystemSpaceState
 
     private void DrawStations(DetailLevel level)
     {
-        if (_stationPositions.Count == 0) return;
+        if (_stationPositions.Count == 0 || _meshRenderer == null) return;
 
         float rs = (float)Camera3D.RenderScale;
+        Matrix view = _effect.View;
+        Matrix proj = _effect.Projection;
+        var    sunCol = new Color(SceneLighting.SunColour);
 
-        // Hull pass — real-time BasicEffect N·L lighting with procedural texture.
-        // Uses VertexPositionNormalTexture so normals are in the vertex data.
-        // DirectionalLight0.Direction is already set from the star position in Draw().
-        _effect.LightingEnabled                = true;
-        _effect.TextureEnabled                 = true;
-        _effect.VertexColorEnabled             = false;
-        _effect.DiffuseColor                   = Vector3.One;
-        _effect.DirectionalLight0.DiffuseColor = SceneLighting.SunColour;
-        _effect.AmbientLightColor              = new Vector3(SceneLighting.Ambient);
-
+        // Hull pass — real-time LitSurface.fx DynamicLit (ambient + saturate(N.L)) with
+        // procedural texture; MaterialColor left White (matches the old
+        // BasicEffect.DiffuseColor = Vector3.One) so all tint comes from the texture.
         foreach (var (station, universePos) in _stationPositions)
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
@@ -70,38 +66,26 @@ public sealed partial class SystemSpaceState
                 if (mod.TextureInstance == null) continue;
 
                 mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
-                _effect.World =
+                Matrix world =
                     Matrix.CreateScale(rs) *
                     Matrix.CreateFromQuaternion(modRot) *
                     stationRot *
                     Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
                     Matrix.CreateTranslation(renderPos);
 
-                _effect.Texture = mod.TextureInstance;
-
-                _gd.SetVertexBuffer(hull.vb);
-                _gd.Indices = hull.ib;
-
-                foreach (var pass in _effect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    _gd.DrawIndexedPrimitives(
-                        PrimitiveType.TriangleList,
-                        baseVertex: 0, startIndex: 0,
-                        primitiveCount: hull.triCount);
-                }
+                _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
+                    Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                    mod.TextureInstance);
             }
         }
 
-        // Decoration pass — pre-baked lighting in vertex colours; texture modulates.
+        // Decoration pass — vertex colour is albedo x AO (+ self-illumination floor S in
+        // alpha); the sun term is computed here every frame from the real world normal
+        // (LitSurface.fx BakedColorLit technique), so a rotating station is lit correctly.
         // Full uses the wear/ambient-occlusion-graded mesh; Medium/Minimal use the flat
         // (ungraded) variant built before that pass ran — same generator, fewer steps,
         // same principle already established for containers and station decoration.
         var decoMeshesForLevel = level == DetailLevel.Full ? _decoMeshes : _decoMeshesFlat;
-
-        _effect.LightingEnabled    = false;
-        _effect.VertexColorEnabled = true;
-        _effect.TextureEnabled     = true;
 
         foreach (var (station, universePos) in _stationPositions)
         {
@@ -120,31 +104,27 @@ public sealed partial class SystemSpaceState
 
                 mod.Transform.Decompose(out _, out Quaternion modRot, out Vector3 posMetres);
 
-                _effect.World =
+                Matrix world =
                     Matrix.CreateScale(rs) *
                     Matrix.CreateFromQuaternion(modRot) *
                     stationRot *
                     Matrix.CreateTranslation(Vector3.Transform(posMetres, stationRot) * rs) *
                     Matrix.CreateTranslation(renderPos);
 
-                _effect.Texture = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
+                Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
 
-                _gd.SetVertexBuffer(deco.vb);
-                _gd.Indices = deco.ib;
-
-                foreach (var pass in _effect.CurrentTechnique.Passes)
-                {
-                    pass.Apply();
-                    _gd.DrawIndexedPrimitives(
-                        PrimitiveType.TriangleList,
-                        baseVertex: 0, startIndex: 0,
-                        primitiveCount: deco.triCount);
-                }
+                _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
+                    SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
             }
         }
 
-        // Glass pass — windows, portholes; White texture so vertex colours are unmodified.
-        _effect.Texture = StationTextureRegistry.White;
+        // Glass pass — windows, portholes; unlit, unchanged (Docs/station-lighting-pipeline-spec.md
+        // D5: glass is a separate mesh, explicitly out of scope for this migration). Still
+        // BasicEffect; explicit state set here since the deco pass above no longer touches _effect.
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = true;
+        _effect.TextureEnabled     = true;
+        _effect.Texture            = StationTextureRegistry.White;
 
         foreach (var (station, universePos) in _stationPositions)
         {
@@ -187,10 +167,19 @@ public sealed partial class SystemSpaceState
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
         _effect.LightingEnabled    = true;
+
+        // MeshRenderer's Draw() leaves rasterizer/depth state set for its own techniques;
+        // restore what the rest of this frame's 3D passes expect (matches DrawTestContainers'
+        // and ShipMeshRenderer.Draw's post-draw restore).
+        _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
+        _gd.DepthStencilState = DepthStencilState.Default;
     }
 
-    // Builds a VertexPositionNormalTexture hull mesh for one module (6 box faces, 24 verts).
-    // Normals are local-space outward per face; BasicEffect transforms them at draw time.
+    // Builds a VertexPositionNormalColorTexture hull mesh for one module (6 box faces, 24
+    // verts). Colour is baked White — this pass draws through LitSurface.fx's DynamicLit
+    // technique with MaterialColor left at its default White too (matches the old
+    // BasicEffect.DiffuseColor = Vector3.One), all tint coming from the panel texture.
+    // Normals are local-space outward per face; the shader transforms them at draw time.
     // UV uses the same tangent-frame projection as StationModuleMesh.AddQuad (5 m/tile).
     private static (VertexBuffer vb, IndexBuffer ib, int triCount) BuildHullMesh(
         GraphicsDevice gd, PlacedModule mod)
@@ -200,23 +189,23 @@ public sealed partial class SystemSpaceState
         var h  = mod.Definition.BoundingBox * 0.5f;
         float si = ChamferInset;
 
-        var verts = new VertexPositionNormalTexture[24];
+        var verts = new VertexPositionNormalColorTexture[24];
         var idx   = new int[36];
 
         // Per-face UV axes chosen so that U and V are always positive (0→4 for a 20 m face).
         // Cross(normal, arb) produces negative U on several faces of a standard box,
         // making texture V=0.5 (the name text) only partially sampled. Hardcoded axes avoid this.
-        static void AddFace(VertexPositionNormalTexture[] v, int[] idx, int face,
+        static void AddFace(VertexPositionNormalColorTexture[] v, int[] idx, int face,
                             Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 n,
                             Vector3 uAxis, Vector3 vAxis)
         {
             int b = face * 4;
-            v[b    ] = new VertexPositionNormalTexture(v0, n, Vector2.Zero);
-            v[b + 1] = new VertexPositionNormalTexture(v1, n, new Vector2(
+            v[b    ] = new VertexPositionNormalColorTexture(v0, n, Color.White, Vector2.Zero);
+            v[b + 1] = new VertexPositionNormalColorTexture(v1, n, Color.White, new Vector2(
                 Vector3.Dot(v1 - v0, uAxis) / UvScale, Vector3.Dot(v1 - v0, vAxis) / UvScale));
-            v[b + 2] = new VertexPositionNormalTexture(v2, n, new Vector2(
+            v[b + 2] = new VertexPositionNormalColorTexture(v2, n, Color.White, new Vector2(
                 Vector3.Dot(v2 - v0, uAxis) / UvScale, Vector3.Dot(v2 - v0, vAxis) / UvScale));
-            v[b + 3] = new VertexPositionNormalTexture(v3, n, new Vector2(
+            v[b + 3] = new VertexPositionNormalColorTexture(v3, n, Color.White, new Vector2(
                 Vector3.Dot(v3 - v0, uAxis) / UvScale, Vector3.Dot(v3 - v0, vAxis) / UvScale));
 
             int i = face * 6;
@@ -235,7 +224,7 @@ public sealed partial class SystemSpaceState
         AddFace(verts, idx, 4, new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,-h.Z+si), new(-h.X+si,+h.Y,-h.Z+si),  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);  // +Y
         AddFace(verts, idx, 5, new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);  // -Y
 
-        var vb = new VertexBuffer(gd, VertexPositionNormalTexture.VertexDeclaration,
+        var vb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
                                   24, BufferUsage.WriteOnly);
         vb.SetData(verts);
         var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, 36, BufferUsage.WriteOnly);

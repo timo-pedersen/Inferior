@@ -75,7 +75,7 @@ public static class ShippingContainerFactory
 
         ApplyWear(mesh, wear, sidePatternSeed);
 
-        return mesh.ToArraysWithNormals();
+        return mesh.ToArrays();
     }
 
     public static ShippingContainer[] Generate(

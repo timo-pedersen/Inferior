@@ -19,6 +19,12 @@
 /processorParam:DebugMode=Auto
 /build:Effects/Atmosphere.fx
 
+#begin Effects/LitSurface.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:Effects/LitSurface.fx
+
 #begin Fonts/DefaultFont.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor

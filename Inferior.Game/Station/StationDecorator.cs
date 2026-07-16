@@ -10,7 +10,7 @@ namespace Inferior.Game.StationGen;
 // fully populated. ApplyAmbientOcclusion is a separate pass run after BakeLighting.
 public static class StationDecorator
 {
-    public static void Decorate(IReadOnlyList<PlacedModule> modules, Matrix stationRot)
+    public static void Decorate(IReadOnlyList<PlacedModule> modules)
     {
         foreach (var mod in modules)
         {
@@ -77,7 +77,7 @@ public static class StationDecorator
                 GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
                 GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy, greeblePlacements);
                 GenerateTanks       (mod, face, mesh, occupancy, new System.Random(tankRng.Next()));
-                GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()), stationRot);
+                GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()));
 
                 if (face.IsExposed && greeblePlacements.Count >= 2 && face.Width * face.Height >= 4f)
                     StationCableGenerator.GenerateFaceCables(
@@ -2973,7 +2973,7 @@ public static class StationDecorator
     ];
 
     private static void GenerateContainers(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Matrix stationRot)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
     {
         if (!face.IsExposed) return;
         // Need at least enough space for one container laid on its smallest footprint
@@ -3008,7 +3008,7 @@ public static class StationDecorator
         double nextProb = 1.0;
         while (placed < maxContainers && rng.NextDouble() < nextProb)
         {
-            PlaceContainer(mod, face, mesh, occupancy, rng, palette[rng.Next(palette.Length)], stationRot);
+            PlaceContainer(mod, face, mesh, occupancy, rng, palette[rng.Next(palette.Length)]);
             placed++;
             nextProb = placed == 1 ? 0.60 : 0.35;
         }
@@ -3028,8 +3028,7 @@ public static class StationDecorator
     }
 
     private static void PlaceContainer(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Color color,
-        Matrix stationRot)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, Color color)
     {
         // Decide orientation: long axis along Right (horizontal) or Up (vertical)
         bool longHoriz = rng.NextDouble() < 0.6;
@@ -3089,33 +3088,17 @@ public static class StationDecorator
             // geometry instead of a separately hand-maintained reimplementation (that
             // reimplementation had drifted from the factory's own conventions, which is
             // why station-placed container text mirrored differently than standalone).
-            // MergeTransformedAndLit detects and corrects handedness automatically, so
-            // the old manual axisY-flip check that used to live here is gone — t is
-            // passed through unchanged.
-            //
-            // Lighting needs care though: t only maps container-local space into
-            // MODULE-local space (matching what DrawStations applies at draw time via
-            // modRot*stationRot). SceneLighting.SunDirection is a world/galaxy-space
-            // direction — comparing a module-local normal against it directly (as a first
-            // pass of this fix did) ignores the module's own port-attachment twist and the
-            // station's current spin, both of which BakeLighting/ApplyLighting correctly
-            // apply for the rest of the module's geometry. A 180° twist, common from the
-            // random 0/90/180/270° rotation TryAttach applies per port, would show up as
-            // exactly inverted lighting — matching what was reported. Pre-rotate the sun
-            // direction back into module-local space instead (equivalent to rotating the
-            // normal forward, via Dot(Rv,w) = Dot(v,R⁻¹w) for the rotation R = modRot*stationRot),
-            // so container faces land on the same lighting basis as the module's own hull.
-            mod.Transform.Decompose(out _, out Quaternion modRotQ, out _);
-            Matrix  modRot       = Matrix.CreateFromQuaternion(modRotQ);
-            Matrix  fullRot      = modRot * stationRot;
-            Vector3 localSunDir  = Vector3.Normalize(
-                Vector3.TransformNormal(SceneLighting.SunDirection, Matrix.Invert(fullRot)));
-
+            // MergeTransformed detects and corrects handedness automatically, so the old
+            // manual axisY-flip check that used to live here is gone — t is passed through
+            // unchanged. No lighting pre-rotation is needed any more either: the sun term
+            // is computed per frame in LitSurface.fx from each vertex's real world normal
+            // (t maps container-local space into module-local space; the module's own
+            // rotation and the station's spin are applied once, at draw time, to every
+            // vertex uniformly — there is no separate bake-time basis to get wrong).
             var (verts, indices) = ShippingContainerFactory.GenerateVertices(
                 color, wear: (float)(0.1 + rng.NextDouble() * 0.5), sidePatternSeed: rng.Next(),
                 text: null, lockGrade: LockGrade.Civilian);
-            mesh.MergeTransformedAndLit(verts, indices, t,
-                localSunDir, SceneLighting.Ambient, SceneLighting.SunColour);
+            mesh.MergeTransformed(verts, indices, t);
             break;
         }
     }

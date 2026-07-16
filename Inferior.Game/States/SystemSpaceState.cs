@@ -64,6 +64,7 @@ public sealed partial class SystemSpaceState : GameState
     private Camera3D    _camera = null!;
     private BasicEffect _effect = null!;
     private Effect?     _atmosEffect;
+    private Effect      _litSurfaceEffect = null!;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
     // ── Celestial body rendering ──────────────────────────────────────────────
@@ -104,7 +105,8 @@ public sealed partial class SystemSpaceState : GameState
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshesFlat = [];
     // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
-    // GPU-side hull meshes (VertexPositionNormalTexture) for real-time BasicEffect lighting.
+    // GPU-side hull meshes (VertexPositionNormalColorTexture) for real-time LitSurface.fx
+    // DynamicLit lighting (Docs/station-lighting-pipeline-spec.md Phase A).
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
 
     // ── Container rendering ───────────────────────────────────────────────────
@@ -338,7 +340,8 @@ public sealed partial class SystemSpaceState : GameState
         _effect.DirectionalLight2.Enabled = false;
 
         // Container renderer — geometry is built per-instance in SpawnTestContainers
-        _meshRenderer = new MeshRenderer(_gd);
+        _litSurfaceEffect = _content.Load<Effect>("Effects/LitSurface");
+        _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
 
         // Ship mesh — three components; built once per session entry on the main thread
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
@@ -505,6 +508,7 @@ public sealed partial class SystemSpaceState : GameState
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
+        _litSurfaceEffect = null!; // owned by ContentManager — do not dispose manually
     }
 
     public override void OnResize(int width, int height)

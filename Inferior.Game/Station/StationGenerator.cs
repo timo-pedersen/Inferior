@@ -34,6 +34,10 @@ public sealed class StationGenerator
     internal static float ChamferDepthForSeed(int seed)
         => 0.05f + (float)new System.Random(seed ^ 0x43484D46).NextDouble() * 0.45f;
 
+    // gameTime is no longer read internally — it fed the world-space rotation BakeLighting
+    // used for its N.L bake, which is gone now that the sun term is computed per frame in
+    // LitSurface.fx (Docs/station-lighting-pipeline-spec.md Phase A). Kept on the signature
+    // rather than touching this public entry point's call site for a lighting-only brief.
     public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd,
                                                double gameTime = 0.0)
     {
@@ -56,12 +60,8 @@ public sealed class StationGenerator
         var palette = TexturePalette.From(profile);
         AssignTextures(modules, gd, palette, station.Name);
 
-        var sysQ       = station.GetOrientation(gameTime);
-        var stRotQ     = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
-        var stationRot = Matrix.CreateFromQuaternion(stRotQ);
-
-        StationDecorator.Decorate(modules, stationRot);
-        BakeLighting(modules, stationRot);
+        StationDecorator.Decorate(modules);
+        BakeLighting(modules);
         // ApplyAmbientOcclusion intentionally NOT called here — the caller (SystemSpaceState)
         // builds a flat GPU snapshot first, then calls it, then builds the graded snapshot,
         // so both DetailLevel variants exist from one generation pass.
@@ -131,39 +131,30 @@ public sealed class StationGenerator
         _                                    => SurfaceTexture.CleanPanel,
     };
 
-    // Bakes SceneLighting into each module's decoration vertex colours.
-    // stationRot: the station's world-space rotation at bake time. Combined with each
-    // module's local rotation so the N·L is computed in world space, matching the
-    // hull pass which applies modRot * stationRot via the BasicEffect World matrix.
-    // Must run after Decorate() (so meshes exist) and before Build() (so GPU buffers
-    // pick up the modified colours).
-    private static void BakeLighting(List<PlacedModule> modules, Matrix stationRot)
+    // Writes the self-illumination floor S into each module's decoration vertex alpha
+    // (Docs/station-lighting-pipeline-spec.md Phase A) — no directional bake, no world
+    // rotation needed any more: the sun term is computed per frame in LitSurface.fx from
+    // the real (rotating) world normal. Must run after Decorate() (so meshes exist) and
+    // before Build() (so GPU buffers pick up the written alpha).
+    private static void BakeLighting(List<PlacedModule> modules)
     {
         foreach (var mod in modules)
         {
             if (mod.Mesh == null) continue;
-            mod.Transform.Decompose(out _, out Quaternion rot, out _);
-            Matrix modRot = Matrix.CreateFromQuaternion(rot);
-            Matrix worldRot = modRot * stationRot;
-            mod.Mesh.ApplyLighting(
-                worldRot,
-                SceneLighting.SunDirection,
-                SceneLighting.Ambient,
-                SceneLighting.SunColour);
+            mod.Mesh.ApplyIlluminationFlags();
 
             if (mod.Mesh.AmbientOverrideFaceCount > 0)
-                BoostAmbientForFaceRange(mod.Mesh, worldRot, SceneLighting.Ambient, mod.Seed);
+                BoostAmbientForFaceRange(mod.Mesh, SceneLighting.Ambient, mod.Seed);
         }
     }
 
-    // Re-derives what ApplyLighting's per-face factor would have been with a higher, per-face
-    // ambient floor, for a sub-range of faces the mesh flagged via AmbientOverrideFace* (e.g. a
-    // hollow module's interior walls). Scales the already-baked color by the ratio between the
-    // two factors rather than re-lighting from scratch, since ApplyLighting already ran and only
-    // the lit result is available. Replaces the earlier flat-boost version: the flat ambient made
-    // the interior visible but unreadable (no sense of depth, no up/down cue, no corner detail).
-    // Three additive terms instead, each a per-face constant (flat-shaded, matching the rest of
-    // this mesh — not a per-vertex gradient):
+    // Computes a higher, per-face self-illumination floor S for a sub-range of faces the mesh
+    // flagged via AmbientOverrideFace* (e.g. a hollow module's interior walls) and writes it
+    // directly into vertex alpha via SetFaceIllumination — no colour rescaling: S is a shader
+    // input (LitSurface.fx's BakedColorLit technique takes max(N.L, Ambient, S) every frame),
+    // not a baked multiply, so it needs no world rotation or sun direction at bake time. Three
+    // additive terms, each a per-face constant (flat-shaded, matching the rest of this mesh —
+    // not a per-vertex gradient):
     //   - doorProximity: linear falloff from the door plane to the far wall, derived from the
     //     flagged faces' own Z spread (no hardcoded door location) — brighter near the door.
     //   - overheadCue: faces whose normal points down (the ceiling, in this convention) read
@@ -177,8 +168,7 @@ public sealed class StationGenerator
     private const float OverheadCueWeight   = 0.25f;
     private const float CornerNoiseWeight   = 0.15f;
 
-    private static void BoostAmbientForFaceRange(StationModuleMesh mesh, Matrix worldRotation,
-        float baseAmbient, int seed)
+    private static void BoostAmbientForFaceRange(StationModuleMesh mesh, float baseAmbient, int seed)
     {
         int start = mesh.AmbientOverrideFaceStart;
         int count = mesh.AmbientOverrideFaceCount;
@@ -219,14 +209,7 @@ public sealed class StationGenerator
                 + cornerNoise   * CornerNoiseWeight;
             brightness = MathHelper.Clamp(brightness, baseAmbient, 1f);
 
-            Vector3 worldN = Vector3.Normalize(Vector3.TransformNormal(localN, worldRotation));
-            float sunDot   = Vector3.Dot(worldN, SceneLighting.SunDirection);
-
-            float originalFactor = MathF.Max(sunDot, baseAmbient);
-            float boostedFactor  = MathF.Max(sunDot, brightness);
-            if (originalFactor <= 0f) continue;
-
-            mesh.MultiplyFaceColor(f, boostedFactor / originalFactor);
+            mesh.SetFaceIllumination(f, brightness);
         }
     }
 

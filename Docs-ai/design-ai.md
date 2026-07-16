@@ -44,6 +44,15 @@ Lighting targets (initial, intentionally left open for future improvement):
 | Planet terminator | Self-shadowing sphere |
 | Ship shadow | On nearby surfaces when landing |
 
+**Station lighting/shadows:** not part of current stable presentation. The agreed design
+is `Docs/station-lighting-pipeline-spec.md` — one custom lit-surface shader (directional
+light, shadow maps, planetary eclipse term computed per frame; specular and normal maps
+as reserved later phases). The failed first shadow experiment is quarantined on
+`wip/station-lighting-shadows`; treat it as historical only.
+
+Principle: **visual systems must not become authoritative sources for station position,
+orientation, velocity, or relocation.**
+
 ---
 
 ## Flight & physics

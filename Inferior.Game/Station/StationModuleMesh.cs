@@ -20,9 +20,12 @@ public sealed class AnimTag
 
 // CPU-side mesh accumulator for per-module decoration geometry.
 // Vertices are in local module space (metres). Call Build() to produce GPU buffers.
-// Uses VertexPositionColorTexture — render with LightingEnabled=false,
-// VertexColorEnabled=true, TextureEnabled=true.
-// Lighting is baked into vertex colours by ApplyLighting() before Build().
+// Vertex colour is albedo x AO (+ deliberate tint/wear/interior overrides) only — no
+// directional term is ever baked in (Docs/station-lighting-pipeline-spec.md Phase A).
+// Vertex alpha carries a self-illumination floor S written by ApplyIlluminationFlags()/
+// StationGenerator.BoostAmbientForFaceRange before Build(). Normals travel through to the
+// GPU buffer; the sun term (LitSurface.fx, BakedColorLit technique) is computed every
+// frame from the real world normal, so a rotating station is lit correctly.
 // UV coordinates are generated automatically from face geometry (5 m per tile).
 public sealed class StationModuleMesh
 {
@@ -347,47 +350,69 @@ public sealed class StationModuleMesh
         }
     }
 
-    // Bakes directional lighting into vertex colours.
-    // worldRotation: rotation-only part of the module's world transform (no scale/translate).
-    // Emissive faces (R+G+B > 370) are skipped — their colours stay at full brightness.
-    // Must be called after all geometry is added and before Build().
-    public void ApplyLighting(Matrix worldRotation, Vector3 sunDirection, float ambient, Vector3 sunColour)
+    // Sets the self-illumination floor S (vertex alpha, [0,1]) for every vertex in a face —
+    // used by StationGenerator.BoostAmbientForFaceRange for interior-override faces.
+    public void SetFaceIllumination(int faceIdx, float s)
     {
-        foreach (var (vb, count) in _faces)
+        var (vb, count) = _faces[faceIdx];
+        byte a = (byte)MathHelper.Clamp(s * 255f, 0f, 255f);
+        for (int i = 0; i < count; i++)
         {
-            Color orig = _verts[vb].Color;
-
-            // Compute face normal from first three vertices (cross product → outward normal)
-            Vector3 localN = Vector3.Cross(
-                _verts[vb + 1].Position - _verts[vb].Position,
-                _verts[vb + 2].Position - _verts[vb].Position);
-            float len = localN.Length();
-            if (len < 1e-6f) continue;
-            localN /= len;
-
-            // Transform local normal to world space for the N·L calculation
-            Vector3 worldN = Vector3.Normalize(Vector3.TransformNormal(localN, worldRotation));
-            float   factor = MathF.Max(Vector3.Dot(worldN, sunDirection), ambient);
-
-            for (int i = 0; i < count; i++)
-            {
-                var vtx   = _verts[vb + i];
-                var c     = vtx.Color;
-                vtx.Color = new Color(
-                    (byte)MathF.Min(c.R * factor * sunColour.X, 255f),
-                    (byte)MathF.Min(c.G * factor * sunColour.Y, 255f),
-                    (byte)MathF.Min(c.B * factor * sunColour.Z, 255f),
-                    c.A);
-                _verts[vb + i] = vtx;
-            }
+            var vtx   = _verts[vb + i];
+            var c     = vtx.Color;
+            vtx.Color = new Color(c.R, c.G, c.B, a);
+            _verts[vb + i] = vtx;
         }
     }
 
-    // Transforms external geometry into this mesh's local space and bakes directional
-    // lighting into it using each vertex's own normal (more accurate than this mesh's own
-    // per-face lighting, since real per-vertex normals are available). No _faces entry is
-    // added — matches how other raised decoration (tanks, dishes, antennas) already isn't
-    // individually face-addressable after being added.
+    // Writes the self-illumination floor S into vertex alpha for every vertex in the mesh —
+    // the bake-time replacement for the old directional multiply (deleted; the sun term is
+    // now computed per frame in LitSurface.fx). S = 0 (fully sun-dependent) for every vertex.
+    //
+    // Iterates _verts directly, NOT _faces: MergeTransformed-merged geometry (station-placed
+    // containers and their text) is never given a _faces entry (see MergeTransformed's own
+    // comment), so a _faces-based sweep silently skips it — those vertices would keep
+    // whatever alpha they arrived with (255, from ShippingContainerFactory's 3-arg Color
+    // constructors), reading as S=1, i.e. fully emissive. Iterating _verts catches every
+    // vertex present at bake time regardless of how it was added, including tanks/dishes/
+    // antennas (also merged without a _faces entry).
+    //
+    // Design-note / flagged mismatch: the brief for this migration describes a "current
+    // R+G+B > 370 → emissive, S=1" rule "applied where ApplyLighting applies it today."
+    // No such rule exists anywhere in this method, in StationGenerator.BakeLighting, or
+    // anywhere else in this file's git history on this branch's lineage — the old
+    // ApplyLighting multiplied every face unconditionally, with no brightness-based skip.
+    // The only actually-emissive station geometry (window/porthole glass) already lives in
+    // a separate mesh (PlacedModule.GlassMesh) that ApplyLighting never touched and that
+    // stays out of scope per this brief's D5. Implementing a fresh R+G+B>370 classifier
+    // here would un-dim previously-dimmed light-housing faces on the shadow side — new
+    // visual behaviour, not parity with master. Per the brief's own instruction ("if a
+    // real conflict is found, stop and report — do not invent a different encoding
+    // silently") this method sets S=0 for every vertex rather than inventing that rule; only
+    // the AmbientOverrideFaceRange (interior faces, handled by
+    // StationGenerator.BoostAmbientForFaceRange, which runs after this and only touches
+    // face-tracked geometry) gets a non-zero S. Flagged for Timo.
+    // Must be called after all geometry is added AND merged, and before Build().
+    public void ApplyIlluminationFlags()
+    {
+        for (int i = 0; i < _verts.Count; i++)
+        {
+            var vtx   = _verts[i];
+            var c     = vtx.Color;
+            vtx.Color = new Color(c.R, c.G, c.B, (byte)0);
+            _verts[i] = vtx;
+        }
+    }
+
+    // Transforms external geometry into this mesh's local space, keeping each vertex's own
+    // normal and colour untouched (no directional bake — Docs/station-lighting-pipeline-spec.md
+    // Phase A). No _faces entry is added — matches how other raised decoration (tanks,
+    // dishes, antennas) already isn't individually face-addressable after being added.
+    // Merged vertices keep whatever alpha they arrive with (typically 255, i.e. S=1/fully
+    // emissive) until ApplyIlluminationFlags runs — which is why that method sweeps _verts
+    // directly rather than _faces, so this merge does NOT need to pre-zero alpha itself;
+    // it must simply run before ApplyIlluminationFlags (StationGenerator.BakeLighting, after
+    // all of StationDecorator.Decorate — see call order there).
     //
     // Automatically detects and corrects a mirrored (improper / negative-determinant)
     // transform by negating one basis row, restoring a proper rotation before anything
@@ -403,9 +428,8 @@ public sealed class StationModuleMesh
     // backwards-facing correct one; fixing only the winding leaves it readable as
     // backwards text. Restoring properness at the transform itself, before any vertex
     // is moved, fixes both symmetric and asymmetric content the same way.
-    public void MergeTransformedAndLit(
-        VertexPositionNormalColorTexture[] verts, short[] indices, Matrix transform,
-        Vector3 sunDirection, float ambient, Vector3 sunColour)
+    public void MergeTransformed(
+        VertexPositionNormalColorTexture[] verts, short[] indices, Matrix transform)
     {
         if (transform.Determinant() < 0)
         {
@@ -420,35 +444,18 @@ public sealed class StationModuleMesh
         {
             Vector3 pos = Vector3.Transform(v.Position, transform);
             Vector3 nrm = Vector3.Normalize(Vector3.TransformNormal(v.Normal, transform));
-            float   factor = MathF.Max(Vector3.Dot(nrm, sunDirection), ambient);
-            Color   c = v.Color;
-            Color lit = new Color(
-                (byte)MathF.Min(c.R * factor * sunColour.X, 255f),
-                (byte)MathF.Min(c.G * factor * sunColour.Y, 255f),
-                (byte)MathF.Min(c.B * factor * sunColour.Z, 255f), c.A);
-            _verts.Add(new VertexPositionNormalColorTexture(pos, nrm, lit, v.TextureCoordinate));
+            _verts.Add(new VertexPositionNormalColorTexture(pos, nrm, v.Color, v.TextureCoordinate));
         }
 
         for (int i = 0; i < indices.Length; i += 3)
             _idx.AddRange([vbOffset + indices[i], vbOffset + indices[i + 1], vbOffset + indices[i + 2]]);
     }
 
-    // Returns raw CPU-side arrays without requiring a GraphicsDevice.
-    // Indices are converted from int to short (safe up to 32 767 vertices).
-    public (VertexPositionColorTexture[] verts, short[] indices) ToArrays()
+    // Returns raw CPU-side arrays including per-vertex normals — for dynamically lit
+    // geometry (containers) and anywhere else a GraphicsDevice isn't available yet.
+    public (VertexPositionNormalColorTexture[] verts, short[] indices) ToArrays()
     {
-        var verts = _verts.Select(v => new VertexPositionColorTexture(v.Position, v.Color, v.TextureCoordinate)).ToArray();
-        var indices = new short[_idx.Count];
-        for (int i = 0; i < _idx.Count; i++)
-            indices[i] = (short)_idx[i];
-        return (verts, indices);
-    }
-
-    // Returns raw CPU-side arrays including per-vertex normals, for dynamically lit
-    // geometry (containers) — see VertexPositionNormalColorTexture.
-    public (VertexPositionNormalColorTexture[] verts, short[] indices) ToArraysWithNormals()
-    {
-        var verts   = _verts.ToArray();   // already the right type now
+        var verts   = _verts.ToArray();   // already the right type
         var indices = new short[_idx.Count];
         for (int i = 0; i < _idx.Count; i++)
             indices[i] = (short)_idx[i];
@@ -460,10 +467,10 @@ public sealed class StationModuleMesh
     {
         if (_verts.Count == 0) return null;
 
-        var verts   = _verts.Select(v => new VertexPositionColorTexture(v.Position, v.Color, v.TextureCoordinate)).ToArray();
+        var verts   = _verts.ToArray();   // already the right type — normals travel to the GPU
         var indices = _idx.ToArray();
 
-        var vb = new VertexBuffer(gd, VertexPositionColorTexture.VertexDeclaration,
+        var vb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
                                   verts.Length, BufferUsage.WriteOnly);
         vb.SetData(verts);
 

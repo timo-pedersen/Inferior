@@ -52,8 +52,8 @@ public sealed partial class SystemSpaceState
                          * Matrix.CreateFromQuaternion(tc.Orientation)
                          * Matrix.CreateTranslation(renderPos);
 
-            _meshRenderer.DrawDynamicColored(tc.Vb, tc.Ib, world, view, proj,
-                SceneLighting.SunDirection, new Color(SceneLighting.SunColour));
+            _meshRenderer.DrawDynamicLit(tc.Vb, tc.Ib, world, view, proj,
+                Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient);
         }
 
         // Restore effect state expected by subsequent draw calls

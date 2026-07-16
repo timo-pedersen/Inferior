@@ -13,8 +13,8 @@ internal readonly struct PlacedGreebleInfo(Vector2 faceLocalPos, Vector2 footpri
 
 // Generates cable bundles and conduits routed between connectable greeble items on a
 // module face. Geometry is added to the existing StationModuleMesh (module-local space).
-// ApplyLighting bakes lighting into vertex colours after all geometry is added, so raw
-// colours are passed here.
+// ApplyIlluminationFlags writes the self-illumination floor into vertex alpha after all
+// geometry is added, so raw (undimmed) colours are passed here.
 internal static class StationCableGenerator
 {
     private const float CellSize        = 0.15f;   // grid resolution (metres)
