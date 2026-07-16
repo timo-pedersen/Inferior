@@ -596,7 +596,15 @@ public sealed partial class SystemSpaceState : GameState
 
             if (station != null)
             {
-                DVec3 stationGalaxyPos = EclipticToGalaxy(_system.GetStationPosition(station, _gameTimeSeconds));
+                // Position and time must come from the SAME snapshot: _gameTimeSeconds is
+                // not refreshed from _frameShipSnap.SimTime until later in this Update()
+                // call (see below), so using it here would evaluate the station at the
+                // PREVIOUS frame's time while snap.Position is current — during the heavy
+                // startup frames when relocation lands, that gap can be hundreds of ms,
+                // which at typical close-orbit speeds (~tens of km/s) is a tens-of-km error
+                // baked permanently into the offset.
+                DVec3 stationGalaxyPos = EclipticToGalaxy(
+                    _system.GetStationPosition(station, _frameShipSnap.SimTime));
                 DVec3 desiredWorldPos  = _frameShipSnap.Position
                                        + _frameShipSnap.Forward * CalibrationCubeSpawnDistance;
 
@@ -604,10 +612,29 @@ public sealed partial class SystemSpaceState : GameState
                 _calibrationCubeStation = station;   // now safe for DrawCalibrationCube to read
 
                 double distanceFromShip = (desiredWorldPos - _frameShipSnap.Position).Length;
-                System.Console.WriteLine(
+                string diagnostic =
                     $"[CalibrationCube] Anchored to '{station.Name}' ({station.PersistenceId}); " +
                     $"offset={_calibrationCubeOffset} (|offset|={_calibrationCubeOffset.Length:F1} m " +
-                    $"from station centre); distance from ship at capture = {distanceFromShip:F2} m.");
+                    $"from station centre); distance from ship at capture = {distanceFromShip:F2} m.";
+                System.Console.WriteLine(diagnostic);
+                DataBus.System.Publish(Topics.System.All,
+                    new SystemMessage(diagnostic, SystemMessagePriority.NB));
+
+                // Sanity guard: the offset should be roughly stationRadius + 100m (the
+                // spawn stand-off) — if it's ballooned well past that, the two time bases
+                // diverged again (same failure mode this fix addresses) and the cube will
+                // read as anchored somewhere well off the station's surface.
+                double stationRadius = SpaceSimulation.StationPhysicalRadius(station);
+                if (_calibrationCubeOffset.Length > stationRadius + 2000.0)
+                {
+                    string warning =
+                        $"[CalibrationCube] Offset magnitude {_calibrationCubeOffset.Length:F0} m exceeds " +
+                        $"station radius ({stationRadius:F0} m) + 2 km sanity bound — station position and " +
+                        "ship snapshot were likely evaluated at different sim times.";
+                    System.Console.WriteLine(warning);
+                    DataBus.System.Publish(Topics.System.All,
+                        new SystemMessage(warning, SystemMessagePriority.Warning));
+                }
             }
         }
         if (_frameShipSnap != null)
