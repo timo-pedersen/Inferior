@@ -140,6 +140,29 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesSemanticIds_FollowLocationBasedTypedNamespaceConvention()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var ids = EnumerateAriesSemanticIds(hull).ToArray();
+
+        Assert.NotEmpty(ids);
+        Assert.All(ids, id =>
+        {
+            string[] segments = id.Split('.');
+
+            Assert.StartsWith("type-1.", id, StringComparison.Ordinal);
+            Assert.True(segments.Length >= 4, $"Semantic id '{id}' does not include hull, region, subregion, and number.");
+            Assert.True(int.TryParse(segments[^1], out _), $"Semantic id '{id}' does not end with a numeric instance segment.");
+            Assert.DoesNotContain("v", segments);
+            Assert.DoesNotContain("face", segments);
+            Assert.DoesNotContain("panel", segments);
+        });
+
+        Assert.Contains("type-1.top.cargo.01", ids);
+        Assert.Contains("type-1.top.cargo.01", hull.VisualGeometry!.Faces.Select(f => f.PanelSlotId).OfType<string>());
+    }
+
+    [Fact]
     public void AriesCargoVolume_FitsTwoCanonicalContainersAndRearLoadingPath()
     {
         var hull = HullDefinitionLibrary.Get("type-1");
@@ -496,6 +519,50 @@ public sealed class ShipVisualSystemTests
                 new(faceId, ["sample.v.01", "sample.v.02", "sample.v.03"], role, "structural", outwardNormal ?? DVec3.UnitZ, panelSlotId),
             ],
         };
+
+    private static IEnumerable<string> EnumerateAriesSemanticIds(HullDefinition hull)
+    {
+        yield return hull.CargoArrangement!.CargoDoorAssemblyId;
+
+        var geometry = hull.VisualGeometry!;
+        foreach (var vertex in geometry.Vertices)
+            yield return vertex.Id;
+
+        foreach (var face in geometry.Faces)
+        {
+            yield return face.Id;
+
+            if (!string.IsNullOrWhiteSpace(face.PanelSlotId))
+                yield return face.PanelSlotId;
+
+            if (!string.IsNullOrWhiteSpace(face.AssemblyId))
+                yield return face.AssemblyId;
+
+            foreach (string vertexId in face.VertexIds)
+                yield return vertexId;
+        }
+
+        foreach (var assembly in geometry.Assemblies)
+        {
+            yield return assembly.AssemblyId;
+            yield return assembly.FaceId;
+
+            foreach (string vertexId in assembly.OpeningPolygonVertexIds)
+                yield return vertexId;
+
+            foreach (var seat in assembly.ArmourPanelSeats)
+                yield return seat.SeatId;
+        }
+
+        foreach (var port in geometry.AttachmentPorts)
+            yield return port.PortId;
+
+        foreach (var light in geometry.MarkerLights)
+            yield return light.LightId;
+
+        foreach (var light in geometry.BeamLights)
+            yield return light.LightId;
+    }
 
     private readonly record struct Cuboid(DVec3 Min, DVec3 Max)
     {

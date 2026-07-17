@@ -240,7 +240,7 @@ public static class Type1HullDefinitionFactory
     }
 
     private static string VertexId(string ringName, int index)
-        => $"{HullId}.v.{ringName}.{index + 1:00}";
+        => $"{HullId}.{ringName}.perimeter.{index + 1:00}";
 
     private static void AddRearPlaneQuad(
         Dictionary<string, DVec3> vertices,
@@ -261,7 +261,7 @@ public static class Type1HullDefinitionFactory
         => [OverlayVertexId(faceId, 1), OverlayVertexId(faceId, 2), OverlayVertexId(faceId, 3), OverlayVertexId(faceId, 4)];
 
     private static string OverlayVertexId(string faceId, int index)
-        => $"{faceId}.v.{index:00}";
+        => $"{faceId}.corner.{index:00}";
 
     private static DVec3 EdgeNormal(int edge) => edge switch
     {
