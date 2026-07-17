@@ -170,6 +170,7 @@ public sealed partial class SystemSpaceState : GameState
     private bool _uiMouseMode;
     private bool _debugCameraMode;
     private bool _thirdPersonMode;
+    private bool _semanticHullDebug;
     private DVec3 _tpCamPos;       // smoothed third-person camera position
     private bool  _tpCamPosValid;
     private bool _prevIsGameActive = true;
@@ -660,6 +661,7 @@ public sealed partial class SystemSpaceState : GameState
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
         bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
+        bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
 
         if (tabJustPressed)
         {
@@ -683,6 +685,15 @@ public sealed partial class SystemSpaceState : GameState
         {
             _thirdPersonMode = !_thirdPersonMode;
             _tpCamPosValid   = false;  // force immediate snap on first frame
+        }
+        if (f4JustPressed)
+        {
+            _semanticHullDebug = !_semanticHullDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _semanticHullDebug
+                    ? "Semantic hull debug: surface roles, axes, bounds."
+                    : "Semantic hull debug: normal materials.",
+                SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);
 
@@ -1048,7 +1059,8 @@ public sealed partial class SystemSpaceState : GameState
         DrawCalibrationCube(level);
         if (_thirdPersonMode && _frameShipSnap != null)
             _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
-                _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level);
+                _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
+                _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 

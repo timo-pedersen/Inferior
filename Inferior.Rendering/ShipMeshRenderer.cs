@@ -15,6 +15,7 @@ public sealed class ShipMeshRenderer : IDisposable
 {
     private readonly GraphicsDevice _gd;
     private readonly MeshRenderer _meshRenderer;
+    private readonly BasicEffect _debugLineEffect;
     private readonly Dictionary<string, SemanticHullGpuMesh> _semanticMeshCache = new(StringComparer.OrdinalIgnoreCase);
 
     private LegacyFallbackMesh? _legacyFallback;
@@ -23,6 +24,12 @@ public sealed class ShipMeshRenderer : IDisposable
     {
         _gd = gd;
         _meshRenderer = meshRenderer;
+        _debugLineEffect = new BasicEffect(gd)
+        {
+            VertexColorEnabled = true,
+            LightingEnabled = false,
+            TextureEnabled = false,
+        };
     }
 
     // currentView is the already-rolled view matrix. currentProjection is the active
@@ -35,7 +42,8 @@ public sealed class ShipMeshRenderer : IDisposable
         string hullTypeId,
         DVec3 shipPosition,
         Quaternion shipOrientation,
-        DetailLevel level)
+        DetailLevel level,
+        SemanticHullDebugMode debugMode = SemanticHullDebugMode.Normal)
     {
         float renderScale = (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
@@ -44,7 +52,15 @@ public sealed class ShipMeshRenderer : IDisposable
         if (HullDefinitionLibrary.TryGet(hullTypeId, out var hullDefinition)
             && hullDefinition?.VisualGeometry is not null)
         {
-            DrawSemanticHull(hullDefinition, renderScale, renderPos, shipOrientation, currentView, currentProjection, sunColour);
+            DrawSemanticHull(
+                hullDefinition,
+                renderScale,
+                renderPos,
+                shipOrientation,
+                currentView,
+                currentProjection,
+                sunColour,
+                debugMode);
         }
         else
         {
@@ -67,7 +83,8 @@ public sealed class ShipMeshRenderer : IDisposable
         Quaternion shipOrientation,
         Matrix currentView,
         Matrix projection,
-        Color sunColour)
+        Color sunColour,
+        SemanticHullDebugMode debugMode)
     {
         SemanticHullGpuMesh mesh = GetOrCreateSemanticMesh(hullDefinition);
 
@@ -77,17 +94,115 @@ public sealed class ShipMeshRenderer : IDisposable
 
         foreach (var part in mesh.Parts)
         {
-            _meshRenderer.DrawDynamicLit(
-                part.VertexBuffer,
-                part.IndexBuffer,
-                world,
-                currentView,
-                projection,
-                part.MaterialColour,
-                SceneLighting.SunDirection,
-                sunColour,
-                SceneLighting.Ambient);
+            if (debugMode == SemanticHullDebugMode.SurfaceRoles)
+            {
+                foreach (var face in part.FaceRanges)
+                {
+                    _meshRenderer.DrawDynamicLitRange(
+                        part.VertexBuffer,
+                        part.IndexBuffer,
+                        face.StartIndex,
+                        face.IndexCount,
+                        world,
+                        currentView,
+                        projection,
+                        DebugColourForRole(face.SurfaceRole),
+                        SceneLighting.SunDirection,
+                        sunColour,
+                        SceneLighting.Ambient);
+                }
+            }
+            else
+            {
+                _meshRenderer.DrawDynamicLit(
+                    part.VertexBuffer,
+                    part.IndexBuffer,
+                    world,
+                    currentView,
+                    projection,
+                    part.MaterialColour,
+                    SceneLighting.SunDirection,
+                    sunColour,
+                    SceneLighting.Ambient);
+            }
         }
+
+        if (debugMode == SemanticHullDebugMode.SurfaceRoles)
+            DrawSemanticDebugLines(hullDefinition.VisualGeometry!, world, currentView, projection);
+    }
+
+    public static Color DebugColourForRole(HullSurfaceRole role)
+        => role switch
+        {
+            HullSurfaceRole.PanelSeat => new Color(72, 150, 210),
+            HullSurfaceRole.ExposedStructure => new Color(105, 105, 105),
+            HullSurfaceRole.ServiceSurface => new Color(224, 174, 52),
+            HullSurfaceRole.EngineMount => new Color(216, 76, 58),
+            HullSurfaceRole.CargoDoor => new Color(82, 174, 105),
+            HullSurfaceRole.CockpitFrame => new Color(190, 104, 205),
+            HullSurfaceRole.CockpitGlass => new Color(55, 205, 218),
+            _ => Color.Magenta,
+        };
+
+    private void DrawSemanticDebugLines(
+        SemanticHullGeometry geometry,
+        Matrix world,
+        Matrix view,
+        Matrix projection)
+    {
+        Vector3 min = new(
+            (float)geometry.Vertices.Min(vertex => vertex.Position.X),
+            (float)geometry.Vertices.Min(vertex => vertex.Position.Y),
+            (float)geometry.Vertices.Min(vertex => vertex.Position.Z));
+        Vector3 max = new(
+            (float)geometry.Vertices.Max(vertex => vertex.Position.X),
+            (float)geometry.Vertices.Max(vertex => vertex.Position.Y),
+            (float)geometry.Vertices.Max(vertex => vertex.Position.Z));
+
+        var lines = BuildDebugLines(min, max);
+        _debugLineEffect.World = world;
+        _debugLineEffect.View = view;
+        _debugLineEffect.Projection = projection;
+
+        _gd.RasterizerState = RasterizerState.CullNone;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        foreach (var pass in _debugLineEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawUserPrimitives(PrimitiveType.LineList, lines, 0, lines.Length / 2);
+        }
+    }
+
+    private static VertexPositionColor[] BuildDebugLines(Vector3 min, Vector3 max)
+    {
+        var vertices = new List<VertexPositionColor>(30);
+        AddLine(vertices, Vector3.Zero, Vector3.UnitX * 2.5f, Color.Red);
+        AddLine(vertices, Vector3.Zero, Vector3.UnitY * 2.5f, Color.LimeGreen);
+        AddLine(vertices, Vector3.Zero, -Vector3.UnitZ * 2.5f, Color.Cyan);
+
+        Vector3[] corners =
+        [
+            new(min.X, min.Y, min.Z), new(max.X, min.Y, min.Z),
+            new(max.X, max.Y, min.Z), new(min.X, max.Y, min.Z),
+            new(min.X, min.Y, max.Z), new(max.X, min.Y, max.Z),
+            new(max.X, max.Y, max.Z), new(min.X, max.Y, max.Z),
+        ];
+        int[] edges =
+        [
+            0, 1, 1, 2, 2, 3, 3, 0,
+            4, 5, 5, 6, 6, 7, 7, 4,
+            0, 4, 1, 5, 2, 6, 3, 7,
+        ];
+        for (int i = 0; i < edges.Length; i += 2)
+            AddLine(vertices, corners[edges[i]], corners[edges[i + 1]], Color.White);
+
+        return vertices.ToArray();
+    }
+
+    private static void AddLine(List<VertexPositionColor> vertices, Vector3 start, Vector3 end, Color colour)
+    {
+        vertices.Add(new VertexPositionColor(start, colour));
+        vertices.Add(new VertexPositionColor(end, colour));
     }
 
     private SemanticHullGpuMesh GetOrCreateSemanticMesh(HullDefinition hullDefinition)
@@ -148,6 +263,7 @@ public sealed class ShipMeshRenderer : IDisposable
             mesh.Dispose();
 
         _legacyFallback?.Dispose();
+        _debugLineEffect.Dispose();
     }
 
     private sealed record LegacyFallbackMesh(
@@ -174,4 +290,10 @@ public enum ShipHullRenderPath
 {
     SemanticHull,
     LegacyFallback,
+}
+
+public enum SemanticHullDebugMode
+{
+    Normal,
+    SurfaceRoles,
 }

@@ -166,6 +166,18 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void SemanticHullDebug_AssignsDistinctColoursToEverySurfaceRole()
+    {
+        HullSurfaceRole[] roles = Enum.GetValues<HullSurfaceRole>();
+        Color[] colours = roles
+            .Select(ShipMeshRenderer.DebugColourForRole)
+            .ToArray();
+
+        Assert.Equal(roles.Length, colours.Distinct().Count());
+        Assert.DoesNotContain(Color.Magenta, colours);
+    }
+
+    [Fact]
     public void AriesEngineSlots_AreIndependentRequiredPhysicalEnginesWithoutHullOwnedThrust()
     {
         var hull = HullDefinitionLibrary.Get("type-1");
