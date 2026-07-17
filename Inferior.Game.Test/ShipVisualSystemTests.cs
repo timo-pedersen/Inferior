@@ -169,6 +169,23 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesStructuralShell_IsCompleteReadableClosedSemanticBoundary()
+    {
+        var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
+
+        Assert.True(geometry.RequireClosedHull);
+        Assert.Empty(geometry.Validate());
+        Assert.Equal(18, geometry.Faces.Count);
+        Assert.All(geometry.Faces, face => Assert.InRange(face.VertexIds.Count, 4, 8));
+        Assert.DoesNotContain(geometry.Faces, face => face.VertexIds.Count == 3);
+
+        Assert.Equal(16, geometry.Faces.Count(face => face.VertexIds.Count == 4));
+        Assert.Equal(2, geometry.Faces.Count(face => face.VertexIds.Count == 8));
+        Assert.Contains(geometry.Faces, face => face.Id == "type-1.front.armoured-head.01");
+        Assert.Contains(geometry.Faces, face => face.Id == "type-1.rear.cargo-door.01" && face.Role == HullSurfaceRole.CargoDoor);
+    }
+
+    [Fact]
     public void SemanticGeometryValidator_AcceptsSharedSemanticLocationAcrossTypedNamespaces()
     {
         var geometry = GeometryWithFace(
@@ -244,6 +261,30 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void SemanticGeometryValidator_RejectsNonConvexFacesForAnySurfaceRole()
+    {
+        var geometry = new SemanticHullGeometry
+        {
+            Vertices =
+            [
+                new("sample.v.01", new DVec3(0, 0, 0)),
+                new("sample.v.02", new DVec3(2, 0, 0)),
+                new("sample.v.03", new DVec3(1, 0.5, 0)),
+                new("sample.v.04", new DVec3(2, 1, 0)),
+                new("sample.v.05", new DVec3(0, 1, 0)),
+            ],
+            Faces =
+            [
+                new("sample.service.01", ["sample.v.01", "sample.v.02", "sample.v.03", "sample.v.04", "sample.v.05"], HullSurfaceRole.ServiceSurface, "structural", DVec3.UnitZ),
+            ],
+        };
+
+        Assert.Contains(
+            geometry.Validate(),
+            e => e.Contains("not convex", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void SemanticGeometryValidator_RejectsMissingAndRepeatedFaceVertices()
     {
         var geometry = new SemanticHullGeometry
@@ -285,6 +326,33 @@ public sealed class ShipVisualSystemTests
         Assert.Contains(
             geometry.Validate(),
             e => e.Contains("near-zero area", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SemanticGeometryValidator_RejectsClosedHullWithInconsistentSharedEdgeWinding()
+    {
+        var geometry = new SemanticHullGeometry
+        {
+            RequireClosedHull = true,
+            Vertices =
+            [
+                new("sample.v.01", new DVec3(0, 0, 0)),
+                new("sample.v.02", new DVec3(1, 0, 0)),
+                new("sample.v.03", new DVec3(0, 1, 0)),
+                new("sample.v.04", new DVec3(0, 0, 1)),
+            ],
+            Faces =
+            [
+                new("sample.face.01", ["sample.v.01", "sample.v.02", "sample.v.03"], HullSurfaceRole.ExposedStructure, "structural", DVec3.UnitZ),
+                new("sample.face.02", ["sample.v.01", "sample.v.02", "sample.v.04"], HullSurfaceRole.ExposedStructure, "structural", -DVec3.UnitY),
+                new("sample.face.03", ["sample.v.01", "sample.v.03", "sample.v.04"], HullSurfaceRole.ExposedStructure, "structural", DVec3.UnitX),
+                new("sample.face.04", ["sample.v.02", "sample.v.03", "sample.v.04"], HullSurfaceRole.ExposedStructure, "structural", new DVec3(1, 1, 1).Normalized()),
+            ],
+        };
+
+        Assert.Contains(
+            geometry.Validate(),
+            e => e.Contains("same direction", StringComparison.Ordinal) || e.Contains("opposing face winding", StringComparison.Ordinal));
     }
 
     [Fact]

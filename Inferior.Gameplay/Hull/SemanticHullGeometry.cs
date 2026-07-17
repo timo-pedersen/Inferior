@@ -245,13 +245,14 @@ public sealed class SemanticHullGeometry
             }
         }
 
-        if (face.Role == HullSurfaceRole.PanelSeat && !IsConvex(positions, geometricNormal))
-            errors.Add($"PanelSeat face '{face.Id}' is not convex.");
+        if (!IsConvex(positions, geometricNormal))
+            errors.Add($"Semantic hull face '{face.Id}' is not convex.");
     }
 
     private void ValidateClosedHull(List<string> errors)
     {
         var edgeCounts = new Dictionary<(string a, string b), int>();
+        var directedEdges = new HashSet<(string a, string b)>();
         foreach (var face in Faces)
         {
             for (int i = 0; i < face.VertexIds.Count; i++)
@@ -263,6 +264,9 @@ public sealed class SemanticHullGeometry
 
                 var key = string.CompareOrdinal(a, b) < 0 ? (a, b) : (b, a);
                 edgeCounts[key] = edgeCounts.TryGetValue(key, out int count) ? count + 1 : 1;
+
+                if (!directedEdges.Add((a, b)))
+                    errors.Add($"Closed semantic hull edge '{a}'-'{b}' is reused with the same direction.");
             }
         }
 
@@ -270,6 +274,8 @@ public sealed class SemanticHullGeometry
         {
             if (count != 2)
                 errors.Add($"Closed semantic hull edge '{edge.a}'-'{edge.b}' is used {count} time(s), expected 2.");
+            else if (!directedEdges.Contains((edge.a, edge.b)) || !directedEdges.Contains((edge.b, edge.a)))
+                errors.Add($"Closed semantic hull edge '{edge.a}'-'{edge.b}' does not have opposing face winding.");
         }
     }
 
