@@ -13,15 +13,62 @@ public sealed record SemanticHullFace(
     string? PanelSlotId = null,
     string? AssemblyId = null);
 
+public sealed record HullDimensions(
+    double LengthMeters,
+    double WidthMeters,
+    double HeightMeters,
+    double StructuralHullWidthMeters,
+    double StructuralHullHeightMeters);
+
+public sealed record CargoArrangementDefinition(
+    int ContainerCapacity,
+    string Arrangement,
+    DVec3 StackBoundsMeters,
+    DVec3 DesignVolumeCenterMeters,
+    DVec3 DesignVolumeBoundsMeters,
+    string CargoDoorAssemblyId,
+    DVec3 RearOpeningBoundsMeters,
+    DVec3 TransferAxis);
+
+public sealed record SemanticAssemblyDefinition(
+    string AssemblyId,
+    string Kind,
+    string FaceId);
+
+public sealed record HullLightDefinition(
+    string LightId,
+    DVec3 Position,
+    DVec3 Direction,
+    string Colour,
+    double GlowSizeMeters,
+    double Intensity,
+    string Pattern);
+
+public sealed record BeamLightDefinition(
+    string LightId,
+    DVec3 Position,
+    DVec3 Direction,
+    double ConeAngleDegrees,
+    double RangeMeters,
+    double Intensity,
+    string Colour);
+
 /// <summary>
-/// Minimal semantic attachment point. Full engine-mount support still requires an
-/// attachment plane, footprint, clearance bounds, and complete pose/orientation.
+/// Semantic attachment point for external equipment. Position/normal/up define the
+/// mount pose in hull-local space; footprint and clearance are authored contract
+/// dimensions, not renderer-derived approximations.
 /// </summary>
 public sealed record AttachmentPortDefinition(
     string PortId,
     DVec3 Position,
     DVec3 Normal,
-    AttachmentCapability Capabilities);
+    AttachmentCapability Capabilities)
+{
+    public DVec3 Up { get; init; } = DVec3.UnitY;
+    public DVec3 FootprintMeters { get; init; } = DVec3.Zero;
+    public DVec3 ClearanceMinMeters { get; init; } = DVec3.Zero;
+    public DVec3 ClearanceMaxMeters { get; init; } = DVec3.Zero;
+}
 
 public sealed class SemanticHullGeometry
 {
@@ -32,6 +79,10 @@ public sealed class SemanticHullGeometry
     public required IReadOnlyList<SemanticHullVertex> Vertices { get; init; }
     public required IReadOnlyList<SemanticHullFace> Faces { get; init; }
     public IReadOnlyList<AttachmentPortDefinition> AttachmentPorts { get; init; } = [];
+    public IReadOnlyList<SemanticAssemblyDefinition> Assemblies { get; init; } = [];
+    public IReadOnlyList<HullLightDefinition> MarkerLights { get; init; } = [];
+    public IReadOnlyList<BeamLightDefinition> BeamLights { get; init; } = [];
+    public bool RequireClosedHull { get; init; }
 
     public IReadOnlyList<string> Validate()
     {
@@ -51,6 +102,14 @@ public sealed class SemanticHullGeometry
 
         var faceIds = new HashSet<string>(StringComparer.Ordinal);
         var panelSlotIds = new HashSet<string>(StringComparer.Ordinal);
+        var assemblyIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var assembly in Assemblies)
+        {
+            if (string.IsNullOrWhiteSpace(assembly.AssemblyId))
+                errors.Add("Semantic assembly has an empty id.");
+            else if (!assemblyIds.Add(assembly.AssemblyId))
+                errors.Add($"Duplicate semantic assembly id '{assembly.AssemblyId}'.");
+        }
 
         foreach (var face in Faces)
         {
@@ -95,6 +154,15 @@ public sealed class SemanticHullGeometry
             {
                 errors.Add($"Non-PanelSeat face '{face.Id}' carries panel slot id '{face.PanelSlotId}'.");
             }
+
+            if (!string.IsNullOrWhiteSpace(face.AssemblyId) && !assemblyIds.Contains(face.AssemblyId))
+                errors.Add($"Semantic hull face '{face.Id}' references unknown assembly '{face.AssemblyId}'.");
+        }
+
+        foreach (var assembly in Assemblies)
+        {
+            if (!faceIds.Contains(assembly.FaceId))
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' references unknown face '{assembly.FaceId}'.");
         }
 
         var portIds = new HashSet<string>(StringComparer.Ordinal);
@@ -111,9 +179,34 @@ public sealed class SemanticHullGeometry
             if (!IsFinite(port.Normal) || port.Normal.LengthSquared <= 1e-12)
                 errors.Add($"Attachment port '{port.PortId}' has invalid normal {port.Normal}.");
 
+            if (!IsFinite(port.Up) || port.Up.LengthSquared <= 1e-12)
+                errors.Add($"Attachment port '{port.PortId}' has invalid up vector {port.Up}.");
+
+            if (!IsFinite(port.FootprintMeters) || !IsFinite(port.ClearanceMinMeters) || !IsFinite(port.ClearanceMaxMeters))
+                errors.Add($"Attachment port '{port.PortId}' has non-finite footprint or clearance bounds.");
+
+            if (port.Capabilities.HasFlag(AttachmentCapability.Engine))
+            {
+                if (port.FootprintMeters.X <= 0 || port.FootprintMeters.Y <= 0)
+                    errors.Add($"Engine attachment port '{port.PortId}' has invalid mount footprint {port.FootprintMeters}.");
+
+                if (port.ClearanceMaxMeters.X <= port.ClearanceMinMeters.X ||
+                    port.ClearanceMaxMeters.Y <= port.ClearanceMinMeters.Y ||
+                    port.ClearanceMaxMeters.Z <= port.ClearanceMinMeters.Z)
+                {
+                    errors.Add($"Engine attachment port '{port.PortId}' has invalid clearance bounds.");
+                }
+            }
+
             if (port.Capabilities == AttachmentCapability.None)
                 errors.Add($"Attachment port '{port.PortId}' declares no capabilities.");
         }
+
+        ValidateLights(MarkerLights, "marker light", errors);
+        ValidateLights(BeamLights, "beam light", errors);
+
+        if (RequireClosedHull)
+            ValidateClosedHull(errors);
 
         return errors;
     }
@@ -150,6 +243,84 @@ public sealed class SemanticHullGeometry
                     $"Semantic hull face '{face.Id}' is non-planar at vertex {i}: distance={distance:F8}m.");
                 break;
             }
+        }
+
+        if (face.Role == HullSurfaceRole.PanelSeat && !IsConvex(positions, geometricNormal))
+            errors.Add($"PanelSeat face '{face.Id}' is not convex.");
+    }
+
+    private void ValidateClosedHull(List<string> errors)
+    {
+        var edgeCounts = new Dictionary<(string a, string b), int>();
+        foreach (var face in Faces)
+        {
+            for (int i = 0; i < face.VertexIds.Count; i++)
+            {
+                string a = face.VertexIds[i];
+                string b = face.VertexIds[(i + 1) % face.VertexIds.Count];
+                if (a == b)
+                    continue;
+
+                var key = string.CompareOrdinal(a, b) < 0 ? (a, b) : (b, a);
+                edgeCounts[key] = edgeCounts.TryGetValue(key, out int count) ? count + 1 : 1;
+            }
+        }
+
+        foreach (var (edge, count) in edgeCounts)
+        {
+            if (count != 2)
+                errors.Add($"Closed semantic hull edge '{edge.a}'-'{edge.b}' is used {count} time(s), expected 2.");
+        }
+    }
+
+    private static bool IsConvex(IReadOnlyList<DVec3> positions, DVec3 normal)
+    {
+        for (int i = 0; i < positions.Count; i++)
+        {
+            DVec3 a = positions[i];
+            DVec3 b = positions[(i + 1) % positions.Count];
+            DVec3 c = positions[(i + 2) % positions.Count];
+            DVec3 cross = DVec3.Cross(b - a, c - b);
+            if (DVec3.Dot(cross, normal) < -1e-8)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void ValidateLights(IEnumerable<HullLightDefinition> lights, string label, List<string> errors)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var light in lights)
+        {
+            if (string.IsNullOrWhiteSpace(light.LightId))
+                errors.Add($"Hull {label} has an empty id.");
+            else if (!ids.Add(light.LightId))
+                errors.Add($"Duplicate hull {label} id '{light.LightId}'.");
+
+            if (!IsFinite(light.Position) || !IsFinite(light.Direction) || light.Direction.LengthSquared <= 1e-12)
+                errors.Add($"Hull {label} '{light.LightId}' has invalid position or direction.");
+
+            if (light.GlowSizeMeters <= 0 || light.Intensity <= 0)
+                errors.Add($"Hull {label} '{light.LightId}' has invalid size or intensity.");
+        }
+    }
+
+    private static void ValidateLights(IEnumerable<BeamLightDefinition> lights, string label, List<string> errors)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var light in lights)
+        {
+            if (string.IsNullOrWhiteSpace(light.LightId))
+                errors.Add($"Hull {label} has an empty id.");
+            else if (!ids.Add(light.LightId))
+                errors.Add($"Duplicate hull {label} id '{light.LightId}'.");
+
+            if (!IsFinite(light.Position) || !IsFinite(light.Direction) || light.Direction.LengthSquared <= 1e-12)
+                errors.Add($"Hull {label} '{light.LightId}' has invalid position or direction.");
+
+            if (light.ConeAngleDegrees <= 0 || light.RangeMeters <= 0 || light.Intensity <= 0)
+                errors.Add($"Hull {label} '{light.LightId}' has invalid cone, range, or intensity.");
         }
     }
 

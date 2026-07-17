@@ -266,7 +266,7 @@ public sealed class XStopAfterburnerTests
         FlightMode mode = FlightMode.SystemNewtonian)
     {
         var sim = new SpaceSimulation();
-        var ship = ShipBuilder.NewShip("type1")
+        var ship = ShipBuilder.NewShip("type-1")
             .WithPosition(DVec3.Zero)
             .WithOrientation(Quaternion.Identity)
             .WithDefaultStartingComponents()

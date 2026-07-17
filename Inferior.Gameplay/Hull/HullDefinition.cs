@@ -32,6 +32,11 @@ public sealed class HullDefinition
     /// <summary>All component slots available on this hull.</summary>
     public required IReadOnlyList<HullSlot> Slots { get; init; }
 
+    public HullDimensions? Dimensions { get; init; }
+    public string? PrimaryDesignBias { get; init; }
+    public string? SecondaryDesignBias { get; init; }
+    public CargoArrangementDefinition? CargoArrangement { get; init; }
+
     /// <summary>CPU-side semantic geometry used by the ship visual system.</summary>
     public SemanticHullGeometry? VisualGeometry { get; init; }
 

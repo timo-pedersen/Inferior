@@ -74,7 +74,7 @@ public sealed partial class SystemSpaceState
 
     private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
-        var ship = ShipBuilder.NewShip("type1")
+        var ship = ShipBuilder.NewShip("type-1")
             .WithPosition(startPos)
             .WithOrientation(orientation)
             .WithDefaultStartingComponents()
