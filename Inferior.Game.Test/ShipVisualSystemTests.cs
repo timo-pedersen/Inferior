@@ -146,6 +146,29 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void LegacyType1Renderer_IsDocumentedTemporaryMismatchAndNotSemanticAuthority()
+    {
+        string repoRoot = RepoRoot();
+        string spec = File.ReadAllText(Path.Combine(repoRoot, "Docs-ai", "ship-visual-system-design-spec.md"));
+        string renderer = File.ReadAllText(Path.Combine(repoRoot, "Inferior.Rendering", "ShipMeshRenderer.cs"));
+        string legacyFactory = File.ReadAllText(Path.Combine(repoRoot, "Inferior.Rendering", "Type1HullFactory.cs"));
+
+        Assert.Contains("type-1` is now semantically registered as Aries", spec);
+        Assert.Contains("legacy `Type1HullFactory` mesh", spec);
+        Assert.Contains("temporary visible placeholder only", spec);
+        Assert.Contains("Do not claim visual verification of Aries from the legacy mesh", spec);
+
+        foreach (string source in new[] { renderer, legacyFactory })
+        {
+            Assert.DoesNotContain("HullDefinitionLibrary", source);
+            Assert.DoesNotContain("AriesHullDefinitionFactory", source);
+            Assert.DoesNotContain("SemanticHullGeometry", source);
+            Assert.DoesNotContain("HullSurfaceRole", source);
+            Assert.DoesNotContain("AttachmentPortDefinition", source);
+        }
+    }
+
+    [Fact]
     public void AriesEngineSlots_AreIndependentRequiredPhysicalEnginesWithoutHullOwnedThrust()
     {
         var hull = HullDefinitionLibrary.Get("type-1");
@@ -895,6 +918,15 @@ public sealed class ShipVisualSystemTests
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (string id in ids)
             Assert.True(seen.Add(id), $"Duplicate {label} id '{id}'.");
+    }
+
+    private static string RepoRoot()
+    {
+        string? dir = AppContext.BaseDirectory;
+        while (dir is not null && !File.Exists(Path.Combine(dir, "Inferior.slnx")))
+            dir = Directory.GetParent(dir)?.FullName;
+
+        return dir ?? throw new DirectoryNotFoundException("Could not locate repository root.");
     }
 
     private static IEnumerable<string> EnumerateAriesSemanticIds(HullDefinition hull)

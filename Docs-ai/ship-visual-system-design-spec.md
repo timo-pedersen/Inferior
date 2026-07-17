@@ -1168,6 +1168,8 @@ Catalogue commits should remain coherent by family or system, not one enormous u
 
 The present Type-1 ship path bakes hull, nacelles, and pylons into one fixed factory and gives every ship the same visual model. The new system replaces that ownership rather than layering independent-engine semantics over the old merged asset.
 
+Checkpoint Aries note: `type-1` is now semantically registered as Aries, but the runtime third-person renderer still uses the legacy `Type1HullFactory` mesh. That mesh is a temporary visible placeholder only. It is not authoritative for Aries vertices, faces, surface roles, attachment ports, cargo layout, cockpit pose, lights, landing feet, or engine mounts, and gameplay code must not infer Aries semantics from renderer triangles or legacy mesh parts. This mismatch is expected until a later rendering brief generates visible Type-1/Aries geometry from the CPU-side semantic hull definition. Do not claim visual verification of Aries from the legacy mesh.
+
 The current size-class code must be corrected to:
 
 ```text
