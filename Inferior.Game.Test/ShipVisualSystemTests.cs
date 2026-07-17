@@ -43,6 +43,7 @@ public sealed class ShipVisualSystemTests
     {
         var hull = HullDefinitionLibrary.Get("type-1");
 
+        Assert.Same(hull, HullDefinitionLibrary.Get("TYPE-1"));
         Assert.Equal("type-1", hull.HullTypeId);
         Assert.Equal("Aries", hull.DisplayName);
         Assert.Equal(ShipSizeClass.Small, hull.SizeClass);
@@ -64,6 +65,24 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesSemanticTypedIds_AreUniqueWithinEachNamespace()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var geometry = hull.VisualGeometry!;
+        var cargo = hull.CargoArrangement!;
+
+        AssertUnique("vertex", geometry.Vertices.Select(v => v.Id));
+        AssertUnique("face", geometry.Faces.Select(f => f.Id));
+        AssertUnique("panel slot", geometry.Faces.Select(f => f.PanelSlotId).OfType<string>());
+        AssertUnique("assembly", geometry.Assemblies.Select(a => a.AssemblyId));
+        AssertUnique("attachment port", geometry.AttachmentPorts.Select(p => p.PortId));
+        AssertUnique("marker light", geometry.MarkerLights.Select(l => l.LightId));
+        AssertUnique("beam light", geometry.BeamLights.Select(l => l.LightId));
+        AssertUnique("cargo placement", cargo.ContainerPlacements.Select(p => p.PlacementId));
+        AssertUnique("door armour seat", geometry.Assemblies.SelectMany(a => a.ArmourPanelSeats).Select(s => s.SeatId));
+    }
+
+    [Fact]
     public void AriesCockpitPose_IsPortOffsetRaisedAndYawedInward()
     {
         var pose = HullDefinitionLibrary.Get("type-1").CockpitPose;
@@ -79,6 +98,18 @@ public sealed class ShipVisualSystemTests
         Assert.InRange(inwardYawDegrees, 2.0, 4.0);
         Assert.InRange(Math.Abs(forward.Y), 0.0, 0.0001);
         Assert.InRange(Vector3.Dot(up, Vector3.Up), 0.9999f, 1.0f);
+    }
+
+    [Fact]
+    public void AriesCockpitPose_SitsAdjacentToForwardHullStructure()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var pose = hull.CockpitPose;
+        var forwardHull = Cuboid.FromPoints(hull.VisualGeometry!.Vertices
+            .Where(v => v.Position.Z <= -2.2)
+            .Select(v => v.Position));
+
+        Assert.True(forwardHull.Contains(pose.Position) || forwardHull.DistanceTo(pose.Position) < 0.75);
     }
 
     [Fact]
@@ -261,6 +292,12 @@ public sealed class ShipVisualSystemTests
         var loadingClearance = new Cuboid(cargo.LoadingClearanceBoundsMeters.Min, cargo.LoadingClearanceBoundsMeters.Max);
         Assert.All(containers, container => Assert.True(loadingClearance.Contains(container)));
         Assert.True(loadingClearance.Max.Z > hullBounds.Max.Z);
+        Assert.True(loadingClearance.Max.Z >= 8.0);
+        Assert.All(cargo.ContainerPlacements, placement =>
+        {
+            var laneCenterAtDoor = new DVec3(placement.CenterMeters.X, placement.CenterMeters.Y, 8.0);
+            Assert.True(loadingClearance.Contains(laneCenterAtDoor));
+        });
 
         Assert.True(cargo.RearOpeningBoundsMeters.X >= cargo.StackBoundsMeters.X);
         Assert.True(cargo.RearOpeningBoundsMeters.Y >= cargo.StackBoundsMeters.Y);
@@ -310,6 +347,8 @@ public sealed class ShipVisualSystemTests
         Assert.Equal([-DVec3.UnitX, DVec3.UnitX], door.MovementAxes);
         Assert.Equal(8, door.OpeningPolygonVertexIds.Count);
         Assert.Equal(2, door.MovementClearanceVolumes.Count);
+        Assert.True(cargo.RearOpeningBoundsMeters.X >= cargo.DesignVolumeBoundsMeters.X);
+        Assert.True(cargo.RearOpeningBoundsMeters.Y >= cargo.StackBoundsMeters.Y);
 
         var portSeat = Assert.Single(door.ArmourPanelSeats, s => s.SeatId == "type-1.rear.cargo-door.port.01");
         var starboardSeat = Assert.Single(door.ArmourPanelSeats, s => s.SeatId == "type-1.rear.cargo-door.starboard.01");
@@ -851,6 +890,13 @@ public sealed class ShipVisualSystemTests
         return u >= -tolerance && v >= -tolerance && w >= -tolerance;
     }
 
+    private static void AssertUnique(string label, IEnumerable<string> ids)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string id in ids)
+            Assert.True(seen.Add(id), $"Duplicate {label} id '{id}'.");
+    }
+
     private static IEnumerable<string> EnumerateAriesSemanticIds(HullDefinition hull)
     {
         yield return hull.CargoArrangement!.CargoDoorAssemblyId;
@@ -940,6 +986,14 @@ public sealed class ShipVisualSystemTests
             => point.X >= Min.X && point.X <= Max.X
             && point.Y >= Min.Y && point.Y <= Max.Y
             && point.Z >= Min.Z && point.Z <= Max.Z;
+
+        public double DistanceTo(DVec3 point)
+        {
+            double dx = Math.Max(Math.Max(Min.X - point.X, 0.0), point.X - Max.X);
+            double dy = Math.Max(Math.Max(Min.Y - point.Y, 0.0), point.Y - Max.Y);
+            double dz = Math.Max(Math.Max(Min.Z - point.Z, 0.0), point.Z - Max.Z);
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
 
         public bool OverlapsWithPositiveVolume(Cuboid other)
             => Min.X < other.Max.X && Max.X > other.Min.X
