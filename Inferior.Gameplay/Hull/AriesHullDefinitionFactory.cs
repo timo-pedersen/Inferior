@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework;
 
 namespace Inferior.Gameplay.Hull;
 
-public static class Type1HullDefinitionFactory
+public static class AriesHullDefinitionFactory
 {
     private const string HullId = "type-1";
     private const string CargoDoorId = $"{HullId}.rear.cargo-door.01";
