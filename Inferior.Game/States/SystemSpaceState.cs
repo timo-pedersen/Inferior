@@ -1048,7 +1048,7 @@ public sealed partial class SystemSpaceState : GameState
         DrawCalibrationCube(level);
         if (_thirdPersonMode && _frameShipSnap != null)
             _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
-                _frameShipSnap.Position, _frameShipSnap.Orientation, level);
+                _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level);
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 

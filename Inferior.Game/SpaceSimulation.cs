@@ -99,6 +99,7 @@ public sealed class SpaceSimulation : Simulation
         DVec3      Position,
         DVec3      Velocity,
         Quaternion Orientation,
+        string     HullTypeId,
         DVec3      CockpitWorldPosition,
         DVec3      Forward,
         DVec3      Up,
@@ -565,7 +566,7 @@ public sealed class SpaceSimulation : Simulation
         var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
 
         _shipSnapshot = new ShipSnapshot(
-            ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
+            ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId, ship.CockpitWorldPosition,
             ship.Forward, ship.Up,
             GameClock.SimTime,
             snapTickSequence,

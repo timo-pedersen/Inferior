@@ -2,6 +2,7 @@ using Inferior.Core.Math;
 using Inferior.Game.Ships;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -146,26 +147,20 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
-    public void LegacyType1Renderer_IsDocumentedTemporaryMismatchAndNotSemanticAuthority()
+    public void ShipRenderer_SelectsSemanticPathForAriesWithoutType1IdentityBranch()
     {
         string repoRoot = RepoRoot();
         string spec = File.ReadAllText(Path.Combine(repoRoot, "Docs-ai", "ship-visual-system-design-spec.md"));
         string renderer = File.ReadAllText(Path.Combine(repoRoot, "Inferior.Rendering", "ShipMeshRenderer.cs"));
-        string legacyFactory = File.ReadAllText(Path.Combine(repoRoot, "Inferior.Rendering", "Type1HullFactory.cs"));
+        var aries = HullDefinitionLibrary.Get("type-1");
+        var sidewinder = HullDefinitionLibrary.Get("sidewinder");
 
         Assert.Contains("type-1` is now semantically registered as Aries", spec);
-        Assert.Contains("legacy `Type1HullFactory` mesh", spec);
-        Assert.Contains("temporary visible placeholder only", spec);
-        Assert.Contains("Do not claim visual verification of Aries from the legacy mesh", spec);
-
-        foreach (string source in new[] { renderer, legacyFactory })
-        {
-            Assert.DoesNotContain("HullDefinitionLibrary", source);
-            Assert.DoesNotContain("AriesHullDefinitionFactory", source);
-            Assert.DoesNotContain("SemanticHullGeometry", source);
-            Assert.DoesNotContain("HullSurfaceRole", source);
-            Assert.DoesNotContain("AttachmentPortDefinition", source);
-        }
+        Assert.Equal(ShipHullRenderPath.SemanticHull, ShipMeshRenderer.SelectRenderPath(aries));
+        Assert.Equal(ShipHullRenderPath.LegacyFallback, ShipMeshRenderer.SelectRenderPath(sidewinder));
+        Assert.DoesNotContain("== \"type-1\"", renderer);
+        Assert.DoesNotContain("HullTypeId == ", renderer);
+        Assert.DoesNotContain("AriesHullDefinitionFactory", renderer);
     }
 
     [Fact]
