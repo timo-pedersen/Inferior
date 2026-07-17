@@ -154,6 +154,9 @@ public sealed class SemanticHullGeometry
             else if (!faceIds.Add(face.Id))
                 errors.Add($"Duplicate semantic hull face id '{face.Id}'.");
 
+            if (!Enum.IsDefined(face.Role))
+                errors.Add($"Semantic hull face '{face.Id}' has undefined surface role '{face.Role}'.");
+
             if (face.VertexIds.Count < 3)
                 errors.Add($"Semantic hull face '{face.Id}' has fewer than three vertices.");
 
@@ -233,6 +236,19 @@ public sealed class SemanticHullGeometry
                     port.ClearanceMaxMeters.Z <= port.ClearanceMinMeters.Z)
                 {
                     errors.Add($"Engine attachment port '{port.PortId}' has invalid clearance bounds.");
+                }
+            }
+
+            if (port.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            {
+                if (port.FootprintMeters.X <= 0 || port.FootprintMeters.Y <= 0)
+                    errors.Add($"Landing gear attachment port '{port.PortId}' has invalid footprint {port.FootprintMeters}.");
+
+                if (port.ClearanceMaxMeters.X <= port.ClearanceMinMeters.X ||
+                    port.ClearanceMaxMeters.Y <= port.ClearanceMinMeters.Y ||
+                    port.ClearanceMaxMeters.Z <= port.ClearanceMinMeters.Z)
+                {
+                    errors.Add($"Landing gear attachment port '{port.PortId}' has invalid clearance bounds.");
                 }
             }
 

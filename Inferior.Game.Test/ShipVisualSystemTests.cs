@@ -89,12 +89,29 @@ public sealed class ShipVisualSystemTests
 
         Assert.NotNull(geometry);
         Assert.Empty(geometry.Validate());
+        Assert.Empty(hull.Validate());
         Assert.True(geometry.RequireClosedHull);
         Assert.Contains(hull.Slots, s => s.SlotId == "engine.port.01" && s.Category == SlotCategory.Engine && s.Required);
         Assert.Contains(hull.Slots, s => s.SlotId == "engine.starboard.01" && s.Category == SlotCategory.Engine && s.Required);
         Assert.DoesNotContain(hull.Slots, s => s.SlotId == "engine_main");
         Assert.Equal(2, geometry.AttachmentPorts.Count(p => p.Capabilities.HasFlag(AttachmentCapability.Engine)));
         Assert.Equal(3, geometry.AttachmentPorts.Count(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear)));
+    }
+
+    [Fact]
+    public void AriesDefinition_PassesFullSemanticValidationChecklist()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var geometry = hull.VisualGeometry!;
+        var structuralFaces = geometry.Faces.Where(face => face.ContributesToClosedHull).ToArray();
+
+        Assert.Empty(hull.Validate());
+        Assert.Contains(structuralFaces, face => face.Id == "type-1.rear.cargo-door.01" && face.Role == HullSurfaceRole.CargoDoor);
+        Assert.All(geometry.Faces.Where(face => face.Role == HullSurfaceRole.PanelSeat), face => Assert.Equal(face.Id, face.PanelSlotId));
+        Assert.DoesNotContain(geometry.Faces.Where(face => face.Role != HullSurfaceRole.PanelSeat), face => !string.IsNullOrWhiteSpace(face.PanelSlotId));
+        Assert.Equal(2, geometry.AttachmentPorts.Count(port => port.Capabilities.HasFlag(AttachmentCapability.Engine)));
+        Assert.Equal(3, geometry.AttachmentPorts.Count(port => port.Capabilities.HasFlag(AttachmentCapability.LandingGear)));
+        Assert.Equal(18, structuralFaces.Length);
     }
 
     [Fact]
@@ -723,6 +740,81 @@ public sealed class ShipVisualSystemTests
         Assert.Contains(
             geometry.Validate(),
             e => e.Contains("Non-PanelSeat face", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SemanticGeometryValidator_RejectsInvalidLandingGearPortGeometry()
+    {
+        var geometry = new SemanticHullGeometry
+        {
+            Vertices =
+            [
+                new("sample.v.01", new DVec3(0, 0, 0)),
+                new("sample.v.02", new DVec3(1, 0, 0)),
+                new("sample.v.03", new DVec3(0, 1, 0)),
+            ],
+            Faces =
+            [
+                new("sample.top.nose.01", ["sample.v.01", "sample.v.02", "sample.v.03"], HullSurfaceRole.ExposedStructure, "structural", DVec3.UnitZ),
+            ],
+            AttachmentPorts =
+            [
+                new("sample.underside.landing-foot.01", new DVec3(0, -1, 0), -DVec3.UnitY, AttachmentCapability.LandingGear),
+            ],
+        };
+
+        var errors = geometry.Validate();
+
+        Assert.Contains(errors, e => e.Contains("Landing gear attachment port", StringComparison.Ordinal)
+            && e.Contains("invalid footprint", StringComparison.Ordinal));
+        Assert.Contains(errors, e => e.Contains("Landing gear attachment port", StringComparison.Ordinal)
+            && e.Contains("invalid clearance bounds", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void HullDefinitionValidator_RejectsEnginePortsThatDoNotMatchEngineSlots()
+    {
+        var hull = new HullDefinition
+        {
+            HullTypeId = "sample",
+            DisplayName = "Sample",
+            SizeClass = ShipSizeClass.Small,
+            HullMass = 1.0,
+            CockpitOffset = DVec3.Zero,
+            CockpitPose = new CockpitPoseDefinition(DVec3.Zero, Quaternion.Identity),
+            Slots =
+            [
+                new() { SlotId = "engine.port.01", Label = "Port Engine", Category = SlotCategory.Engine, MaxComponentClass = 1, Required = true },
+                new() { SlotId = "engine.starboard.01", Label = "Starboard Engine", Category = SlotCategory.Engine, MaxComponentClass = 1, Required = true },
+            ],
+            VisualGeometry = new SemanticHullGeometry
+            {
+                Vertices =
+                [
+                    new("sample.v.01", new DVec3(0, 0, 0)),
+                    new("sample.v.02", new DVec3(1, 0, 0)),
+                    new("sample.v.03", new DVec3(0, 1, 0)),
+                ],
+                Faces =
+                [
+                    new("sample.top.nose.01", ["sample.v.01", "sample.v.02", "sample.v.03"], HullSurfaceRole.ExposedStructure, "structural", DVec3.UnitZ),
+                ],
+                AttachmentPorts =
+                [
+                    new("sample.port.engine-root.01", new DVec3(-1, 0, 0), -DVec3.UnitX, AttachmentCapability.Engine)
+                    {
+                        ComponentSlotId = "engine.port.01",
+                        FootprintMeters = new DVec3(1, 1, 0),
+                        ClearanceMinMeters = new DVec3(-2, -1, -1),
+                        ClearanceMaxMeters = new DVec3(-1, 1, 1),
+                    },
+                ],
+            },
+        };
+
+        Assert.Contains(
+            hull.Validate(),
+            e => e.Contains("Engine slot 'engine.starboard.01' has no matching engine attachment port", StringComparison.Ordinal));
     }
 
     private static SemanticHullGeometry GeometryWithFace(

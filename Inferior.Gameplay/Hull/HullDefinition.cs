@@ -51,4 +51,71 @@ public sealed class HullDefinition
 
     /// <summary>Drag coefficient for motion in ship-lateral/vertical direction.</summary>
     public double AerodynamicBrakeLateral { get; init; } = 0.0;
+
+    public IReadOnlyList<string> Validate()
+    {
+        var errors = new List<string>();
+
+        if (VisualGeometry is null)
+            return errors;
+
+        errors.AddRange(VisualGeometry.Validate());
+
+        var slotsById = Slots.ToDictionary(slot => slot.SlotId, StringComparer.Ordinal);
+        var engineSlots = Slots.Where(slot => slot.Category == SlotCategory.Engine).Select(slot => slot.SlotId).ToHashSet(StringComparer.Ordinal);
+        var enginePorts = VisualGeometry.AttachmentPorts
+            .Where(port => port.Capabilities.HasFlag(AttachmentCapability.Engine))
+            .ToArray();
+
+        foreach (var port in VisualGeometry.AttachmentPorts)
+        {
+            if (string.IsNullOrWhiteSpace(port.ComponentSlotId))
+                continue;
+
+            if (!slotsById.TryGetValue(port.ComponentSlotId, out var slot))
+            {
+                errors.Add($"Attachment port '{port.PortId}' references unknown component slot '{port.ComponentSlotId}'.");
+            }
+            else if (port.Capabilities.HasFlag(AttachmentCapability.Engine) && slot.Category != SlotCategory.Engine)
+            {
+                errors.Add($"Engine attachment port '{port.PortId}' references non-engine slot '{port.ComponentSlotId}'.");
+            }
+        }
+
+        var boundEngineSlots = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var port in enginePorts)
+        {
+            if (string.IsNullOrWhiteSpace(port.ComponentSlotId))
+            {
+                errors.Add($"Engine attachment port '{port.PortId}' has no component slot binding.");
+                continue;
+            }
+
+            if (!boundEngineSlots.Add(port.ComponentSlotId))
+                errors.Add($"Multiple engine attachment ports reference component slot '{port.ComponentSlotId}'.");
+        }
+
+        if (engineSlots.Count > 0 || enginePorts.Length > 0)
+        {
+            foreach (string slotId in engineSlots)
+            {
+                if (!boundEngineSlots.Contains(slotId))
+                    errors.Add($"Engine slot '{slotId}' has no matching engine attachment port.");
+            }
+
+            foreach (string slotId in boundEngineSlots)
+            {
+                if (!engineSlots.Contains(slotId))
+                    errors.Add($"Engine attachment port references non-engine slot '{slotId}'.");
+            }
+        }
+
+        var landingPorts = VisualGeometry.AttachmentPorts
+            .Where(port => port.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            .ToArray();
+        if (landingPorts.Length is > 0 and not 3)
+            errors.Add($"Semantic hull defines {landingPorts.Length} landing gear attachment ports, expected 3.");
+
+        return errors;
+    }
 }
