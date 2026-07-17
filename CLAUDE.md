@@ -117,6 +117,10 @@ features; use the architecture map and code.
 - Preserve working behaviour outside the requested scope.
 - Prefer the smallest coherent solution.
 - Do not create duplicate implementations of the same concept.
+- Do not key branches on identity (category strings, names, concrete types) when a
+  capability check (`MeshFactory != null` etc.) expresses the real condition — the
+  first "special case" always orphans every later instance of the same kind. See
+  `!invariants.md` §13.
 - Do not build generic infrastructure before a concrete use case requires it.
 - Do not silently fix unrelated issues; report them separately unless they block the task.
 - Separate design discussion from implementation. When design is unsettled, do not make a

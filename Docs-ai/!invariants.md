@@ -247,6 +247,29 @@ Do not build an unbounded queue that can grow forever because one consumer is sl
 - Do not silently fix unrelated issues; report them separately unless they block the task.
 - For visual/geometry work, preserve working style and iterate on the requested problem rather than replacing the aesthetic.
 
+### No special cases keyed on identity
+
+A recurring failure pattern in this project: the first instance of a new kind gets a
+branch keyed on its identity (`Category == "docking-bay"`, a name check, a dedicated
+render path), and every later instance of the same kind silently falls outside it.
+Containers, octagonal modules, and ship rendering have each been through this cycle.
+
+Rules:
+
+- Branch on **capability**, never identity: `MeshFactory != null`, "has normals",
+  "is closed mesh" — not category strings, names, or concrete types. If code needs an
+  identity check to work, that is a design smell requiring explicit sign-off in the
+  brief, with a comment stating why no capability expresses it.
+- When a fix lands on a general pipeline, its coverage is defined by enumeration, not
+  by the fixer's memory: prefer a test or runtime warning that iterates ALL instances
+  (all modules, all mesh classes, all drawn object kinds) and asserts each one
+  participates. "Every placed module yields a caster", "every mesh class has an
+  explicit shadow policy", "every lit object renders through LitSurface" — coverage
+  assertions of this shape catch special-case drift automatically.
+- An object kind may only have its own generation/render path when the design
+  explicitly says so (e.g. glass), and that exception is documented at the
+  participation table/policy site, not discovered in a branch condition.
+
 ---
 
 ## 14. Verification and honesty
