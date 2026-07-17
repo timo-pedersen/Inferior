@@ -28,6 +28,14 @@ public sealed record CockpitPoseDefinition(
     DVec3 Position,
     Quaternion Orientation);
 
+public sealed record SemanticBounds(DVec3 Min, DVec3 Max);
+
+public sealed record CargoContainerPlacementDefinition(
+    string PlacementId,
+    DVec3 CenterMeters,
+    DVec3 BoundsMeters,
+    SemanticBounds OccupiedBoundsMeters);
+
 public sealed record CargoArrangementDefinition(
     int ContainerCapacity,
     string Arrangement,
@@ -36,9 +44,11 @@ public sealed record CargoArrangementDefinition(
     DVec3 DesignVolumeBoundsMeters,
     string CargoDoorAssemblyId,
     DVec3 RearOpeningBoundsMeters,
-    DVec3 TransferAxis);
-
-public sealed record SemanticBounds(DVec3 Min, DVec3 Max);
+    DVec3 TransferAxis)
+{
+    public IReadOnlyList<CargoContainerPlacementDefinition> ContainerPlacements { get; init; } = [];
+    public SemanticBounds LoadingClearanceBoundsMeters { get; init; } = new(DVec3.Zero, DVec3.Zero);
+}
 
 public sealed record AssemblyArmourPanelSeatDefinition(
     string SeatId,

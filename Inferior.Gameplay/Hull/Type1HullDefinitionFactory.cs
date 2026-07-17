@@ -41,7 +41,17 @@ public static class Type1HullDefinitionFactory
             DesignVolumeBoundsMeters: new DVec3(6.0, 3.2, 7.2),
             CargoDoorAssemblyId: CargoDoorId,
             RearOpeningBoundsMeters: new DVec3(6.1, 3.25, 0.0),
-            TransferAxis: DVec3.UnitZ),
+            TransferAxis: DVec3.UnitZ)
+        {
+            ContainerPlacements =
+            [
+                CreateCargoContainerPlacement($"{HullId}.cargo.port.01", new DVec3(-1.25, -0.05, 3.8)),
+                CreateCargoContainerPlacement($"{HullId}.cargo.starboard.01", new DVec3(1.25, -0.05, 3.8)),
+            ],
+            LoadingClearanceBoundsMeters = new SemanticBounds(
+                new DVec3(-3.0, -1.65, 0.2),
+                new DVec3(3.0, 1.55, 8.6)),
+        },
 
         AerodynamicLift         = 0.65,
         AerodynamicBrakeFront   = 0.95,
@@ -248,6 +258,16 @@ public static class Type1HullDefinitionFactory
                 new($"{HullId}.underside.beam-light.02", new DVec3(0.85, -1.15, -7.55), new DVec3(0.0, -0.35, -1.0).Normalized(), 24.0, 700.0, 1.0, "warm-white"),
             ],
         };
+    }
+
+    private static CargoContainerPlacementDefinition CreateCargoContainerPlacement(string placementId, DVec3 center)
+    {
+        var bounds = new DVec3(2.5, 2.5, 6.0);
+        return new CargoContainerPlacementDefinition(
+            placementId,
+            center,
+            bounds,
+            new SemanticBounds(center - bounds / 2.0, center + bounds / 2.0));
     }
 
     private static void AddRing(Dictionary<string, DVec3> vertices, string ringName, double z, double scale)

@@ -60,6 +60,7 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(new DVec3(5.0, 2.5, 6.0), hull.CargoArrangement.StackBoundsMeters);
         Assert.Equal(new DVec3(6.0, 3.2, 7.2), hull.CargoArrangement.DesignVolumeBoundsMeters);
         Assert.Equal("type-1.rear.cargo-door.01", hull.CargoArrangement.CargoDoorAssemblyId);
+        Assert.Equal(2, hull.CargoArrangement.ContainerPlacements.Count);
     }
 
     [Fact]
@@ -229,23 +230,52 @@ public sealed class ShipVisualSystemTests
         var geometry = hull.VisualGeometry!;
 
         var designVolume = Cuboid.FromCenterAndSize(cargo.DesignVolumeCenterMeters, cargo.DesignVolumeBoundsMeters);
-        var containerA = Cuboid.FromCenterAndSize(
-            cargo.DesignVolumeCenterMeters + new DVec3(-1.25, 0.0, 0.0),
-            new DVec3(2.5, 2.5, 6.0));
-        var containerB = Cuboid.FromCenterAndSize(
-            cargo.DesignVolumeCenterMeters + new DVec3(1.25, 0.0, 0.0),
-            new DVec3(2.5, 2.5, 6.0));
+        var containers = cargo.ContainerPlacements
+            .Select(p => new Cuboid(p.OccupiedBoundsMeters.Min, p.OccupiedBoundsMeters.Max))
+            .ToArray();
 
-        Assert.True(designVolume.Contains(containerA));
-        Assert.True(designVolume.Contains(containerB));
-        Assert.False(containerA.OverlapsWithPositiveVolume(containerB));
+        Assert.Equal(cargo.ContainerCapacity, containers.Length);
+        Assert.All(containers, container => Assert.True(designVolume.Contains(container)));
+        Assert.False(containers[0].OverlapsWithPositiveVolume(containers[1]));
 
         Cuboid hullBounds = Cuboid.FromPoints(geometry.Vertices.Select(v => v.Position));
         Assert.True(hullBounds.Contains(designVolume));
 
+        var loadingClearance = new Cuboid(cargo.LoadingClearanceBoundsMeters.Min, cargo.LoadingClearanceBoundsMeters.Max);
+        Assert.All(containers, container => Assert.True(loadingClearance.Contains(container)));
+        Assert.True(loadingClearance.Max.Z > hullBounds.Max.Z);
+
         Assert.True(cargo.RearOpeningBoundsMeters.X >= cargo.StackBoundsMeters.X);
         Assert.True(cargo.RearOpeningBoundsMeters.Y >= cargo.StackBoundsMeters.Y);
         Assert.Equal(DVec3.UnitZ, cargo.TransferAxis);
+    }
+
+    [Fact]
+    public void AriesCargoLayoutMetadata_RecordsPhysicalContainerPlacementsAndLoadingClearance()
+    {
+        var cargo = HullDefinitionLibrary.Get("type-1").CargoArrangement!;
+        var placements = cargo.ContainerPlacements.OrderBy(p => p.PlacementId, StringComparer.Ordinal).ToArray();
+        var loadingClearance = new Cuboid(cargo.LoadingClearanceBoundsMeters.Min, cargo.LoadingClearanceBoundsMeters.Max);
+
+        Assert.Equal(2, cargo.ContainerCapacity);
+        Assert.Equal(2, placements.Length);
+        Assert.Equal(["type-1.cargo.port.01", "type-1.cargo.starboard.01"], placements.Select(p => p.PlacementId).ToArray());
+        Assert.Equal(DVec3.UnitZ, cargo.TransferAxis);
+        Assert.Equal("type-1.rear.cargo-door.01", cargo.CargoDoorAssemblyId);
+        Assert.Equal(new DVec3(-3.0, -1.65, 0.2), cargo.LoadingClearanceBoundsMeters.Min);
+        Assert.Equal(new DVec3(3.0, 1.55, 8.6), cargo.LoadingClearanceBoundsMeters.Max);
+
+        Assert.All(placements, placement =>
+        {
+            Assert.Equal(new DVec3(2.5, 2.5, 6.0), placement.BoundsMeters);
+            Assert.Equal(placement.CenterMeters - placement.BoundsMeters / 2.0, placement.OccupiedBoundsMeters.Min);
+            Assert.Equal(placement.CenterMeters + placement.BoundsMeters / 2.0, placement.OccupiedBoundsMeters.Max);
+            Assert.True(loadingClearance.Contains(new Cuboid(placement.OccupiedBoundsMeters.Min, placement.OccupiedBoundsMeters.Max)));
+        });
+        Assert.True(placements[0].CenterMeters.X < 0.0);
+        Assert.True(placements[1].CenterMeters.X > 0.0);
+        Assert.Equal(placements[0].CenterMeters.Y, placements[1].CenterMeters.Y);
+        Assert.Equal(placements[0].CenterMeters.Z, placements[1].CenterMeters.Z);
     }
 
     [Fact]
@@ -282,15 +312,7 @@ public sealed class ShipVisualSystemTests
         var cargo = hull.CargoArrangement!;
         var geometry = hull.VisualGeometry!;
         var door = Assert.Single(geometry.Assemblies, a => a.AssemblyId == cargo.CargoDoorAssemblyId);
-        var loadingPath = new Cuboid(
-            new DVec3(
-                cargo.DesignVolumeCenterMeters.X - cargo.DesignVolumeBoundsMeters.X / 2.0,
-                cargo.DesignVolumeCenterMeters.Y - cargo.DesignVolumeBoundsMeters.Y / 2.0,
-                cargo.DesignVolumeCenterMeters.Z - cargo.DesignVolumeBoundsMeters.Z / 2.0),
-            new DVec3(
-                cargo.DesignVolumeCenterMeters.X + cargo.DesignVolumeBoundsMeters.X / 2.0,
-                cargo.DesignVolumeCenterMeters.Y + cargo.DesignVolumeBoundsMeters.Y / 2.0,
-                8.6));
+        var loadingPath = new Cuboid(cargo.LoadingClearanceBoundsMeters.Min, cargo.LoadingClearanceBoundsMeters.Max);
         var engineClearances = geometry.AttachmentPorts
             .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Engine))
             .Select(p => new Cuboid(p.ClearanceMinMeters, p.ClearanceMaxMeters))
@@ -395,7 +417,7 @@ public sealed class ShipVisualSystemTests
     {
         var hull = HullDefinitionLibrary.Get("type-1");
         var cargo = hull.CargoArrangement!;
-        var loadingCorridor = Cuboid.FromCenterAndSize(cargo.DesignVolumeCenterMeters, cargo.DesignVolumeBoundsMeters);
+        var loadingCorridor = new Cuboid(cargo.LoadingClearanceBoundsMeters.Min, cargo.LoadingClearanceBoundsMeters.Max);
         var enginePorts = hull.VisualGeometry!.AttachmentPorts
             .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Engine))
             .ToArray();
@@ -450,7 +472,7 @@ public sealed class ShipVisualSystemTests
         var geometry = hull.VisualGeometry!;
         var cargo = hull.CargoArrangement!;
         var door = Assert.Single(geometry.Assemblies, a => a.AssemblyId == cargo.CargoDoorAssemblyId);
-        var loadingCorridor = Cuboid.FromCenterAndSize(cargo.DesignVolumeCenterMeters, cargo.DesignVolumeBoundsMeters);
+        var loadingCorridor = new Cuboid(cargo.LoadingClearanceBoundsMeters.Min, cargo.LoadingClearanceBoundsMeters.Max);
         var cockpitKeepout = Cuboid.FromCenterAndSize(hull.CockpitPose.Position, new DVec3(2.2, 1.6, 2.0));
         var landingFeet = geometry.AttachmentPorts
             .Where(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear))
