@@ -132,6 +132,48 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesLights_DefineHullOwnedMarkersAndForwardDownBeamMounts()
+    {
+        var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
+        var port = Assert.Single(geometry.MarkerLights, l => l.LightId == "type-1.port.navigation-light.01");
+        var starboard = Assert.Single(geometry.MarkerLights, l => l.LightId == "type-1.starboard.navigation-light.01");
+        var rear = Assert.Single(geometry.MarkerLights, l => l.LightId == "type-1.rear.position-light.01");
+        var beams = geometry.BeamLights.OrderBy(l => l.LightId, StringComparer.Ordinal).ToArray();
+
+        Assert.Equal("red", port.Colour);
+        Assert.Equal(-DVec3.UnitX, port.Direction);
+        Assert.Equal("continuous", port.Pattern);
+        Assert.True(port.Position.X < 0.0);
+        Assert.True(port.Position.Z < -5.0);
+
+        Assert.Equal("green", starboard.Colour);
+        Assert.Equal(DVec3.UnitX, starboard.Direction);
+        Assert.Equal("continuous", starboard.Pattern);
+        Assert.True(starboard.Position.X > 0.0);
+        Assert.Equal(port.Position.Z, starboard.Position.Z, 6);
+
+        Assert.Equal("white", rear.Colour);
+        Assert.Equal(DVec3.UnitZ, rear.Direction);
+        Assert.Equal("continuous", rear.Pattern);
+        Assert.True(rear.Position.Y > 0.5);
+        Assert.True(rear.Position.Z > 8.0);
+
+        Assert.Equal(["type-1.underside.beam-light.01", "type-1.underside.beam-light.02"], beams.Select(b => b.LightId).ToArray());
+        Assert.All(beams, beam =>
+        {
+            Assert.True(beam.Position.Y < -1.0);
+            Assert.True(beam.Position.Z < -7.0);
+            Assert.True(beam.Direction.Y < -0.2);
+            Assert.True(beam.Direction.Z < -0.9);
+            Assert.Equal(24.0, beam.ConeAngleDegrees);
+            Assert.Equal(700.0, beam.RangeMeters);
+            Assert.Equal("warm-white", beam.Colour);
+        });
+        Assert.DoesNotContain(geometry.MarkerLights.Select(l => l.LightId).Concat(geometry.BeamLights.Select(l => l.LightId)),
+            id => id.Contains("engine", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AriesSurfaceRoleMap_ClassifiesEveryProductionFace()
     {
         var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;

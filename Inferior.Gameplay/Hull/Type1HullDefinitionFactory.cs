@@ -237,15 +237,15 @@ public static class Type1HullDefinitionFactory
             ],
             MarkerLights =
             [
-                new($"{HullId}.port.marker.01", new DVec3(-3.95, 0.65, -5.8), -DVec3.UnitX, "red", 0.24, 1.0, "steady"),
-                new($"{HullId}.starboard.marker.01", new DVec3(3.95, 0.65, -5.8), DVec3.UnitX, "green", 0.24, 1.0, "steady"),
-                new($"{HullId}.rear.marker.01", new DVec3(0.0, 0.55, 8.05), DVec3.UnitZ, "white", 0.28, 0.9, "steady"),
+                new($"{HullId}.port.navigation-light.01", new DVec3(-3.95, 0.65, -5.8), -DVec3.UnitX, "red", 0.24, 1.0, "continuous"),
+                new($"{HullId}.starboard.navigation-light.01", new DVec3(3.95, 0.65, -5.8), DVec3.UnitX, "green", 0.24, 1.0, "continuous"),
+                new($"{HullId}.rear.position-light.01", new DVec3(0.0, 0.85, 8.12), DVec3.UnitZ, "white", 0.28, 0.9, "continuous"),
                 new($"{HullId}.underside.marker.01", new DVec3(0.0, -1.95, 2.5), -DVec3.UnitY, "amber", 0.20, 0.65, "slow-pulse"),
             ],
             BeamLights =
             [
-                new($"{HullId}.front.beam-light.01", new DVec3(-0.85, -0.95, -8.05), -DVec3.UnitZ, 18.0, 650.0, 1.0, "warm-white"),
-                new($"{HullId}.front.beam-light.02", new DVec3(0.85, -0.95, -8.05), -DVec3.UnitZ, 18.0, 650.0, 1.0, "warm-white"),
+                new($"{HullId}.underside.beam-light.01", new DVec3(-0.85, -1.15, -7.55), new DVec3(0.0, -0.35, -1.0).Normalized(), 24.0, 700.0, 1.0, "warm-white"),
+                new($"{HullId}.underside.beam-light.02", new DVec3(0.85, -1.15, -7.55), new DVec3(0.0, -0.35, -1.0).Normalized(), 24.0, 700.0, 1.0, "warm-white"),
             ],
         };
     }
