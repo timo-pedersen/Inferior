@@ -104,13 +104,39 @@ public sealed class ShipVisualSystemTests
 
         Assert.Contains(geometry.Assemblies, a => a.AssemblyId == "type-1.rear.cargo-door.01" && a.Kind == "CargoDoor");
         Assert.Contains(geometry.Faces, f => f.Id == "type-1.rear.cargo-door.01" && f.Role == HullSurfaceRole.CargoDoor);
-        Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.PanelSeat) >= 6);
-        Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.EngineMount) >= 4);
-        Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ServiceSurface) >= 4);
+        Assert.InRange(geometry.Faces.Count(f => f.Role == HullSurfaceRole.PanelSeat), 8, 16);
+        Assert.Equal(2, geometry.Faces.Count(f => f.Role == HullSurfaceRole.EngineMount));
+        Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ServiceSurface) >= 6);
+        Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ExposedStructure) >= 4);
         Assert.Contains(geometry.Faces, f => f.Id == "type-1.top.cockpit-glass.01" && f.Role == HullSurfaceRole.CockpitGlass);
         Assert.Contains(geometry.Faces, f => f.Id == "type-1.port.cockpit-frame.01" && f.Role == HullSurfaceRole.CockpitFrame);
         Assert.Equal(4, geometry.MarkerLights.Count);
         Assert.Equal(2, geometry.BeamLights.Count);
+    }
+
+    [Fact]
+    public void AriesSurfaceRoleMap_ClassifiesEveryProductionFace()
+    {
+        var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
+        var engineMountFaces = geometry.Faces.Where(f => f.Role == HullSurfaceRole.EngineMount).ToArray();
+
+        Assert.All(geometry.Faces, face => Assert.True(Enum.IsDefined(face.Role)));
+        Assert.Equal(
+            ["type-1.port.engine-root.01", "type-1.starboard.engine-root.01"],
+            engineMountFaces.Select(f => f.Id).Order(StringComparer.Ordinal).ToArray());
+        Assert.DoesNotContain(engineMountFaces, face => !string.IsNullOrWhiteSpace(face.PanelSlotId));
+
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.front.armoured-head.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.port.forward-side.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.starboard.forward-side.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.port.cargo-shoulder.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.starboard.cargo-shoulder.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.top.cargo.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.rear.cargo-door.port.01" && f.Role == HullSurfaceRole.PanelSeat && f.AssemblyId == "type-1.rear.cargo-door.01");
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.rear.cargo-door.starboard.01" && f.Role == HullSurfaceRole.PanelSeat && f.AssemblyId == "type-1.rear.cargo-door.01");
+        Assert.All(
+            geometry.Faces.Where(f => f.Id.Contains("cargo-door-frame", StringComparison.Ordinal)),
+            face => Assert.Equal(HullSurfaceRole.ExposedStructure, face.Role));
     }
 
     [Fact]
@@ -258,12 +284,14 @@ public sealed class ShipVisualSystemTests
 
         Assert.True(geometry.RequireClosedHull);
         Assert.Empty(geometry.Validate());
-        Assert.Equal(18, geometry.Faces.Count);
+        var structuralFaces = geometry.Faces.Where(face => face.ContributesToClosedHull).ToArray();
+        Assert.Equal(18, structuralFaces.Length);
         Assert.All(geometry.Faces, face => Assert.InRange(face.VertexIds.Count, 4, 8));
         Assert.DoesNotContain(geometry.Faces, face => face.VertexIds.Count == 3);
 
-        Assert.Equal(16, geometry.Faces.Count(face => face.VertexIds.Count == 4));
-        Assert.Equal(2, geometry.Faces.Count(face => face.VertexIds.Count == 8));
+        Assert.Equal(16, structuralFaces.Count(face => face.VertexIds.Count == 4));
+        Assert.Equal(2, structuralFaces.Count(face => face.VertexIds.Count == 8));
+        Assert.All(geometry.Faces.Where(face => !face.ContributesToClosedHull), face => Assert.Equal(4, face.VertexIds.Count));
         Assert.Contains(geometry.Faces, face => face.Id == "type-1.front.armoured-head.01");
         Assert.Contains(geometry.Faces, face => face.Id == "type-1.rear.cargo-door.01" && face.Role == HullSurfaceRole.CargoDoor);
     }

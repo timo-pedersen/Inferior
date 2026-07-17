@@ -12,7 +12,10 @@ public sealed record SemanticHullFace(
     string MaterialGroup,
     DVec3 OutwardNormal,
     string? PanelSlotId = null,
-    string? AssemblyId = null);
+    string? AssemblyId = null)
+{
+    public bool ContributesToClosedHull { get; init; } = true;
+}
 
 public sealed record HullDimensions(
     double LengthMeters,
@@ -277,7 +280,7 @@ public sealed class SemanticHullGeometry
     {
         var edgeCounts = new Dictionary<(string a, string b), int>();
         var directedEdges = new HashSet<(string a, string b)>();
-        foreach (var face in Faces)
+        foreach (var face in Faces.Where(f => f.ContributesToClosedHull))
         {
             for (int i = 0; i < face.VertexIds.Count; i++)
             {

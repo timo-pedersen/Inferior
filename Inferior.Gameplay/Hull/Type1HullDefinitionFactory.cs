@@ -85,24 +85,31 @@ public static class Type1HullDefinitionFactory
             AddRing(vertices, ringNames[ring], z[ring], scale[ring]);
         }
 
+        AddRearPlaneQuad(vertices, CargoDoorPortPanelSeatId, -2.95, 0.0, -1.45, 1.45, 8.06);
+        AddRearPlaneQuad(vertices, CargoDoorStarboardPanelSeatId, 0.0, 2.95, -1.45, 1.45, 8.06);
+        AddRearPlaneQuad(vertices, $"{HullId}.rear.cargo-door-frame.top.01", -3.2, 3.2, 1.60, 2.05, 8.07);
+        AddRearPlaneQuad(vertices, $"{HullId}.rear.cargo-door-frame.bottom.01", -3.2, 3.2, -2.05, -1.60, 8.07);
+        AddRearPlaneQuad(vertices, $"{HullId}.rear.cargo-door-frame.port.01", -3.45, -3.05, -1.60, 1.60, 8.07);
+        AddRearPlaneQuad(vertices, $"{HullId}.rear.cargo-door-frame.starboard.01", 3.05, 3.45, -1.60, 1.60, 8.07);
+
         var faceSpecs = new (string id, int section, int edge, HullSurfaceRole role, string material, string? assembly)[]
         {
             ($"{HullId}.top.cockpit-glass.01", 0, 0, HullSurfaceRole.CockpitGlass, "cockpit-glass", null),
             ($"{HullId}.starboard.head-armour.01", 0, 1, HullSurfaceRole.PanelSeat, "panel-exterior", null),
-            ($"{HullId}.starboard.engine-mount.01", 0, 2, HullSurfaceRole.EngineMount, "structural-hull", null),
-            ($"{HullId}.starboard.service.01", 0, 3, HullSurfaceRole.ServiceSurface, "structural-hull", null),
-            ($"{HullId}.underside.head.01", 0, 4, HullSurfaceRole.PanelSeat, "panel-exterior", null),
-            ($"{HullId}.port.service.01", 0, 5, HullSurfaceRole.ServiceSurface, "structural-hull", null),
-            ($"{HullId}.port.engine-mount.01", 0, 6, HullSurfaceRole.EngineMount, "structural-hull", null),
+            ($"{HullId}.starboard.forward-side.01", 0, 2, HullSurfaceRole.PanelSeat, "panel-exterior", null),
+            ($"{HullId}.starboard.lower-forward-service.01", 0, 3, HullSurfaceRole.ServiceSurface, "structural-hull", null),
+            ($"{HullId}.underside.forward-service.01", 0, 4, HullSurfaceRole.ServiceSurface, "structural-hull", null),
+            ($"{HullId}.port.lower-forward-service.01", 0, 5, HullSurfaceRole.ServiceSurface, "structural-hull", null),
+            ($"{HullId}.port.forward-side.01", 0, 6, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.port.cockpit-frame.01", 0, 7, HullSurfaceRole.CockpitFrame, "cockpit-frame", null),
 
             ($"{HullId}.top.cargo.01", 1, 0, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.cargo-shoulder.01", 1, 1, HullSurfaceRole.PanelSeat, "panel-exterior", null),
-            ($"{HullId}.starboard.engine-mount.02", 1, 2, HullSurfaceRole.EngineMount, "structural-hull", null),
-            ($"{HullId}.starboard.lower-service.01", 1, 3, HullSurfaceRole.ServiceSurface, "structural-hull", null),
-            ($"{HullId}.underside.cargo.01", 1, 4, HullSurfaceRole.ServiceSurface, "structural-hull", null),
-            ($"{HullId}.port.lower-service.01", 1, 5, HullSurfaceRole.ServiceSurface, "structural-hull", null),
-            ($"{HullId}.port.engine-mount.02", 1, 6, HullSurfaceRole.EngineMount, "structural-hull", null),
+            ($"{HullId}.starboard.engine-root.01", 1, 2, HullSurfaceRole.EngineMount, "structural-hull", null),
+            ($"{HullId}.starboard.lower-rear-service.01", 1, 3, HullSurfaceRole.ServiceSurface, "structural-hull", null),
+            ($"{HullId}.underside.cargo-service.01", 1, 4, HullSurfaceRole.ServiceSurface, "structural-hull", null),
+            ($"{HullId}.port.lower-rear-service.01", 1, 5, HullSurfaceRole.ServiceSurface, "structural-hull", null),
+            ($"{HullId}.port.engine-root.01", 1, 6, HullSurfaceRole.EngineMount, "structural-hull", null),
             ($"{HullId}.port.cargo-shoulder.01", 1, 7, HullSurfaceRole.PanelSeat, "panel-exterior", null),
         };
 
@@ -124,6 +131,26 @@ public static class Type1HullDefinitionFactory
         AddFace(faces, vertices, CargoDoorId,
             Enumerable.Range(0, 8).Select(i => VertexId("cargo-rear", i)).ToArray(),
             HullSurfaceRole.CargoDoor, "cargo-door-structure", DVec3.UnitZ, null, CargoDoorId);
+
+        AddFace(faces, vertices, CargoDoorPortPanelSeatId,
+            OverlayVertexIds(CargoDoorPortPanelSeatId), HullSurfaceRole.PanelSeat, "panel-exterior",
+            DVec3.UnitZ, CargoDoorPortPanelSeatId, CargoDoorId, contributesToClosedHull: false);
+        AddFace(faces, vertices, CargoDoorStarboardPanelSeatId,
+            OverlayVertexIds(CargoDoorStarboardPanelSeatId), HullSurfaceRole.PanelSeat, "panel-exterior",
+            DVec3.UnitZ, CargoDoorStarboardPanelSeatId, CargoDoorId, contributesToClosedHull: false);
+
+        foreach (string frameFaceId in new[]
+        {
+            $"{HullId}.rear.cargo-door-frame.top.01",
+            $"{HullId}.rear.cargo-door-frame.bottom.01",
+            $"{HullId}.rear.cargo-door-frame.port.01",
+            $"{HullId}.rear.cargo-door-frame.starboard.01",
+        })
+        {
+            AddFace(faces, vertices, frameFaceId, OverlayVertexIds(frameFaceId),
+                HullSurfaceRole.ExposedStructure, "cargo-door-frame", DVec3.UnitZ,
+                null, CargoDoorId, contributesToClosedHull: false);
+        }
 
         return new SemanticHullGeometry
         {
@@ -215,6 +242,27 @@ public static class Type1HullDefinitionFactory
     private static string VertexId(string ringName, int index)
         => $"{HullId}.v.{ringName}.{index + 1:00}";
 
+    private static void AddRearPlaneQuad(
+        Dictionary<string, DVec3> vertices,
+        string faceId,
+        double minX,
+        double maxX,
+        double minY,
+        double maxY,
+        double z)
+    {
+        vertices.Add(OverlayVertexId(faceId, 1), new DVec3(minX, minY, z));
+        vertices.Add(OverlayVertexId(faceId, 2), new DVec3(maxX, minY, z));
+        vertices.Add(OverlayVertexId(faceId, 3), new DVec3(maxX, maxY, z));
+        vertices.Add(OverlayVertexId(faceId, 4), new DVec3(minX, maxY, z));
+    }
+
+    private static string[] OverlayVertexIds(string faceId)
+        => [OverlayVertexId(faceId, 1), OverlayVertexId(faceId, 2), OverlayVertexId(faceId, 3), OverlayVertexId(faceId, 4)];
+
+    private static string OverlayVertexId(string faceId, int index)
+        => $"{faceId}.v.{index:00}";
+
     private static DVec3 EdgeNormal(int edge) => edge switch
     {
         0 => DVec3.UnitY,
@@ -230,13 +278,16 @@ public static class Type1HullDefinitionFactory
 
     private static void AddFace(List<SemanticHullFace> faces, Dictionary<string, DVec3> vertices,
         string id, string[] vertexIds, HullSurfaceRole role, string material, DVec3 desiredNormal,
-        string? panelSlotId, string? assemblyId)
+        string? panelSlotId, string? assemblyId, bool contributesToClosedHull = true)
     {
         if (DVec3.Dot(ComputePolygonNormal(vertexIds.Select(v => vertices[v]).ToArray()), desiredNormal) < 0)
             Array.Reverse(vertexIds);
 
         DVec3 actualNormal = ComputePolygonNormal(vertexIds.Select(v => vertices[v]).ToArray()).Normalized();
-        faces.Add(new SemanticHullFace(id, vertexIds, role, material, actualNormal, panelSlotId, assemblyId));
+        faces.Add(new SemanticHullFace(id, vertexIds, role, material, actualNormal, panelSlotId, assemblyId)
+        {
+            ContributesToClosedHull = contributesToClosedHull,
+        });
     }
 
     private static DVec3 ComputePolygonNormal(IReadOnlyList<DVec3> positions)
