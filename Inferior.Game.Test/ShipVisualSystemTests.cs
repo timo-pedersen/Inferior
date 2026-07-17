@@ -120,6 +120,55 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesLandingFeet_MatchForwardPairAndRearFootLayout()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var cargo = hull.CargoArrangement!;
+        var feet = hull.VisualGeometry!.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            .ToArray();
+
+        Assert.Equal(3, feet.Length);
+
+        var forwardFeet = feet
+            .Where(p => p.PortId.Contains("forward-landing-foot", StringComparison.Ordinal))
+            .OrderBy(p => p.Position.X)
+            .ToArray();
+
+        Assert.Equal(2, forwardFeet.Length);
+        Assert.All(forwardFeet, p => Assert.True(p.Position.Z < 0.0));
+        Assert.Equal(forwardFeet[0].Position.Z, forwardFeet[1].Position.Z, 6);
+        Assert.Equal(forwardFeet[0].Position.Y, forwardFeet[1].Position.Y, 6);
+        Assert.Equal(-forwardFeet[0].Position.X, forwardFeet[1].Position.X, 6);
+
+        var rearFoot = Assert.Single(feet, p => p.PortId == "type-1.rear.landing-foot.01");
+        double cargoRearEdge = cargo.DesignVolumeCenterMeters.Z + cargo.DesignVolumeBoundsMeters.Z / 2.0;
+        Assert.True(rearFoot.Position.Z > 0.0);
+        Assert.True(rearFoot.Position.Z < cargoRearEdge);
+        Assert.Equal(0.0, rearFoot.Position.X, 6);
+    }
+
+    [Fact]
+    public void AriesEngineZones_DoNotBlockRearCargoLoadingCorridor()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var cargo = hull.CargoArrangement!;
+        var loadingCorridor = Cuboid.FromCenterAndSize(cargo.DesignVolumeCenterMeters, cargo.DesignVolumeBoundsMeters);
+        var enginePorts = hull.VisualGeometry!.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Engine))
+            .ToArray();
+
+        Assert.Equal(2, enginePorts.Length);
+
+        foreach (var enginePort in enginePorts)
+        {
+            var clearance = new Cuboid(enginePort.ClearanceMinMeters, enginePort.ClearanceMaxMeters);
+
+            Assert.False(clearance.OverlapsWithPositiveVolume(loadingCorridor));
+        }
+    }
+
+    [Fact]
     public void SemanticGeometryValidator_AcceptsSharedSemanticLocationAcrossTypedNamespaces()
     {
         var geometry = GeometryWithFace(

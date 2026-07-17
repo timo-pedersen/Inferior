@@ -141,9 +141,9 @@ public static class Type1HullDefinitionFactory
                     ClearanceMinMeters = new DVec3(3.65, -1.7, -1.8),
                     ClearanceMaxMeters = new DVec3(5.0, 1.7, 7.4),
                 },
-                new($"{HullId}.underside.landing-foot.01", new DVec3(0.0, -2.05, -6.4), -DVec3.UnitY, AttachmentCapability.LandingGear),
-                new($"{HullId}.port.landing-foot.01", new DVec3(-2.75, -2.05, 5.8), -DVec3.UnitY, AttachmentCapability.LandingGear),
-                new($"{HullId}.starboard.landing-foot.01", new DVec3(2.75, -2.05, 5.8), -DVec3.UnitY, AttachmentCapability.LandingGear),
+                new($"{HullId}.port.forward-landing-foot.01", new DVec3(-1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear),
+                new($"{HullId}.starboard.forward-landing-foot.01", new DVec3(1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear),
+                new($"{HullId}.rear.landing-foot.01", new DVec3(0.0, -2.55, 6.25), -DVec3.UnitY, AttachmentCapability.LandingGear),
                 new($"{HullId}.top.service-sensor.01", new DVec3(-1.8, 2.2, -1.8), DVec3.UnitY, AttachmentCapability.Sensor | AttachmentCapability.Utility),
             ],
             MarkerLights =
