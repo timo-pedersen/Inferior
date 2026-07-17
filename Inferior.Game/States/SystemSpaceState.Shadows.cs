@@ -1,3 +1,4 @@
+using System.Linq;
 using Inferior.Core.DataBus;
 using Inferior.Game.StationGen;
 using Inferior.Rendering;
@@ -21,6 +22,19 @@ public sealed partial class SystemSpaceState
     private Effect? _shadowCasterEffect;
     private RenderTarget2D? _stationShadowMap;
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _shadowCasterMeshes = [];
+    // Decoration caster, separate from the hull caster above (Phase C) — one extra draw per
+    // module's deco mesh, composed from whichever DecorClass ranges are enabled for
+    // _casterStage. Absent for modules with nothing enabled. Rebuilt on stage change
+    // (RebuildDecoCasterMeshesForStage) without touching the hull casters.
+    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoCasterMeshes = [];
+    // Module-local caster AABBs (Phase C), used by FitStationShadowLight instead of
+    // Definition.BoundingBox — computed once from the actual caster vertex data (not the
+    // approximate envelope box) so the fit is exact for MeshFactory hulls too, and grows to
+    // cover whichever decoration is currently casting. Hull bounds are set alongside the hull
+    // caster in BuildStationShadowCasterMeshes (stage-independent); deco bounds are set
+    // alongside the deco caster in BuildModuleDecoCasterMesh (rebuilt on stage change).
+    private readonly Dictionary<PlacedModule, (Vector3 min, Vector3 max)> _shadowCasterHullBounds = [];
+    private readonly Dictionary<PlacedModule, (Vector3 min, Vector3 max)> _shadowCasterDecoBounds = [];
     private StationShadowContext? _stationShadowContext;
     private bool _showStationShadowOverlay;
     private bool _freezeStationShadowMap;
@@ -30,6 +44,38 @@ public sealed partial class SystemSpaceState
     private bool _stationShadowDeltaView;
     private bool _stationShadowLogged;
     private bool _stationShadowFreezeLogged;
+
+    // Ctrl+F6 caster-stage debug cycle (Docs/station-lighting-pipeline-spec.md §10 Phase C
+    // "Rollout"). Independent of DecorCastingPolicy — this previews a stage ahead of its
+    // landing there, so a not-yet-landed class can be gated (F8 overlay + screenshots)
+    // before its bool flips to true for real. Default tracks whatever's currently landed in
+    // DecorCastingPolicy, so normal play needs no keypress to see the production result.
+    private enum CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }
+    private CasterStage _casterStage = DefaultCasterStage();
+
+    private static CasterStage DefaultCasterStage()
+    {
+        bool Any(IEnumerable<DecorClass> classes) =>
+            classes.Any(c => StationDecorator.DecorCastingPolicy[c]);
+        if (Any(StationDecorator.C4Classes)) return CasterStage.AllClasses;
+        if (Any(StationDecorator.C3Classes)) return CasterStage.PlusC3;
+        if (Any(StationDecorator.C2Classes)) return CasterStage.PlusC2;
+        if (Any(StationDecorator.C1Classes)) return CasterStage.PlusC1;
+        return CasterStage.HullOnly;
+    }
+
+    private static IEnumerable<DecorClass> ClassesForStage(CasterStage stage) => stage switch
+    {
+        CasterStage.HullOnly   => [],
+        CasterStage.PlusC1     => StationDecorator.C1Classes,
+        CasterStage.PlusC2     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes),
+        CasterStage.PlusC3     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
+                                                             .Concat(StationDecorator.C3Classes),
+        CasterStage.AllClasses => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
+                                                             .Concat(StationDecorator.C3Classes)
+                                                             .Concat(StationDecorator.C4Classes),
+        _ => [],
+    };
 
     private sealed record StationShadowContext(
         Galaxy.Station Station,
@@ -60,32 +106,142 @@ public sealed partial class SystemSpaceState
             v.ib.Dispose();
         }
         _shadowCasterMeshes.Clear();
+        foreach (var v in _decoCasterMeshes.Values)
+        {
+            v.vb.Dispose();
+            v.ib.Dispose();
+        }
+        _decoCasterMeshes.Clear();
+        _shadowCasterHullBounds.Clear();
+        _shadowCasterDecoBounds.Clear();
         _stationShadowMap?.Dispose();
         _stationShadowMap = null;
         _shadowCasterEffect = null;
         _stationShadowContext = null;
     }
 
+    // Pure decision logic, no GraphicsDevice — any MeshFactory module (docking-bay,
+    // hab-block-octagonal, science-block-octagonal, any future one) casts its base hull
+    // faces [0, BaseFaceCount) once StationDecorator.Decorate has built its Mesh. This is
+    // NOT specific to docking-bay: docking-bay just happened to be the first MeshFactory
+    // module to get a caster, and an earlier fix wrongly encoded that as a category check
+    // instead of the general MeshFactory condition, silently leaving every other
+    // MeshFactory module (octagonal blocks) with no hull caster while their decoration
+    // still composed — floating greeble shadows with nothing underneath. `internal` so the
+    // regression test (Inferior.Game.Test) can assert this directly without a live
+    // GraphicsDevice. Box modules (MeshFactory == null) are handled separately, below, via
+    // BuildHullMesh — always unconditional, never this path.
+    internal static bool TryGetMeshFactoryHullFaceRange(PlacedModule mod, out int baseFaceCount)
+    {
+        baseFaceCount = 0;
+        if (mod.Definition.MeshFactory == null || mod.Mesh == null) return false;
+        baseFaceCount = mod.Mesh.BaseFaceCount;
+        return baseFaceCount > 0;
+    }
+
     private void BuildStationShadowCasterMeshes(IEnumerable<PlacedModule> modules)
     {
-        foreach (var mod in modules)
+        var enabled = new HashSet<DecorClass>(ClassesForStage(_casterStage));
+        var moduleList = modules as IReadOnlyList<PlacedModule> ?? modules.ToList();
+
+        foreach (var mod in moduleList)
         {
             if (mod.Definition.MeshFactory == null)
             {
                 _shadowCasterMeshes[mod] = BuildHullMesh(_gd, mod);
-                continue;
+                // BuildHullMesh's chamfered panel geometry recovers exactly
+                // Definition.BoundingBox's extents (every face-normal axis is reached
+                // un-inset by the opposite face's panel) — exact, not an approximation.
+                var h = mod.Definition.BoundingBox * 0.5f;
+                _shadowCasterHullBounds[mod] = (-h, h);
+            }
+            else if (TryGetMeshFactoryHullFaceRange(mod, out int baseFaceCount))
+            {
+                // Generalized MeshFactory hull caster — docking-bay is one example of this,
+                // not a special case of it. Decoration appended separately (below) now
+                // casts too, per the enabled DecorClass set.
+                var hull = mod.Mesh!.BuildFaceRange(_gd, 0, baseFaceCount);
+                if (hull.HasValue)
+                    _shadowCasterMeshes[mod] = hull.Value;
+
+                // Real vertex bounds, not the definition's approximate envelope box — a
+                // MeshFactory hull's true extent doesn't always exactly match the nominal
+                // envelope used to size it (e.g. docking-bay's wall thickness/door frame).
+                var bounds = mod.Mesh.ComputeFaceRangeBounds(0, baseFaceCount);
+                if (bounds.HasValue)
+                    _shadowCasterHullBounds[mod] = bounds.Value;
             }
 
-            // Phase B caster policy: docking-bay hull only. Its MeshFactory writes the
-            // closed bay hull as the mesh base faces; decoration appended later remains a
-            // receiver but does not cast until Phase C.
-            if (mod.Definition.Category == "docking-bay" && mod.Mesh != null)
-            {
-                var bayHull = mod.Mesh.BuildFaceRange(_gd, 0, mod.Mesh.BaseFaceCount);
-                if (bayHull.HasValue)
-                    _shadowCasterMeshes[mod] = bayHull.Value;
-            }
+            BuildModuleDecoCasterMesh(mod, enabled);
         }
+
+        // Safety net: a module with decoration casting but no hull caster produces floating
+        // shadows with nothing underneath them — exactly the bug this fix addresses. Warn
+        // loudly instead of silently missing it again for some future module shape.
+        foreach (var mod in moduleList)
+        {
+            if (_shadowCasterMeshes.ContainsKey(mod)) continue;
+            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+                $"Station shadow: module '{mod.Definition.Id}' (category '{mod.Definition.Category}') " +
+                "has no hull shadow caster — its decoration may cast unattached shadows.",
+                SystemMessagePriority.NB));
+        }
+    }
+
+    // Composes one caster index buffer for a module's decoration from the ranges of
+    // whichever DecorClass values are in `enabled` (Phase C). Separate draw from the hull
+    // caster above — see the field comment on _decoCasterMeshes. Also (re)computes the
+    // module-local deco bounds used by FitStationShadowLight; cleared when nothing's enabled
+    // so a stage rollback doesn't leave stale bounds behind.
+    private void BuildModuleDecoCasterMesh(PlacedModule mod, HashSet<DecorClass> enabled)
+    {
+        if (mod.Mesh == null || enabled.Count == 0)
+        {
+            _shadowCasterDecoBounds.Remove(mod);
+            return;
+        }
+
+        List<(int indexStart, int indexCount)>? ranges = null;
+        foreach (var (indexStart, indexCount, decorClass) in mod.Mesh.DecorClassRanges)
+        {
+            if (!enabled.Contains(decorClass)) continue;
+            ranges ??= [];
+            ranges.Add((indexStart, indexCount));
+        }
+        if (ranges == null)
+        {
+            _shadowCasterDecoBounds.Remove(mod);
+            return;
+        }
+
+        var built = mod.Mesh.BuildIndexRanges(_gd, ranges);
+        if (built.HasValue)
+            _decoCasterMeshes[mod] = built.Value;
+
+        var bounds = mod.Mesh.ComputeIndexRangeBounds(ranges);
+        if (bounds.HasValue)
+            _shadowCasterDecoBounds[mod] = bounds.Value;
+        else
+            _shadowCasterDecoBounds.Remove(mod);
+    }
+
+    // Ctrl+F6 handler: rebuilds only the decoration casters for the new stage, across every
+    // station's geometry (cheap — a rare keypress, not a per-frame cost). Hull casters are
+    // untouched, matching the brief's "hull shadows from Phase B unchanged."
+    private void RebuildDecoCasterMeshesForStage()
+    {
+        foreach (var v in _decoCasterMeshes.Values)
+        {
+            v.vb.Dispose();
+            v.ib.Dispose();
+        }
+        _decoCasterMeshes.Clear();
+
+        var enabled = new HashSet<DecorClass>(ClassesForStage(_casterStage));
+        if (enabled.Count == 0) return;
+        foreach (var modules in _stationGeometry.Values)
+            foreach (var mod in modules)
+                BuildModuleDecoCasterMesh(mod, enabled);
     }
 
     private void UpdateStationShadowInput(KeyboardState keys)
@@ -97,7 +253,22 @@ public sealed partial class SystemSpaceState
         bool f8 = keys.IsKeyDown(Keys.F8) && !_prevKeys.IsKeyDown(Keys.F8);
         bool f9 = keys.IsKeyDown(Keys.F9) && !_prevKeys.IsKeyDown(Keys.F9);
 
-        if (f6)
+        // Ctrl+F6 checked for conflicts the same way (the Ctrl+C lesson again): grep of
+        // LeftControl/RightControl usage across Inferior.Game found only Ctrl+C (screenshot)
+        // and Ctrl+F12 (window-mode/station-cycle chord) — Ctrl+F6 was free.
+        bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
+        bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
+        bool ctrlF6 = ctrlDown && keys.IsKeyDown(Keys.F6) && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F6));
+
+        if (ctrlF6)
+        {
+            _casterStage = (CasterStage)(((int)_casterStage + 1) % 5);
+            RebuildDecoCasterMeshesForStage();
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage($"Station shadow caster stage: {_casterStage}", SystemMessagePriority.NB));
+        }
+
+        if (f6 && !ctrlDown)
         {
             _stationShadowDeltaView = !_stationShadowDeltaView;
             DataBus.System.Publish(Topics.System.All,
@@ -198,16 +369,31 @@ public sealed partial class SystemSpaceState
 
         foreach (var mod in modules)
         {
-            if (!_shadowCasterMeshes.TryGetValue(mod, out var caster)) continue;
             Matrix moduleToLightView = mod.Transform * lightView;
             fx.Parameters["ModuleToLightView"].SetValue(moduleToLightView);
 
-            _gd.SetVertexBuffer(caster.vb);
-            _gd.Indices = caster.ib;
-            foreach (var pass in fx.CurrentTechnique.Passes)
+            if (_shadowCasterMeshes.TryGetValue(mod, out var caster))
             {
-                pass.Apply();
-                _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, caster.triCount);
+                _gd.SetVertexBuffer(caster.vb);
+                _gd.Indices = caster.ib;
+                foreach (var pass in fx.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, caster.triCount);
+                }
+            }
+
+            // Phase C: decoration caster, a separate draw from the hull above (same
+            // ModuleToLightView — deco ranges are recorded in the same module-local space).
+            if (_decoCasterMeshes.TryGetValue(mod, out var deco))
+            {
+                _gd.SetVertexBuffer(deco.vb);
+                _gd.Indices = deco.ib;
+                foreach (var pass in fx.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, deco.triCount);
+                }
             }
         }
 
@@ -245,6 +431,12 @@ public sealed partial class SystemSpaceState
         return best;
     }
 
+    // Phase C: fits from each module's actual enabled caster geometry (_shadowCasterHullBounds
+    // unioned with _shadowCasterDecoBounds when present), not Definition.BoundingBox — so a
+    // landmark antenna mast or dish extending past the module's envelope box is no longer
+    // clipped out of the light frustum. Both bounds dictionaries are precomputed once when the
+    // caster meshes are (re)built, not per frame — this just transforms the 8 corners of the
+    // cached box through the current lightView, same cost shape as before.
     private bool FitStationShadowLight(
         IReadOnlyList<PlacedModule> modules, Matrix lightView,
         out Vector2 minXY, out Vector2 maxXY, out float near, out float far)
@@ -257,14 +449,24 @@ public sealed partial class SystemSpaceState
 
         foreach (var mod in modules)
         {
-            if (!_shadowCasterMeshes.ContainsKey(mod)) continue;
+            if (!_shadowCasterHullBounds.TryGetValue(mod, out var hullBounds)) continue;
 
-            var h = mod.Definition.BoundingBox * 0.5f;
-            for (int ix = -1; ix <= 1; ix += 2)
-            for (int iy = -1; iy <= 1; iy += 2)
-            for (int iz = -1; iz <= 1; iz += 2)
+            Vector3 boundsMin = hullBounds.min;
+            Vector3 boundsMax = hullBounds.max;
+            if (_shadowCasterDecoBounds.TryGetValue(mod, out var decoBounds))
             {
-                Vector3 local = new(h.X * ix, h.Y * iy, h.Z * iz);
+                boundsMin = Vector3.Min(boundsMin, decoBounds.min);
+                boundsMax = Vector3.Max(boundsMax, decoBounds.max);
+            }
+
+            for (int ix = 0; ix <= 1; ix++)
+            for (int iy = 0; iy <= 1; iy++)
+            for (int iz = 0; iz <= 1; iz++)
+            {
+                Vector3 local = new(
+                    ix == 0 ? boundsMin.X : boundsMax.X,
+                    iy == 0 ? boundsMin.Y : boundsMax.Y,
+                    iz == 0 ? boundsMin.Z : boundsMax.Z);
                 Vector3 stationLocal = Vector3.Transform(local, mod.Transform);
                 Vector3 light = Vector3.Transform(stationLocal, lightView);
                 min.X = MathF.Min(min.X, light.X);
@@ -321,7 +523,7 @@ public sealed partial class SystemSpaceState
         string message =
             $"[{label}] {ctx.Station.Name}: {width:F1} x {height:F1} m, " +
             $"depth {ctx.DepthSpan:F1} m, {ctx.BuildMilliseconds:F2} ms. " +
-            "Keys F6 delta, F7 binary, F8 overlay, F9 freeze.";
+            "Keys F6 delta, F7 binary, F8 overlay, F9 freeze, Ctrl+F6 caster stage.";
         System.Console.WriteLine(message);
         DataBus.System.Publish(Topics.System.All, new SystemMessage(message, SystemMessagePriority.NB));
     }

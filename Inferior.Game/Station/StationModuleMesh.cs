@@ -6,6 +6,36 @@ namespace Inferior.Game.StationGen;
 
 public enum AnimType { Steady, Strobe, Pulse }
 
+// Decoration class tag for shadow-caster composition (Docs/station-lighting-pipeline-spec.md
+// Phase C). StationDecorator sets StationModuleMesh.CurrentDecorClass before each
+// Generate*/Place* pass; every geometry-appending call records the index range it just
+// added under that class (see RecordDecorClassRange). Sub-helpers called from within a
+// pass inherit whatever class is already current — nothing resets it mid-pass. See
+// StationDecorator.DecorCastingPolicy for the casts/doesn't-cast table and the per-class
+// rationale; that table is the executable form of the spec's "documented casting policy."
+public enum DecorClass
+{
+    // Default; never casts — safe fallback for anything not explicitly tagged (there
+    // shouldn't be any once Decorate wraps every pass, but this is the fail-safe, not a
+    // silently-relied-on default).
+    Unclassified,
+
+    // Never casts (documented exclusions) — see DecorCastingPolicy.
+    PanelSeams, EdgeTrim, Cables, Lights, Glass, LandingPadMarkings,
+
+    // C1 — structural
+    Pipes, SurfacePipes, PipeBrackets,
+
+    // C2 — equipment
+    Tanks, Containers, Greebles, Chimneys, VentGrilles, SolarPanels,
+
+    // C3 — antennas
+    Dishes, Antennas,
+
+    // C4 — windows
+    Windows, Hatches,
+}
+
 // Links a range of decoration vertices to an animation type so the renderer
 // can drive colour changes at runtime without re-uploading geometry.
 public sealed class AnimTag
@@ -32,10 +62,47 @@ public sealed class StationModuleMesh
     private readonly List<VertexPositionNormalColorTexture>  _verts = [];
     private readonly List<int>                          _idx   = [];
     private readonly List<(int vertexBase, int count)>  _faces = [];
+    private readonly List<(int indexStart, int indexCount, DecorClass decorClass)> _classRanges = [];
 
     public bool           IsEmpty       => _verts.Count == 0;
     public List<AnimTag>  AnimTags      { get; } = [];
     public SurfaceTexture Texture       { get; set; } = SurfaceTexture.CleanPanel;
+
+    // Set by StationDecorator before each Generate*/Place* pass; every geometry-appending
+    // call below tags the index range it just added with whatever class is current. See
+    // the DecorClass enum doc comment and StationDecorator.DecorCastingPolicy.
+    public DecorClass CurrentDecorClass { get; set; } = DecorClass.Unclassified;
+
+    // Index ranges recorded as geometry was appended, tagged by CurrentDecorClass at the
+    // time. Consumed by the shadow system (SystemSpaceState.Shadows.cs) to compose a
+    // per-module caster mesh from whichever classes are currently casting-enabled — see
+    // BuildIndexRanges. Exposed alongside Build() rather than through its return value:
+    // the ranges are a property of the accumulated mesh itself, not of any one GPU build
+    // (the flat and AO-graded snapshots share identical index structure — AO only
+    // rewrites vertex colour — so threading ranges through every Build() call would just
+    // duplicate the same data under two different dictionary entries for no benefit).
+    public IReadOnlyList<(int indexStart, int indexCount, DecorClass decorClass)> DecorClassRanges
+        => _classRanges;
+
+    // Appends (or extends, if contiguous with the previous entry and same class) a
+    // class-tagged range covering the indices just added. Called once per geometry-adding
+    // method (AddQuad/AddTriangle/gradient variants/MergeTransformed) — sub-shapes built
+    // from those (AddOrientedBox, AddPrismPipe, etc.) tag correctly for free since they're
+    // themselves built from calls to the tagged primitives.
+    private void RecordDecorClassRange(int indexStart, int indexCount)
+    {
+        if (indexCount <= 0) return;
+        if (_classRanges.Count > 0)
+        {
+            var last = _classRanges[^1];
+            if (last.decorClass == CurrentDecorClass && last.indexStart + last.indexCount == indexStart)
+            {
+                _classRanges[^1] = (last.indexStart, last.indexCount + indexCount, last.decorClass);
+                return;
+            }
+        }
+        _classRanges.Add((indexStart, indexCount, CurrentDecorClass));
+    }
 
     // Set after base/seam geometry is added and before raised decoration (greebles, pipes).
     // ApplyAmbientOcclusion only processes faces 0..BaseFaceCount-1.
@@ -71,7 +138,9 @@ public sealed class StationModuleMesh
         _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(v1 - v0, uAxis, vAxis)));
         _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(v2 - v0, uAxis, vAxis)));
         _verts.Add(new VertexPositionNormalColorTexture(v3, normal, color, FaceUV(v3 - v0, uAxis, vAxis)));
+        int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
+        RecordDecorClassRange(idxStart, _idx.Count - idxStart);
         _faces.Add((b, 4));
         return b;
     }
@@ -253,7 +322,9 @@ public sealed class StationModuleMesh
         _verts.Add(new VertexPositionNormalColorTexture(v0, normal, color, Vector2.Zero));
         _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(edge0, uAxis, vAxis)));
         _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(edge1, uAxis, vAxis)));
+        int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1]);
+        RecordDecorClassRange(idxStart, _idx.Count - idxStart);
         _faces.Add((b, 3));
     }
 
@@ -274,7 +345,9 @@ public sealed class StationModuleMesh
         _verts.Add(new VertexPositionNormalColorTexture(v0, normal, c0, Vector2.Zero));
         _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(edge0, uAxis, vAxis)));
         _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(edge1, uAxis, vAxis)));
+        int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1]);
+        RecordDecorClassRange(idxStart, _idx.Count - idxStart);
         _faces.Add((b, 3));
     }
 
@@ -298,7 +371,9 @@ public sealed class StationModuleMesh
         _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(v1 - v0, uAxis, vAxis)));
         _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(v2 - v0, uAxis, vAxis)));
         _verts.Add(new VertexPositionNormalColorTexture(v3, normal, c3, FaceUV(v3 - v0, uAxis, vAxis)));
+        int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
+        RecordDecorClassRange(idxStart, _idx.Count - idxStart);
         _faces.Add((b, 4));
         return b;
     }
@@ -344,6 +419,98 @@ public sealed class StationModuleMesh
         var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, idx.Count, BufferUsage.WriteOnly);
         ib.SetData(idx.ToArray());
         return (vb, ib, idx.Count / 3);
+    }
+
+    // Builds a compact GPU mesh (fresh vertex/index buffers, vertices remapped to a
+    // dense 0-based range) containing exactly the triangles referenced by the given
+    // (indexStart, indexCount) ranges from the accumulated index buffer. Used by the
+    // shadow system to compose a per-module caster mesh from whichever DecorClass ranges
+    // are currently casting-enabled (see DecorClassRanges and
+    // StationDecorator.DecorCastingPolicy) — same remap-and-copy approach as
+    // BuildFaceRange, just keyed by raw index position instead of face index, since a
+    // class's triangles are scattered non-contiguously through the deco mesh.
+    public (VertexBuffer vb, IndexBuffer ib, int triCount)? BuildIndexRanges(
+        GraphicsDevice gd, IReadOnlyList<(int indexStart, int indexCount)> ranges)
+    {
+        if (ranges.Count == 0) return null;
+
+        var verts = new List<VertexPositionNormalColorTexture>();
+        var idx = new List<int>();
+        var remap = new Dictionary<int, int>();
+
+        foreach (var (indexStart, indexCount) in ranges)
+        {
+            int end = Math.Min(_idx.Count, indexStart + indexCount);
+            for (int i = Math.Max(0, indexStart); i < end; i++)
+            {
+                int srcVertex = _idx[i];
+                if (!remap.TryGetValue(srcVertex, out int dstVertex))
+                {
+                    dstVertex = verts.Count;
+                    verts.Add(_verts[srcVertex]);
+                    remap[srcVertex] = dstVertex;
+                }
+                idx.Add(dstVertex);
+            }
+        }
+
+        if (verts.Count == 0 || idx.Count == 0)
+            return null;
+
+        var ivb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
+                                  verts.Count, BufferUsage.WriteOnly);
+        ivb.SetData(verts.ToArray());
+        var iib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, idx.Count, BufferUsage.WriteOnly);
+        iib.SetData(idx.ToArray());
+        return (ivb, iib, idx.Count / 3);
+    }
+
+    // Module-local AABB over a face range — same face-range selection as BuildFaceRange, but
+    // just the vertex bounds, no GPU buffers. Used by the shadow system's light-camera fit
+    // (Phase C) so a MeshFactory hull (e.g. docking-bay) contributes its real geometry extent
+    // instead of the definition's approximate envelope box.
+    public (Vector3 min, Vector3 max)? ComputeFaceRangeBounds(int firstFace, int faceCount)
+    {
+        if (faceCount <= 0 || firstFace < 0 || firstFace >= _faces.Count) return null;
+        int lastFace = Math.Min(_faces.Count, firstFace + faceCount);
+
+        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+        bool any = false;
+        for (int face = firstFace; face < lastFace; face++)
+        {
+            var (vertexBase, count) = _faces[face];
+            for (int i = 0; i < count; i++)
+            {
+                Vector3 p = _verts[vertexBase + i].Position;
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+                any = true;
+            }
+        }
+        return any ? (min, max) : null;
+    }
+
+    // Module-local AABB over a set of (indexStart, indexCount) ranges — same range selection
+    // as BuildIndexRanges, but just the vertex bounds, no GPU buffers. Used by the shadow
+    // system's light-camera fit (Phase C) to include whichever DecorClass ranges are
+    // currently casting-enabled.
+    public (Vector3 min, Vector3 max)? ComputeIndexRangeBounds(
+        IReadOnlyList<(int indexStart, int indexCount)> ranges)
+    {
+        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+        bool any = false;
+        foreach (var (indexStart, indexCount) in ranges)
+        {
+            int end = Math.Min(_idx.Count, indexStart + indexCount);
+            for (int i = Math.Max(0, indexStart); i < end; i++)
+            {
+                Vector3 p = _verts[_idx[i]].Position;
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+                any = true;
+            }
+        }
+        return any ? (min, max) : null;
     }
 
     // Returns (localCenter, width, height) for a face.
@@ -480,6 +647,7 @@ public sealed class StationModuleMesh
         }
 
         int vbOffset = _verts.Count;
+        int idxStart = _idx.Count;
 
         foreach (var v in verts)
         {
@@ -490,6 +658,8 @@ public sealed class StationModuleMesh
 
         for (int i = 0; i < indices.Length; i += 3)
             _idx.AddRange([vbOffset + indices[i], vbOffset + indices[i + 1], vbOffset + indices[i + 2]]);
+
+        RecordDecorClassRange(idxStart, _idx.Count - idxStart);
     }
 
     // Returns raw CPU-side arrays including per-vertex normals — for dynamically lit
