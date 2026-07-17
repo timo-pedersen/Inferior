@@ -378,6 +378,7 @@ public sealed partial class SystemSpaceState : GameState
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
         _thirdPersonMode  = false;
         _tpCamPosValid    = false;
+        InitializeShipPositionMarker();
 
         // Ring primitive reused for both orbit rings and station orbit rings
         _ringPrimitive = new RingPrimitive();
@@ -552,6 +553,7 @@ public sealed partial class SystemSpaceState : GameState
         _meshRenderer = null;
         DisposeStationShadows();
         _shipMeshRenderer?.Dispose();
+        DisposeShipPositionMarker();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
@@ -662,6 +664,8 @@ public sealed partial class SystemSpaceState : GameState
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
         bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
         bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
+        bool f5JustPressed  = keys.IsKeyDown(Keys.F5)  && !_prevKeys.IsKeyDown(Keys.F5);
+        bool shipPositionMarkerToggledOn = false;
 
         if (tabJustPressed)
         {
@@ -693,6 +697,16 @@ public sealed partial class SystemSpaceState : GameState
                 _semanticHullDebug
                     ? "Semantic hull debug: surface roles, axes, bounds."
                     : "Semantic hull debug: normal materials.",
+                SystemMessagePriority.Info));
+        }
+        if (f5JustPressed)
+        {
+            _shipPositionMarkerEnabled = !_shipPositionMarkerEnabled;
+            shipPositionMarkerToggledOn = _shipPositionMarkerEnabled;
+            _hudAlert.AddMessage(new SystemMessage(
+                _shipPositionMarkerEnabled
+                    ? "Ship simulation position marker enabled."
+                    : "Ship simulation position marker disabled.",
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);
@@ -880,6 +894,7 @@ public sealed partial class SystemSpaceState : GameState
 
         // Flat hyperspace update runs every tick regardless of UI mode
         _hyperspace.Update(dt, lookMouse, _camera, _star, _frameShipSnap);
+        UpdateShipPositionMarkerDiagnostics(shipPositionMarkerToggledOn, f3JustPressed);
 
         var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
         _hudAlert.Update(dt);
@@ -1057,6 +1072,7 @@ public sealed partial class SystemSpaceState : GameState
         DrawStations(level);
         DrawContainers(level);
         DrawCalibrationCube(level);
+        DrawShipPositionMarker();
         if (_thirdPersonMode && _frameShipSnap != null)
             _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
                 _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
