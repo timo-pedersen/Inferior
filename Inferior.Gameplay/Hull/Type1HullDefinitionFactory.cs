@@ -182,6 +182,7 @@ public static class Type1HullDefinitionFactory
                 new($"{HullId}.port.engine-root.01", new DVec3(-4.05, -0.05, 2.75), -DVec3.UnitX, AttachmentCapability.Engine)
                 {
                     Up = DVec3.UnitY,
+                    ComponentSlotId = "engine.port.01",
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
                     ClearanceMinMeters = new DVec3(-5.0, -1.7, -1.8),
                     ClearanceMaxMeters = new DVec3(-3.65, 1.7, 7.4),
@@ -189,6 +190,7 @@ public static class Type1HullDefinitionFactory
                 new($"{HullId}.starboard.engine-root.01", new DVec3(4.05, -0.05, 2.75), DVec3.UnitX, AttachmentCapability.Engine)
                 {
                     Up = DVec3.UnitY,
+                    ComponentSlotId = "engine.starboard.01",
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
                     ClearanceMinMeters = new DVec3(3.65, -1.7, -1.8),
                     ClearanceMaxMeters = new DVec3(5.0, 1.7, 7.4),

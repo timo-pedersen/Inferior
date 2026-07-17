@@ -90,6 +90,7 @@ public sealed record AttachmentPortDefinition(
     AttachmentCapability Capabilities)
 {
     public DVec3 Up { get; init; } = DVec3.UnitY;
+    public string? ComponentSlotId { get; init; }
     public DVec3 FootprintMeters { get; init; } = DVec3.Zero;
     public DVec3 ClearanceMinMeters { get; init; } = DVec3.Zero;
     public DVec3 ClearanceMaxMeters { get; init; } = DVec3.Zero;

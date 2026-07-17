@@ -318,6 +318,73 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesEngineMounts_DefineSlotBoundMirrorAttachmentPoses()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var ports = hull.VisualGeometry!.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Engine))
+            .OrderBy(p => p.PortId, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(2, ports.Length);
+        var port = Assert.Single(ports, p => p.PortId == "type-1.port.engine-root.01");
+        var starboard = Assert.Single(ports, p => p.PortId == "type-1.starboard.engine-root.01");
+
+        Assert.Equal("engine.port.01", port.ComponentSlotId);
+        Assert.Equal("engine.starboard.01", starboard.ComponentSlotId);
+        Assert.Equal(-DVec3.UnitX, port.Normal);
+        Assert.Equal(DVec3.UnitX, starboard.Normal);
+        Assert.Equal(DVec3.UnitY, port.Up);
+        Assert.Equal(DVec3.UnitY, starboard.Up);
+        Assert.Equal(new DVec3(2.2, 2.4, 0.0), port.FootprintMeters);
+        Assert.Equal(port.FootprintMeters, starboard.FootprintMeters);
+
+        Assert.Equal(-port.Position.X, starboard.Position.X, 6);
+        Assert.Equal(port.Position.Y, starboard.Position.Y, 6);
+        Assert.Equal(port.Position.Z, starboard.Position.Z, 6);
+        Assert.Equal(-port.ClearanceMaxMeters.X, starboard.ClearanceMinMeters.X, 6);
+        Assert.Equal(-port.ClearanceMinMeters.X, starboard.ClearanceMaxMeters.X, 6);
+        Assert.Equal(port.ClearanceMinMeters.Y, starboard.ClearanceMinMeters.Y, 6);
+        Assert.Equal(port.ClearanceMaxMeters.Y, starboard.ClearanceMaxMeters.Y, 6);
+        Assert.Equal(port.ClearanceMinMeters.Z, starboard.ClearanceMinMeters.Z, 6);
+        Assert.Equal(port.ClearanceMaxMeters.Z, starboard.ClearanceMaxMeters.Z, 6);
+    }
+
+    [Fact]
+    public void AriesEngineMountClearances_RespectShipEnvelopeAndStayClearOfCockpitDoorAndFeet()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var geometry = hull.VisualGeometry!;
+        var cargo = hull.CargoArrangement!;
+        var door = Assert.Single(geometry.Assemblies, a => a.AssemblyId == cargo.CargoDoorAssemblyId);
+        var loadingCorridor = Cuboid.FromCenterAndSize(cargo.DesignVolumeCenterMeters, cargo.DesignVolumeBoundsMeters);
+        var cockpitKeepout = Cuboid.FromCenterAndSize(hull.CockpitPose.Position, new DVec3(2.2, 1.6, 2.0));
+        var landingFeet = geometry.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            .Select(p => p.Position)
+            .ToArray();
+        var enginePorts = geometry.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Engine))
+            .ToArray();
+
+        foreach (var enginePort in enginePorts)
+        {
+            var clearance = new Cuboid(enginePort.ClearanceMinMeters, enginePort.ClearanceMaxMeters);
+
+            Assert.InRange(clearance.Min.X, -hull.Dimensions!.WidthMeters / 2.0, hull.Dimensions.WidthMeters / 2.0);
+            Assert.InRange(clearance.Max.X, -hull.Dimensions.WidthMeters / 2.0, hull.Dimensions.WidthMeters / 2.0);
+            Assert.True(clearance.Max.Z > clearance.Min.Z);
+            Assert.True(clearance.Max.Z - clearance.Min.Z >= 8.0);
+            Assert.False(clearance.OverlapsWithPositiveVolume(loadingCorridor));
+            Assert.False(clearance.OverlapsWithPositiveVolume(cockpitKeepout));
+            Assert.All(landingFeet, foot => Assert.False(clearance.Contains(foot)));
+
+            foreach (var doorBounds in door.MovementClearanceVolumes)
+                Assert.False(clearance.OverlapsWithPositiveVolume(new Cuboid(doorBounds.Min, doorBounds.Max)));
+        }
+    }
+
+    [Fact]
     public void AriesStructuralShell_IsCompleteReadableClosedSemanticBoundary()
     {
         var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
