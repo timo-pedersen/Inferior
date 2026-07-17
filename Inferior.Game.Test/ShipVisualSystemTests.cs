@@ -275,26 +275,77 @@ public sealed class ShipVisualSystemTests
         var cargo = hull.CargoArrangement!;
         var feet = hull.VisualGeometry!.AttachmentPorts
             .Where(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            .OrderBy(p => p.PortId, StringComparer.Ordinal)
             .ToArray();
 
         Assert.Equal(3, feet.Length);
+        Assert.Equal(
+            ["type-1.underside.landing-foot.01", "type-1.underside.landing-foot.02", "type-1.underside.landing-foot.03"],
+            feet.Select(p => p.PortId).ToArray());
 
-        var forwardFeet = feet
-            .Where(p => p.PortId.Contains("forward-landing-foot", StringComparison.Ordinal))
-            .OrderBy(p => p.Position.X)
-            .ToArray();
+        var portForward = feet[0];
+        var starboardForward = feet[1];
+        var rearFoot = feet[2];
 
-        Assert.Equal(2, forwardFeet.Length);
-        Assert.All(forwardFeet, p => Assert.True(p.Position.Z < 0.0));
-        Assert.Equal(forwardFeet[0].Position.Z, forwardFeet[1].Position.Z, 6);
-        Assert.Equal(forwardFeet[0].Position.Y, forwardFeet[1].Position.Y, 6);
-        Assert.Equal(-forwardFeet[0].Position.X, forwardFeet[1].Position.X, 6);
-
-        var rearFoot = Assert.Single(feet, p => p.PortId == "type-1.rear.landing-foot.01");
+        Assert.True(portForward.Position.X < 0.0);
+        Assert.True(starboardForward.Position.X > 0.0);
+        Assert.True(portForward.Position.Z < 0.0);
+        Assert.True(starboardForward.Position.Z < 0.0);
+        Assert.Equal(portForward.Position.Z, starboardForward.Position.Z, 6);
+        Assert.Equal(portForward.Position.Y, starboardForward.Position.Y, 6);
+        Assert.Equal(-portForward.Position.X, starboardForward.Position.X, 6);
         double cargoRearEdge = cargo.DesignVolumeCenterMeters.Z + cargo.DesignVolumeBoundsMeters.Z / 2.0;
         Assert.True(rearFoot.Position.Z > 0.0);
         Assert.True(rearFoot.Position.Z < cargoRearEdge);
         Assert.Equal(0.0, rearFoot.Position.X, 6);
+
+        Assert.All(feet, foot =>
+        {
+            Assert.Equal(-DVec3.UnitY, foot.Normal);
+            Assert.True(foot.FootprintMeters.X > 0.0);
+            Assert.True(foot.FootprintMeters.Y > 0.0);
+            Assert.True(foot.ClearanceMaxMeters.X > foot.ClearanceMinMeters.X);
+            Assert.True(foot.ClearanceMaxMeters.Y > foot.ClearanceMinMeters.Y);
+            Assert.True(foot.ClearanceMaxMeters.Z > foot.ClearanceMinMeters.Z);
+        });
+    }
+
+    [Fact]
+    public void AriesLandingFeet_FormSupportTriangleAroundHullMassAndClearCargoDoor()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var geometry = hull.VisualGeometry!;
+        var cargo = hull.CargoArrangement!;
+        var door = Assert.Single(geometry.Assemblies, a => a.AssemblyId == cargo.CargoDoorAssemblyId);
+        var feet = geometry.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            .OrderBy(p => p.PortId, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(3, feet.Select(p => p.PortId).Distinct(StringComparer.Ordinal).Count());
+
+        DVec3 a = feet[0].Position;
+        DVec3 b = feet[1].Position;
+        DVec3 c = feet[2].Position;
+        double supportArea2 = Math.Abs(SignedTriangleArea2XZ(a, b, c));
+        Assert.True(supportArea2 > 1.0);
+
+        var hullMassProjection = DVec3.Zero;
+        Assert.True(PointInTriangleXZ(hullMassProjection, a, b, c));
+
+        foreach (var foot in feet)
+        {
+            var footClearance = new Cuboid(foot.ClearanceMinMeters, foot.ClearanceMaxMeters);
+            Assert.True(footClearance.Contains(foot.Position));
+
+            foreach (var doorBounds in door.MovementClearanceVolumes)
+            {
+                var doorClearance = new Cuboid(doorBounds.Min, doorBounds.Max);
+
+                Assert.False(doorClearance.Contains(foot.Position));
+                Assert.False(doorClearance.OverlapsWithPositiveVolume(footClearance));
+            }
+        }
     }
 
     [Fact]
@@ -603,6 +654,21 @@ public sealed class ShipVisualSystemTests
                 new(faceId, ["sample.v.01", "sample.v.02", "sample.v.03"], role, "structural", outwardNormal ?? DVec3.UnitZ, panelSlotId),
             ],
         };
+
+    private static double SignedTriangleArea2XZ(DVec3 a, DVec3 b, DVec3 c)
+        => (b.X - a.X) * (c.Z - a.Z) - (b.Z - a.Z) * (c.X - a.X);
+
+    private static bool PointInTriangleXZ(DVec3 point, DVec3 a, DVec3 b, DVec3 c)
+    {
+        double area = SignedTriangleArea2XZ(a, b, c);
+        double invArea = 1.0 / area;
+        double u = SignedTriangleArea2XZ(point, b, c) * invArea;
+        double v = SignedTriangleArea2XZ(point, c, a) * invArea;
+        double w = SignedTriangleArea2XZ(point, a, b) * invArea;
+        const double tolerance = 1e-9;
+
+        return u >= -tolerance && v >= -tolerance && w >= -tolerance;
+    }
 
     private static IEnumerable<string> EnumerateAriesSemanticIds(HullDefinition hull)
     {

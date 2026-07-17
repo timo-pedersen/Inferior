@@ -195,9 +195,24 @@ public static class Type1HullDefinitionFactory
                     ClearanceMinMeters = new DVec3(3.65, -1.7, -1.8),
                     ClearanceMaxMeters = new DVec3(5.0, 1.7, 7.4),
                 },
-                new($"{HullId}.port.forward-landing-foot.01", new DVec3(-1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear),
-                new($"{HullId}.starboard.forward-landing-foot.01", new DVec3(1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear),
-                new($"{HullId}.rear.landing-foot.01", new DVec3(0.0, -2.55, 6.25), -DVec3.UnitY, AttachmentCapability.LandingGear),
+                new($"{HullId}.underside.landing-foot.01", new DVec3(-1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear)
+                {
+                    FootprintMeters = new DVec3(0.75, 0.55, 0.0),
+                    ClearanceMinMeters = new DVec3(-2.35, -2.85, -6.55),
+                    ClearanceMaxMeters = new DVec3(-1.35, -2.35, -5.75),
+                },
+                new($"{HullId}.underside.landing-foot.02", new DVec3(1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear)
+                {
+                    FootprintMeters = new DVec3(0.75, 0.55, 0.0),
+                    ClearanceMinMeters = new DVec3(1.35, -2.85, -6.55),
+                    ClearanceMaxMeters = new DVec3(2.35, -2.35, -5.75),
+                },
+                new($"{HullId}.underside.landing-foot.03", new DVec3(0.0, -2.55, 6.25), -DVec3.UnitY, AttachmentCapability.LandingGear)
+                {
+                    FootprintMeters = new DVec3(0.9, 0.65, 0.0),
+                    ClearanceMinMeters = new DVec3(-0.55, -2.85, 5.85),
+                    ClearanceMaxMeters = new DVec3(0.55, -2.35, 6.65),
+                },
                 new($"{HullId}.top.service-sensor.01", new DVec3(-1.8, 2.2, -1.8), DVec3.UnitY, AttachmentCapability.Sensor | AttachmentCapability.Utility),
             ],
             MarkerLights =
