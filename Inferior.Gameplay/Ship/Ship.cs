@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Hull;
 
 namespace Inferior.Gameplay.Ship;
 
@@ -62,6 +63,9 @@ public sealed class Ship
     // ── Cockpit ───────────────────────────────────────────────────────────────
     /// <summary>Offset from centre of mass in ship-local space. Camera eye point.</summary>
     public DVec3 CockpitOffset { get; init; } = DVec3.Zero;
+
+    /// <summary>Full hull-local cockpit camera pose authored by the hull definition.</summary>
+    public CockpitPoseDefinition CockpitPose { get; init; } = new(DVec3.Zero, Quaternion.Identity);
 
     /// <summary>World-space cockpit position. The camera follows this, not Position.</summary>
     public DVec3 CockpitWorldPosition

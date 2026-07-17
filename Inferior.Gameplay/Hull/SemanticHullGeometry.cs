@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Microsoft.Xna.Framework;
 
 namespace Inferior.Gameplay.Hull;
 
@@ -19,6 +20,10 @@ public sealed record HullDimensions(
     double HeightMeters,
     double StructuralHullWidthMeters,
     double StructuralHullHeightMeters);
+
+public sealed record CockpitPoseDefinition(
+    DVec3 Position,
+    Quaternion Orientation);
 
 public sealed record CargoArrangementDefinition(
     int ContainerCapacity,

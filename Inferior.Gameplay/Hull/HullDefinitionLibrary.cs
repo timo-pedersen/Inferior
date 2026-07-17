@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Gameplay.Ship;
+using Microsoft.Xna.Framework;
 
 namespace Inferior.Gameplay.Hull;
 
@@ -46,6 +47,7 @@ public static class HullDefinitionLibrary
         SizeClass    = ShipSizeClass.Small,
         HullMass     = 25_000.0,
         CockpitOffset = new DVec3(0, 3, -12),
+        CockpitPose = new CockpitPoseDefinition(new DVec3(0, 3, -12), Quaternion.Identity),
 
         AerodynamicLift         = 0.8,
         AerodynamicBrakeFront   = 0.75,
@@ -77,6 +79,7 @@ public static class HullDefinitionLibrary
         SizeClass    = ShipSizeClass.Medium,
         HullMass     = 80_000.0,
         CockpitOffset = new DVec3(0, 4, -18),
+        CockpitPose = new CockpitPoseDefinition(new DVec3(0, 4, -18), Quaternion.Identity),
 
         AerodynamicLift         = 1.4,
         AerodynamicBrakeFront   = 1.10,

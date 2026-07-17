@@ -29,6 +29,9 @@ public sealed class HullDefinition
     /// </summary>
     public required DVec3 CockpitOffset { get; init; }
 
+    /// <summary>Full hull-local cockpit camera pose, including its authored view orientation.</summary>
+    public required CockpitPoseDefinition CockpitPose { get; init; }
+
     /// <summary>All component slots available on this hull.</summary>
     public required IReadOnlyList<HullSlot> Slots { get; init; }
 

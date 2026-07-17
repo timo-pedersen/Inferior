@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Gameplay.Ship;
+using Microsoft.Xna.Framework;
 
 namespace Inferior.Gameplay.Hull;
 
@@ -7,6 +8,11 @@ public static class Type1HullDefinitionFactory
 {
     private const string HullId = "type-1";
     private const string CargoDoorId = $"{HullId}.rear.cargo-door.01";
+    private static readonly DVec3 CockpitPosition = new(-1.25, 1.55, -5.9);
+    private static readonly Quaternion CockpitOrientation = Quaternion.CreateFromYawPitchRoll(
+        MathHelper.ToRadians(-3.0f),
+        0.0f,
+        0.0f);
 
     public static HullDefinition Create() => new()
     {
@@ -14,7 +20,8 @@ public static class Type1HullDefinitionFactory
         DisplayName  = "Aries",
         SizeClass    = ShipSizeClass.Small,
         HullMass     = 72_000.0,
-        CockpitOffset = new DVec3(1.25, 1.85, -5.75),
+        CockpitOffset = CockpitPosition,
+        CockpitPose = new CockpitPoseDefinition(CockpitPosition, CockpitOrientation),
 
         Dimensions = new HullDimensions(
             LengthMeters: 16.0,
@@ -79,13 +86,13 @@ public static class Type1HullDefinitionFactory
         var faceSpecs = new (string id, int section, int edge, HullSurfaceRole role, string material, string? assembly)[]
         {
             ($"{HullId}.top.cockpit-glass.01", 0, 0, HullSurfaceRole.CockpitGlass, "cockpit-glass", null),
-            ($"{HullId}.starboard.cockpit-frame.01", 0, 1, HullSurfaceRole.CockpitFrame, "cockpit-frame", null),
+            ($"{HullId}.starboard.head-armour.01", 0, 1, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.engine-mount.01", 0, 2, HullSurfaceRole.EngineMount, "structural-hull", null),
             ($"{HullId}.starboard.service.01", 0, 3, HullSurfaceRole.ServiceSurface, "structural-hull", null),
             ($"{HullId}.underside.head.01", 0, 4, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.port.service.01", 0, 5, HullSurfaceRole.ServiceSurface, "structural-hull", null),
             ($"{HullId}.port.engine-mount.01", 0, 6, HullSurfaceRole.EngineMount, "structural-hull", null),
-            ($"{HullId}.top.head-armour.01", 0, 7, HullSurfaceRole.PanelSeat, "panel-exterior", null),
+            ($"{HullId}.port.cockpit-frame.01", 0, 7, HullSurfaceRole.CockpitFrame, "cockpit-frame", null),
 
             ($"{HullId}.top.cargo.01", 1, 0, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.cargo-shoulder.01", 1, 1, HullSurfaceRole.PanelSeat, "panel-exterior", null),

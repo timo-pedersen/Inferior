@@ -32,6 +32,7 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(hull.SizeClass, ship.SizeClass);
         Assert.Equal(hull.HullMass, ship.HullMass);
         Assert.Equal(hull.CockpitOffset, ship.CockpitOffset);
+        Assert.Equal(hull.CockpitPose, ship.CockpitPose);
         Assert.Equal(hull.AerodynamicLift, ship.AerodynamicLift);
         Assert.Equal(hull.AerodynamicBrakeFront, ship.AerodynamicBrakeFront);
         Assert.Equal(hull.AerodynamicBrakeLateral, ship.AerodynamicBrakeLateral);
@@ -48,6 +49,8 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(ShipSizeClass.Small, hull.SizeClass);
         Assert.Equal("Utility", hull.PrimaryDesignBias);
         Assert.Equal("Light freight", hull.SecondaryDesignBias);
+        Assert.Equal(new DVec3(-1.25, 1.55, -5.9), hull.CockpitOffset);
+        Assert.Equal(hull.CockpitOffset, hull.CockpitPose.Position);
         Assert.Equal(16.0, hull.Dimensions!.LengthMeters);
         Assert.Equal(10.0, hull.Dimensions.WidthMeters);
         Assert.Equal(5.0, hull.Dimensions.HeightMeters);
@@ -58,6 +61,24 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(new DVec3(5.0, 2.5, 6.0), hull.CargoArrangement.StackBoundsMeters);
         Assert.Equal(new DVec3(6.0, 3.2, 7.2), hull.CargoArrangement.DesignVolumeBoundsMeters);
         Assert.Equal("type-1.rear.cargo-door.01", hull.CargoArrangement.CargoDoorAssemblyId);
+    }
+
+    [Fact]
+    public void AriesCockpitPose_IsPortOffsetRaisedAndYawedInward()
+    {
+        var pose = HullDefinitionLibrary.Get("type-1").CockpitPose;
+
+        Assert.InRange(pose.Position.X, -1.5, -1.0);
+        Assert.InRange(pose.Position.Y, 1.2, 1.7);
+        Assert.InRange(pose.Position.Z, -6.5, -5.5);
+
+        var forward = Vector3.Normalize(Vector3.Transform(Vector3.Forward, pose.Orientation));
+        var up = Vector3.Normalize(Vector3.Transform(Vector3.Up, pose.Orientation));
+        double inwardYawDegrees = Math.Atan2(forward.X, -forward.Z) * 180.0 / Math.PI;
+
+        Assert.InRange(inwardYawDegrees, 2.0, 4.0);
+        Assert.InRange(Math.Abs(forward.Y), 0.0, 0.0001);
+        Assert.InRange(Vector3.Dot(up, Vector3.Up), 0.9999f, 1.0f);
     }
 
     [Fact]
@@ -86,8 +107,8 @@ public sealed class ShipVisualSystemTests
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.PanelSeat) >= 6);
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.EngineMount) >= 4);
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ServiceSurface) >= 4);
-        Assert.Contains(geometry.Faces, f => f.Role == HullSurfaceRole.CockpitGlass);
-        Assert.Contains(geometry.Faces, f => f.Role == HullSurfaceRole.CockpitFrame);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.top.cockpit-glass.01" && f.Role == HullSurfaceRole.CockpitGlass);
+        Assert.Contains(geometry.Faces, f => f.Id == "type-1.port.cockpit-frame.01" && f.Role == HullSurfaceRole.CockpitFrame);
         Assert.Equal(4, geometry.MarkerLights.Count);
         Assert.Equal(2, geometry.BeamLights.Count);
     }

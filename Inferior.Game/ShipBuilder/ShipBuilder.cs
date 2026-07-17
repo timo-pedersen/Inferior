@@ -72,6 +72,7 @@ public sealed class ShipBuilder
             MoveSpeedMs = 5e9,                    // same default SpawnShip used
             HullMass    = hull.HullMass,
             CockpitOffset = hull.CockpitOffset,
+            CockpitPose = hull.CockpitPose,
             AerodynamicLift = hull.AerodynamicLift,
             AerodynamicBrakeFront = hull.AerodynamicBrakeFront,
             AerodynamicBrakeLateral = hull.AerodynamicBrakeLateral,
