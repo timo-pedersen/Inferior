@@ -8,6 +8,8 @@ public static class Type1HullDefinitionFactory
 {
     private const string HullId = "type-1";
     private const string CargoDoorId = $"{HullId}.rear.cargo-door.01";
+    private const string CargoDoorPortPanelSeatId = $"{HullId}.rear.cargo-door.port.01";
+    private const string CargoDoorStarboardPanelSeatId = $"{HullId}.rear.cargo-door.starboard.01";
     private static readonly DVec3 CockpitPosition = new(-1.25, 1.55, -5.9);
     private static readonly Quaternion CockpitOrientation = Quaternion.CreateFromYawPitchRoll(
         MathHelper.ToRadians(-3.0f),
@@ -130,7 +132,23 @@ public static class Type1HullDefinitionFactory
             Faces = faces,
             Assemblies =
             [
-                new(CargoDoorId, "CargoDoor", CargoDoorId),
+                new(CargoDoorId, "CargoDoor", CargoDoorId)
+                {
+                    ClosedPose = "Closed",
+                    OpeningPolygonVertexIds = Enumerable.Range(0, 8).Select(i => VertexId("cargo-rear", i)).ToArray(),
+                    MovementConcept = "Two sliding leaves",
+                    MovementAxes = [-DVec3.UnitX, DVec3.UnitX],
+                    MovementClearanceVolumes =
+                    [
+                        new(new DVec3(-5.8, -1.8, 7.65), new DVec3(-3.1, 1.8, 8.6)),
+                        new(new DVec3(3.1, -1.8, 7.65), new DVec3(5.8, 1.8, 8.6)),
+                    ],
+                    ArmourPanelSeats =
+                    [
+                        new(CargoDoorPortPanelSeatId, "port container lane", new DVec3(-1.5, 0.0, 8.05), new DVec3(2.8, 3.0, 0.08), DVec3.UnitZ),
+                        new(CargoDoorStarboardPanelSeatId, "starboard container lane", new DVec3(1.5, 0.0, 8.05), new DVec3(2.8, 3.0, 0.08), DVec3.UnitZ),
+                    ],
+                },
             ],
             AttachmentPorts =
             [

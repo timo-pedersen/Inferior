@@ -35,10 +35,27 @@ public sealed record CargoArrangementDefinition(
     DVec3 RearOpeningBoundsMeters,
     DVec3 TransferAxis);
 
+public sealed record SemanticBounds(DVec3 Min, DVec3 Max);
+
+public sealed record AssemblyArmourPanelSeatDefinition(
+    string SeatId,
+    string ProtectedLane,
+    DVec3 CenterMeters,
+    DVec3 BoundsMeters,
+    DVec3 Normal);
+
 public sealed record SemanticAssemblyDefinition(
     string AssemblyId,
     string Kind,
-    string FaceId);
+    string FaceId)
+{
+    public string ClosedPose { get; init; } = "";
+    public IReadOnlyList<string> OpeningPolygonVertexIds { get; init; } = [];
+    public string MovementConcept { get; init; } = "";
+    public IReadOnlyList<DVec3> MovementAxes { get; init; } = [];
+    public IReadOnlyList<SemanticBounds> MovementClearanceVolumes { get; init; } = [];
+    public IReadOnlyList<AssemblyArmourPanelSeatDefinition> ArmourPanelSeats { get; init; } = [];
+}
 
 public sealed record HullLightDefinition(
     string LightId,
@@ -168,6 +185,8 @@ public sealed class SemanticHullGeometry
         {
             if (!faceIds.Contains(assembly.FaceId))
                 errors.Add($"Semantic assembly '{assembly.AssemblyId}' references unknown face '{assembly.FaceId}'.");
+
+            ValidateAssemblyMetadata(assembly, verticesById, errors);
         }
 
         var portIds = new HashSet<string>(StringComparer.Ordinal);
@@ -281,6 +300,66 @@ public sealed class SemanticHullGeometry
                 errors.Add($"Closed semantic hull edge '{edge.a}'-'{edge.b}' is used {count} time(s), expected 2.");
             else if (!directedEdges.Contains((edge.a, edge.b)) || !directedEdges.Contains((edge.b, edge.a)))
                 errors.Add($"Closed semantic hull edge '{edge.a}'-'{edge.b}' does not have opposing face winding.");
+        }
+    }
+
+    private static void ValidateAssemblyMetadata(
+        SemanticAssemblyDefinition assembly,
+        IReadOnlyDictionary<string, DVec3> verticesById,
+        List<string> errors)
+    {
+        if (assembly.OpeningPolygonVertexIds.Count > 0)
+        {
+            if (assembly.OpeningPolygonVertexIds.Count < 3)
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' has an opening polygon with fewer than three vertices.");
+
+            var openingVertexIds = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string vertexId in assembly.OpeningPolygonVertexIds)
+            {
+                if (!openingVertexIds.Add(vertexId))
+                    errors.Add($"Semantic assembly '{assembly.AssemblyId}' repeats opening polygon vertex '{vertexId}'.");
+
+                if (!verticesById.ContainsKey(vertexId))
+                    errors.Add($"Semantic assembly '{assembly.AssemblyId}' references unknown opening polygon vertex '{vertexId}'.");
+            }
+        }
+
+        foreach (var axis in assembly.MovementAxes)
+        {
+            if (!IsFinite(axis) || axis.LengthSquared <= 1e-12)
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' has invalid movement axis {axis}.");
+        }
+
+        foreach (var bounds in assembly.MovementClearanceVolumes)
+        {
+            if (!IsFinite(bounds.Min) || !IsFinite(bounds.Max) ||
+                bounds.Max.X <= bounds.Min.X ||
+                bounds.Max.Y <= bounds.Min.Y ||
+                bounds.Max.Z <= bounds.Min.Z)
+            {
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' has invalid movement clearance volume.");
+            }
+        }
+
+        var seatIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var seat in assembly.ArmourPanelSeats)
+        {
+            if (string.IsNullOrWhiteSpace(seat.SeatId))
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' has an armour panel seat with an empty id.");
+            else if (!seatIds.Add(seat.SeatId))
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' has duplicate armour panel seat id '{seat.SeatId}'.");
+
+            if (string.IsNullOrWhiteSpace(seat.ProtectedLane))
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' armour panel seat '{seat.SeatId}' has no protected lane.");
+
+            if (!IsFinite(seat.CenterMeters) || !IsFinite(seat.BoundsMeters) || !IsFinite(seat.Normal) ||
+                seat.BoundsMeters.X <= 0 ||
+                seat.BoundsMeters.Y <= 0 ||
+                seat.BoundsMeters.Z <= 0 ||
+                seat.Normal.LengthSquared <= 1e-12)
+            {
+                errors.Add($"Semantic assembly '{assembly.AssemblyId}' armour panel seat '{seat.SeatId}' has invalid pose or bounds.");
+            }
         }
     }
 

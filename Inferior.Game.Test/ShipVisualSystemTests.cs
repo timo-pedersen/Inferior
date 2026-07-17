@@ -141,6 +141,68 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesCargoDoorAssembly_DefinesClosedSlidingDoorAndArmourPanelSeats()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var cargo = hull.CargoArrangement!;
+        var geometry = hull.VisualGeometry!;
+        var door = Assert.Single(geometry.Assemblies, a => a.AssemblyId == cargo.CargoDoorAssemblyId);
+
+        Assert.Equal("CargoDoor", door.Kind);
+        Assert.Equal("type-1.rear.cargo-door.01", door.FaceId);
+        Assert.Equal("Closed", door.ClosedPose);
+        Assert.Equal("Two sliding leaves", door.MovementConcept);
+        Assert.Equal([-DVec3.UnitX, DVec3.UnitX], door.MovementAxes);
+        Assert.Equal(8, door.OpeningPolygonVertexIds.Count);
+        Assert.Equal(2, door.MovementClearanceVolumes.Count);
+
+        var portSeat = Assert.Single(door.ArmourPanelSeats, s => s.SeatId == "type-1.rear.cargo-door.port.01");
+        var starboardSeat = Assert.Single(door.ArmourPanelSeats, s => s.SeatId == "type-1.rear.cargo-door.starboard.01");
+
+        Assert.Equal("port container lane", portSeat.ProtectedLane);
+        Assert.Equal("starboard container lane", starboardSeat.ProtectedLane);
+        Assert.True(portSeat.CenterMeters.X < 0.0);
+        Assert.True(starboardSeat.CenterMeters.X > 0.0);
+        Assert.Equal(DVec3.UnitZ, portSeat.Normal);
+        Assert.Equal(DVec3.UnitZ, starboardSeat.Normal);
+    }
+
+    [Fact]
+    public void AriesCargoDoorMovementClearance_DoesNotBlockEnginesLandingFeetOrLoadingPath()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var cargo = hull.CargoArrangement!;
+        var geometry = hull.VisualGeometry!;
+        var door = Assert.Single(geometry.Assemblies, a => a.AssemblyId == cargo.CargoDoorAssemblyId);
+        var loadingPath = new Cuboid(
+            new DVec3(
+                cargo.DesignVolumeCenterMeters.X - cargo.DesignVolumeBoundsMeters.X / 2.0,
+                cargo.DesignVolumeCenterMeters.Y - cargo.DesignVolumeBoundsMeters.Y / 2.0,
+                cargo.DesignVolumeCenterMeters.Z - cargo.DesignVolumeBoundsMeters.Z / 2.0),
+            new DVec3(
+                cargo.DesignVolumeCenterMeters.X + cargo.DesignVolumeBoundsMeters.X / 2.0,
+                cargo.DesignVolumeCenterMeters.Y + cargo.DesignVolumeBoundsMeters.Y / 2.0,
+                8.6));
+        var engineClearances = geometry.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Engine))
+            .Select(p => new Cuboid(p.ClearanceMinMeters, p.ClearanceMaxMeters))
+            .ToArray();
+        var landingFeet = geometry.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear))
+            .Select(p => p.Position)
+            .ToArray();
+
+        foreach (var bounds in door.MovementClearanceVolumes)
+        {
+            var doorClearance = new Cuboid(bounds.Min, bounds.Max);
+
+            Assert.False(doorClearance.OverlapsWithPositiveVolume(loadingPath));
+            Assert.All(engineClearances, engineClearance => Assert.False(doorClearance.OverlapsWithPositiveVolume(engineClearance)));
+            Assert.All(landingFeet, landingFoot => Assert.False(doorClearance.Contains(landingFoot)));
+        }
+    }
+
+    [Fact]
     public void AriesLandingFeet_MatchForwardPairAndRearFootLayout()
     {
         var hull = HullDefinitionLibrary.Get("type-1");
@@ -447,6 +509,11 @@ public sealed class ShipVisualSystemTests
             => other.Min.X >= Min.X && other.Max.X <= Max.X
             && other.Min.Y >= Min.Y && other.Max.Y <= Max.Y
             && other.Min.Z >= Min.Z && other.Max.Z <= Max.Z;
+
+        public bool Contains(DVec3 point)
+            => point.X >= Min.X && point.X <= Max.X
+            && point.Y >= Min.Y && point.Y <= Max.Y
+            && point.Z >= Min.Z && point.Z <= Max.Z;
 
         public bool OverlapsWithPositiveVolume(Cuboid other)
             => Min.X < other.Max.X && Max.X > other.Min.X
