@@ -25,7 +25,7 @@ public static class FlightConstants
 
     public static int NewtonianGearCount => NewtonianGearSpeeds.Length;
 
-    // Gear 1 (index 0) uses a reduced acceleration instead of Ship.FlightAcceleration —
+    // Gear 1 (index 0) uses a reduced acceleration instead of the current engine acceleration —
     // makes close-quarters maneuvering (docking, flying around debris) controllable.
     // All other gears use the ship's normal acceleration, unchanged.
     public const double Gear1AccelerationMs2 = 4.0;
@@ -107,8 +107,7 @@ public static class FlightConstants
     // ── AFTERBURNER (SYSTEM NEWTONIAN) ────────────────────────────────────
     public const double AfterburnerDurationSeconds = 2.0;
 
-    // Constant forward accel while active = current full-throttle accel (Gear1AccelerationMs2
-    // or ship.FlightAcceleration, whichever TickNewtonianPhysics is currently using) × this.
+    // Constant forward accel while active = current full-throttle accel × this.
     public const double AfterburnerAccelMultiplier = 5.0;
 
     // Random pitch/yaw jitter added on top of mouse-look each tick while active (radians).

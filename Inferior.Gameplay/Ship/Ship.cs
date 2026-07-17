@@ -102,9 +102,6 @@ public sealed class Ship
     // Number of engine nodes — governs gear table depth and Slipstream harmonic count.
     public int NodeCount { get; init; } = FlightConstants.DefaultNodeCount;
 
-    // Forward acceleration in m/s² (derived from thrust and mass).
-    public double FlightAcceleration => MaxForwardThrustN / Mass;
-
     // Newtonian gear speed ceilings — bottom NodeCount entries from the global table.
     public double[] NewtonianGears =>
         FlightConstants.NewtonianGearSpeeds.Take(NodeCount).ToArray();
@@ -131,16 +128,6 @@ public sealed class Ship
 
     // ── Atmosphere / aerodynamics ──────────────────────────────────────────────
     // Aerodynamics are set from HullDefinition at ship construction.
-
-    /// <summary>
-    /// Legacy default downward (gravity-opposing) engine thrust in newtons.
-    /// Engine performance belongs to installed engines; this remains only until
-    /// ship-level engine aggregation is wired into flight physics.
-    /// </summary>
-    public double MaxDownThrustN          { get; init; } = 300_000.0;
-
-    /// <summary>Maximum forward thrust ≈ 3× down thrust (engines more efficient forward).</summary>
-    public double MaxForwardThrustN       => MaxDownThrustN * 3.0;
 
     public double AerodynamicLift         { get; init; } = 0.0;
     public double AerodynamicBrakeFront   { get; init; } = 0.0;

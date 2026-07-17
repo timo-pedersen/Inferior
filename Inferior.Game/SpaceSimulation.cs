@@ -20,6 +20,9 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
+    private const double LegacyEngineDownThrustN = 300_000.0;
+    private const double LegacyEngineForwardThrustN = LegacyEngineDownThrustN * 3.0;
+
     public sealed record StationProximityTickDiagnostic(
         long TickSequence,
         double EnvironmentSimTime,
@@ -619,7 +622,7 @@ public sealed class SpaceSimulation : Simulation
         double reverseCeiling = gearCeiling * FlightConstants.ReverseSpeedRatio;
         double accel          = _newtonianGear == 0
             ? FlightConstants.Gear1AccelerationMs2
-            : ship.FlightAcceleration;
+            : LegacyEngineForwardThrustN / ship.Mass;
 
         DVec3  refVel = GetRefVelocity();
         string refId  = GetRefSourceId();
@@ -843,13 +846,13 @@ public sealed class SpaceSimulation : Simulation
                     totalForce += ship.Up * (ship.AerodynamicLift * density * vFwd * System.Math.Abs(vFwd));
             }
 
-            totalForce += ship.Forward * (input.ThrustForward  * ship.MaxForwardThrustN);
-            totalForce += ship.Right   * (input.ThrustLateral   * ship.MaxDownThrustN * 0.5);
-            totalForce += ship.Up      * (input.ThrustVertical   * ship.MaxDownThrustN);
+            totalForce += ship.Forward * (input.ThrustForward  * LegacyEngineForwardThrustN);
+            totalForce += ship.Right   * (input.ThrustLateral   * LegacyEngineDownThrustN * 0.5);
+            totalForce += ship.Up      * (input.ThrustVertical   * LegacyEngineDownThrustN);
 
             if (_flightAssistEnabled && density >= AtmoSlipstreamMinDensity)
             {
-                double faN = System.Math.Min(ship.MaxDownThrustN, gMag * ship.Mass);
+                double faN = System.Math.Min(LegacyEngineDownThrustN, gMag * ship.Mass);
                 totalForce += ship.Up * faN;
             }
         }

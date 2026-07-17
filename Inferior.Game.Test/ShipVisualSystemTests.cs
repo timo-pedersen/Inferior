@@ -36,7 +36,6 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(hull.AerodynamicLift, ship.AerodynamicLift);
         Assert.Equal(hull.AerodynamicBrakeFront, ship.AerodynamicBrakeFront);
         Assert.Equal(hull.AerodynamicBrakeLateral, ship.AerodynamicBrakeLateral);
-        Assert.Equal(300_000.0, ship.MaxDownThrustN);
     }
 
     [Fact]
@@ -90,11 +89,29 @@ public sealed class ShipVisualSystemTests
         Assert.NotNull(geometry);
         Assert.Empty(geometry.Validate());
         Assert.True(geometry.RequireClosedHull);
-        Assert.Contains(hull.Slots, s => s.SlotId == "engine.port.01" && s.Category == SlotCategory.Engine);
-        Assert.Contains(hull.Slots, s => s.SlotId == "engine.starboard.01" && s.Category == SlotCategory.Engine);
+        Assert.Contains(hull.Slots, s => s.SlotId == "engine.port.01" && s.Category == SlotCategory.Engine && s.Required);
+        Assert.Contains(hull.Slots, s => s.SlotId == "engine.starboard.01" && s.Category == SlotCategory.Engine && s.Required);
         Assert.DoesNotContain(hull.Slots, s => s.SlotId == "engine_main");
         Assert.Equal(2, geometry.AttachmentPorts.Count(p => p.Capabilities.HasFlag(AttachmentCapability.Engine)));
         Assert.Equal(3, geometry.AttachmentPorts.Count(p => p.Capabilities.HasFlag(AttachmentCapability.LandingGear)));
+    }
+
+    [Fact]
+    public void AriesEngineSlots_AreIndependentRequiredPhysicalEnginesWithoutHullOwnedThrust()
+    {
+        var hull = HullDefinitionLibrary.Get("type-1");
+        var engineSlots = hull.Slots.Where(s => s.Category == SlotCategory.Engine).ToArray();
+
+        Assert.Equal(2, engineSlots.Length);
+        Assert.Equal(
+            ["engine.port.01", "engine.starboard.01"],
+            engineSlots.Select(s => s.SlotId).Order(StringComparer.Ordinal).ToArray());
+        Assert.All(engineSlots, slot => Assert.True(slot.Required));
+        Assert.DoesNotContain(engineSlots, slot => slot.SlotId == "engine_main");
+
+        Assert.Null(typeof(Ship).GetProperty("MaxDownThrustN"));
+        Assert.Null(typeof(Ship).GetProperty("MaxForwardThrustN"));
+        Assert.Null(typeof(Ship).GetProperty("FlightAcceleration"));
     }
 
     [Fact]
