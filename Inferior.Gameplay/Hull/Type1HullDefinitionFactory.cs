@@ -213,7 +213,27 @@ public static class Type1HullDefinitionFactory
                     ClearanceMinMeters = new DVec3(-0.55, -2.85, 5.85),
                     ClearanceMaxMeters = new DVec3(0.55, -2.35, 6.65),
                 },
-                new($"{HullId}.top.service-sensor.01", new DVec3(-1.8, 2.2, -1.8), DVec3.UnitY, AttachmentCapability.Sensor | AttachmentCapability.Utility),
+                new($"{HullId}.top.service-sensor.01", new DVec3(-1.8, 2.2, -1.8), DVec3.UnitY, AttachmentCapability.Sensor | AttachmentCapability.Utility)
+                {
+                    Up = -DVec3.UnitZ,
+                    FootprintMeters = new DVec3(0.7, 0.7, 0.0),
+                    ClearanceMinMeters = new DVec3(-2.25, 2.1, -2.25),
+                    ClearanceMaxMeters = new DVec3(-1.35, 2.75, -1.35),
+                },
+                new($"{HullId}.underside.utility-sensor.01", new DVec3(0.0, -2.5, -1.0), -DVec3.UnitY, AttachmentCapability.Sensor | AttachmentCapability.Utility)
+                {
+                    Up = DVec3.UnitZ,
+                    FootprintMeters = new DVec3(0.8, 0.8, 0.0),
+                    ClearanceMinMeters = new DVec3(-0.5, -2.85, -1.5),
+                    ClearanceMaxMeters = new DVec3(0.5, -2.35, -0.5),
+                },
+                new($"{HullId}.port.utility-sensor.01", new DVec3(-3.05, 0.15, -3.8), -DVec3.UnitX, AttachmentCapability.Sensor | AttachmentCapability.Utility)
+                {
+                    Up = DVec3.UnitY,
+                    FootprintMeters = new DVec3(0.8, 0.8, 0.0),
+                    ClearanceMinMeters = new DVec3(-3.45, -0.35, -4.3),
+                    ClearanceMaxMeters = new DVec3(-2.85, 0.65, -3.3),
+                },
             ],
             MarkerLights =
             [

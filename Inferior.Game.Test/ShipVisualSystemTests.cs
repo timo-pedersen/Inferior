@@ -436,6 +436,31 @@ public sealed class ShipVisualSystemTests
     }
 
     [Fact]
+    public void AriesServicePorts_ReserveSmallCapabilityDrivenFutureAttachmentSet()
+    {
+        var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
+        var servicePorts = geometry.AttachmentPorts
+            .Where(p => p.Capabilities.HasFlag(AttachmentCapability.Sensor)
+                && p.Capabilities.HasFlag(AttachmentCapability.Utility))
+            .ToArray();
+
+        Assert.InRange(servicePorts.Length, 2, 3);
+        Assert.All(servicePorts, port =>
+        {
+            Assert.True(port.Capabilities.HasFlag(AttachmentCapability.Sensor));
+            Assert.True(port.Capabilities.HasFlag(AttachmentCapability.Utility));
+            Assert.False(port.Capabilities.HasFlag(AttachmentCapability.Engine));
+            Assert.False(port.Capabilities.HasFlag(AttachmentCapability.LandingGear));
+            Assert.True(port.FootprintMeters.X > 0.0);
+            Assert.True(port.FootprintMeters.Y > 0.0);
+            Assert.True(new Cuboid(port.ClearanceMinMeters, port.ClearanceMaxMeters).Contains(port.Position));
+        });
+
+        Assert.Single(servicePorts, p => p.Normal == -DVec3.UnitY && p.Position.Y < -2.0);
+        Assert.Single(servicePorts, p => Math.Abs(p.Normal.X) > 0.99 && p.Position.X < 0.0);
+    }
+
+    [Fact]
     public void AriesStructuralShell_IsCompleteReadableClosedSemanticBoundary()
     {
         var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
