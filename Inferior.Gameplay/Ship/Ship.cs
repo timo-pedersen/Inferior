@@ -126,9 +126,13 @@ public sealed class Ship
         + FlightConstants.ClunkNodePenaltyMs * (24 - NodeCount);
 
     // ── Atmosphere / aerodynamics ──────────────────────────────────────────────
-    // Set from HullDefinition at ship construction.
+    // Aerodynamics are set from HullDefinition at ship construction.
 
-    /// <summary>Maximum downward (gravity-opposing) engine thrust in newtons.</summary>
+    /// <summary>
+    /// Legacy default downward (gravity-opposing) engine thrust in newtons.
+    /// Engine performance belongs to installed engines; this remains only until
+    /// ship-level engine aggregation is wired into flight physics.
+    /// </summary>
     public double MaxDownThrustN          { get; init; } = 300_000.0;
 
     /// <summary>Maximum forward thrust ≈ 3× down thrust (engines more efficient forward).</summary>

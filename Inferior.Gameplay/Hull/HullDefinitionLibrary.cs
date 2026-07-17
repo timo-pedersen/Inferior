@@ -5,7 +5,7 @@ namespace Inferior.Gameplay.Hull;
 
 /// <summary>
 /// Static registry of all hull definitions.
-/// Loaded at startup — immutable once initialised.
+/// Loaded at startup; immutable once initialised.
 ///
 /// Add new hulls via Register() in the static constructor.
 /// The fitting screen, ShipBuilder, and FlyabilityMonitor all look up definitions here.
@@ -16,11 +16,10 @@ public static class HullDefinitionLibrary
 
     static HullDefinitionLibrary()
     {
+        Register(Type1HullDefinitionFactory.Create());
         Register(Sidewinder());
         Register(Cobra());
     }
-
-    // ── Public API ─────────────────────────────────────────────────────────────
 
     public static HullDefinition Get(string hullTypeId)
     {
@@ -33,8 +32,6 @@ public static class HullDefinitionLibrary
 
     public static IReadOnlyCollection<HullDefinition> All => _defs.Values;
 
-    // ── Registration ───────────────────────────────────────────────────────────
-
     private static void Register(HullDefinition def)
     {
         if (_defs.ContainsKey(def.HullTypeId))
@@ -42,21 +39,17 @@ public static class HullDefinitionLibrary
         _defs[def.HullTypeId] = def;
     }
 
-    // ── Hull definitions ───────────────────────────────────────────────────────
-
     private static HullDefinition Sidewinder() => new()
     {
         HullTypeId   = "sidewinder",
         DisplayName  = "Sidewinder",
         SizeClass    = ShipSizeClass.Small,
-        HullMass     = 25_000.0,   // kg — 25 tonnes
-        CockpitOffset = new DVec3(0, 3, -12),  // nose-mounted, slightly above centreline
+        HullMass     = 25_000.0,
+        CockpitOffset = new DVec3(0, 3, -12),
 
-        // 25 t hull; 1.2 × 25000 × 9.81 ≈ 294 kN hover margin
-        AerodynamicLift         = 0.8,   // modest lift — not a glider
+        AerodynamicLift         = 0.8,
         AerodynamicBrakeFront   = 0.75,
-        AerodynamicBrakeLateral = 2.00,  // > 2× front per spec
-        MaxDownThrustN          = 300_000,
+        AerodynamicBrakeLateral = 2.00,
 
         Slots =
         [
@@ -82,21 +75,19 @@ public static class HullDefinitionLibrary
         HullTypeId   = "cobra",
         DisplayName  = "Cobra Mk III",
         SizeClass    = ShipSizeClass.Medium,
-        HullMass     = 80_000.0,   // kg
+        HullMass     = 80_000.0,
         CockpitOffset = new DVec3(0, 4, -18),
 
-        // 80 t hull; 1.2 × 80000 × 9.81 ≈ 941 kN hover margin
-        AerodynamicLift         = 1.4,   // better lift than Sidewinder
+        AerodynamicLift         = 1.4,
         AerodynamicBrakeFront   = 1.10,
         AerodynamicBrakeLateral = 2.75,
-        MaxDownThrustN          = 960_000,
 
         Slots =
         [
             new() { SlotId = "reactor",           Label = "Power Reactor",        Category = SlotCategory.PowerReactor,     MaxComponentClass = 4, Required = true  },
             new() { SlotId = "power_bus",         Label = "Power Bus",            Category = SlotCategory.PowerBus,         MaxComponentClass = 4, Required = true  },
-            new() { SlotId = "engine_main",       Label = "Main Engine",          Category = SlotCategory.Engine,           MaxComponentClass = 4, Required = true  },
-            new() { SlotId = "engine_secondary",  Label = "Secondary Engine",     Category = SlotCategory.Engine,           MaxComponentClass = 3, Required = false },
+            new() { SlotId = "engine.port.01",    Label = "Port Engine",          Category = SlotCategory.Engine,           MaxComponentClass = 4, Required = true  },
+            new() { SlotId = "engine.starboard.01", Label = "Starboard Engine",   Category = SlotCategory.Engine,           MaxComponentClass = 3, Required = false },
             new() { SlotId = "shield_top",        Label = "Top Shield",           Category = SlotCategory.Shield,           MaxComponentClass = 4, Required = false },
             new() { SlotId = "shield_bottom",     Label = "Bottom Shield",        Category = SlotCategory.Shield,           MaxComponentClass = 4, Required = false },
             new() { SlotId = "heat_sink",         Label = "Hyperspace Heat Sink", Category = SlotCategory.HeatSink,         MaxComponentClass = 4, Required = true  },

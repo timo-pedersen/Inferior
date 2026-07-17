@@ -2,6 +2,7 @@ using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
 using Inferior.Persistence.Data;
 using Microsoft.Xna.Framework;
@@ -59,14 +60,21 @@ public sealed class ShipBuilder
 
     public Ship Build()
     {
+        var hull = HullDefinitionLibrary.Get(_hullTypeId);
+
         var ship = new Ship
         {
             Id          = _id,
             HullTypeId  = _hullTypeId,
             Name        = _name,
             CreatedDate = _createdDate,
-            SizeClass   = ShipSizeClass.Medium,   // same default SpawnShip used
+            SizeClass   = hull.SizeClass,
             MoveSpeedMs = 5e9,                    // same default SpawnShip used
+            HullMass    = hull.HullMass,
+            CockpitOffset = hull.CockpitOffset,
+            AerodynamicLift = hull.AerodynamicLift,
+            AerodynamicBrakeFront = hull.AerodynamicBrakeFront,
+            AerodynamicBrakeLateral = hull.AerodynamicBrakeLateral,
             Position    = _position,
         };
         ship.SetOrientation(_orientation);
