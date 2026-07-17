@@ -27,30 +27,53 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    internal readonly record struct ChaseCameraTargets(
+        DVec3 DesiredPosition,
+        DVec3 LookTarget);
 
     private void UpdateThirdPersonCamera(SpaceSimulation.ShipSnapshot snap)
     {
-        // Camera sits 80 m behind and 30 m above the ship, looks slightly ahead of CoM.
-        DVec3 targetCamPos = snap.Position - snap.Forward * 80.0 + snap.Up * 30.0;
-        DVec3 lookTarget   = snap.Position + snap.Forward * 8.0;
+        ChaseCameraTargets targets = CalculateChaseCameraTargets(
+            snap.Position,
+            snap.Forward,
+            snap.Up);
 
         // Snap on the first frame after entering third-person; lerp smoothly after that.
         _tpCamPos = _tpCamPosValid
-            ? DVec3.Lerp(_tpCamPos, targetCamPos, 0.08)
-            : targetCamPos;
+            ? DVec3.Lerp(_tpCamPos, targets.DesiredPosition, 0.08)
+            : targets.DesiredPosition;
         _tpCamPosValid = true;
 
         // Use ship's own up axis so the camera rolls with the ship — eliminates the
         // singularity that occurs when the ship points near vertical and world-up is
         // nearly parallel to the look direction.
-        DVec3 lookDir = DVec3.Normalize(lookTarget - _tpCamPos);
+        DVec3 lookDir = DVec3.Normalize(targets.LookTarget - _tpCamPos);
         _camera.SetPose(_tpCamPos, QuatLookAtWithUp(lookDir, snap.Up));
+    }
+
+    private void UpdateShipFollowingCamera(SpaceSimulation.ShipSnapshot snap)
+    {
+        if (_thirdPersonMode)
+            UpdateThirdPersonCamera(snap);
+        else
+            _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
+    }
+
+    internal static ChaseCameraTargets CalculateChaseCameraTargets(
+        DVec3 shipPosition,
+        DVec3 shipForward,
+        DVec3 shipUp)
+    {
+        // Camera sits 80 m behind and 30 m above the ship, looking 8 m ahead of CoM.
+        return new ChaseCameraTargets(
+            shipPosition - shipForward * 80.0 + shipUp * 30.0,
+            shipPosition + shipForward * 8.0);
     }
 
     // Builds a quaternion whose -Z axis aligns with `forward` and whose +Y axis
     // aligns as closely as possible with `shipUp`. No singularity because shipUp is
     // always perpendicular to shipForward (orthogonal ship axes).
-    private static Quaternion QuatLookAtWithUp(DVec3 forward, DVec3 shipUp)
+    internal static Quaternion QuatLookAtWithUp(DVec3 forward, DVec3 shipUp)
     {
         var fwd    = new Vector3((float)forward.X, (float)forward.Y, (float)forward.Z);
         var upHint = new Vector3((float)shipUp.X,  (float)shipUp.Y,  (float)shipUp.Z);

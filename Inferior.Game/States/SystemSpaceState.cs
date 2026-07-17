@@ -745,7 +745,7 @@ public sealed partial class SystemSpaceState : GameState
                 // Ship camera must still track the ship — without this the camera freezes
                 // while thrust keeps the ship moving, causing a snap on UI-mode exit.
                 if (_frameShipSnap != null)
-                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+                    UpdateShipFollowingCamera(_frameShipSnap);
             }
             // Preserve the last flight-mode thrust so relative speed is unchanged when
             // the player opens the UI. Rotation inputs are zeroed to keep the ship still.
@@ -799,12 +799,7 @@ public sealed partial class SystemSpaceState : GameState
             _lastFlightInput = BuildShipInput(lookMouse, keys, IsGameActive);
             _simulation.SetInput(_lastFlightInput);
             if (_frameShipSnap != null)
-            {
-                if (_thirdPersonMode)
-                    UpdateThirdPersonCamera(_frameShipSnap);
-                else
-                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
-            }
+                UpdateShipFollowingCamera(_frameShipSnap);
             if (IsGameActive) Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
         }
 

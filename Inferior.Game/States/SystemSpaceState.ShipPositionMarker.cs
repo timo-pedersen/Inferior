@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
@@ -77,26 +78,49 @@ public sealed partial class SystemSpaceState
             _frameShipSnap.RelocationSequence != _shipPositionMarkerObservedRelocationSequence;
         _shipPositionMarkerObservedRelocationSequence = _frameShipSnap.RelocationSequence;
 
-        if (!_shipPositionMarkerEnabled || (!toggledOn && !f3JustPressed && !relocationChanged))
+        bool markerLogRequested =
+            _shipPositionMarkerEnabled && (toggledOn || relocationChanged);
+        if (!markerLogRequested && !f3JustPressed)
             return;
 
+        ChaseCameraTargets? chaseTargets = f3JustPressed && _thirdPersonMode
+            ? CalculateChaseCameraTargets(
+                _frameShipSnap.Position,
+                _frameShipSnap.Forward,
+                _frameShipSnap.Up)
+            : null;
         string log = FormatShipPositionMarkerLog(
             _frameShipSnap.Position,
+            _frameShipSnap.Position,
+            _frameShipSnap.Position,
             _camera.UniversePosition,
-            _frameShipSnap.Position);
+            chaseTargets);
         Console.WriteLine(log);
+
+        string path = Path.Combine(AppContext.BaseDirectory, "ship_chase_camera_diagnostic.log");
+        File.AppendAllText(path, $"{DateTimeOffset.Now:O}\n{log}\n");
+        DataBus.System.Publish(Topics.System.All,
+            new SystemMessage($"Ship chase diagnostic written: {path}", SystemMessagePriority.Info));
     }
 
     internal static string FormatShipPositionMarkerLog(
         DVec3 simulationPosition,
+        DVec3 snapshotPosition,
+        DVec3 presentationPosition,
         DVec3 cameraPosition,
-        DVec3 shipRenderPosition)
+        ChaseCameraTargets? chaseTargets)
     {
         var text = new StringBuilder();
         text.AppendLine("[ShipMarker]");
         AppendPosition(text, "Sim position", simulationPosition);
+        AppendPosition(text, "Snapshot ship position", snapshotPosition);
+        AppendPosition(text, "Presentation ship position / render source", presentationPosition);
+        if (chaseTargets is { } targets)
+        {
+            AppendPosition(text, "Camera desired position", targets.DesiredPosition);
+            AppendPosition(text, "Camera target", targets.LookTarget);
+        }
         AppendPosition(text, "Camera position", cameraPosition);
-        AppendPosition(text, "Ship render position (snapshot source)", shipRenderPosition);
         return text.ToString();
     }
 
