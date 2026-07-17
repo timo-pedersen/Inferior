@@ -1172,6 +1172,28 @@ Checkpoint Aries rendering note: `type-1` is now semantically registered as Arie
 
 This checkpoint renders only the closed structural shell and its semantic material groups. It does not render generated armour, engines, landing feet, marker-light fixtures, beam illumination, cargo-door animation, or detailed cockpit interiors. Visual correctness remains unverified until Timo inspects Aries in-engine.
 
+### 28.1 Aries semantic rendering checkpoint
+
+The CPU-side `SemanticHullMeshBuilder` triangulates validated convex semantic n-gons with a deterministic fan while retaining one `RenderedFaceRange` per semantic face. Aries currently supplies 48 semantic vertices and 24 semantic faces, producing 56 rendered triangles:
+
+| Render group | Faces | Triangles |
+|---|---:|---:|
+| Structural hull | 21 | 46 |
+| Cargo door | 1 | 6 |
+| Cockpit frame | 1 | 2 |
+| Cockpit glass | 1 | 2 |
+
+Vertices are emitted per triangle with the semantic face's flat outward normal. Planar UVs use a deterministic face-local basis at 2 metres per UV unit. The semantic path uses Aries' native `-Z` forward convention and does not apply the legacy mesh's 180-degree correction.
+
+`ShipMeshRenderer` owns a GPU mesh cache keyed by stable `HullTypeId`. It creates immutable vertex/index buffers on first use, reuses them on later frames, and disposes all cached semantic meshes, the optional legacy fallback mesh, and its debug-line effect with the renderer.
+
+In-engine inspection controls:
+
+- `F3`: toggle third-person view so the ship hull is visible.
+- `F4`: toggle between normal materials and semantic surface-role colours. Role mode also draws ship-local axes (`+X` red, `+Y` green, `-Z` cyan) and a white vertex-derived hull bounding box.
+
+The role view draws existing face index ranges with diagnostic colours; it does not create alternate geometry or change the semantic definition. Face-ID cycling was omitted because it was optional and the retained face ranges already provide the required selection foundation.
+
 The current size-class code must be corrected to:
 
 ```text

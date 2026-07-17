@@ -117,6 +117,8 @@ public sealed class SemanticHullMeshBuilderTests
         var mesh = SemanticHullMeshBuilder.Build(HullDefinitionLibrary.Get("type-1").VisualGeometry!);
         var groups = mesh.Parts.Select(part => part.RenderGroup).Order().ToArray();
 
+        Assert.Equal(56, mesh.TriangleCount);
+        Assert.Equal(24, mesh.FaceRanges.Count());
         Assert.Equal(
             [
                 SemanticHullRenderGroup.StructuralHull,
@@ -131,6 +133,10 @@ public sealed class SemanticHullMeshBuilderTests
             Assert.NotEqual(default, part.MaterialColour);
             Assert.NotEmpty(part.FaceRanges);
         });
+        Assert.Equal(46, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.StructuralHull).TriangleCount);
+        Assert.Equal(6, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.CargoDoor).TriangleCount);
+        Assert.Equal(2, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.CockpitFrame).TriangleCount);
+        Assert.Equal(2, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.CockpitGlass).TriangleCount);
     }
 
     private static SemanticHullGeometry PentagonalFaceGeometry()
