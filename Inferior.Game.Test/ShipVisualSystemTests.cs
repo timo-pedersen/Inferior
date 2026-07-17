@@ -152,10 +152,12 @@ public sealed class ShipVisualSystemTests
         string repoRoot = RepoRoot();
         string spec = File.ReadAllText(Path.Combine(repoRoot, "Docs-ai", "ship-visual-system-design-spec.md"));
         string renderer = File.ReadAllText(Path.Combine(repoRoot, "Inferior.Rendering", "ShipMeshRenderer.cs"));
+        string legacyFactory = File.ReadAllText(Path.Combine(repoRoot, "Inferior.Rendering", "Type1HullFactory.cs"));
         var aries = HullDefinitionLibrary.Get("type-1");
         var sidewinder = HullDefinitionLibrary.Get("sidewinder");
 
         Assert.Contains("type-1` is now semantically registered as Aries", spec);
+        Assert.Contains("Aries/type-1 does not use this factory", legacyFactory);
         Assert.Equal(ShipHullRenderPath.SemanticHull, ShipMeshRenderer.SelectRenderPath(aries));
         Assert.Equal(ShipHullRenderPath.LegacyFallback, ShipMeshRenderer.SelectRenderPath(sidewinder));
         Assert.DoesNotContain("== \"type-1\"", renderer);

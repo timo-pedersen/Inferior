@@ -1166,9 +1166,11 @@ Catalogue commits should remain coherent by family or system, not one enormous u
 
 ## 28. Current-code migration constraints
 
-The present Type-1 ship path bakes hull, nacelles, and pylons into one fixed factory and gives every ship the same visual model. The new system replaces that ownership rather than layering independent-engine semantics over the old merged asset.
+The former Type-1 ship path bakes hull, nacelles, and pylons into one fixed factory. The semantic renderer now resolves each snapshot's `HullTypeId` and uses the registered hull's `VisualGeometry` whenever it is present.
 
-Checkpoint Aries note: `type-1` is now semantically registered as Aries, but the runtime third-person renderer still uses the legacy `Type1HullFactory` mesh. That mesh is a temporary visible placeholder only. It is not authoritative for Aries vertices, faces, surface roles, attachment ports, cargo layout, cockpit pose, lights, landing feet, or engine mounts, and gameplay code must not infer Aries semantics from renderer triangles or legacy mesh parts. This mismatch is expected until a later rendering brief generates visible Type-1/Aries geometry from the CPU-side semantic hull definition. Do not claim visual verification of Aries from the legacy mesh.
+Checkpoint Aries rendering note: `type-1` is now semantically registered as Aries and its third-person structural hull is generated from those semantic polygons. The old `Type1HullFactory` remains only as a temporary fallback for registrations that do not yet provide semantic visual geometry. Aries does not use that factory or its legacy 180-degree orientation correction. The fallback mesh is not authoritative for any hull semantics and must be removed once all renderable hull registrations provide `VisualGeometry`.
+
+This checkpoint renders only the closed structural shell and its semantic material groups. It does not render generated armour, engines, landing feet, marker-light fixtures, beam illumination, cargo-door animation, or detailed cockpit interiors. Visual correctness remains unverified until Timo inspects Aries in-engine.
 
 The current size-class code must be corrected to:
 
