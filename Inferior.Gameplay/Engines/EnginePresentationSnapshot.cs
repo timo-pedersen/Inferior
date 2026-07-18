@@ -4,6 +4,8 @@ public sealed record EnginePresentationSnapshot(
     string InstanceId,
     string VariantId,
     EngineVisualGeometry VisualGeometry,
+    EngineVisualDefinition? VisualDefinition,
+    EngineVisualState VisualState,
     EngineGeometryTransform GeometryTransform,
     double DamageFraction,
     double WearFraction);

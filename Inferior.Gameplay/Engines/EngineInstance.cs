@@ -16,6 +16,7 @@ public sealed class EngineInstance
     public EngineVariantDefinition Variant { get; }
     public double DamageFraction { get; private set; }
     public double WearFraction { get; private set; }
+    public EngineVisualState VisualState { get; private set; } = EngineVisualState.Idle;
     public EngineGeometryTransform? GeometryTransform { get; private set; }
     public string? InstalledMountId { get; private set; }
 
@@ -26,6 +27,9 @@ public sealed class EngineInstance
 
     public void SetWearFraction(double value)
         => WearFraction = ValidateFraction(value, nameof(value));
+
+    public void SetVisualState(EngineVisualState value)
+        => VisualState = value.Validate();
 
     internal void Install(string mountId, EngineGeometryTransform geometryTransform)
     {

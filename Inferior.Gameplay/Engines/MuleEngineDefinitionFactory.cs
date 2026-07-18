@@ -33,7 +33,11 @@ public static class MuleEngineDefinitionFactory
             new DVec3(-0.80, 0.0, 0.0),
             parts,
             [
-                new EngineExhaustDefinition("mule.exhaust.main.01", new DVec3(0.0, 0.0, 3.30), DVec3.UnitZ),
+                new EngineExhaustDefinition(
+                    "mule.exhaust.main.01",
+                    new DVec3(0.0, 0.0, 3.30),
+                    DVec3.UnitZ,
+                    RadiusMeters: 0.72),
             ],
             [
                 new EngineLightDefinition(
@@ -62,7 +66,14 @@ public static class MuleEngineDefinitionFactory
                 EngineIntentRating.High,
                 EngineIntentRating.Low,
                 EngineIntentRating.Low,
-                AlphaRedProduction: true));
+                AlphaRedProduction: true),
+            new EngineVisualDefinition(
+                new DVec3(1.0, 0.24, 0.035),
+                idleIntensity: 0.15f,
+                thrustIntensity: 0.50f,
+                brakeIntensity: 0.80f,
+                boostIntensity: 2.0f,
+                flickerAmount: 0.22f));
     }
 
     private static void AddBox(

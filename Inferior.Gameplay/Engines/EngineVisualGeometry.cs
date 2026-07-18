@@ -25,7 +25,8 @@ public sealed record EngineVisualMeshPart(
 public sealed record EngineExhaustDefinition(
     string ExhaustId,
     DVec3 Position,
-    DVec3 Direction);
+    DVec3 Direction,
+    double RadiusMeters);
 
 public sealed record EngineLightDefinition(
     string LightId,
@@ -54,6 +55,18 @@ public sealed class EngineVisualGeometry
             throw new ArgumentException("Engine geometry must contain non-empty mesh parts.", nameof(meshParts));
         if (!IsFinite(attachmentInterfacePosition))
             throw new ArgumentOutOfRangeException(nameof(attachmentInterfacePosition));
+        if (exhausts.Any(exhaust =>
+            string.IsNullOrWhiteSpace(exhaust.ExhaustId)
+            || !IsFinite(exhaust.Position)
+            || !IsFinite(exhaust.Direction)
+            || exhaust.Direction.Length < 1e-9
+            || !double.IsFinite(exhaust.RadiusMeters)
+            || exhaust.RadiusMeters <= 0.0))
+        {
+            throw new ArgumentException(
+                "Engine exhaust anchors require an id, finite pose, and positive radius.",
+                nameof(exhausts));
+        }
 
         GeometryId = geometryId;
         AttachmentInterfacePosition = attachmentInterfacePosition;

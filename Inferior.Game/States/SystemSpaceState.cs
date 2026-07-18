@@ -66,6 +66,7 @@ public sealed partial class SystemSpaceState : GameState
     private BasicEffect _effect = null!;
     private Effect?     _atmosEffect;
     private Effect      _litSurfaceEffect = null!;
+    private Effect      _engineExhaustGlowEffect = null!;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
     // ── Celestial body rendering ──────────────────────────────────────────────
@@ -169,6 +170,7 @@ public sealed partial class SystemSpaceState : GameState
     // F11  — toggles between ship camera (cockpit) and free debug camera.
     // F2        — toggles engine mount/module transform debug.
     // Ctrl+F2   — cycles the installed engine pair through debug configurations.
+    // Alt+F2    — cycles the installed engines' exhaust visual state.
     // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
@@ -373,11 +375,15 @@ public sealed partial class SystemSpaceState : GameState
 
         // Container renderer — geometry is built per-instance in SpawnContainers
         _litSurfaceEffect = _content.Load<Effect>("Effects/LitSurface");
+        _engineExhaustGlowEffect = _content.Load<Effect>("Effects/EngineExhaustGlow");
         _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
         InitializeStationShadows();
 
         // Ship hull and installed child modules; GPU meshes are cached on the main thread.
-        _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
+        _shipMeshRenderer = new ShipMeshRenderer(
+            _gd,
+            _meshRenderer,
+            _engineExhaustGlowEffect);
         _chaseCamera.Deactivate();
         _chaseCamera.ResetSmoothing();
         InitializeShipPositionMarker();
@@ -560,6 +566,7 @@ public sealed partial class SystemSpaceState : GameState
         _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
         _litSurfaceEffect = null!; // owned by ContentManager — do not dispose manually
+        _engineExhaustGlowEffect = null!; // owned by ContentManager
     }
 
     public override void OnResize(int width, int height)
@@ -676,10 +683,14 @@ public sealed partial class SystemSpaceState : GameState
         bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
         bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
         bool shiftDown = keys.IsKeyDown(Keys.LeftShift) || keys.IsKeyDown(Keys.RightShift);
+        bool altDown = keys.IsKeyDown(Keys.LeftAlt) || keys.IsKeyDown(Keys.RightAlt);
         bool ctrlF2JustPressed =
             EngineDebugCyclePlatformInput.IsCycleJustPressed(keys, _prevKeys);
+        bool altF2JustPressed =
+            EngineExhaustDebugPlatformInput.IsCycleJustPressed(keys, _prevKeys);
         bool f2JustPressed = !ctrlDown
             && !shiftDown
+            && !altDown
             && keys.IsKeyDown(Keys.F2)
             && !_prevKeys.IsKeyDown(Keys.F2);
         bool ctrlF3Down = ctrlDown && keys.IsKeyDown(Keys.F3);
@@ -702,6 +713,10 @@ public sealed partial class SystemSpaceState : GameState
         if (ctrlF2JustPressed)
         {
             _simulation.RequestDebugCycleEngineConfiguration();
+        }
+        else if (altF2JustPressed)
+        {
+            _simulation.RequestDebugCycleEngineExhaustState();
         }
         else if (f2JustPressed)
         {
@@ -1144,7 +1159,8 @@ public sealed partial class SystemSpaceState : GameState
                 _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
                 _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal,
                 _frameShipSnap.EngineMounts,
-                _engineModuleDebug);
+                _engineModuleDebug,
+                _frameShipSnap.SimTime);
             WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
         }
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);

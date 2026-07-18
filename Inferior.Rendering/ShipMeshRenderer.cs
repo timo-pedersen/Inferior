@@ -18,6 +18,12 @@ public readonly record struct ShipRenderTransformDiagnostic(
     Vector3 WorldTranslation,
     ShipHullRenderPath RenderPath);
 
+public readonly record struct EngineExhaustGlowDraw(
+    Vector3 Center,
+    float Radius,
+    EngineVisualDefinition VisualDefinition,
+    EngineVisualState VisualState);
+
 /// <summary>
 /// Draws the player ship in third-person view.
 /// Caller decides when to call Draw() and passes the active view/projection for the
@@ -28,16 +34,32 @@ public sealed class ShipMeshRenderer : IDisposable
 {
     private readonly GraphicsDevice _gd;
     private readonly MeshRenderer _meshRenderer;
+    private readonly Effect _engineExhaustGlowEffect;
     private readonly BasicEffect _debugLineEffect;
     private readonly Dictionary<string, SemanticHullGpuMesh> _semanticMeshCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string GeometryId, bool Mirrored), EngineGpuMesh> _engineMeshCache = [];
 
     private LegacyFallbackMesh? _legacyFallback;
 
-    public ShipMeshRenderer(GraphicsDevice gd, MeshRenderer meshRenderer)
+    private static readonly VertexPositionTexture[] ExhaustGlowQuad =
+    [
+        new(new Vector3(-1f,  1f, 0f), new Vector2(0f, 0f)),
+        new(new Vector3( 1f,  1f, 0f), new Vector2(1f, 0f)),
+        new(new Vector3(-1f, -1f, 0f), new Vector2(0f, 1f)),
+        new(new Vector3( 1f,  1f, 0f), new Vector2(1f, 0f)),
+        new(new Vector3( 1f, -1f, 0f), new Vector2(1f, 1f)),
+        new(new Vector3(-1f, -1f, 0f), new Vector2(0f, 1f)),
+    ];
+
+    public ShipMeshRenderer(
+        GraphicsDevice gd,
+        MeshRenderer meshRenderer,
+        Effect engineExhaustGlowEffect)
     {
         _gd = gd;
         _meshRenderer = meshRenderer;
+        _engineExhaustGlowEffect =
+            engineExhaustGlowEffect ?? throw new ArgumentNullException(nameof(engineExhaustGlowEffect));
         _debugLineEffect = new BasicEffect(gd)
         {
             VertexColorEnabled = true,
@@ -59,7 +81,8 @@ public sealed class ShipMeshRenderer : IDisposable
         DetailLevel level,
         SemanticHullDebugMode debugMode = SemanticHullDebugMode.Normal,
         IReadOnlyList<EngineMountPresentationSnapshot>? engineMounts = null,
-        bool engineModuleDebug = false)
+        bool engineModuleDebug = false,
+        double engineVisualTimeSeconds = 0.0)
     {
         float renderScale = (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
@@ -95,6 +118,13 @@ public sealed class ShipMeshRenderer : IDisposable
                 currentView,
                 currentProjection,
                 sunColour);
+            DrawEngineExhaustGlows(
+                engineMounts,
+                world,
+                currentView,
+                currentProjection,
+                renderScale,
+                engineVisualTimeSeconds);
             if (engineModuleDebug)
                 DrawEngineModuleDebug(engineMounts, world, currentView, currentProjection);
         }
@@ -370,6 +400,101 @@ public sealed class ShipMeshRenderer : IDisposable
         mesh = EngineGpuMesh.Create(_gd, EngineMeshBuilder.Build(geometry, mirrored));
         _engineMeshCache.Add(key, mesh);
         return mesh;
+    }
+
+    private void DrawEngineExhaustGlows(
+        IReadOnlyList<EngineMountPresentationSnapshot> engineMounts,
+        Matrix shipWorld,
+        Matrix view,
+        Matrix projection,
+        float metresToRenderScale,
+        double visualTimeSeconds)
+    {
+        IReadOnlyList<EngineExhaustGlowDraw> glows = BuildEngineExhaustGlowDraws(
+            engineMounts,
+            shipWorld,
+            metresToRenderScale);
+        if (glows.Count == 0)
+            return;
+
+        Matrix inverseView = Matrix.Invert(view);
+        Vector3 cameraRight = Vector3.Normalize(inverseView.Right);
+        Vector3 cameraUp = Vector3.Normalize(inverseView.Up);
+        Effect effect = _engineExhaustGlowEffect;
+        effect.CurrentTechnique = effect.Techniques["EngineExhaustGlow"];
+        effect.Parameters["ViewProjection"].SetValue(view * projection);
+        effect.Parameters["CameraRight"].SetValue(cameraRight);
+        effect.Parameters["CameraUp"].SetValue(cameraUp);
+        effect.Parameters["VisualTime"].SetValue((float)(visualTimeSeconds % 4096.0));
+
+        _gd.BlendState = BlendState.Additive;
+        _gd.DepthStencilState = DepthStencilState.DepthRead;
+        _gd.RasterizerState = RasterizerState.CullNone;
+
+        foreach (EngineExhaustGlowDraw glow in glows)
+        {
+            EngineVisualDefinition definition = glow.VisualDefinition;
+            EngineVisualState state = glow.VisualState;
+            effect.Parameters["GlowCenter"].SetValue(glow.Center);
+            effect.Parameters["GlowRadius"].SetValue(glow.Radius);
+            effect.Parameters["GlowColor"].SetValue(definition.GlowColour.ToVector3());
+            effect.Parameters["IdleIntensity"].SetValue(definition.IdleIntensity);
+            effect.Parameters["ThrustIntensity"].SetValue(definition.ThrustIntensity);
+            effect.Parameters["BrakeIntensity"].SetValue(definition.BrakeIntensity);
+            effect.Parameters["BoostIntensity"].SetValue(definition.BoostIntensity);
+            effect.Parameters["FlickerAmount"].SetValue(definition.FlickerAmount);
+            effect.Parameters["EngineOutput"].SetValue(state.Output);
+            effect.Parameters["EngineBrake"].SetValue(state.Brake);
+            effect.Parameters["EngineBoost"].SetValue(state.Boost);
+
+            foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                _gd.DrawUserPrimitives(
+                    PrimitiveType.TriangleList,
+                    ExhaustGlowQuad,
+                    0,
+                    primitiveCount: 2);
+            }
+        }
+
+        _gd.BlendState = BlendState.Opaque;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        _gd.RasterizerState = RasterizerState.CullCounterClockwise;
+    }
+
+    public static IReadOnlyList<EngineExhaustGlowDraw> BuildEngineExhaustGlowDraws(
+        IReadOnlyList<EngineMountPresentationSnapshot> engineMounts,
+        Matrix shipWorld,
+        float metresToRenderScale)
+    {
+        if (!float.IsFinite(metresToRenderScale) || metresToRenderScale <= 0f)
+            throw new ArgumentOutOfRangeException(nameof(metresToRenderScale));
+
+        var glows = new List<EngineExhaustGlowDraw>();
+        foreach (EnginePresentationSnapshot engine in engineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EnginePresentationSnapshot>())
+        {
+            if (engine.VisualDefinition is not { } visualDefinition)
+                continue;
+
+            bool mirrored = engine.GeometryTransform.MirroredAcrossHullX;
+            Matrix engineWorld = engine.GeometryTransform.LocalToHull * shipWorld;
+            foreach (EngineExhaustDefinition exhaust in engine.VisualGeometry.Exhausts)
+            {
+                Vector3 center = Vector3.Transform(
+                    EngineMeshBuilder.ToVector3(exhaust.Position, mirrored),
+                    engineWorld);
+                glows.Add(new EngineExhaustGlowDraw(
+                    center,
+                    (float)exhaust.RadiusMeters * metresToRenderScale,
+                    visualDefinition,
+                    engine.VisualState));
+            }
+        }
+
+        return glows.AsReadOnly();
     }
 
     public static Color EngineMaterialColour(EngineVisualMaterial material, double damageFraction)

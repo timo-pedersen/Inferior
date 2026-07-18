@@ -136,7 +136,8 @@ public static class NeedleEngineDefinitionFactory
                 new EngineExhaustDefinition(
                     "needle.exhaust.slot.01",
                     new DVec3(BodyCenterX, 0.12, 3.10),
-                    DVec3.UnitZ),
+                    DVec3.UnitZ,
+                    RadiusMeters: 0.62),
             ],
             [
                 new EngineLightDefinition(
@@ -172,7 +173,14 @@ public static class NeedleEngineDefinitionFactory
                 EngineIntentRating.Low,
                 EngineIntentRating.High,
                 EngineIntentRating.High,
-                AlphaRedProduction: false));
+                AlphaRedProduction: false),
+            new EngineVisualDefinition(
+                new DVec3(0.48, 0.82, 1.0),
+                idleIntensity: 0.10f,
+                thrustIntensity: 0.70f,
+                brakeIntensity: 0.90f,
+                boostIntensity: 3.0f,
+                flickerAmount: 0.12f));
     }
 
     private static Ring CreateRing(double z, double radiusX, double radiusY)

@@ -159,6 +159,12 @@ public sealed class SpaceSimulation : Simulation
     public void RequestDebugCycleEngineConfiguration()
         => Interlocked.Increment(ref _debugEngineConfigurationCycleRequests);
 
+    private int _debugEngineExhaustStateCycleRequests;
+    private EngineExhaustDebugMode _debugEngineExhaustMode;
+
+    public void RequestDebugCycleEngineExhaustState()
+        => Interlocked.Increment(ref _debugEngineExhaustStateCycleRequests);
+
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
     private bool _stationRelocationAppliedThisTick;
@@ -376,6 +382,11 @@ public sealed class SpaceSimulation : Simulation
             Interlocked.Exchange(ref _debugEngineConfigurationCycleRequests, 0);
         for (int i = 0; i < engineCycleRequests; i++)
             CycleDebugEngineConfiguration(ship);
+
+        int exhaustCycleRequests =
+            Interlocked.Exchange(ref _debugEngineExhaustStateCycleRequests, 0);
+        for (int i = 0; i < exhaustCycleRequests; i++)
+            CycleDebugEngineExhaustState(ship);
 
         // ── Teleport ─────────────────────────────────────────────────────
         var teleport = _teleportRequest;
@@ -655,6 +666,8 @@ public sealed class SpaceSimulation : Simulation
                         engine.InstanceId,
                         engine.Variant.VariantId,
                         engine.Variant.Engine.VisualGeometry,
+                        engine.Variant.Engine.VisualDefinition,
+                        engine.VisualState,
                         engine.GeometryTransform,
                         engine.DamageFraction,
                         engine.WearFraction);
@@ -674,7 +687,7 @@ public sealed class SpaceSimulation : Simulation
         return Array.AsReadOnly(snapshots);
     }
 
-    private static void CycleDebugEngineConfiguration(Ship ship)
+    private void CycleDebugEngineConfiguration(Ship ship)
     {
         EngineMount? port = ship.EngineMounts.SingleOrDefault(mount =>
             mount.Side == EngineMountSide.Port);
@@ -715,11 +728,35 @@ public sealed class SpaceSimulation : Simulation
                 new EnginePairDefinition($"debug.{variant.VariantId}.pair", variant),
                 port,
                 starboard);
+            ApplyDebugEngineExhaustState(ship);
         }
 
         DataBus.System.Publish(
             Topics.System.All,
             new SystemMessage(next.Notification, SystemMessagePriority.NB));
+    }
+
+    private void CycleDebugEngineExhaustState(Ship ship)
+    {
+        _debugEngineExhaustMode = EngineExhaustDebugStates.Next(_debugEngineExhaustMode);
+        ApplyDebugEngineExhaustState(ship);
+        DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(
+                EngineExhaustDebugStates.Notification(_debugEngineExhaustMode),
+                SystemMessagePriority.NB));
+    }
+
+    private void ApplyDebugEngineExhaustState(Ship ship)
+    {
+        EngineVisualState state =
+            EngineExhaustDebugStates.GetState(_debugEngineExhaustMode);
+        foreach (EngineInstance engine in ship.EngineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EngineInstance>())
+        {
+            engine.SetVisualState(state);
+        }
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────
