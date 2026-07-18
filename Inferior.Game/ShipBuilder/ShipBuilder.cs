@@ -2,6 +2,7 @@ using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
 using Inferior.Persistence.Data;
@@ -79,6 +80,7 @@ public sealed class ShipBuilder
             Position    = _position,
         };
         ship.SetOrientation(_orientation);
+        AddEngineMounts(ship, hull);
 
         if (_installDefaultComponents)
         {
@@ -119,5 +121,30 @@ public sealed class ShipBuilder
         }
 
         return ship;
+    }
+
+    private static void AddEngineMounts(Ship ship, HullDefinition hull)
+    {
+        if (hull.VisualGeometry is null)
+            return;
+
+        foreach (var port in hull.VisualGeometry.AttachmentPorts.Where(port =>
+            port.Capabilities.HasFlag(AttachmentCapability.Engine)))
+        {
+            if (string.IsNullOrWhiteSpace(port.ComponentSlotId)
+                || string.IsNullOrWhiteSpace(port.EngineMountStandardId)
+                || port.EngineMountSide is null)
+            {
+                throw new InvalidOperationException(
+                    $"Hull engine attachment port '{port.PortId}' lacks runtime mount metadata.");
+            }
+
+            ship.AddEngineMount(new EngineMount(
+                port.PortId,
+                port.ComponentSlotId,
+                port.EngineMountStandardId,
+                port.EngineMountSide.Value,
+                new EngineMountPose(port.Position, port.Normal, port.Up)));
+        }
     }
 }

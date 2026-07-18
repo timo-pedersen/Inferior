@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Microsoft.Xna.Framework;
+using Inferior.Gameplay.Engines;
 
 namespace Inferior.Gameplay.Hull;
 
@@ -101,6 +102,8 @@ public sealed record AttachmentPortDefinition(
 {
     public DVec3 Up { get; init; } = DVec3.UnitY;
     public string? ComponentSlotId { get; init; }
+    public string? EngineMountStandardId { get; init; }
+    public EngineMountSide? EngineMountSide { get; init; }
     public DVec3 FootprintMeters { get; init; } = DVec3.Zero;
     public DVec3 ClearanceMinMeters { get; init; } = DVec3.Zero;
     public DVec3 ClearanceMaxMeters { get; init; } = DVec3.Zero;

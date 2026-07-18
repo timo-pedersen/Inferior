@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 
 namespace Inferior.Gameplay.Ship;
@@ -50,6 +51,27 @@ public sealed class Ship
     {
         foreach (var c in _components)
             c.Tick(dt);
+    }
+
+    private readonly List<EngineMount> _engineMounts = [];
+    public IReadOnlyList<EngineMount> EngineMounts => _engineMounts;
+
+    public void AddEngineMount(EngineMount mount)
+    {
+        ArgumentNullException.ThrowIfNull(mount);
+        if (_engineMounts.Any(existing =>
+            string.Equals(existing.MountId, mount.MountId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"Duplicate engine mount id '{mount.MountId}'.");
+        }
+        if (_engineMounts.Any(existing =>
+            string.Equals(existing.ComponentSlotId, mount.ComponentSlotId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"Duplicate engine mount component slot '{mount.ComponentSlotId}'.");
+        }
+
+        _engineMounts.Add(mount);
     }
 
     /// <summary>True when at least one GyroComponent is running. Reduces slipstream exit tumble.</summary>

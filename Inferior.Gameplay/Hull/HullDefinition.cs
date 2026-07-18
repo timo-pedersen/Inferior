@@ -91,6 +91,11 @@ public sealed class HullDefinition
                 continue;
             }
 
+            if (string.IsNullOrWhiteSpace(port.EngineMountStandardId))
+                errors.Add($"Engine attachment port '{port.PortId}' has no mount standard.");
+            if (port.EngineMountSide is null)
+                errors.Add($"Engine attachment port '{port.PortId}' has no side assignment.");
+
             if (!boundEngineSlots.Add(port.ComponentSlotId))
                 errors.Add($"Multiple engine attachment ports reference component slot '{port.ComponentSlotId}'.");
         }

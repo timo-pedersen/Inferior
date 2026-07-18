@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Ship;
 using Microsoft.Xna.Framework;
 
@@ -193,6 +194,8 @@ public static class AriesHullDefinitionFactory
                 {
                     Up = DVec3.UnitY,
                     ComponentSlotId = "engine.port.01",
+                    EngineMountStandardId = EngineMountStandardIds.H2,
+                    EngineMountSide = Engines.EngineMountSide.Port,
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
                     ClearanceMinMeters = new DVec3(-5.0, -1.7, -1.8),
                     ClearanceMaxMeters = new DVec3(-3.65, 1.7, 7.4),
@@ -201,6 +204,8 @@ public static class AriesHullDefinitionFactory
                 {
                     Up = DVec3.UnitY,
                     ComponentSlotId = "engine.starboard.01",
+                    EngineMountStandardId = EngineMountStandardIds.H2,
+                    EngineMountSide = Engines.EngineMountSide.Starboard,
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
                     ClearanceMinMeters = new DVec3(3.65, -1.7, -1.8),
                     ClearanceMaxMeters = new DVec3(5.0, 1.7, 7.4),
