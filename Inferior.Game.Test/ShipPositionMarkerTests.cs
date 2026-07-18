@@ -8,6 +8,17 @@ namespace Inferior.Game.Test;
 public sealed class ShipPositionMarkerTests
 {
     [Fact]
+    public void MatrixDifference_IsZeroForIdenticalMatricesAndDetectsChangedTranslation()
+    {
+        Matrix baseline = Matrix.CreateLookAt(Vector3.Zero, -Vector3.UnitZ, Vector3.UnitY);
+        Matrix translated = baseline;
+        translated.M41 += 6500f;
+
+        Assert.Equal(0f, SystemSpaceState.MaxMatrixElementDifference(baseline, baseline));
+        Assert.Equal(6500f, SystemSpaceState.MaxMatrixElementDifference(baseline, translated));
+    }
+
+    [Fact]
     public void MarkerGeometry_ContainsWireCubeAndThreeWorldAxes()
     {
         var lines = SystemSpaceState.BuildShipPositionMarkerLines();

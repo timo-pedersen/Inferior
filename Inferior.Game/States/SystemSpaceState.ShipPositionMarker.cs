@@ -115,8 +115,15 @@ public sealed partial class SystemSpaceState
 
         _shipRenderDiagnosticPending = false;
         DVec3 difference = diagnostic.ShipPosition - snapshot.Position;
+        DVec3 cameraDifference = diagnostic.CameraPosition - _camera.UniversePosition;
         Vector3 translationDifference =
             diagnostic.WorldTranslation - diagnostic.CameraRelativeRenderPosition;
+        float appliedCameraViewDifference =
+            MaxMatrixElementDifference(diagnostic.AppliedView, diagnostic.CameraView);
+        float appliedSceneViewDifference =
+            MaxMatrixElementDifference(diagnostic.AppliedView, _effect.View);
+        float appliedSceneProjectionDifference =
+            MaxMatrixElementDifference(diagnostic.AppliedProjection, _effect.Projection);
         string log =
             "[ShipRender]\n" +
             $"Ship render position: {FormatVector(diagnostic.ShipPosition)}\n" +
@@ -127,7 +134,25 @@ public sealed partial class SystemSpaceState
             $"Camera-relative render position: {FormatVector(diagnostic.CameraRelativeRenderPosition)}\n" +
             $"World matrix translation: {FormatVector(diagnostic.WorldTranslation)}\n" +
             $"Translation difference: {FormatVector(translationDifference)}\n" +
-            $"Render path: {diagnostic.RenderPath}\n";
+            $"Render path: {diagnostic.RenderPath}\n" +
+            "[RenderCamera]\n" +
+            $"Render camera position: {FormatVector(diagnostic.CameraPosition)}\n" +
+            $"Render camera orientation: {FormatQuaternion(diagnostic.CameraOrientation)}\n" +
+            $"View matrix translation: {FormatVector(diagnostic.AppliedView.Translation)}\n" +
+            $"Marker camera/reference position: {FormatVector(_camera.UniversePosition)}\n" +
+            $"Marker camera/reference orientation: {FormatQuaternion(_camera.Orientation)}\n" +
+            $"Render/gameplay camera difference: {FormatVector(cameraDifference)}\n" +
+            $"Applied view vs camera view max element difference: {FormatFloat(appliedCameraViewDifference)}\n" +
+            $"Applied view vs current scene view max element difference: {FormatFloat(appliedSceneViewDifference)}\n" +
+            $"Applied projection vs current scene projection max element difference: {FormatFloat(appliedSceneProjectionDifference)}\n" +
+            "Camera view matrix:\n" +
+            $"{FormatMatrix(diagnostic.CameraView)}\n" +
+            "Applied render view matrix:\n" +
+            $"{FormatMatrix(diagnostic.AppliedView)}\n" +
+            "Applied render projection matrix:\n" +
+            $"{FormatMatrix(diagnostic.AppliedProjection)}\n" +
+            "Origin-shift note: camera world translation is applied by ToRenderSpace; " +
+            "the view matrix intentionally carries orientation without universe-position translation.\n";
 
         Console.WriteLine(log);
         string path = Path.Combine(AppContext.BaseDirectory, "ship_render_transform_diagnostic.log");
@@ -200,6 +225,36 @@ public sealed partial class SystemSpaceState
 
     private static string FormatQuaternion(Quaternion value)
         => FormattableString.Invariant($"({value.X:R}, {value.Y:R}, {value.Z:R}, {value.W:R})");
+
+    private static string FormatFloat(float value)
+        => value.ToString("R", CultureInfo.InvariantCulture);
+
+    private static string FormatMatrix(Matrix value)
+        => string.Join(
+            '\n',
+            FormattableString.Invariant($"    [{value.M11:R}, {value.M12:R}, {value.M13:R}, {value.M14:R}]"),
+            FormattableString.Invariant($"    [{value.M21:R}, {value.M22:R}, {value.M23:R}, {value.M24:R}]"),
+            FormattableString.Invariant($"    [{value.M31:R}, {value.M32:R}, {value.M33:R}, {value.M34:R}]"),
+            FormattableString.Invariant($"    [{value.M41:R}, {value.M42:R}, {value.M43:R}, {value.M44:R}]"));
+
+    internal static float MaxMatrixElementDifference(Matrix left, Matrix right)
+    {
+        return MathF.Max(
+            MathF.Max(
+                MathF.Max(
+                    MathF.Max(MathF.Abs(left.M11 - right.M11), MathF.Abs(left.M12 - right.M12)),
+                    MathF.Max(MathF.Abs(left.M13 - right.M13), MathF.Abs(left.M14 - right.M14))),
+                MathF.Max(
+                    MathF.Max(MathF.Abs(left.M21 - right.M21), MathF.Abs(left.M22 - right.M22)),
+                    MathF.Max(MathF.Abs(left.M23 - right.M23), MathF.Abs(left.M24 - right.M24)))),
+            MathF.Max(
+                MathF.Max(
+                    MathF.Max(MathF.Abs(left.M31 - right.M31), MathF.Abs(left.M32 - right.M32)),
+                    MathF.Max(MathF.Abs(left.M33 - right.M33), MathF.Abs(left.M34 - right.M34))),
+                MathF.Max(
+                    MathF.Max(MathF.Abs(left.M41 - right.M41), MathF.Abs(left.M42 - right.M42)),
+                    MathF.Max(MathF.Abs(left.M43 - right.M43), MathF.Abs(left.M44 - right.M44)))));
+    }
 
     private static void AddMarkerLine(
         List<VertexPositionColor> lines,

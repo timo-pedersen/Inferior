@@ -9,6 +9,10 @@ public readonly record struct ShipRenderTransformDiagnostic(
     DVec3 ShipPosition,
     Quaternion ShipOrientation,
     DVec3 CameraPosition,
+    Quaternion CameraOrientation,
+    Matrix CameraView,
+    Matrix AppliedView,
+    Matrix AppliedProjection,
     Vector3 CameraRelativeRenderPosition,
     Vector3 WorldTranslation,
     ShipHullRenderPath RenderPath);
@@ -86,6 +90,10 @@ public sealed class ShipMeshRenderer : IDisposable
             shipPosition,
             shipOrientation,
             camera.UniversePosition,
+            camera.Orientation,
+            camera.ViewMatrix,
+            currentView,
+            currentProjection,
             renderPos,
             world.Translation,
             renderPath);
