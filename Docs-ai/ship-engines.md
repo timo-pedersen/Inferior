@@ -619,4 +619,41 @@ cost.
 
 A large cheap engine should look different from a compact advanced engine.
 
+## Engine visual state invariant
+
+Engine visuals represent commanded propulsion activity, not achieved vehicle motion.
+The glow indicates what the pilot/flight system is asking the engines to do.
+
+It must not depend on:
+current ship velocity;
+whether acceleration increases or decreases velocity;
+speed limits;
+speed tapering.
+
+A ship travelling at maximum velocity and holding throttle should still show active engines.
+Proposed state mapping
+
+Priority order:
+
+Boost active
+    ↓
+Boost visual
+
+X-Stop active AND velocity non-zero
+    ↓
+Velocity correction / braking visual
+
+Propulsion input active (WASD/RF)
+    ↓
+Normal thrust visual
+
+No propulsion command
+    ↓
+Idle visual
+
+Notes:
+- Reverse acceleration is still normal thrust.
+- Strafing is still normal thrust.
+- Vertical thrust is still normal thrust.
+- The engine does not know or care whether the ship is "winning" against its current velocity.
 
