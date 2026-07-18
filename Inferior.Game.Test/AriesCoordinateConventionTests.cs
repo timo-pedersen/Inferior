@@ -81,8 +81,8 @@ public sealed class AriesCoordinateConventionTests
         EngineMount port = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Port);
         EngineMount starboard = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Starboard);
 
-        Assert.Equal(new DVec3(-4.50, -0.05, 2.75), port.Pose.Position);
-        Assert.Equal(new DVec3(4.50, -0.05, 2.75), starboard.Pose.Position);
+        Assert.Equal(new DVec3(-5.00, 0.45, 2.75), port.Pose.Position);
+        Assert.Equal(new DVec3(5.00, 0.45, 2.75), starboard.Pose.Position);
         Assert.Equal(-DVec3.UnitX, port.Pose.OutwardNormal);
         Assert.Equal(DVec3.UnitX, starboard.Pose.OutwardNormal);
         Assert.Equal(DVec3.UnitY, port.Pose.Up);

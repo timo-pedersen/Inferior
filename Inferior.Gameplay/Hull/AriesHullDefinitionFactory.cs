@@ -28,7 +28,7 @@ public static class AriesHullDefinitionFactory
 
         Dimensions = new HullDimensions(
             LengthMeters: 16.0,
-            WidthMeters: 11.2,
+            WidthMeters: 12.2,
             HeightMeters: 5.0,
             StructuralHullWidthMeters: 7.0,
             StructuralHullHeightMeters: 5.0),
@@ -190,25 +190,25 @@ public static class AriesHullDefinitionFactory
             ],
             AttachmentPorts =
             [
-                new($"{HullId}.port.engine-root.01", new DVec3(-4.50, -0.05, 2.75), -DVec3.UnitX, AttachmentCapability.Engine)
+                new($"{HullId}.port.engine-root.01", new DVec3(-5.00, 0.45, 2.75), -DVec3.UnitX, AttachmentCapability.Engine)
                 {
                     Up = DVec3.UnitY,
                     ComponentSlotId = "engine.port.01",
                     EngineMountStandardId = EngineMountStandardIds.H2,
                     EngineMountSide = Engines.EngineMountSide.Port,
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
-                    ClearanceMinMeters = new DVec3(-5.6, -1.7, -1.8),
-                    ClearanceMaxMeters = new DVec3(-3.55, 1.7, 7.4),
+                    ClearanceMinMeters = new DVec3(-6.1, -1.2, -1.8),
+                    ClearanceMaxMeters = new DVec3(-4.05, 2.2, 7.4),
                 },
-                new($"{HullId}.starboard.engine-root.01", new DVec3(4.50, -0.05, 2.75), DVec3.UnitX, AttachmentCapability.Engine)
+                new($"{HullId}.starboard.engine-root.01", new DVec3(5.00, 0.45, 2.75), DVec3.UnitX, AttachmentCapability.Engine)
                 {
                     Up = DVec3.UnitY,
                     ComponentSlotId = "engine.starboard.01",
                     EngineMountStandardId = EngineMountStandardIds.H2,
                     EngineMountSide = Engines.EngineMountSide.Starboard,
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
-                    ClearanceMinMeters = new DVec3(3.55, -1.7, -1.8),
-                    ClearanceMaxMeters = new DVec3(5.6, 1.7, 7.4),
+                    ClearanceMinMeters = new DVec3(4.05, -1.2, -1.8),
+                    ClearanceMaxMeters = new DVec3(6.1, 2.2, 7.4),
                 },
                 new($"{HullId}.underside.landing-foot.01", new DVec3(-1.85, -2.55, -6.15), -DVec3.UnitY, AttachmentCapability.LandingGear)
                 {
