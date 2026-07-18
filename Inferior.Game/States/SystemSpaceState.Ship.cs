@@ -38,17 +38,21 @@ public sealed partial class SystemSpaceState
             snap.Forward,
             snap.Up);
 
-        // Snap on the first frame after entering third-person; lerp smoothly after that.
-        _tpCamPos = _tpCamPosValid
-            ? DVec3.Lerp(_tpCamPos, targets.DesiredPosition, 0.08)
-            : targets.DesiredPosition;
-        _tpCamPosValid = true;
+        // Smooth only ship-relative framing. Snapshot translation remains exact, so
+        // fast flight cannot leave the camera easing across stale universe space.
+        DVec3 desiredOffset = targets.DesiredPosition - snap.Position;
+        _tpCamOffset = CalculateSmoothedChaseOffset(
+            desiredOffset,
+            _tpCamOffset,
+            _tpCamOffsetValid);
+        _tpCamOffsetValid = true;
+        DVec3 cameraPosition = snap.Position + _tpCamOffset;
 
         // Use ship's own up axis so the camera rolls with the ship — eliminates the
         // singularity that occurs when the ship points near vertical and world-up is
         // nearly parallel to the look direction.
-        DVec3 lookDir = DVec3.Normalize(targets.LookTarget - _tpCamPos);
-        _camera.SetPose(_tpCamPos, QuatLookAtWithUp(lookDir, snap.Up));
+        DVec3 lookDir = DVec3.Normalize(targets.LookTarget - cameraPosition);
+        _camera.SetPose(cameraPosition, QuatLookAtWithUp(lookDir, snap.Up));
     }
 
     private void UpdateShipFollowingCamera(SpaceSimulation.ShipSnapshot snap)
@@ -69,6 +73,14 @@ public sealed partial class SystemSpaceState
             shipPosition - shipForward * 80.0 + shipUp * 30.0,
             shipPosition + shipForward * 8.0);
     }
+
+    internal static DVec3 CalculateSmoothedChaseOffset(
+        DVec3 desiredOffset,
+        DVec3 previousOffset,
+        bool previousOffsetValid)
+        => previousOffsetValid
+            ? DVec3.Lerp(previousOffset, desiredOffset, 0.08)
+            : desiredOffset;
 
     // Builds a quaternion whose -Z axis aligns with `forward` and whose +Y axis
     // aligns as closely as possible with `shipUp`. No singularity because shipUp is

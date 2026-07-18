@@ -34,6 +34,7 @@ public sealed partial class SystemSpaceState
     private void FeedRadarContacts()
     {
         DVec3 camPos = _camera.UniversePosition;
+        DVec3 shipPos = _frameShipSnap?.Position ?? camPos;
 
         // Remove any stale body:* contacts (planets/moons are not shown on radar)
         var staleBodyIds = new List<string>();
@@ -51,10 +52,11 @@ public sealed partial class SystemSpaceState
         {
             string id      = $"station:{station.Name}";
             DVec3  del     = galaxyPos - camPos;
+            float shipDistance = (float)(galaxyPos - shipPos).Length;
             var    contact = new RadarContact(
                 id, station.Name,
                 new Vector3((float)del.X, (float)del.Y, (float)del.Z),
-                Vector3.Zero, ContactType.Station);
+                Vector3.Zero, ContactType.Station, shipDistance);
             _targeting.OnContactUpdated(contact);
             _cockpitUI.NotifyRadarContact(contact);
             _radarContactIds.Add(id);
@@ -67,10 +69,11 @@ public sealed partial class SystemSpaceState
                 if (ReferenceEquals(s, pc.Station)) { stPos = sPos; break; }
             DVec3 pos   = stPos + pc.Offset;
             DVec3 del   = pos - camPos;
+            float shipDistance = (float)(pos - shipPos).Length;
             var   contact = new RadarContact(
                 pc.Id, pc.Name,
                 new Vector3((float)del.X, (float)del.Y, (float)del.Z),
-                Vector3.Zero, ContactType.Debris);
+                Vector3.Zero, ContactType.Debris, shipDistance);
             _targeting.OnContactUpdated(contact);
             _cockpitUI.NotifyRadarContact(contact);
             _radarContactIds.Add(pc.Id);
@@ -149,7 +152,7 @@ public sealed partial class SystemSpaceState
 
         if (_targeting.CurrentRadarTarget is { Type: ContactType.Station } contact)
         {
-            displayedTargetDistance = contact.RelativePosition.Length();
+            displayedTargetDistance = contact.EffectiveShipDistanceMeters;
             string stationName = contact.DisplayName;
             foreach (var (station, pos) in _stationPositions)
             {

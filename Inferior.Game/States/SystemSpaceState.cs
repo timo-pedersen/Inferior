@@ -171,8 +171,8 @@ public sealed partial class SystemSpaceState : GameState
     private bool _debugCameraMode;
     private bool _thirdPersonMode;
     private bool _semanticHullDebug;
-    private DVec3 _tpCamPos;       // smoothed third-person camera position
-    private bool  _tpCamPosValid;
+    private DVec3 _tpCamOffset;       // smoothed ship-relative third-person offset
+    private bool  _tpCamOffsetValid;
     private bool _prevIsGameActive = true;
     private bool _prevUiMouseMode;
     private readonly MouseLookRebaser _shipMouseLook = new();
@@ -377,7 +377,7 @@ public sealed partial class SystemSpaceState : GameState
         // Ship mesh — three components; built once per session entry on the main thread
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
         _thirdPersonMode  = false;
-        _tpCamPosValid    = false;
+        _tpCamOffsetValid = false;
         InitializeShipPositionMarker();
 
         // Ring primitive reused for both orbit rings and station orbit rings
@@ -688,7 +688,7 @@ public sealed partial class SystemSpaceState : GameState
         if (f3JustPressed && !_debugCameraMode)
         {
             _thirdPersonMode = !_thirdPersonMode;
-            _tpCamPosValid   = false;  // force immediate snap on first frame
+            _tpCamOffsetValid = false;  // force immediate snap on first frame
         }
         if (f4JustPressed)
         {

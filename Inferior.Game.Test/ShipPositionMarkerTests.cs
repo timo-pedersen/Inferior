@@ -71,6 +71,25 @@ public sealed class ShipPositionMarkerTests
     }
 
     [Fact]
+    public void ChaseSmoothing_DoesNotEaseAcrossShipUniverseTranslation()
+    {
+        var previousShipPosition = new DVec3(1000, 2000, 3000);
+        var previousOffset = new DVec3(0, 30, 80);
+        var translatedShipPosition = previousShipPosition + new DVec3(6500, -200, 400);
+        DVec3 smoothedOffset = SystemSpaceState.CalculateSmoothedChaseOffset(
+            previousOffset,
+            previousOffset,
+            previousOffsetValid: true);
+
+        DVec3 previousCameraPosition = previousShipPosition + previousOffset;
+        DVec3 translatedCameraPosition = translatedShipPosition + smoothedOffset;
+
+        Assert.Equal(
+            translatedShipPosition - previousShipPosition,
+            translatedCameraPosition - previousCameraPosition);
+    }
+
+    [Fact]
     public void ChaseOrientation_PointsCameraAtCalculatedTarget()
     {
         var targets = SystemSpaceState.CalculateChaseCameraTargets(

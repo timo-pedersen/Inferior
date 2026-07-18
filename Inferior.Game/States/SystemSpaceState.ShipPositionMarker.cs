@@ -135,6 +135,16 @@ public sealed partial class SystemSpaceState
             $"World matrix translation: {FormatVector(diagnostic.WorldTranslation)}\n" +
             $"Translation difference: {FormatVector(translationDifference)}\n" +
             $"Render path: {diagnostic.RenderPath}\n" +
+            "[CameraTruth]\n" +
+            $"Simulation tick number: {snapshot.TickSequence}\n" +
+            $"Snapshot timestamp / SimTime: {snapshot.SimTime.ToString("R", CultureInfo.InvariantCulture)}\n" +
+            $"Snapshot ship position / HUD truth: {FormatVector(snapshot.Position)}\n" +
+            $"Normal camera position: {FormatVector(snapshot.CockpitWorldPosition)}\n" +
+            $"Chase camera position: {FormatVector(diagnostic.CameraPosition)}\n" +
+            $"Graphics view camera position / render origin: {FormatVector(diagnostic.CameraPosition)}\n" +
+            $"HUD ship position: {FormatVector(snapshot.Position)}\n" +
+            $"Target-distance origin position: {FormatVector(snapshot.Position)}\n" +
+            $"Targeting projection origin position: {FormatVector(diagnostic.CameraPosition)}\n" +
             "[RenderCamera]\n" +
             $"Render camera position: {FormatVector(diagnostic.CameraPosition)}\n" +
             $"Render camera orientation: {FormatQuaternion(diagnostic.CameraOrientation)}\n" +
