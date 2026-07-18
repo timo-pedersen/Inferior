@@ -19,10 +19,37 @@ internal sealed class ChaseCameraState
     public DVec3 HullLocalDirection { get; private set; } = DefaultOffset.Normalized();
     public double Radius { get; private set; } = DefaultOffset.Length;
     public double RollRadians { get; private set; }
+    public bool IsActive { get; private set; }
+    public bool IsOrbitalEditActive { get; private set; }
 
     public DVec3 DesiredHullLocalOffset => HullLocalDirection * Radius;
 
     public void ResetSmoothing() => _easedOffsetValid = false;
+
+    public bool ToggleActive()
+    {
+        IsActive = !IsActive;
+        if (!IsActive)
+            IsOrbitalEditActive = false;
+        ResetSmoothing();
+        return IsActive;
+    }
+
+    public void Deactivate()
+    {
+        IsActive = false;
+        IsOrbitalEditActive = false;
+        ResetSmoothing();
+    }
+
+    public bool ToggleOrbitalEdit()
+    {
+        if (!IsActive)
+            return false;
+
+        IsOrbitalEditActive = !IsOrbitalEditActive;
+        return true;
+    }
 
     public void ApplyEdit(ChaseCameraEditInput input, double dt)
     {

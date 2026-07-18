@@ -169,7 +169,6 @@ public sealed partial class SystemSpaceState : GameState
     // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
-    private bool _thirdPersonMode;
     private bool _semanticHullDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
@@ -375,7 +374,7 @@ public sealed partial class SystemSpaceState : GameState
 
         // Ship mesh — three components; built once per session entry on the main thread
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
-        _thirdPersonMode  = false;
+        _chaseCamera.Deactivate();
         _chaseCamera.ResetSmoothing();
         InitializeShipPositionMarker();
 
@@ -661,7 +660,14 @@ public sealed partial class SystemSpaceState : GameState
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
-        bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
+        bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
+        bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
+        bool ctrlF3Down = ctrlDown && keys.IsKeyDown(Keys.F3);
+        bool ctrlF3JustPressed = ctrlF3Down
+                              && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F3));
+        bool f3JustPressed = !ctrlDown
+                          && keys.IsKeyDown(Keys.F3)
+                          && !_prevKeys.IsKeyDown(Keys.F3);
         bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
         bool f5JustPressed  = keys.IsKeyDown(Keys.F5)  && !_prevKeys.IsKeyDown(Keys.F5);
         bool shipPositionMarkerToggledOn = false;
@@ -682,12 +688,27 @@ public sealed partial class SystemSpaceState : GameState
                 _shipMouseLook.RequestRebase();
             }
             _debugCameraMode = !_debugCameraMode;
-            if (_debugCameraMode) _thirdPersonMode = false;  // can't combine with debug cam
+            if (_debugCameraMode) _chaseCamera.Deactivate();  // can't combine with debug cam
         }
-        if (f3JustPressed && !_debugCameraMode)
+        if (ctrlF3JustPressed && !_debugCameraMode)
         {
-            _thirdPersonMode = !_thirdPersonMode;
-            _chaseCamera.ResetSmoothing();
+            if (_chaseCamera.ToggleOrbitalEdit())
+            {
+                PublishCameraMessage(
+                    _chaseCamera.IsOrbitalEditActive
+                        ? "Orbital camera edit enabled."
+                        : "Orbital camera edit disabled.");
+            }
+            else
+            {
+                PublishCameraMessage("Orbital camera requires chase view.");
+            }
+        }
+        else if (f3JustPressed && !_debugCameraMode)
+        {
+            bool enabled = _chaseCamera.ToggleActive();
+            PublishCameraMessage(
+                enabled ? "Chase camera enabled." : "Chase camera disabled.");
         }
         if (f4JustPressed)
         {
@@ -796,6 +817,14 @@ public sealed partial class SystemSpaceState : GameState
             // Cursor is locked to window centre so mouse can't escape the window.
             HandleStationCycleInput(keys);
             _lastFlightInput = BuildShipInput(lookMouse, keys, IsGameActive);
+            if (_chaseCamera.IsOrbitalEditActive)
+            {
+                ChaseCameraEditInput editInput = ReadChaseCameraEditInput(keys, _prevKeys);
+                _chaseCamera.ApplyEdit(editInput, dt);
+                if (editInput.Reset)
+                    PublishCameraMessage("Chase camera reset.");
+                _lastFlightInput = ConsumeOrbitalCameraFlightInput(_lastFlightInput);
+            }
             _simulation.SetInput(_lastFlightInput);
             if (_frameShipSnap != null)
                 UpdateShipFollowingCamera(_frameShipSnap);
@@ -1067,7 +1096,7 @@ public sealed partial class SystemSpaceState : GameState
         DrawContainers(level);
         DrawCalibrationCube(level);
         DrawShipPositionMarker();
-        if (_thirdPersonMode && _frameShipSnap != null)
+        if (_chaseCamera.IsActive && _frameShipSnap != null)
         {
             ShipRenderTransformDiagnostic diagnostic = _shipMeshRenderer.Draw(
                 _camera, _effect.View, _effect.Projection,

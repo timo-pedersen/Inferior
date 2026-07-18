@@ -46,7 +46,7 @@ public sealed partial class SystemSpaceState
 
     private void UpdateShipFollowingCamera(SpaceSimulation.ShipSnapshot snap)
     {
-        if (_thirdPersonMode)
+        if (_chaseCamera.IsActive)
             UpdateThirdPersonCamera(snap);
         else
             _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
@@ -145,6 +145,44 @@ public sealed partial class SystemSpaceState
             GearChangeSteps = gearChangeSteps
         };
     }
+
+    internal static ChaseCameraEditInput ReadChaseCameraEditInput(
+        KeyboardState keys,
+        KeyboardState previousKeys)
+    {
+        double horizontal =
+            (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
+        double vertical =
+            (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
+        double roll =
+            (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
+        double radial =
+            (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0);
+        bool reset = keys.IsKeyDown(Keys.X) && !previousKeys.IsKeyDown(Keys.X);
+        return new ChaseCameraEditInput(horizontal, vertical, roll, radial, reset);
+    }
+
+    internal static PlayerInput ConsumeOrbitalCameraFlightInput(PlayerInput input)
+        => input with
+        {
+            ThrustForward = 0.0,
+            ThrustLateral = 0.0,
+            ThrustVertical = 0.0,
+            RollInput = 0.0,
+            PitchInput = 0.0,
+            YawInput = 0.0,
+            XStopToggle = false,
+            XStopToggleSequence = 0,
+        };
+
+    private void PublishCameraMessage(string text)
+        => DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(text, SystemMessagePriority.NB));
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
 

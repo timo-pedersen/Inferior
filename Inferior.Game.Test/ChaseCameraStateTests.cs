@@ -96,4 +96,37 @@ public sealed class ChaseCameraStateTests
 
         Assert.True(Vector3.Dot(cameraForward, expected) > 0.9999f);
     }
+
+    [Fact]
+    public void EditedPose_PersistsAcrossEditAndChaseModeToggles()
+    {
+        var chase = new ChaseCameraState();
+        chase.ToggleActive();
+        chase.ToggleOrbitalEdit();
+        chase.ApplyEdit(new ChaseCameraEditInput(1, 1, 1, 1, false), 0.25);
+        DVec3 editedDirection = chase.HullLocalDirection;
+        double editedRadius = chase.Radius;
+        double editedRoll = chase.RollRadians;
+
+        chase.ToggleOrbitalEdit();
+        chase.ToggleActive();
+        chase.ToggleActive();
+
+        Assert.True(chase.IsActive);
+        Assert.False(chase.IsOrbitalEditActive);
+        Assert.Equal(editedDirection, chase.HullLocalDirection);
+        Assert.Equal(editedRadius, chase.Radius);
+        Assert.Equal(editedRoll, chase.RollRadians);
+    }
+
+    [Fact]
+    public void OrbitalEdit_CannotActivateOutsideChaseMode()
+    {
+        var chase = new ChaseCameraState();
+
+        bool handled = chase.ToggleOrbitalEdit();
+
+        Assert.False(handled);
+        Assert.False(chase.IsOrbitalEditActive);
+    }
 }

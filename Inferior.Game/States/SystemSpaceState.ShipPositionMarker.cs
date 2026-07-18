@@ -84,7 +84,7 @@ public sealed partial class SystemSpaceState
         if (!markerLogRequested && !f3JustPressed)
             return;
 
-        ChaseCameraTargets? chaseTargets = f3JustPressed && _thirdPersonMode
+        ChaseCameraTargets? chaseTargets = f3JustPressed && _chaseCamera.IsActive
             ? CalculateChaseCameraTargets(
                 _frameShipSnap.Position,
                 _frameShipSnap.Forward,
