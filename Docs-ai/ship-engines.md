@@ -133,6 +133,144 @@ Military Large:
 
 UFSVEM stands for "United Federation Standard Vehicle Engine Mount", a very old imperial standard still in use.
 
+## Engine Mount Geometry
+
+### Physical role
+
+An engine mount is a physical ship structure, not only an attachment transform or compatibility record.
+
+It connects the hull to the installed engine and represents:
+- structural load transfer;
+- engine retention and replacement interface;
+- power and control connections;
+- fuel connections;
+- thermal transport connections;
+- service access where required.
+
+An installed engine must not appear to float beside the hull. There must be continuous visible structure between the 
+hull mount region and the engine attachment plane.
+
+Ownership
+The mount belongs to the hull.
+
+Hull
+ └─ EngineMount
+      └─ Installed EngineInstance
+
+The hull definition owns:
+- mount standard;
+- mount root transform;
+- mount geometry;
+- engine attachment transform;
+- service-access requirements;
+- clearance envelope.
+
+The engine variant owns the matching engine-side attachment interface.
+
+The mount geometry remains present when an engine is removed, unless damage has physically destroyed the mount.
+
+### Mount geometry components
+
+A mount may contain:
+- Hull root
+- The reinforced region where the mount joins the hull.
+- Service trunk or structural arm
+- The visible structure spanning from hull to engine.
+
+Engine attachment collar
+- The interface surrounding or meeting the engine attachment plane.
+
+Optional fairing
+- Hull-owned geometry covering part of the transition.
+
+Optional internal passage
+- Required where internal engine servicing applies.
+
+These parts may form one continuous mesh, but they should retain semantic identities.
+Suggested roles:
+- EngineMountRoot
+- EngineMountTrunk
+- EngineMountCollar
+- EngineMountFairing
+- EngineMountServiceAccess
+- Civilian mount form
+- Civilian mounts generally extend laterally from the hull and keep the engine axis parallel with the ship’s longitudinal axis.
+
+Common shapes include:
+- rectangular trunks;
+- octagonal tubes;
+- tapered structural arms;
+- boxed service passages;
+- short collars integrated into the engine casing.
+
+For Small ships such as Aries, the mount need not contain a human crawlspace. 
+It must still plausibly contain structural members, cabling, fuel handling and thermal 
+transport connections.
+
+### Military mount form
+Military engines remain aligned with the ship axis.
+The mount trunk angles approximately 30 degrees backward from the hull before meeting the engine, creating the characteristic 
+lowercase-y silhouette.
+
+The angled trunk is hull-owned mount geometry, not part of the generic engine family.
+
+### Service-access dimensions
+Medium and larger internally serviceable installations should provide a continuous passage through the mount where the design requires crew access.
+Conceptual minimum clearance:
+Width: 0.6–0.7 m (or up to 1 meters for larger ships)
+Height: approximately 0.7 m (up to 2.5 meters for larger ships)
+
+The passage does not need a fully modelled interior during the initial rendering implementation, but the exterior 
+dimensions must leave plausible room for it.
+
+### Mount standards and geometry
+
+A mount standard defines more than compatibility metadata. It establishes the physical interface, including:
+- attachment-plane dimensions;
+- trunk connection envelope;
+- collar dimensions;
+- permitted structural-arm geometry;
+- service-interface locations;
+- maximum supported load;
+- engine clearance envelope;
+- exhaust keep-clear requirements.
+
+Different hulls using the same standard may have differently shaped hull-side trunks or fairings, provided the engine 
+attachment interface remains compatible.
+
+Therefore:
+The mount standard is shared; the complete visible mount structure is hull-specific.
+
+This allows an H2 mount on Aries to differ visually from an H2 mount on another ship while 
+accepting the same H2 engine variant.
+
+### Engine removal
+When an engine is absent:
+- the hull-side mount remains visible;
+- the attachment collar or exposed interface is visible;
+- engine-owned geometry, lights and exhaust regions disappear;
+- the remaining mount must still read as a real structural component.
+
+Later systems may add:
+- caps or protective covers;
+- exposed connectors;
+- damage;
+- maintenance equipment.
+These are deferred.
+
+### Visual design rule
+The mount should make the installed engine look:
+- structurally supported;
+- replaceable;
+- mechanically connected;
+- deliberately positioned.
+
+It should not resemble:
+- an invisible transform;
+- a decorative strut with no volume;
+- a thin rod incapable of carrying the engine;
+- engine geometry intersecting directly into the hull without an interface.
+
 ## Military mount geometry
 Military propulsion mounts have a distinctive geometry.
 
