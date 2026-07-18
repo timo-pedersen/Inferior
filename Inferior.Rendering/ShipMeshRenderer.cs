@@ -392,20 +392,50 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix view,
         Matrix projection)
     {
+        VertexPositionColor[] lines = BuildEngineModuleDebugLines(engineMounts);
+        if (lines.Length == 0)
+            return;
+
+        _debugLineEffect.World = shipWorld;
+        _debugLineEffect.View = view;
+        _debugLineEffect.Projection = projection;
+        _gd.RasterizerState = RasterizerState.CullNone;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        foreach (EffectPass pass in _debugLineEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawUserPrimitives(PrimitiveType.LineList, lines, 0, lines.Length / 2);
+        }
+    }
+
+    public static VertexPositionColor[] BuildEngineModuleDebugLines(
+        IReadOnlyList<EngineMountPresentationSnapshot> engineMounts)
+    {
         var lines = new List<VertexPositionColor>();
         foreach (EngineMountPresentationSnapshot mount in engineMounts)
         {
-            Matrix mountTransform =
+            if (mount.HullRootPosition is { } root)
+            {
+                Matrix rootTransform =
+                    Matrix.CreateFromQuaternion(mount.Pose.Orientation)
+                    * Matrix.CreateTranslation(root.ToVector3());
+                AddTransformAxes(lines, rootTransform, 0.55f);
+            }
+
+            DVec3 interfacePosition = mount.AttachmentInterfacePosition ?? mount.Pose.Position;
+            Matrix interfaceTransform =
                 Matrix.CreateFromQuaternion(mount.Pose.Orientation)
-                * Matrix.CreateTranslation(mount.Pose.Position.ToVector3());
-            AddTransformAxes(lines, mountTransform, 1.0f);
+                * Matrix.CreateTranslation(interfacePosition.ToVector3());
+            AddTransformAxes(lines, interfaceTransform, 0.85f);
+            if (mount.HullRootPosition is { } hullRoot)
+                AddLine(lines, hullRoot.ToVector3(), interfacePosition.ToVector3(), Color.Yellow);
 
             EnginePresentationSnapshot? engine = mount.InstalledEngine;
             if (engine is null)
                 continue;
 
             Matrix engineTransform = engine.GeometryTransform.LocalToHull;
-            AddTransformAxes(lines, engineTransform, 0.75f);
+            AddCross(lines, engineTransform.Translation, 0.16f, Color.White);
             bool mirrored = engine.GeometryTransform.MirroredAcrossHullX;
             foreach (EngineExhaustDefinition exhaust in engine.VisualGeometry.Exhausts)
             {
@@ -426,19 +456,7 @@ public sealed class ShipMeshRenderer : IDisposable
             }
         }
 
-        if (lines.Count == 0)
-            return;
-
-        _debugLineEffect.World = shipWorld;
-        _debugLineEffect.View = view;
-        _debugLineEffect.Projection = projection;
-        _gd.RasterizerState = RasterizerState.CullNone;
-        _gd.DepthStencilState = DepthStencilState.Default;
-        foreach (EffectPass pass in _debugLineEffect.CurrentTechnique.Passes)
-        {
-            pass.Apply();
-            _gd.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
-        }
+        return lines.ToArray();
     }
 
     private static void AddTransformAxes(List<VertexPositionColor> lines, Matrix transform, float length)

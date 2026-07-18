@@ -656,6 +656,8 @@ public sealed class SpaceSimulation : Simulation
                     mount.MountStandardId,
                     mount.Side,
                     mount.Pose,
+                    mount.HullRootPosition,
+                    mount.AttachmentInterfacePosition,
                     engineSnapshot);
             })
             .ToArray();

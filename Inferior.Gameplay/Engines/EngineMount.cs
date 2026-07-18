@@ -63,6 +63,15 @@ public sealed record EngineGeometryTransform(
     public Matrix LocalToHull =>
         Matrix.CreateFromQuaternion(Orientation)
         * Matrix.CreateTranslation(Position.ToVector3());
+
+    public DVec3 TransformVisualPoint(DVec3 point)
+    {
+        DVec3 corrected = MirroredAcrossHullX
+            ? new DVec3(-point.X, point.Y, point.Z)
+            : point;
+        Vector3 transformed = Vector3.Transform(corrected.ToVector3(), LocalToHull);
+        return new DVec3(transformed.X, transformed.Y, transformed.Z);
+    }
 }
 
 /// <summary>A physical installation location owned by one live ship instance.</summary>
@@ -73,7 +82,9 @@ public sealed class EngineMount
         string componentSlotId,
         string mountStandardId,
         EngineMountSide side,
-        EngineMountPose pose)
+        EngineMountPose pose,
+        DVec3? hullRootPosition = null,
+        DVec3? attachmentInterfacePosition = null)
     {
         if (string.IsNullOrWhiteSpace(mountId))
             throw new ArgumentException("Engine mount id must not be empty.", nameof(mountId));
@@ -87,6 +98,12 @@ public sealed class EngineMount
         MountStandardId = mountStandardId;
         Side = side;
         Pose = pose ?? throw new ArgumentNullException(nameof(pose));
+        if (hullRootPosition is { } root && !IsFinite(root))
+            throw new ArgumentOutOfRangeException(nameof(hullRootPosition));
+        if (attachmentInterfacePosition is { } attachment && !IsFinite(attachment))
+            throw new ArgumentOutOfRangeException(nameof(attachmentInterfacePosition));
+        HullRootPosition = hullRootPosition;
+        AttachmentInterfacePosition = attachmentInterfacePosition;
     }
 
     public string MountId { get; }
@@ -94,6 +111,8 @@ public sealed class EngineMount
     public string MountStandardId { get; }
     public EngineMountSide Side { get; }
     public EngineMountPose Pose { get; }
+    public DVec3? HullRootPosition { get; }
+    public DVec3? AttachmentInterfacePosition { get; }
     public EngineInstance? InstalledEngine { get; private set; }
 
     public bool CanAccept(EngineVariantDefinition variant)
@@ -134,4 +153,9 @@ public sealed class EngineMount
         engine.Uninstall();
         return engine;
     }
+
+    private static bool IsFinite(DVec3 value)
+        => double.IsFinite(value.X)
+        && double.IsFinite(value.Y)
+        && double.IsFinite(value.Z);
 }

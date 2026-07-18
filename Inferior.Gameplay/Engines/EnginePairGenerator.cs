@@ -1,3 +1,4 @@
+using Inferior.Core.Math;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Gameplay.Engines;
@@ -59,6 +60,8 @@ public static class EnginePairGenerator
             starboardMount.Pose.Position,
             pairDefinition.HullLocalOrientation,
             MirroredAcrossHullX: false);
+        ValidatePhysicalInterface(portMount, pairDefinition.Variant, leftTransform);
+        ValidatePhysicalInterface(starboardMount, pairDefinition.Variant, rightTransform);
 
         if (!portMount.TryInstall(left, leftTransform)
             || !starboardMount.TryInstall(right, rightTransform))
@@ -87,4 +90,24 @@ public static class EnginePairGenerator
 
     private static bool Near(double left, double right, double tolerance)
         => Math.Abs(left - right) <= tolerance;
+
+    private static void ValidatePhysicalInterface(
+        EngineMount mount,
+        EngineVariantDefinition variant,
+        EngineGeometryTransform transform)
+    {
+        if (mount.AttachmentInterfacePosition is not { } expected
+            || variant.Engine.VisualGeometry is not { } geometry)
+        {
+            return;
+        }
+
+        DVec3 actual = transform.TransformVisualPoint(geometry.AttachmentInterfacePosition);
+        if ((actual - expected).Length > 1e-5)
+        {
+            throw new InvalidOperationException(
+                $"Engine variant '{variant.VariantId}' interface {actual} does not meet mount " +
+                $"'{mount.MountId}' interface {expected}.");
+        }
+    }
 }

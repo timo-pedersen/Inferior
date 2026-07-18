@@ -36,6 +36,7 @@ public sealed class EngineVisualGeometry
 {
     public EngineVisualGeometry(
         string geometryId,
+        DVec3 attachmentInterfacePosition,
         IReadOnlyList<EngineVisualMeshPart> meshParts,
         IReadOnlyList<EngineExhaustDefinition> exhausts,
         IReadOnlyList<EngineLightDefinition> lights)
@@ -47,8 +48,11 @@ public sealed class EngineVisualGeometry
         ArgumentNullException.ThrowIfNull(lights);
         if (meshParts.Count == 0 || meshParts.Any(part => part.Triangles.Count == 0))
             throw new ArgumentException("Engine geometry must contain non-empty mesh parts.", nameof(meshParts));
+        if (!IsFinite(attachmentInterfacePosition))
+            throw new ArgumentOutOfRangeException(nameof(attachmentInterfacePosition));
 
         GeometryId = geometryId;
+        AttachmentInterfacePosition = attachmentInterfacePosition;
         MeshParts = Array.AsReadOnly(meshParts
             .Select(part => new EngineVisualMeshPart(
                 part.Material,
@@ -59,7 +63,13 @@ public sealed class EngineVisualGeometry
     }
 
     public string GeometryId { get; }
+    public DVec3 AttachmentInterfacePosition { get; }
     public IReadOnlyList<EngineVisualMeshPart> MeshParts { get; }
     public IReadOnlyList<EngineExhaustDefinition> Exhausts { get; }
     public IReadOnlyList<EngineLightDefinition> Lights { get; }
+
+    private static bool IsFinite(DVec3 value)
+        => double.IsFinite(value.X)
+        && double.IsFinite(value.Y)
+        && double.IsFinite(value.Z);
 }

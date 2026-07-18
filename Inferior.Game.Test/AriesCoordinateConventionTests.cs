@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Game.Ships;
+using Inferior.Gameplay;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Inferior.Rendering;
@@ -109,12 +110,119 @@ public sealed class AriesCoordinateConventionTests
         }
     }
 
+    [Fact]
+    public void AriesH2MountGeometry_IsHullOwnedMirroredAndThreePart()
+    {
+        SemanticHullGeometry geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
+        SemanticHullFace[] mountFaces = geometry.Faces
+            .Where(face => face.Role == HullSurfaceRole.EngineMount && !face.ContributesToClosedHull)
+            .ToArray();
+        var vertices = geometry.Vertices.ToDictionary(vertex => vertex.Id, vertex => vertex.Position);
+
+        Assert.Equal(26, mountFaces.Length);
+        Assert.Equal(8, mountFaces.Count(face => face.Id.Contains(".engine-root.", StringComparison.Ordinal)));
+        Assert.Equal(8, mountFaces.Count(face => face.Id.Contains(".engine-trunk.", StringComparison.Ordinal)));
+        Assert.Equal(10, mountFaces.Count(face => face.Id.Contains(".engine-collar.", StringComparison.Ordinal)));
+        Assert.All(mountFaces, face => Assert.Equal("engine-mount-structure", face.MaterialGroup));
+
+        foreach (SemanticHullFace starboardFace in mountFaces.Where(face =>
+            face.Id.Contains(".starboard.", StringComparison.Ordinal)))
+        {
+            string portId = starboardFace.Id.Replace(".starboard.", ".port.", StringComparison.Ordinal);
+            SemanticHullFace portFace = Assert.Single(mountFaces, face => face.Id == portId);
+            DVec3[] portPositions = portFace.VertexIds.Select(id => vertices[id]).ToArray();
+            foreach (DVec3 starboardPosition in starboardFace.VertexIds.Select(id => vertices[id]))
+            {
+                Assert.Contains(portPositions, portPosition =>
+                    Math.Abs(portPosition.X + starboardPosition.X) < 1e-9
+                    && Math.Abs(portPosition.Y - starboardPosition.Y) < 1e-9
+                    && Math.Abs(portPosition.Z - starboardPosition.Z) < 1e-9);
+            }
+        }
+
+        DVec3[] rootOuter = vertices
+            .Where(pair => pair.Key.StartsWith("type-1.starboard.engine-mount.root-outer.", StringComparison.Ordinal))
+            .Select(pair => pair.Value)
+            .ToArray();
+        DVec3[] trunkOuter = vertices
+            .Where(pair => pair.Key.StartsWith("type-1.starboard.engine-mount.trunk-outer.", StringComparison.Ordinal))
+            .Select(pair => pair.Value)
+            .ToArray();
+        Assert.InRange(trunkOuter[0].X - rootOuter[0].X, 0.5, 0.65);
+        Assert.True(Span(rootOuter, point => point.Y) > Span(trunkOuter, point => point.Y));
+        Assert.True(Span(rootOuter, point => point.Z) > Span(trunkOuter, point => point.Z));
+    }
+
+    [Fact]
+    public void AriesH2Mount_InterfaceMeetsUnchangedMuleTransformWithSmallCollarOverlap()
+    {
+        HullDefinition hull = HullDefinitionLibrary.Get("type-1");
+        var ship = ShipBuilder.NewShip("type-1").Build();
+        var ports = hull.VisualGeometry!.AttachmentPorts
+            .Where(port => port.Capabilities.HasFlag(AttachmentCapability.Engine))
+            .ToDictionary(port => port.EngineMountSide!.Value);
+        var vertices = hull.VisualGeometry.Vertices.ToDictionary(vertex => vertex.Id, vertex => vertex.Position);
+
+        foreach (EngineMount mount in ship.EngineMounts)
+        {
+            EngineInstance engine = Assert.IsType<EngineInstance>(mount.InstalledEngine);
+            DVec3 actualInterface = engine.GeometryTransform!.TransformVisualPoint(
+                engine.Variant.Engine.VisualGeometry!.AttachmentInterfacePosition);
+            DVec3 expectedInterface = ports[mount.Side].AttachmentInterfacePosition!.Value;
+            Assert.True((actualInterface - expectedInterface).Length < 1e-5);
+        }
+
+        double starboardCollarOuterX = vertices
+            .Where(pair => pair.Key.StartsWith("type-1.starboard.engine-mount.collar-outer.", StringComparison.Ordinal))
+            .Max(pair => pair.Value.X);
+        double collarOverlap = starboardCollarOuterX
+            - ports[EngineMountSide.Starboard].AttachmentInterfacePosition!.Value.X;
+        Assert.InRange(collarOverlap, 0.02, 0.08);
+    }
+
+    [Fact]
+    public void RemovingEngine_LeavesHullOwnedMountAndF2RootInterfaceDiagnostics()
+    {
+        var simulation = new SpaceSimulation();
+        var ship = ShipBuilder.NewShip("type-1").Build();
+        simulation.SetShip(ship);
+        simulation.DebugTickPhysics(PlayerInput.Zero, 1.0 / 60.0);
+        simulation.RequestDebugRemoveEngine(EngineMountSide.Port);
+        simulation.DebugTickPhysics(PlayerInput.Zero, 1.0 / 60.0);
+
+        Assert.Equal(
+            26,
+            HullDefinitionLibrary.Get("type-1").VisualGeometry!.Faces.Count(face =>
+                face.Role == HullSurfaceRole.EngineMount && !face.ContributesToClosedHull));
+        IReadOnlyList<EngineMountPresentationSnapshot> mountSnapshots =
+            simulation.ShipState!.EngineMounts!;
+        EngineMountPresentationSnapshot portSnapshot = mountSnapshots
+            .Single(mount => mount.Side == EngineMountSide.Port);
+        Assert.Null(portSnapshot.InstalledEngine);
+
+        VertexPositionColor[] lines = ShipMeshRenderer.BuildEngineModuleDebugLines(
+            mountSnapshots);
+        AssertContainsLine(
+            lines,
+            portSnapshot.HullRootPosition!.Value.ToVector3(),
+            portSnapshot.AttachmentInterfacePosition!.Value.ToVector3(),
+            Color.Yellow);
+        AssertLineStartsAt(lines, portSnapshot.HullRootPosition.Value.ToVector3(), Color.Red);
+        AssertLineStartsAt(lines, portSnapshot.AttachmentInterfacePosition.Value.ToVector3(), Color.Red);
+        Assert.Contains(lines, vertex =>
+            vertex.Color == Color.OrangeRed
+            && vertex.Position.Z > 5.9f);
+    }
+
     private static void AssertDirection(DVec3 expected, Vector3 actual)
     {
         Assert.Equal((float)expected.X, actual.X, 5);
         Assert.Equal((float)expected.Y, actual.Y, 5);
         Assert.Equal((float)expected.Z, actual.Z, 5);
     }
+
+    private static double Span(IEnumerable<DVec3> values, Func<DVec3, double> selector)
+        => values.Max(selector) - values.Min(selector);
 
     private static void AssertContainsLine(
         IReadOnlyList<VertexPositionColor> vertices,
@@ -134,5 +242,19 @@ public sealed class AriesCoordinateConventionTests
         }
 
         Assert.Fail($"Expected debug line from {start} to {end} with colour {colour}.");
+    }
+
+    private static void AssertLineStartsAt(
+        IReadOnlyList<VertexPositionColor> vertices,
+        Vector3 start,
+        Color colour)
+    {
+        for (int i = 0; i < vertices.Count; i += 2)
+        {
+            if (vertices[i].Position == start && vertices[i].Color == colour)
+                return;
+        }
+
+        Assert.Fail($"Expected debug line starting at {start} with colour {colour}.");
     }
 }

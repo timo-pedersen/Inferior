@@ -27,6 +27,7 @@ public static class MuleEngineDefinitionFactory
             .ToArray();
         var geometry = new EngineVisualGeometry(
             "mule.geometry.01",
+            new DVec3(-0.80, 0.0, 0.0),
             parts,
             [
                 new EngineExhaustDefinition("mule.exhaust.main.01", new DVec3(0.0, 0.0, 3.30), DVec3.UnitZ),

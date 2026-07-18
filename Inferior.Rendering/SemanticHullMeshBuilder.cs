@@ -7,6 +7,7 @@ namespace Inferior.Rendering;
 public enum SemanticHullRenderGroup
 {
     StructuralHull,
+    EngineMount,
     CargoDoor,
     CockpitFrame,
     CockpitGlass,
@@ -138,6 +139,7 @@ public static class SemanticHullMeshBuilder
     private static SemanticHullRenderGroup GroupFor(HullSurfaceRole role)
         => role switch
         {
+            HullSurfaceRole.EngineMount => SemanticHullRenderGroup.EngineMount,
             HullSurfaceRole.CargoDoor => SemanticHullRenderGroup.CargoDoor,
             HullSurfaceRole.CockpitFrame => SemanticHullRenderGroup.CockpitFrame,
             HullSurfaceRole.CockpitGlass => SemanticHullRenderGroup.CockpitGlass,
@@ -148,6 +150,7 @@ public static class SemanticHullMeshBuilder
         => group switch
         {
             SemanticHullRenderGroup.StructuralHull => "structural-hull",
+            SemanticHullRenderGroup.EngineMount => "engine-mount-structure",
             SemanticHullRenderGroup.CargoDoor => "cargo-door-structure",
             SemanticHullRenderGroup.CockpitFrame => "cockpit-frame",
             SemanticHullRenderGroup.CockpitGlass => "cockpit-glass",
@@ -158,6 +161,7 @@ public static class SemanticHullMeshBuilder
         => group switch
         {
             SemanticHullRenderGroup.StructuralHull => new Color(72, 78, 78),
+            SemanticHullRenderGroup.EngineMount => new Color(42, 47, 48),
             SemanticHullRenderGroup.CargoDoor => new Color(64, 70, 66),
             SemanticHullRenderGroup.CockpitFrame => new Color(48, 52, 54),
             SemanticHullRenderGroup.CockpitGlass => new Color(18, 34, 44),

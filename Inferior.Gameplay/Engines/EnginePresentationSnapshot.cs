@@ -14,4 +14,6 @@ public sealed record EngineMountPresentationSnapshot(
     string MountStandardId,
     EngineMountSide Side,
     EngineMountPose Pose,
+    Inferior.Core.Math.DVec3? HullRootPosition,
+    Inferior.Core.Math.DVec3? AttachmentInterfacePosition,
     EnginePresentationSnapshot? InstalledEngine);

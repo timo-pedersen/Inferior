@@ -262,7 +262,7 @@ public sealed class ShipVisualSystemTests
         Assert.Contains(geometry.Assemblies, a => a.AssemblyId == "type-1.rear.cargo-door.01" && a.Kind == "CargoDoor");
         Assert.Contains(geometry.Faces, f => f.Id == "type-1.rear.cargo-door.01" && f.Role == HullSurfaceRole.CargoDoor);
         Assert.InRange(geometry.Faces.Count(f => f.Role == HullSurfaceRole.PanelSeat), 8, 16);
-        Assert.Equal(2, geometry.Faces.Count(f => f.Role == HullSurfaceRole.EngineMount));
+        Assert.Equal(28, geometry.Faces.Count(f => f.Role == HullSurfaceRole.EngineMount));
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ServiceSurface) >= 6);
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ExposedStructure) >= 4);
         Assert.Contains(geometry.Faces, f => f.Id == "type-1.top.cockpit-glass.01" && f.Role == HullSurfaceRole.CockpitGlass);
@@ -320,9 +320,12 @@ public sealed class ShipVisualSystemTests
         var engineMountFaces = geometry.Faces.Where(f => f.Role == HullSurfaceRole.EngineMount).ToArray();
 
         Assert.All(geometry.Faces, face => Assert.True(Enum.IsDefined(face.Role)));
-        Assert.Equal(
-            ["type-1.port.engine-root.01", "type-1.starboard.engine-root.01"],
-            engineMountFaces.Select(f => f.Id).Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(28, engineMountFaces.Length);
+        Assert.Contains(engineMountFaces, face => face.Id == "type-1.port.engine-root.01");
+        Assert.Contains(engineMountFaces, face => face.Id == "type-1.starboard.engine-root.01");
+        Assert.Equal(10, engineMountFaces.Count(face => face.Id.Contains(".engine-root.", StringComparison.Ordinal)));
+        Assert.Equal(8, engineMountFaces.Count(face => face.Id.Contains(".engine-trunk.", StringComparison.Ordinal)));
+        Assert.Equal(10, engineMountFaces.Count(face => face.Id.Contains(".engine-collar.", StringComparison.Ordinal)));
         Assert.DoesNotContain(engineMountFaces, face => !string.IsNullOrWhiteSpace(face.PanelSlotId));
 
         Assert.Contains(geometry.Faces, f => f.Id == "type-1.front.armoured-head.01" && f.Role == HullSurfaceRole.PanelSeat);

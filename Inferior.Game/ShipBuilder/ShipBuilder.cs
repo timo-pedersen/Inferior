@@ -145,7 +145,9 @@ public sealed class ShipBuilder
                 port.ComponentSlotId,
                 port.EngineMountStandardId,
                 port.EngineMountSide.Value,
-                new EngineMountPose(port.Position, port.Normal, port.Up)));
+                new EngineMountPose(port.Position, port.Normal, port.Up),
+                port.MountRootPosition,
+                port.AttachmentInterfacePosition));
         }
     }
 

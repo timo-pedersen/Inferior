@@ -104,6 +104,8 @@ public sealed record AttachmentPortDefinition(
     public string? ComponentSlotId { get; init; }
     public string? EngineMountStandardId { get; init; }
     public EngineMountSide? EngineMountSide { get; init; }
+    public DVec3? MountRootPosition { get; init; }
+    public DVec3? AttachmentInterfacePosition { get; init; }
     public DVec3 FootprintMeters { get; init; } = DVec3.Zero;
     public DVec3 ClearanceMinMeters { get; init; } = DVec3.Zero;
     public DVec3 ClearanceMaxMeters { get; init; } = DVec3.Zero;
@@ -219,6 +221,10 @@ public sealed class SemanticHullGeometry
 
             if (!IsFinite(port.Position))
                 errors.Add($"Attachment port '{port.PortId}' has non-finite position {port.Position}.");
+            if (port.MountRootPosition is { } mountRoot && !IsFinite(mountRoot))
+                errors.Add($"Attachment port '{port.PortId}' has non-finite mount root {mountRoot}.");
+            if (port.AttachmentInterfacePosition is { } attachmentInterface && !IsFinite(attachmentInterface))
+                errors.Add($"Attachment port '{port.PortId}' has non-finite attachment interface {attachmentInterface}.");
 
             if (!IsFinite(port.Normal) || port.Normal.LengthSquared <= 1e-12)
                 errors.Add($"Attachment port '{port.PortId}' has invalid normal {port.Normal}.");
@@ -231,6 +237,20 @@ public sealed class SemanticHullGeometry
 
             if (port.Capabilities.HasFlag(AttachmentCapability.Engine))
             {
+                if (port.MountRootPosition is null)
+                    errors.Add($"Engine attachment port '{port.PortId}' has no hull mount root position.");
+                if (port.AttachmentInterfacePosition is null)
+                    errors.Add($"Engine attachment port '{port.PortId}' has no physical attachment interface position.");
+                else if (port.MountRootPosition is { } root)
+                {
+                    DVec3 rootToInterface = port.AttachmentInterfacePosition.Value - root;
+                    if (rootToInterface.Length <= 1e-9
+                        || DVec3.Dot(rootToInterface.Normalized(), port.Normal.Normalized()) < 0.99)
+                    {
+                        errors.Add($"Engine attachment port '{port.PortId}' mount root does not lead outward toward its physical interface.");
+                    }
+                }
+
                 if (port.FootprintMeters.X <= 0 || port.FootprintMeters.Y <= 0)
                     errors.Add($"Engine attachment port '{port.PortId}' has invalid mount footprint {port.FootprintMeters}.");
 

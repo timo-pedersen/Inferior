@@ -16,6 +16,7 @@ public static class AriesHullDefinitionFactory
         MathHelper.ToRadians(-3.0f),
         0.0f,
         0.0f);
+    private const double EngineMountRootX = 3.38;
 
     public static HullDefinition Create() => new()
     {
@@ -163,6 +164,9 @@ public static class AriesHullDefinitionFactory
                 null, CargoDoorId, contributesToClosedHull: false);
         }
 
+        AddEngineMountGeometry(vertices, faces, "port", -1.0);
+        AddEngineMountGeometry(vertices, faces, "starboard", 1.0);
+
         return new SemanticHullGeometry
         {
             RequireClosedHull = true,
@@ -196,6 +200,8 @@ public static class AriesHullDefinitionFactory
                     ComponentSlotId = "engine.port.01",
                     EngineMountStandardId = EngineMountStandardIds.H2,
                     EngineMountSide = Engines.EngineMountSide.Port,
+                    MountRootPosition = new DVec3(-EngineMountRootX, 0.45, 2.75),
+                    AttachmentInterfacePosition = new DVec3(-4.20, 0.45, 2.75),
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
                     ClearanceMinMeters = new DVec3(-6.1, -1.2, -1.8),
                     ClearanceMaxMeters = new DVec3(-4.05, 2.2, 7.4),
@@ -206,6 +212,8 @@ public static class AriesHullDefinitionFactory
                     ComponentSlotId = "engine.starboard.01",
                     EngineMountStandardId = EngineMountStandardIds.H2,
                     EngineMountSide = Engines.EngineMountSide.Starboard,
+                    MountRootPosition = new DVec3(EngineMountRootX, 0.45, 2.75),
+                    AttachmentInterfacePosition = new DVec3(4.20, 0.45, 2.75),
                     FootprintMeters = new DVec3(2.2, 2.4, 0.0),
                     ClearanceMinMeters = new DVec3(4.05, -1.2, -1.8),
                     ClearanceMaxMeters = new DVec3(6.1, 2.2, 7.4),
@@ -274,6 +282,102 @@ public static class AriesHullDefinitionFactory
             bounds,
             new SemanticBounds(center - bounds / 2.0, center + bounds / 2.0));
     }
+
+    private static void AddEngineMountGeometry(
+        Dictionary<string, DVec3> vertices,
+        List<SemanticHullFace> faces,
+        string side,
+        double sideSign)
+    {
+        const double centerY = 0.45;
+        const double centerZ = 2.75;
+        string rootInner = AddEngineMountRing(
+            vertices, side, "root-inner", sideSign * 3.34, centerY, centerZ, 0.92, 0.80);
+        string rootOuter = AddEngineMountRing(
+            vertices, side, "root-outer", sideSign * 3.52, centerY, centerZ, 0.84, 0.74);
+        string trunkOuter = AddEngineMountRing(
+            vertices, side, "trunk-outer", sideSign * 4.08, centerY, centerZ, 0.68, 0.58);
+        string collarOuter = AddEngineMountRing(
+            vertices, side, "collar-outer", sideSign * 4.24, centerY, centerZ, 0.78, 0.68);
+
+        AddEngineMountSection(vertices, faces, side, "root", rootInner, rootOuter);
+        AddEngineMountSection(vertices, faces, side, "trunk", rootOuter, trunkOuter);
+        AddEngineMountSection(vertices, faces, side, "collar", trunkOuter, collarOuter);
+        AddFace(
+            faces,
+            vertices,
+            $"{HullId}.{side}.engine-collar.cap.01",
+            EngineMountRingVertexIds(collarOuter),
+            HullSurfaceRole.EngineMount,
+            "engine-mount-structure",
+            sideSign * DVec3.UnitX,
+            panelSlotId: null,
+            assemblyId: null,
+            contributesToClosedHull: false);
+    }
+
+    private static string AddEngineMountRing(
+        Dictionary<string, DVec3> vertices,
+        string side,
+        string section,
+        double x,
+        double centerY,
+        double centerZ,
+        double height,
+        double foreAftThickness)
+    {
+        string ringId = $"{HullId}.{side}.engine-mount.{section}";
+        double halfY = height / 2.0;
+        double halfZ = foreAftThickness / 2.0;
+        DVec3[] points =
+        [
+            new(x, centerY + halfY, centerZ - halfZ),
+            new(x, centerY + halfY, centerZ + halfZ),
+            new(x, centerY - halfY, centerZ + halfZ),
+            new(x, centerY - halfY, centerZ - halfZ),
+        ];
+        for (int i = 0; i < points.Length; i++)
+            vertices.Add($"{ringId}.corner.{i + 1:00}", points[i]);
+        return ringId;
+    }
+
+    private static void AddEngineMountSection(
+        Dictionary<string, DVec3> vertices,
+        List<SemanticHullFace> faces,
+        string side,
+        string section,
+        string innerRing,
+        string outerRing)
+    {
+        string[] inner = EngineMountRingVertexIds(innerRing);
+        string[] outer = EngineMountRingVertexIds(outerRing);
+        var surfaces = new (string Name, int A, int B, DVec3 Normal)[]
+        {
+            ("top", 0, 1, DVec3.UnitY),
+            ("rear", 1, 2, DVec3.UnitZ),
+            ("bottom", 2, 3, -DVec3.UnitY),
+            ("forward", 3, 0, -DVec3.UnitZ),
+        };
+        foreach (var surface in surfaces)
+        {
+            AddFace(
+                faces,
+                vertices,
+                $"{HullId}.{side}.engine-{section}.{surface.Name}.01",
+                [inner[surface.A], inner[surface.B], outer[surface.B], outer[surface.A]],
+                HullSurfaceRole.EngineMount,
+                "engine-mount-structure",
+                surface.Normal,
+                panelSlotId: null,
+                assemblyId: null,
+                contributesToClosedHull: false);
+        }
+    }
+
+    private static string[] EngineMountRingVertexIds(string ringId)
+        => Enumerable.Range(1, 4)
+            .Select(index => $"{ringId}.corner.{index:00}")
+            .ToArray();
 
     private static void AddRing(Dictionary<string, DVec3> vertices, string ringName, double z, double scale)
     {
