@@ -39,8 +39,9 @@ public sealed partial class SystemSpaceState
         // Use ship's own up axis so the camera rolls with the ship — eliminates the
         // singularity that occurs when the ship points near vertical and world-up is
         // nearly parallel to the look direction.
-        DVec3 lookDir = DVec3.Normalize(snap.Position - cameraPosition);
-        _camera.SetPose(cameraPosition, QuatLookAtWithUp(lookDir, snap.Up));
+        _camera.SetPose(
+            cameraPosition,
+            _chaseCamera.ResolveCameraOrientation(worldOffset, snap.Up));
     }
 
     private void UpdateShipFollowingCamera(SpaceSimulation.ShipSnapshot snap)
