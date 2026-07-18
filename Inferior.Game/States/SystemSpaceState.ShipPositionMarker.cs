@@ -85,10 +85,11 @@ public sealed partial class SystemSpaceState
             return;
 
         ChaseCameraTargets? chaseTargets = f3JustPressed && _chaseCamera.IsActive
-            ? CalculateChaseCameraTargets(
-                _frameShipSnap.Position,
-                _frameShipSnap.Forward,
-                _frameShipSnap.Up)
+            ? new ChaseCameraTargets(
+                _frameShipSnap.Position + ChaseCameraState.Transform(
+                    _chaseCamera.DesiredHullLocalOffset,
+                    _frameShipSnap.Orientation),
+                _frameShipSnap.Position)
             : null;
         if (chaseTargets is not null)
             _shipRenderDiagnosticPending = true;

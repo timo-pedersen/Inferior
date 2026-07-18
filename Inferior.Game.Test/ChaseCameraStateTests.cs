@@ -12,12 +12,16 @@ public sealed class ChaseCameraStateTests
     public void OrbitalMovement_PreservesRadiusAndStaysOnSphere()
     {
         var chase = new ChaseCameraState();
+        chase.ToggleActive();
+        chase.ToggleOrbitalEdit();
         double radius = chase.Radius;
 
         chase.ApplyEdit(new ChaseCameraEditInput(1, 1, 0, 0, false), 0.25);
+        DVec3 renderedOffset = chase.ResolveWorldOffset(Quaternion.Identity);
 
         Assert.Equal(radius, chase.Radius, 9);
         Assert.Equal(radius, chase.DesiredHullLocalOffset.Length, 9);
+        Assert.Equal(radius, renderedOffset.Length, 5);
     }
 
     [Fact]

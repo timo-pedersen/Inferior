@@ -93,9 +93,9 @@ internal sealed class ChaseCameraState
     public DVec3 ResolveWorldOffset(Quaternion shipOrientation)
     {
         DVec3 desiredOffset = DesiredHullLocalOffset;
-        _easedHullLocalOffset = _easedOffsetValid
-            ? DVec3.Lerp(_easedHullLocalOffset, desiredOffset, 0.08)
-            : desiredOffset;
+        _easedHullLocalOffset = IsOrbitalEditActive || !_easedOffsetValid
+            ? desiredOffset
+            : DVec3.Lerp(_easedHullLocalOffset, desiredOffset, 0.08);
         _easedOffsetValid = true;
         return Transform(_easedHullLocalOffset, shipOrientation);
     }

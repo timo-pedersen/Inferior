@@ -57,7 +57,7 @@ public sealed partial class SystemSpaceState
         DVec3 shipForward,
         DVec3 shipUp)
     {
-        // Camera sits 80 m behind and 30 m above the ship, looking 8 m ahead of CoM.
+        // Camera sits 80 m behind and 30 m above the ship, looking at hull origin.
         return new ChaseCameraTargets(
             shipPosition - shipForward * 80.0 + shipUp * 30.0,
             shipPosition);
