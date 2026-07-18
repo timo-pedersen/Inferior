@@ -81,6 +81,7 @@ public sealed class ShipBuilder
         };
         ship.SetOrientation(_orientation);
         AddEngineMounts(ship, hull);
+        InstallDefaultEngines(ship, hull);
 
         if (_installDefaultComponents)
         {
@@ -146,5 +147,34 @@ public sealed class ShipBuilder
                 port.EngineMountSide.Value,
                 new EngineMountPose(port.Position, port.Normal, port.Up)));
         }
+    }
+
+    private static void InstallDefaultEngines(Ship ship, HullDefinition hull)
+    {
+        var configuredSlots = hull.Slots
+            .Where(slot => slot.Category == SlotCategory.Engine
+                && !string.IsNullOrWhiteSpace(slot.DefaultComponentDefinitionId))
+            .ToDictionary(slot => slot.SlotId, StringComparer.Ordinal);
+        if (configuredSlots.Count == 0)
+            return;
+
+        EngineMount port = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Port);
+        EngineMount starboard = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Starboard);
+        if (!configuredSlots.TryGetValue(port.ComponentSlotId, out HullSlot? portSlot)
+            || !configuredSlots.TryGetValue(starboard.ComponentSlotId, out HullSlot? starboardSlot)
+            || !string.Equals(
+                portSlot.DefaultComponentDefinitionId,
+                starboardSlot.DefaultComponentDefinitionId,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Default paired engine slots must select the same engine variant.");
+        }
+
+        EngineVariantDefinition variant =
+            EngineDefinitionLibrary.GetVariant(portSlot.DefaultComponentDefinitionId!);
+        EnginePairGenerator.Generate(
+            new EnginePairDefinition($"default.{variant.VariantId}.pair", variant),
+            port,
+            starboard);
     }
 }

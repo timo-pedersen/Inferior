@@ -62,8 +62,8 @@ public static class AriesHullDefinitionFactory
         [
             new() { SlotId = "reactor",             Label = "Power Reactor",        Category = SlotCategory.PowerReactor,     MaxComponentClass = 2, Required = true  },
             new() { SlotId = "power_bus",           Label = "Power Bus",            Category = SlotCategory.PowerBus,         MaxComponentClass = 2, Required = true  },
-            new() { SlotId = "engine.port.01",      Label = "Port Engine",          Category = SlotCategory.Engine,           MaxComponentClass = 2, Required = true  },
-            new() { SlotId = "engine.starboard.01", Label = "Starboard Engine",     Category = SlotCategory.Engine,           MaxComponentClass = 2, Required = true  },
+            new() { SlotId = "engine.port.01",      Label = "Port Engine",          Category = SlotCategory.Engine,           MaxComponentClass = 2, Required = true, DefaultComponentDefinitionId = MuleEngineDefinitionFactory.H2VariantId },
+            new() { SlotId = "engine.starboard.01", Label = "Starboard Engine",     Category = SlotCategory.Engine,           MaxComponentClass = 2, Required = true, DefaultComponentDefinitionId = MuleEngineDefinitionFactory.H2VariantId },
             new() { SlotId = "shield_top",          Label = "Top Shield",           Category = SlotCategory.Shield,           MaxComponentClass = 2, Required = false },
             new() { SlotId = "shield_bottom",       Label = "Bottom Shield",        Category = SlotCategory.Shield,           MaxComponentClass = 2, Required = false },
             new() { SlotId = "heat_sink",           Label = "Hyperspace Heat Sink", Category = SlotCategory.HeatSink,         MaxComponentClass = 2, Required = true  },

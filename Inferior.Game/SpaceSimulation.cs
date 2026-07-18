@@ -4,6 +4,7 @@ using Inferior.Core.Simulation;   // GameClock
 using Inferior.Galaxy;
 using Inferior.Gameplay;          // Simulation base, FlightMode
 using Inferior.Gameplay.Components;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Physics;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
@@ -129,7 +130,8 @@ public sealed class SpaceSimulation : Simulation
         // Compare against the value RequestStationRelocation returned, not against
         // "snapshot is non-null", to avoid racing snapshots published before the sim
         // thread has resolved the request.
-        int        RelocationSequence = 0);
+        int        RelocationSequence = 0,
+        IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -146,6 +148,11 @@ public sealed class SpaceSimulation : Simulation
 
     public void TeleportShip(DVec3 position, Quaternion orientation)
         => _teleportRequest = new TeleportRequest(position, orientation);
+
+    private int _debugEngineRemovalRequest;
+
+    public void RequestDebugRemoveEngine(EngineMountSide side)
+        => Interlocked.Exchange(ref _debugEngineRemovalRequest, (int)side + 1);
 
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
@@ -345,6 +352,20 @@ public sealed class SpaceSimulation : Simulation
         _lastDt = dt;
         var ship = _ship;
         if (ship == null) return;
+
+        int engineRemovalRequest = Interlocked.Exchange(ref _debugEngineRemovalRequest, 0);
+        if (engineRemovalRequest != 0)
+        {
+            EngineMountSide side = (EngineMountSide)(engineRemovalRequest - 1);
+            EngineMount? mount = ship.EngineMounts.SingleOrDefault(candidate => candidate.Side == side);
+            EngineInstance? removed = mount?.RemoveInstalledEngine();
+            DataBus.System.Publish(
+                Topics.System.All,
+                new SystemMessage(
+                    removed is null
+                        ? $"{side} engine mount is already empty."
+                        : $"Debug removed {side.ToString().ToLowerInvariant()} engine '{removed.Variant.Engine.DisplayName}'."));
+        }
 
         // ── Teleport ─────────────────────────────────────────────────────
         var teleport = _teleportRequest;
@@ -587,7 +608,8 @@ public sealed class SpaceSimulation : Simulation
             snapRelSpd,
             snapFwdSpd,
             snapAccel,
-            _relocationSequence);
+            _relocationSequence,
+            BuildEngineMountSnapshots(ship));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -607,6 +629,37 @@ public sealed class SpaceSimulation : Simulation
             ship.Position,
             shipMovementDuringTick,
             snapMode);
+    }
+
+    private static IReadOnlyList<EngineMountPresentationSnapshot> BuildEngineMountSnapshots(Ship ship)
+    {
+        var snapshots = ship.EngineMounts
+            .Select(mount =>
+            {
+                EngineInstance? engine = mount.InstalledEngine;
+                EnginePresentationSnapshot? engineSnapshot = null;
+                if (engine?.GeometryTransform is not null
+                    && engine.Variant.Engine.VisualGeometry is not null)
+                {
+                    engineSnapshot = new EnginePresentationSnapshot(
+                        engine.InstanceId,
+                        engine.Variant.VariantId,
+                        engine.Variant.Engine.VisualGeometry,
+                        engine.GeometryTransform,
+                        engine.DamageFraction,
+                        engine.WearFraction);
+                }
+
+                return new EngineMountPresentationSnapshot(
+                    mount.MountId,
+                    mount.ComponentSlotId,
+                    mount.MountStandardId,
+                    mount.Side,
+                    mount.Pose,
+                    engineSnapshot);
+            })
+            .ToArray();
+        return Array.AsReadOnly(snapshots);
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────

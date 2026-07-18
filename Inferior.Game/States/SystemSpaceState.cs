@@ -10,6 +10,7 @@ using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
@@ -120,7 +121,7 @@ public sealed partial class SystemSpaceState : GameState
     // VertexBuffer/IndexBuffer (see PlacedContainer) — geometry differs per instance.
     private MeshRenderer?  _meshRenderer;
 
-    // ── Ship mesh (three components, built once per session entry) ────────────
+    // ── Ship hull and installed child-module meshes ───────────────────────────
     private ShipMeshRenderer _shipMeshRenderer = null!;
 
     // ── UI ────────────────────────────────────────────────────────────────────
@@ -166,10 +167,12 @@ public sealed partial class SystemSpaceState : GameState
     // ── Camera modes ──────────────────────────────────────────────────────────
     // TAB  — toggles between ship-control and mouse-driven UI interaction.
     // F11  — toggles between ship camera (cockpit) and free debug camera.
+    // F2   — toggles engine mount/module transform debug.
     // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
     private bool _semanticHullDebug;
+    private bool _engineModuleDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
     private bool _prevUiMouseMode;
@@ -372,7 +375,7 @@ public sealed partial class SystemSpaceState : GameState
         _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
         InitializeStationShadows();
 
-        // Ship mesh — three components; built once per session entry on the main thread
+        // Ship hull and installed child modules; GPU meshes are cached on the main thread.
         _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
         _chaseCamera.Deactivate();
         _chaseCamera.ResetSmoothing();
@@ -671,6 +674,19 @@ public sealed partial class SystemSpaceState : GameState
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
         bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
         bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
+        bool shiftDown = keys.IsKeyDown(Keys.LeftShift) || keys.IsKeyDown(Keys.RightShift);
+        bool prevShiftDown = _prevKeys.IsKeyDown(Keys.LeftShift) || _prevKeys.IsKeyDown(Keys.RightShift);
+        bool ctrlF2JustPressed = ctrlDown
+            && keys.IsKeyDown(Keys.F2)
+            && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F2));
+        bool shiftF2JustPressed = !ctrlDown
+            && shiftDown
+            && keys.IsKeyDown(Keys.F2)
+            && !(prevShiftDown && _prevKeys.IsKeyDown(Keys.F2));
+        bool f2JustPressed = !ctrlDown
+            && !shiftDown
+            && keys.IsKeyDown(Keys.F2)
+            && !_prevKeys.IsKeyDown(Keys.F2);
         bool ctrlF3Down = ctrlDown && keys.IsKeyDown(Keys.F3);
         bool ctrlF3JustPressed = ctrlF3Down
                               && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F3));
@@ -688,6 +704,29 @@ public sealed partial class SystemSpaceState : GameState
         }
         if (f10JustPressed)
             RequestStationProximityDiagnostic();
+        if (ctrlF2JustPressed)
+        {
+            _simulation.RequestDebugRemoveEngine(EngineMountSide.Port);
+            _hudAlert.AddMessage(new SystemMessage(
+                "Requested debug removal of port engine.",
+                SystemMessagePriority.Info));
+        }
+        else if (shiftF2JustPressed)
+        {
+            _simulation.RequestDebugRemoveEngine(EngineMountSide.Starboard);
+            _hudAlert.AddMessage(new SystemMessage(
+                "Requested debug removal of starboard engine.",
+                SystemMessagePriority.Info));
+        }
+        else if (f2JustPressed)
+        {
+            _engineModuleDebug = !_engineModuleDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _engineModuleDebug
+                    ? "Ship module debug: mounts, origins, exhausts, lights."
+                    : "Ship module debug disabled.",
+                SystemMessagePriority.Info));
+        }
         if (f11JustPressed)
         {
             if (_debugCameraMode)
@@ -1118,7 +1157,9 @@ public sealed partial class SystemSpaceState : GameState
             ShipRenderTransformDiagnostic diagnostic = _shipMeshRenderer.Draw(
                 _camera, _effect.View, _effect.Projection,
                 _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
-                _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
+                _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal,
+                _frameShipSnap.EngineMounts,
+                _engineModuleDebug);
             WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
         }
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);

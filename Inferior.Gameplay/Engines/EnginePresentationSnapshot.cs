@@ -1,0 +1,17 @@
+namespace Inferior.Gameplay.Engines;
+
+public sealed record EnginePresentationSnapshot(
+    string InstanceId,
+    string VariantId,
+    EngineVisualGeometry VisualGeometry,
+    EngineGeometryTransform GeometryTransform,
+    double DamageFraction,
+    double WearFraction);
+
+public sealed record EngineMountPresentationSnapshot(
+    string MountId,
+    string ComponentSlotId,
+    string MountStandardId,
+    EngineMountSide Side,
+    EngineMountPose Pose,
+    EnginePresentationSnapshot? InstalledEngine);

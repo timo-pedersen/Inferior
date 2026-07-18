@@ -1,6 +1,8 @@
 using Inferior.Core.Math;
 using Inferior.Game.Ships;
+using Inferior.Gameplay;
 using Inferior.Gameplay.Engines;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -62,7 +64,7 @@ public sealed class EngineSystemFoundationTests
         Assert.Equal(right.Position.Z, left.Position.Z);
         Assert.True(left.MirroredAcrossHullX);
         Assert.False(right.MirroredAcrossHullX);
-        Assert.Equal(-rightMatrix.M11, leftMatrix.M11);
+        Assert.Equal(rightMatrix.M11, leftMatrix.M11);
         Assert.Equal(rightMatrix.M22, leftMatrix.M22);
         Assert.Equal(rightMatrix.M33, leftMatrix.M33);
         Assert.Equal(-rightMatrix.Translation.X, leftMatrix.Translation.X);
@@ -99,6 +101,98 @@ public sealed class EngineSystemFoundationTests
         Assert.Contains(ship.EngineMounts, mount =>
             mount.ComponentSlotId == "engine.starboard.01"
             && mount.Side == EngineMountSide.Starboard);
+    }
+
+    [Fact]
+    public void ShipBuilder_InstallsIndependentMulePairOnAries()
+    {
+        var ship = ShipBuilder.NewShip("type-1").Build();
+        EngineInstance[] engines = ship.EngineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EngineInstance>()
+            .ToArray();
+
+        Assert.Equal(2, engines.Length);
+        Assert.All(engines, engine => Assert.Equal(MuleEngineDefinitionFactory.H2VariantId, engine.Variant.VariantId));
+        Assert.NotSame(engines[0], engines[1]);
+
+        engines[0].SetDamageFraction(0.7);
+        Assert.Equal(0.7, engines[0].DamageFraction);
+        Assert.Equal(0.0, engines[1].DamageFraction);
+    }
+
+    [Fact]
+    public void MulePortMesh_IsPositionMirroredWithCorrectedWinding()
+    {
+        EngineVisualGeometry geometry = MuleEngineDefinitionFactory.CreateDefinition().VisualGeometry!;
+        EngineCpuMesh starboard = EngineMeshBuilder.Build(geometry, mirroredAcrossHullX: false);
+        EngineCpuMesh port = EngineMeshBuilder.Build(geometry, mirroredAcrossHullX: true);
+
+        Assert.Equal(starboard.Parts.Count, port.Parts.Count);
+        for (int partIndex = 0; partIndex < starboard.Parts.Count; partIndex++)
+        {
+            EngineCpuMeshPart rightPart = starboard.Parts[partIndex];
+            EngineCpuMeshPart leftPart = port.Parts[partIndex];
+            Assert.Equal(rightPart.Vertices.Count, leftPart.Vertices.Count);
+
+            for (int i = 0; i < rightPart.Vertices.Count; i += 3)
+            {
+                Vector3 rightA = rightPart.Vertices[i].Position;
+                Vector3 rightB = rightPart.Vertices[i + 1].Position;
+                Vector3 rightC = rightPart.Vertices[i + 2].Position;
+                Vector3 leftA = leftPart.Vertices[i].Position;
+                Vector3 leftB = leftPart.Vertices[i + 1].Position;
+                Vector3 leftC = leftPart.Vertices[i + 2].Position;
+
+                Assert.Equal(-rightA.X, leftA.X);
+                Assert.Equal(rightC.Y, leftB.Y);
+                Assert.Equal(rightC.Z, leftB.Z);
+                Assert.Equal(-rightC.X, leftB.X);
+                Assert.Equal(-rightB.X, leftC.X);
+                Assert.Equal(rightB.Y, leftC.Y);
+                Assert.Equal(rightB.Z, leftC.Z);
+                Assert.True(Vector3.Dot(
+                    Vector3.Cross(leftB - leftA, leftC - leftA),
+                    leftPart.Vertices[i].Normal) > 0f);
+            }
+        }
+    }
+
+    [Fact]
+    public void RemovingPortEngine_LeavesStarboardEngineInstalled()
+    {
+        var ship = ShipBuilder.NewShip("type-1").Build();
+        EngineMount port = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Port);
+        EngineMount starboard = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Starboard);
+
+        EngineInstance? removed = port.RemoveInstalledEngine();
+
+        Assert.NotNull(removed);
+        Assert.False(removed.IsInstalled);
+        Assert.Null(port.InstalledEngine);
+        Assert.NotNull(starboard.InstalledEngine);
+        Assert.True(starboard.InstalledEngine.IsInstalled);
+    }
+
+    [Fact]
+    public void SimulationSnapshot_ReflectsOneSidedDebugEngineRemoval()
+    {
+        var simulation = new SpaceSimulation();
+        var ship = ShipBuilder.NewShip("type-1").Build();
+        simulation.SetShip(ship);
+        simulation.DebugTickPhysics(PlayerInput.Zero, 1.0 / 60.0);
+
+        Assert.Equal(2, simulation.ShipState!.EngineMounts!.Count(mount => mount.InstalledEngine is not null));
+
+        simulation.RequestDebugRemoveEngine(EngineMountSide.Port);
+        simulation.DebugTickPhysics(PlayerInput.Zero, 1.0 / 60.0);
+
+        EngineMountPresentationSnapshot port = simulation.ShipState!.EngineMounts!
+            .Single(mount => mount.Side == EngineMountSide.Port);
+        EngineMountPresentationSnapshot starboard = simulation.ShipState.EngineMounts!
+            .Single(mount => mount.Side == EngineMountSide.Starboard);
+        Assert.Null(port.InstalledEngine);
+        Assert.NotNull(starboard.InstalledEngine);
     }
 
     private static GeneratedEnginePair GeneratePair()

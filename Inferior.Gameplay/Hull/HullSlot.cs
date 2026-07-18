@@ -29,4 +29,7 @@ public record HullSlot
     /// Used by FlyabilityMonitor checks.
     /// </summary>
     public bool Required { get; init; }
+
+    /// <summary>Optional definition selected when a new runtime ship receives its baseline loadout.</summary>
+    public string? DefaultComponentDefinitionId { get; init; }
 }

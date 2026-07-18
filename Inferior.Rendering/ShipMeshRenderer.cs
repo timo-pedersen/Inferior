@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -29,6 +30,7 @@ public sealed class ShipMeshRenderer : IDisposable
     private readonly MeshRenderer _meshRenderer;
     private readonly BasicEffect _debugLineEffect;
     private readonly Dictionary<string, SemanticHullGpuMesh> _semanticMeshCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(string GeometryId, bool Mirrored), EngineGpuMesh> _engineMeshCache = [];
 
     private LegacyFallbackMesh? _legacyFallback;
 
@@ -55,7 +57,9 @@ public sealed class ShipMeshRenderer : IDisposable
         DVec3 shipPosition,
         Quaternion shipOrientation,
         DetailLevel level,
-        SemanticHullDebugMode debugMode = SemanticHullDebugMode.Normal)
+        SemanticHullDebugMode debugMode = SemanticHullDebugMode.Normal,
+        IReadOnlyList<EngineMountPresentationSnapshot>? engineMounts = null,
+        bool engineModuleDebug = false)
     {
         float renderScale = (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
@@ -81,6 +85,18 @@ public sealed class ShipMeshRenderer : IDisposable
             renderPath = ShipHullRenderPath.LegacyFallback;
             world = BuildLegacyWorldTransform(renderScale, renderPos, shipOrientation);
             DrawLegacyFallback(world, currentView, currentProjection, sunColour);
+        }
+
+        if (engineMounts is not null)
+        {
+            DrawInstalledEngines(
+                engineMounts,
+                world,
+                currentView,
+                currentProjection,
+                sunColour);
+            if (engineModuleDebug)
+                DrawEngineModuleDebug(engineMounts, world, currentView, currentProjection);
         }
 
         _gd.RasterizerState = RasterizerState.CullCounterClockwise;
@@ -238,6 +254,137 @@ public sealed class ShipMeshRenderer : IDisposable
         return mesh;
     }
 
+    private void DrawInstalledEngines(
+        IReadOnlyList<EngineMountPresentationSnapshot> engineMounts,
+        Matrix shipWorld,
+        Matrix view,
+        Matrix projection,
+        Color sunColour)
+    {
+        foreach (EnginePresentationSnapshot engine in engineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EnginePresentationSnapshot>())
+        {
+            EngineGpuMesh mesh = GetOrCreateEngineMesh(
+                engine.VisualGeometry,
+                engine.GeometryTransform.MirroredAcrossHullX);
+            Matrix world = engine.GeometryTransform.LocalToHull * shipWorld;
+
+            foreach (EngineGpuMeshPart part in mesh.Parts)
+            {
+                _meshRenderer.DrawDynamicLit(
+                    part.VertexBuffer,
+                    part.IndexBuffer,
+                    world,
+                    view,
+                    projection,
+                    EngineMaterialColour(part.Material, engine.DamageFraction),
+                    SceneLighting.SunDirection,
+                    sunColour,
+                    SceneLighting.Ambient);
+            }
+        }
+    }
+
+    private EngineGpuMesh GetOrCreateEngineMesh(EngineVisualGeometry geometry, bool mirrored)
+    {
+        var key = (geometry.GeometryId, mirrored);
+        if (_engineMeshCache.TryGetValue(key, out EngineGpuMesh? mesh))
+            return mesh;
+
+        mesh = EngineGpuMesh.Create(_gd, EngineMeshBuilder.Build(geometry, mirrored));
+        _engineMeshCache.Add(key, mesh);
+        return mesh;
+    }
+
+    public static Color EngineMaterialColour(EngineVisualMaterial material, double damageFraction)
+    {
+        Color baseColour = material switch
+        {
+            EngineVisualMaterial.Structural => new Color(55, 61, 62),
+            EngineVisualMaterial.Casing => new Color(92, 96, 91),
+            EngineVisualMaterial.Nozzle => new Color(40, 43, 44),
+            EngineVisualMaterial.Accent => new Color(190, 145, 42),
+            _ => Color.Magenta,
+        };
+        float condition = MathHelper.Lerp(1.0f, 0.45f, (float)damageFraction);
+        return new Color(baseColour.ToVector3() * condition);
+    }
+
+    private void DrawEngineModuleDebug(
+        IReadOnlyList<EngineMountPresentationSnapshot> engineMounts,
+        Matrix shipWorld,
+        Matrix view,
+        Matrix projection)
+    {
+        var lines = new List<VertexPositionColor>();
+        foreach (EngineMountPresentationSnapshot mount in engineMounts)
+        {
+            Matrix mountTransform =
+                Matrix.CreateFromQuaternion(mount.Pose.Orientation)
+                * Matrix.CreateTranslation(mount.Pose.Position.ToVector3());
+            AddTransformAxes(lines, mountTransform, 1.0f);
+
+            EnginePresentationSnapshot? engine = mount.InstalledEngine;
+            if (engine is null)
+                continue;
+
+            Matrix engineTransform = engine.GeometryTransform.LocalToHull;
+            AddTransformAxes(lines, engineTransform, 0.75f);
+            bool mirrored = engine.GeometryTransform.MirroredAcrossHullX;
+            foreach (EngineExhaustDefinition exhaust in engine.VisualGeometry.Exhausts)
+            {
+                Vector3 start = Vector3.Transform(
+                    EngineMeshBuilder.ToVector3(exhaust.Position, mirrored),
+                    engineTransform);
+                Vector3 direction = Vector3.TransformNormal(
+                    EngineMeshBuilder.ToVector3(exhaust.Direction, mirrored),
+                    engineTransform);
+                AddLine(lines, start, start + Vector3.Normalize(direction) * 1.8f, Color.OrangeRed);
+            }
+            foreach (EngineLightDefinition light in engine.VisualGeometry.Lights)
+            {
+                Vector3 position = Vector3.Transform(
+                    EngineMeshBuilder.ToVector3(light.Position, mirrored),
+                    engineTransform);
+                AddCross(lines, position, 0.18f, new Color(light.Colour.ToVector3()));
+            }
+        }
+
+        if (lines.Count == 0)
+            return;
+
+        _debugLineEffect.World = shipWorld;
+        _debugLineEffect.View = view;
+        _debugLineEffect.Projection = projection;
+        _gd.RasterizerState = RasterizerState.CullNone;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        foreach (EffectPass pass in _debugLineEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _gd.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
+        }
+    }
+
+    private static void AddTransformAxes(List<VertexPositionColor> lines, Matrix transform, float length)
+    {
+        Vector3 origin = transform.Translation;
+        AddLine(lines, origin, Vector3.Transform(Vector3.UnitX * length, transform), Color.Red);
+        AddLine(lines, origin, Vector3.Transform(Vector3.UnitY * length, transform), Color.LimeGreen);
+        AddLine(lines, origin, Vector3.Transform(-Vector3.UnitZ * length, transform), Color.Cyan);
+    }
+
+    private static void AddCross(
+        List<VertexPositionColor> lines,
+        Vector3 position,
+        float radius,
+        Color colour)
+    {
+        AddLine(lines, position - Vector3.UnitX * radius, position + Vector3.UnitX * radius, colour);
+        AddLine(lines, position - Vector3.UnitY * radius, position + Vector3.UnitY * radius, colour);
+        AddLine(lines, position - Vector3.UnitZ * radius, position + Vector3.UnitZ * radius, colour);
+    }
+
     public static Matrix BuildSemanticWorldTransform(
         float renderScale,
         Vector3 cameraRelativeRenderPosition,
@@ -290,6 +437,8 @@ public sealed class ShipMeshRenderer : IDisposable
     public void Dispose()
     {
         foreach (var mesh in _semanticMeshCache.Values)
+            mesh.Dispose();
+        foreach (var mesh in _engineMeshCache.Values)
             mesh.Dispose();
 
         _legacyFallback?.Dispose();

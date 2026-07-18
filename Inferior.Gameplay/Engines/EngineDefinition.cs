@@ -9,7 +9,8 @@ public sealed class EngineDefinition
         string familyId,
         string displayName,
         DVec3 nominalEnvelopeMeters,
-        double dryMassKg)
+        double dryMassKg,
+        EngineVisualGeometry? visualGeometry = null)
     {
         if (string.IsNullOrWhiteSpace(familyId))
             throw new ArgumentException("Engine family id must not be empty.", nameof(familyId));
@@ -26,12 +27,14 @@ public sealed class EngineDefinition
         DisplayName = displayName;
         NominalEnvelopeMeters = nominalEnvelopeMeters;
         DryMassKg = dryMassKg;
+        VisualGeometry = visualGeometry;
     }
 
     public string FamilyId { get; }
     public string DisplayName { get; }
     public DVec3 NominalEnvelopeMeters { get; }
     public double DryMassKg { get; }
+    public EngineVisualGeometry? VisualGeometry { get; }
 
     private static bool IsPositiveFinite(DVec3 value)
         => double.IsFinite(value.X) && value.X > 0.0

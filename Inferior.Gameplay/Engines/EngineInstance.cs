@@ -37,6 +37,12 @@ public sealed class EngineInstance
         GeometryTransform = geometryTransform;
     }
 
+    internal void Uninstall()
+    {
+        InstalledMountId = null;
+        GeometryTransform = null;
+    }
+
     private static double ValidateFraction(double value, string parameterName)
     {
         if (!double.IsFinite(value) || value < 0.0 || value > 1.0)

@@ -61,8 +61,7 @@ public sealed record EngineGeometryTransform(
     bool MirroredAcrossHullX)
 {
     public Matrix LocalToHull =>
-        Matrix.CreateScale(MirroredAcrossHullX ? -1f : 1f, 1f, 1f)
-        * Matrix.CreateFromQuaternion(Orientation)
+        Matrix.CreateFromQuaternion(Orientation)
         * Matrix.CreateTranslation(Position.ToVector3());
 }
 
@@ -123,5 +122,16 @@ public sealed class EngineMount
         engine.Install(MountId, geometryTransform);
         InstalledEngine = engine;
         return true;
+    }
+
+    public EngineInstance? RemoveInstalledEngine()
+    {
+        EngineInstance? engine = InstalledEngine;
+        if (engine is null)
+            return null;
+
+        InstalledEngine = null;
+        engine.Uninstall();
+        return engine;
     }
 }
