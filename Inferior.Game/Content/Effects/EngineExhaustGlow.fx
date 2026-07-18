@@ -58,10 +58,10 @@ float4 PS(VertexOutput input) : COLOR0
     // pulses, deep dips, and occasional surges instead of a fine random shimmer.
     float brakePulse = saturate(
         0.50
-        + 0.26 * sin(VisualTime * 4.1)
-        + 0.16 * sin(VisualTime * 2.3 + 1.7)
-        + 0.10 * sin(VisualTime * 7.3 + 0.6));
-    float brakeFactor = 0.28 + brakePulse * 1.18;
+        + 0.26 * sin(VisualTime * 12.3)
+        + 0.16 * sin(VisualTime * 6.9 + 1.7)
+        + 0.10 * sin(VisualTime * 21.9 + 0.6));
+    float brakeFactor = 0.08 + brakePulse * 1.45;
     intensity *= lerp(
         1.0,
         brakeFactor,

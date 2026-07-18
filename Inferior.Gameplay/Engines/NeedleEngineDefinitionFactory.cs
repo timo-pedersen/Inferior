@@ -180,7 +180,7 @@ public static class NeedleEngineDefinitionFactory
                 thrustIntensity: 0.70f,
                 brakeIntensity: 0.90f,
                 boostIntensity: 3.0f,
-                flickerAmount: 0.58f));
+                flickerAmount: 0.85f));
     }
 
     private static Ring CreateRing(double z, double radiusX, double radiusY)

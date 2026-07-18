@@ -508,13 +508,13 @@ Expected:
 ## Initial implementation scope
 
 The first implementation should prove:
-- engine generation;
-- mount compatibility;
-- paired generation;
-- mirrored geometry;
-- engine rendering;
-- exhaust placement;
-- engine lights.
+- engine generation; - Done
+- mount compatibility; - Done
+- paired generation; - Done
+- mirrored geometry; - Done
+- engine rendering; - Done
+- exhaust placement; - Done
+- engine lights. - Partly done
 
 Gameplay systems such as:
 - damage;
@@ -523,5 +523,87 @@ Gameplay systems such as:
 - advanced thermal simulation;
 
 can follow later.
+
+## Engine Visual Design Notes
+
+### Purpose
+Engine visuals communicate propulsion characteristics, engine class, condition, and operating state.
+Engines are large physical machines. Their visual appearance should reinforce their mechanical identity rather than simply represent a thrust value.
+Exhaust is not a conventional rocket flame. It represents energy/plasma/field effects from the propulsion system.
+
+### Engine Glow
+All active engines have a visible idle glow.
+An engine sitting powered but producing no thrust should not appear visually inactive.
+Glow intensity changes with operating state:
+State	Visual behaviour
+Idle	Low, stable glow
+Acceleration	Increased brightness
+Maximum thrust	Strong glow
+Boost	Very bright glow, possible colour shift and instability
+Braking	Increased intensity with flickering/pulsing behaviour
+
+Glow characteristics are engine-specific.
+Examples:
+industrial engines: warm, broad, less refined glow;
+military engines: intense, controlled glow;
+high-end civilian engines: cleaner, smoother appearance.
+
+### Exhaust Effects
+Exhaust is owned by the engine definition.
+Each engine may define:
+exhaust geometry;
+colour;
+spread;
+particle behaviour;
+intensity.
+
+Initial visual concept:
+idle: no visible exhaust particles;
+acceleration: trailing exhaust/plasma;
+boost: strong exhaust effect;
+braking: separate turbulent energy-dump effect.
+
+Acceleration exhaust particles inherit ship velocity at creation.
+This means exhaust naturally behaves correctly in space:
+when accelerating, particles appear to move behind the ship;
+when coasting, particles retain previous momentum.
+
+Braking uses a separate visual effect rather than simply reversing normal exhaust.
+
+### Engine Visual Parameters
+Engine definitions may contain visual parameters:
+
+EngineVisualDefinition
+{
+    GlowColor;
+    IdleGlow;
+    MaxGlow;
+    BoostGlowMultiplier;
+
+    ExhaustType;
+    ExhaustColor;
+    ExhaustSpread;
+    ExhaustParticleRate;
+
+    BrakeEffectType;
+}
+
+These values describe appearance only.
+They do not define physics.
+
+### Visual Identity
+Engine appearance should communicate:
+power;
+refinement;
+manufacturing origin;
+military/civilian purpose.
+
+Two engines with identical thrust values may look different because of:
+technology generation;
+manufacturer;
+intended use;
+cost.
+
+A large cheap engine should look different from a compact advanced engine.
 
 

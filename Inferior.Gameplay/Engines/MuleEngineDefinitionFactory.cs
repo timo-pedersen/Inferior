@@ -73,7 +73,7 @@ public static class MuleEngineDefinitionFactory
                 thrustIntensity: 0.50f,
                 brakeIntensity: 0.80f,
                 boostIntensity: 2.0f,
-                flickerAmount: 0.72f));
+                flickerAmount: 0.90f));
     }
 
     private static void AddBox(
