@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Gameplay;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.States;
@@ -34,6 +35,19 @@ internal sealed class ChaseCameraState
         ResetSmoothing();
         return IsActive;
     }
+
+    public bool EnforceFlightMode(FlightMode flightMode)
+    {
+        if (!IsActive || IsAvailableIn(flightMode))
+            return false;
+
+        Deactivate();
+        return true;
+    }
+
+    public static bool IsAvailableIn(FlightMode flightMode)
+        => flightMode is FlightMode.SystemNewtonian
+                      or FlightMode.AtmosphericNewtonian;
 
     public void Deactivate()
     {

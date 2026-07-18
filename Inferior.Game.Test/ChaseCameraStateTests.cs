@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Game.States;
+using Inferior.Gameplay;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -128,5 +129,45 @@ public sealed class ChaseCameraStateTests
 
         Assert.False(handled);
         Assert.False(chase.IsOrbitalEditActive);
+    }
+
+    [Theory]
+    [InlineData(FlightMode.SystemNewtonian)]
+    [InlineData(FlightMode.AtmosphericNewtonian)]
+    public void ChaseCamera_IsAvailableInNewtonianModes(FlightMode mode)
+    {
+        Assert.True(ChaseCameraState.IsAvailableIn(mode));
+    }
+
+    [Theory]
+    [InlineData(FlightMode.Docked)]
+    [InlineData(FlightMode.SystemSlipstream)]
+    [InlineData(FlightMode.AtmosphericSlipstream)]
+    [InlineData(FlightMode.EnteringFlatHyperspace)]
+    [InlineData(FlightMode.FlatHyperspace)]
+    public void ChaseCamera_IsUnavailableOutsideNewtonianModes(FlightMode mode)
+    {
+        Assert.False(ChaseCameraState.IsAvailableIn(mode));
+    }
+
+    [Fact]
+    public void EnteringSlipstream_ExitsChaseAndPreservesSavedPose()
+    {
+        var chase = new ChaseCameraState();
+        chase.ToggleActive();
+        chase.ToggleOrbitalEdit();
+        chase.ApplyEdit(new ChaseCameraEditInput(1, 1, 1, 1, false), 0.25);
+        DVec3 direction = chase.HullLocalDirection;
+        double radius = chase.Radius;
+        double roll = chase.RollRadians;
+
+        bool forcedOff = chase.EnforceFlightMode(FlightMode.SystemSlipstream);
+
+        Assert.True(forcedOff);
+        Assert.False(chase.IsActive);
+        Assert.False(chase.IsOrbitalEditActive);
+        Assert.Equal(direction, chase.HullLocalDirection);
+        Assert.Equal(radius, chase.Radius);
+        Assert.Equal(roll, chase.RollRadians);
     }
 }

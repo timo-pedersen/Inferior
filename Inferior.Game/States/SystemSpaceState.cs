@@ -657,6 +657,15 @@ public sealed partial class SystemSpaceState : GameState
 
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
+        FlightMode presentationFlightMode =
+            _frameShipSnap?.FlightMode ?? FlightMode.Docked;
+        bool chaseAvailable =
+            ChaseCameraState.IsAvailableIn(presentationFlightMode);
+        bool chaseForcedOff =
+            _chaseCamera.EnforceFlightMode(presentationFlightMode);
+        if (chaseForcedOff)
+            PublishCameraMessage("Chase camera unavailable outside Newtonian flight.");
+
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
@@ -690,7 +699,7 @@ public sealed partial class SystemSpaceState : GameState
             _debugCameraMode = !_debugCameraMode;
             if (_debugCameraMode) _chaseCamera.Deactivate();  // can't combine with debug cam
         }
-        if (ctrlF3JustPressed && !_debugCameraMode)
+        if (ctrlF3JustPressed && !_debugCameraMode && chaseAvailable)
         {
             if (_chaseCamera.ToggleOrbitalEdit())
             {
@@ -706,9 +715,17 @@ public sealed partial class SystemSpaceState : GameState
         }
         else if (f3JustPressed && !_debugCameraMode)
         {
-            bool enabled = _chaseCamera.ToggleActive();
-            PublishCameraMessage(
-                enabled ? "Chase camera enabled." : "Chase camera disabled.");
+            if (!chaseAvailable)
+            {
+                if (!chaseForcedOff)
+                    PublishCameraMessage("Chase camera unavailable outside Newtonian flight.");
+            }
+            else
+            {
+                bool enabled = _chaseCamera.ToggleActive();
+                PublishCameraMessage(
+                    enabled ? "Chase camera enabled." : "Chase camera disabled.");
+            }
         }
         if (f4JustPressed)
         {
