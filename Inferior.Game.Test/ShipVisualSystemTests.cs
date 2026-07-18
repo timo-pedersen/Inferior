@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Game.Ships;
+using Inferior.Game.States;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
@@ -175,6 +176,64 @@ public sealed class ShipVisualSystemTests
 
         Assert.Equal(roles.Length, colours.Distinct().Count());
         Assert.DoesNotContain(Color.Magenta, colours);
+    }
+
+    [Fact]
+    public void SemanticShipWorldTransform_PreservesCameraRelativeSnapshotTranslation()
+    {
+        var renderPosition = new Vector3(8.0e-8f, 3.0e-8f, -2.5e-8f);
+        Quaternion orientation = Quaternion.CreateFromYawPitchRoll(0.7f, -0.2f, 0.3f);
+
+        Matrix world = ShipMeshRenderer.BuildSemanticWorldTransform(
+            (float)Camera3D.RenderScale,
+            renderPosition,
+            orientation);
+
+        Assert.Equal(renderPosition, world.Translation);
+        Assert.Equal(renderPosition, Vector3.Transform(Vector3.Zero, world));
+    }
+
+    [Fact]
+    public void AriesVertices_ProjectInsideChaseCameraFrustum()
+    {
+        var shipPosition = new DVec3(1.2e11, -4.5e10, 8.7e10);
+        var shipForward = new DVec3(0, 0, -1);
+        var targets = SystemSpaceState.CalculateChaseCameraTargets(
+            shipPosition,
+            shipForward,
+            DVec3.UnitY);
+        DVec3 lookDirection = (targets.LookTarget - targets.DesiredPosition).Normalized();
+        Quaternion cameraOrientation = SystemSpaceState.QuatLookAtWithUp(
+            lookDirection,
+            DVec3.UnitY);
+        var camera = new Camera3D(targets.DesiredPosition, 16.0f / 9.0f);
+        camera.SetPose(targets.DesiredPosition, cameraOrientation);
+
+        Vector3 renderPosition = camera.ToRenderSpace(shipPosition);
+        Matrix world = ShipMeshRenderer.BuildSemanticWorldTransform(
+            (float)Camera3D.RenderScale,
+            renderPosition,
+            Quaternion.Identity);
+        Matrix projection = Matrix.CreatePerspectiveFieldOfView(
+            MathHelper.ToRadians(60.0f),
+            16.0f / 9.0f,
+            5.0f * (float)Camera3D.RenderScale,
+            57_000.0f * (float)Camera3D.RenderScale);
+        Matrix worldViewProjection = world * camera.ViewMatrix * projection;
+        var geometry = HullDefinitionLibrary.Get("type-1").VisualGeometry!;
+
+        var projected = geometry.Vertices.Select(vertex =>
+        {
+            Vector4 clip = Vector4.Transform(
+                new Vector4(vertex.Position.ToVector3(), 1.0f),
+                worldViewProjection);
+            return clip / clip.W;
+        }).ToArray();
+
+        Assert.Contains(projected, vertex =>
+            MathF.Abs(vertex.X) < 1.0f &&
+            MathF.Abs(vertex.Y) < 1.0f &&
+            vertex.Z is >= 0.0f and <= 1.0f);
     }
 
     [Fact]

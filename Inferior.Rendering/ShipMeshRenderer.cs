@@ -5,6 +5,14 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace Inferior.Rendering;
 
+public readonly record struct ShipRenderTransformDiagnostic(
+    DVec3 ShipPosition,
+    Quaternion ShipOrientation,
+    DVec3 CameraPosition,
+    Vector3 CameraRelativeRenderPosition,
+    Vector3 WorldTranslation,
+    ShipHullRenderPath RenderPath);
+
 /// <summary>
 /// Draws the player ship in third-person view.
 /// Caller decides when to call Draw() and passes the active view/projection for the
@@ -35,7 +43,7 @@ public sealed class ShipMeshRenderer : IDisposable
     // currentView is the already-rolled view matrix. currentProjection is the active
     // pass projection. Do not read camera.ViewMatrix/camera.ProjectionMatrix here.
     // level is accepted but not yet used; no ship mesh LOD variants exist yet.
-    public void Draw(
+    public ShipRenderTransformDiagnostic Draw(
         Camera3D camera,
         Matrix currentView,
         Matrix currentProjection,
@@ -48,15 +56,17 @@ public sealed class ShipMeshRenderer : IDisposable
         float renderScale = (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
         var sunColour = new Color(SceneLighting.SunColour);
+        ShipHullRenderPath renderPath;
+        Matrix world;
 
         if (HullDefinitionLibrary.TryGet(hullTypeId, out var hullDefinition)
             && hullDefinition?.VisualGeometry is not null)
         {
+            renderPath = ShipHullRenderPath.SemanticHull;
+            world = BuildSemanticWorldTransform(renderScale, renderPos, shipOrientation);
             DrawSemanticHull(
                 hullDefinition,
-                renderScale,
-                renderPos,
-                shipOrientation,
+                world,
                 currentView,
                 currentProjection,
                 sunColour,
@@ -64,11 +74,21 @@ public sealed class ShipMeshRenderer : IDisposable
         }
         else
         {
-            DrawLegacyFallback(renderScale, renderPos, shipOrientation, currentView, currentProjection, sunColour);
+            renderPath = ShipHullRenderPath.LegacyFallback;
+            world = BuildLegacyWorldTransform(renderScale, renderPos, shipOrientation);
+            DrawLegacyFallback(world, currentView, currentProjection, sunColour);
         }
 
         _gd.RasterizerState = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
+
+        return new ShipRenderTransformDiagnostic(
+            shipPosition,
+            shipOrientation,
+            camera.UniversePosition,
+            renderPos,
+            world.Translation,
+            renderPath);
     }
 
     public static ShipHullRenderPath SelectRenderPath(HullDefinition? hullDefinition)
@@ -78,19 +98,13 @@ public sealed class ShipMeshRenderer : IDisposable
 
     private void DrawSemanticHull(
         HullDefinition hullDefinition,
-        float renderScale,
-        Vector3 renderPos,
-        Quaternion shipOrientation,
+        Matrix world,
         Matrix currentView,
         Matrix projection,
         Color sunColour,
         SemanticHullDebugMode debugMode)
     {
         SemanticHullGpuMesh mesh = GetOrCreateSemanticMesh(hullDefinition);
-
-        Matrix world = Matrix.CreateScale(renderScale)
-                     * Matrix.CreateFromQuaternion(shipOrientation)
-                     * Matrix.CreateTranslation(renderPos);
 
         foreach (var part in mesh.Parts)
         {
@@ -216,22 +230,30 @@ public sealed class ShipMeshRenderer : IDisposable
         return mesh;
     }
 
-    private void DrawLegacyFallback(
+    public static Matrix BuildSemanticWorldTransform(
         float renderScale,
-        Vector3 renderPos,
-        Quaternion shipOrientation,
+        Vector3 cameraRelativeRenderPosition,
+        Quaternion shipOrientation)
+        => Matrix.CreateScale(renderScale)
+         * Matrix.CreateFromQuaternion(shipOrientation)
+         * Matrix.CreateTranslation(cameraRelativeRenderPosition);
+
+    private static Matrix BuildLegacyWorldTransform(
+        float renderScale,
+        Vector3 cameraRelativeRenderPosition,
+        Quaternion shipOrientation)
+        => Matrix.CreateScale(renderScale)
+         * Matrix.CreateRotationY(MathF.PI)
+         * Matrix.CreateFromQuaternion(shipOrientation)
+         * Matrix.CreateTranslation(cameraRelativeRenderPosition);
+
+    private void DrawLegacyFallback(
+        Matrix world,
         Matrix currentView,
         Matrix projection,
         Color sunColour)
     {
         LegacyFallbackMesh legacy = GetOrCreateLegacyFallback();
-
-        // The legacy mesh is authored +Z-forward, so it needs this correction. Hulls
-        // with semantic visual geometry, including Aries/type-1, do not use this path.
-        Matrix world = Matrix.CreateScale(renderScale)
-                     * Matrix.CreateRotationY(MathF.PI)
-                     * Matrix.CreateFromQuaternion(shipOrientation)
-                     * Matrix.CreateTranslation(renderPos);
 
         _meshRenderer.DrawDynamicLit(legacy.HullVb, legacy.HullIb, world, currentView, projection,
             Type1HullFactory.HullColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient);

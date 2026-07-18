@@ -16,6 +16,7 @@ public sealed partial class SystemSpaceState
     private BasicEffect? _shipPositionMarkerEffect;
     private bool _shipPositionMarkerEnabled;
     private int _shipPositionMarkerObservedRelocationSequence;
+    private bool _shipRenderDiagnosticPending;
 
     private void InitializeShipPositionMarker()
     {
@@ -89,6 +90,8 @@ public sealed partial class SystemSpaceState
                 _frameShipSnap.Forward,
                 _frameShipSnap.Up)
             : null;
+        if (chaseTargets is not null)
+            _shipRenderDiagnosticPending = true;
         string log = FormatShipPositionMarkerLog(
             _frameShipSnap.Position,
             _frameShipSnap.Position,
@@ -101,6 +104,36 @@ public sealed partial class SystemSpaceState
         File.AppendAllText(path, $"{DateTimeOffset.Now:O}\n{log}\n");
         DataBus.System.Publish(Topics.System.All,
             new SystemMessage($"Ship chase diagnostic written: {path}", SystemMessagePriority.Info));
+    }
+
+    private void WriteShipRenderDiagnostic(
+        SpaceSimulation.ShipSnapshot snapshot,
+        ShipRenderTransformDiagnostic diagnostic)
+    {
+        if (!_shipRenderDiagnosticPending)
+            return;
+
+        _shipRenderDiagnosticPending = false;
+        DVec3 difference = diagnostic.ShipPosition - snapshot.Position;
+        Vector3 translationDifference =
+            diagnostic.WorldTranslation - diagnostic.CameraRelativeRenderPosition;
+        string log =
+            "[ShipRender]\n" +
+            $"Ship render position: {FormatVector(diagnostic.ShipPosition)}\n" +
+            $"Ship render orientation: {FormatQuaternion(diagnostic.ShipOrientation)}\n" +
+            $"Ship snapshot position: {FormatVector(snapshot.Position)}\n" +
+            $"Difference vector: {FormatVector(difference)}\n" +
+            $"Camera position: {FormatVector(diagnostic.CameraPosition)}\n" +
+            $"Camera-relative render position: {FormatVector(diagnostic.CameraRelativeRenderPosition)}\n" +
+            $"World matrix translation: {FormatVector(diagnostic.WorldTranslation)}\n" +
+            $"Translation difference: {FormatVector(translationDifference)}\n" +
+            $"Render path: {diagnostic.RenderPath}\n";
+
+        Console.WriteLine(log);
+        string path = Path.Combine(AppContext.BaseDirectory, "ship_render_transform_diagnostic.log");
+        File.AppendAllText(path, $"{DateTimeOffset.Now:O}\n{log}\n");
+        DataBus.System.Publish(Topics.System.All,
+            new SystemMessage($"Ship render diagnostic written: {path}", SystemMessagePriority.Info));
     }
 
     internal static string FormatShipPositionMarkerLog(
@@ -158,6 +191,15 @@ public sealed partial class SystemSpaceState
         text.AppendLine($"    Y: {position.Y.ToString("R", CultureInfo.InvariantCulture)}");
         text.AppendLine($"    Z: {position.Z.ToString("R", CultureInfo.InvariantCulture)}");
     }
+
+    private static string FormatVector(DVec3 value)
+        => FormattableString.Invariant($"({value.X:R}, {value.Y:R}, {value.Z:R})");
+
+    private static string FormatVector(Vector3 value)
+        => FormattableString.Invariant($"({value.X:R}, {value.Y:R}, {value.Z:R})");
+
+    private static string FormatQuaternion(Quaternion value)
+        => FormattableString.Invariant($"({value.X:R}, {value.Y:R}, {value.Z:R}, {value.W:R})");
 
     private static void AddMarkerLine(
         List<VertexPositionColor> lines,

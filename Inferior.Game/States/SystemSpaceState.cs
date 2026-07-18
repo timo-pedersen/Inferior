@@ -1069,9 +1069,13 @@ public sealed partial class SystemSpaceState : GameState
         DrawCalibrationCube(level);
         DrawShipPositionMarker();
         if (_thirdPersonMode && _frameShipSnap != null)
-            _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
+        {
+            ShipRenderTransformDiagnostic diagnostic = _shipMeshRenderer.Draw(
+                _camera, _effect.View, _effect.Projection,
                 _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
                 _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
+            WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
+        }
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 
