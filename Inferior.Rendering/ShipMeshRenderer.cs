@@ -197,7 +197,7 @@ public sealed class ShipMeshRenderer : IDisposable
             (float)geometry.Vertices.Max(vertex => vertex.Position.Y),
             (float)geometry.Vertices.Max(vertex => vertex.Position.Z));
 
-        var lines = BuildDebugLines(min, max);
+        var lines = BuildSemanticDebugLines(min, max);
         _debugLineEffect.World = world;
         _debugLineEffect.View = view;
         _debugLineEffect.Projection = projection;
@@ -211,12 +211,19 @@ public sealed class ShipMeshRenderer : IDisposable
         }
     }
 
-    private static VertexPositionColor[] BuildDebugLines(Vector3 min, Vector3 max)
+    public static VertexPositionColor[] BuildSemanticDebugLines(Vector3 min, Vector3 max)
     {
-        var vertices = new List<VertexPositionColor>(30);
-        AddLine(vertices, Vector3.Zero, Vector3.UnitX * 2.5f, Color.Red);
-        AddLine(vertices, Vector3.Zero, Vector3.UnitY * 2.5f, Color.LimeGreen);
-        AddLine(vertices, Vector3.Zero, -Vector3.UnitZ * 2.5f, Color.Cyan);
+        var vertices = new List<VertexPositionColor>(300);
+        const float axisLength = 4.5f;
+        Vector3 xTip = Vector3.UnitX * axisLength;
+        Vector3 yTip = Vector3.UnitY * axisLength;
+        Vector3 forwardTip = -Vector3.UnitZ * axisLength;
+        AddArrow(vertices, Vector3.Zero, xTip, Vector3.UnitY, Color.Red);
+        AddArrow(vertices, Vector3.Zero, yTip, Vector3.UnitX, Color.LimeGreen);
+        AddArrow(vertices, Vector3.Zero, forwardTip, Vector3.UnitX, Color.Cyan);
+        AddDebugLabel(vertices, "+X STARBOARD", new Vector3(4.8f, -0.3f, 0f), Vector3.UnitX, Vector3.UnitY, Color.Red);
+        AddDebugLabel(vertices, "+Y UP", new Vector3(0.3f, 4.8f, 0f), Vector3.UnitX, Vector3.UnitY, Color.LimeGreen);
+        AddDebugLabel(vertices, "-Z FORWARD", new Vector3(-3.0f, -0.3f, -4.8f), Vector3.UnitX, Vector3.UnitY, Color.Cyan);
 
         Vector3[] corners =
         [
@@ -236,6 +243,74 @@ public sealed class ShipMeshRenderer : IDisposable
 
         return vertices.ToArray();
     }
+
+    private static void AddArrow(
+        List<VertexPositionColor> vertices,
+        Vector3 start,
+        Vector3 tip,
+        Vector3 wingAxis,
+        Color colour)
+    {
+        AddLine(vertices, start, tip, colour);
+        Vector3 direction = Vector3.Normalize(tip - start);
+        Vector3 wingBase = tip - direction * 0.45f;
+        AddLine(vertices, tip, wingBase + wingAxis * 0.22f, colour);
+        AddLine(vertices, tip, wingBase - wingAxis * 0.22f, colour);
+    }
+
+    private static void AddDebugLabel(
+        List<VertexPositionColor> vertices,
+        string text,
+        Vector3 origin,
+        Vector3 right,
+        Vector3 up,
+        Color colour)
+    {
+        const float pixelSize = 0.12f;
+        int cursor = 0;
+        foreach (char character in text)
+        {
+            string[] glyph = DebugGlyph(character);
+            for (int row = 0; row < glyph.Length; row++)
+            {
+                for (int column = 0; column < glyph[row].Length; column++)
+                {
+                    if (glyph[row][column] != '1')
+                        continue;
+
+                    Vector3 pixelStart =
+                        origin
+                        + right * ((cursor + column) * pixelSize)
+                        + up * ((4 - row) * pixelSize);
+                    AddLine(vertices, pixelStart, pixelStart + right * (pixelSize * 0.8f), colour);
+                }
+            }
+            cursor += 4;
+        }
+    }
+
+    private static string[] DebugGlyph(char character)
+        => character switch
+        {
+            ' ' => ["000", "000", "000", "000", "000"],
+            '+' => ["000", "010", "111", "010", "000"],
+            '-' => ["000", "000", "111", "000", "000"],
+            'A' => ["010", "101", "111", "101", "101"],
+            'B' => ["110", "101", "110", "101", "110"],
+            'D' => ["110", "101", "101", "101", "110"],
+            'F' => ["111", "100", "110", "100", "100"],
+            'O' => ["010", "101", "101", "101", "010"],
+            'P' => ["110", "101", "110", "100", "100"],
+            'R' => ["110", "101", "110", "101", "101"],
+            'S' => ["011", "100", "010", "001", "110"],
+            'T' => ["111", "010", "010", "010", "010"],
+            'U' => ["101", "101", "101", "101", "111"],
+            'W' => ["101", "101", "111", "111", "101"],
+            'X' => ["101", "101", "010", "101", "101"],
+            'Y' => ["101", "101", "010", "010", "010"],
+            'Z' => ["111", "001", "010", "100", "111"],
+            _ => ["111", "001", "010", "000", "010"],
+        };
 
     private static void AddLine(List<VertexPositionColor> vertices, Vector3 start, Vector3 end, Color colour)
     {

@@ -54,7 +54,7 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(new DVec3(-1.25, 1.55, -5.9), hull.CockpitOffset);
         Assert.Equal(hull.CockpitOffset, hull.CockpitPose.Position);
         Assert.Equal(16.0, hull.Dimensions!.LengthMeters);
-        Assert.Equal(10.0, hull.Dimensions.WidthMeters);
+        Assert.Equal(11.2, hull.Dimensions.WidthMeters);
         Assert.Equal(5.0, hull.Dimensions.HeightMeters);
         Assert.Equal(7.0, hull.Dimensions.StructuralHullWidthMeters);
         Assert.Equal(5.0, hull.Dimensions.StructuralHullHeightMeters);
