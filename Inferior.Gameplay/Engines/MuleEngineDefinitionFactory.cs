@@ -35,9 +35,9 @@ public static class MuleEngineDefinitionFactory
             [
                 new EngineExhaustDefinition(
                     "mule.exhaust.main.01",
-                    new DVec3(0.0, 0.0, 3.30),
+                    new DVec3(0.0, 0.0, 3.80),
                     DVec3.UnitZ,
-                    RadiusMeters: 0.72),
+                    RadiusMeters: 0.50),
             ],
             [
                 new EngineLightDefinition(
@@ -73,7 +73,7 @@ public static class MuleEngineDefinitionFactory
                 thrustIntensity: 0.50f,
                 brakeIntensity: 0.80f,
                 boostIntensity: 2.0f,
-                flickerAmount: 0.22f));
+                flickerAmount: 0.72f));
     }
 
     private static void AddBox(

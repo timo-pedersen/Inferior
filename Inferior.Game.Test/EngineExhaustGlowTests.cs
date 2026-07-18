@@ -27,13 +27,15 @@ public sealed class EngineExhaustGlowTests
         Assert.Equal(new DVec3(1.0, 0.24, 0.035), mule.VisualDefinition!.GlowColour);
         Assert.Equal(0.15f, mule.VisualDefinition.IdleIntensity);
         Assert.Equal(2.0f, mule.VisualDefinition.BoostIntensity);
-        Assert.Equal(0.72, muleAnchor.RadiusMeters);
+        Assert.Equal(new DVec3(0.0, 0.0, 3.80), muleAnchor.Position);
+        Assert.Equal(0.50, muleAnchor.RadiusMeters);
         Assert.Equal(DVec3.UnitZ, muleAnchor.Direction);
 
         Assert.Equal(new DVec3(0.48, 0.82, 1.0), needle.VisualDefinition!.GlowColour);
         Assert.Equal(0.10f, needle.VisualDefinition.IdleIntensity);
         Assert.Equal(3.0f, needle.VisualDefinition.BoostIntensity);
-        Assert.Equal(0.62, needleAnchor.RadiusMeters);
+        Assert.Equal(new DVec3(-0.04, 0.12, 3.62), needleAnchor.Position);
+        Assert.Equal(0.50, needleAnchor.RadiusMeters);
         Assert.Equal(DVec3.UnitZ, needleAnchor.Direction);
     }
 
@@ -113,7 +115,7 @@ public sealed class EngineExhaustGlowTests
                 metresToRenderScale: 1f);
 
         Assert.Equal(2, draws.Count);
-        Assert.All(draws, draw => Assert.Equal(0.62f, draw.Radius));
+        Assert.All(draws, draw => Assert.Equal(0.50f, draw.Radius));
         Assert.Equal(-draws[1].Center.X, draws[0].Center.X, 5);
         Assert.Equal(draws[1].Center.Y, draws[0].Center.Y, 5);
         Assert.Equal(draws[1].Center.Z, draws[0].Center.Z, 5);

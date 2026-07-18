@@ -54,12 +54,22 @@ float4 PS(VertexOutput input) : COLOR0
     intensity = lerp(intensity, BrakeIntensity, saturate(EngineBrake));
     intensity = lerp(intensity, BoostIntensity, saturate(EngineBoost));
 
-    float flickerWave =
-        0.5
-        + 0.30 * sin(VisualTime * 31.0)
-        + 0.20 * sin(VisualTime * 53.0 + 1.7);
-    float instability = saturate(EngineBrake + EngineBoost * 0.25);
-    intensity *= 1.0 - FlickerAmount * instability * saturate(flickerWave);
+    // Braking is deliberately slow and uneven: layered periods create recognizable
+    // pulses, deep dips, and occasional surges instead of a fine random shimmer.
+    float brakePulse = saturate(
+        0.50
+        + 0.26 * sin(VisualTime * 4.1)
+        + 0.16 * sin(VisualTime * 2.3 + 1.7)
+        + 0.10 * sin(VisualTime * 7.3 + 0.6));
+    float brakeFactor = 0.28 + brakePulse * 1.18;
+    intensity *= lerp(
+        1.0,
+        brakeFactor,
+        saturate(EngineBrake) * FlickerAmount);
+
+    // Boost stays consistently brightest but retains a restrained energetic ripple.
+    float boostRipple = 1.0 + sin(VisualTime * 13.0) * 0.08 * FlickerAmount;
+    intensity *= lerp(1.0, boostRipple, saturate(EngineBoost));
 
     float whiteCore =
         saturate((intensity - 1.0) * 0.5)
