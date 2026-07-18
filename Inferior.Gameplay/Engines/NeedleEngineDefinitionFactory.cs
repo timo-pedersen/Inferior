@@ -178,9 +178,9 @@ public static class NeedleEngineDefinitionFactory
                 new DVec3(0.48, 0.82, 1.0),
                 idleIntensity: 0.10f,
                 thrustIntensity: 0.70f,
-                brakeIntensity: 0.90f,
+                velocityCorrectionIntensity: 0.90f,
                 boostIntensity: 3.0f,
-                flickerAmount: 0.85f));
+                instabilityAmount: 0.85f));
     }
 
     private static Ring CreateRing(double z, double radiusX, double radiusY)

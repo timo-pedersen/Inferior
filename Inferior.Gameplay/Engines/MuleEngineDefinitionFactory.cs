@@ -71,9 +71,9 @@ public static class MuleEngineDefinitionFactory
                 new DVec3(1.0, 0.24, 0.035),
                 idleIntensity: 0.15f,
                 thrustIntensity: 0.50f,
-                brakeIntensity: 0.80f,
+                velocityCorrectionIntensity: 0.80f,
                 boostIntensity: 2.0f,
-                flickerAmount: 0.90f));
+                instabilityAmount: 0.90f));
     }
 
     private static void AddBox(

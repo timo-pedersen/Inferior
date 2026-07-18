@@ -170,7 +170,6 @@ public sealed partial class SystemSpaceState : GameState
     // F11  — toggles between ship camera (cockpit) and free debug camera.
     // F2        — toggles engine mount/module transform debug.
     // Ctrl+F2   — cycles the installed engine pair through debug configurations.
-    // Alt+F2    — cycles the installed engines' exhaust visual state.
     // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
@@ -686,8 +685,6 @@ public sealed partial class SystemSpaceState : GameState
         bool altDown = keys.IsKeyDown(Keys.LeftAlt) || keys.IsKeyDown(Keys.RightAlt);
         bool ctrlF2JustPressed =
             EngineDebugCyclePlatformInput.IsCycleJustPressed(keys, _prevKeys);
-        bool altF2JustPressed =
-            EngineExhaustDebugPlatformInput.IsCycleJustPressed(keys, _prevKeys);
         bool f2JustPressed = !ctrlDown
             && !shiftDown
             && !altDown
@@ -713,10 +710,6 @@ public sealed partial class SystemSpaceState : GameState
         if (ctrlF2JustPressed)
         {
             _simulation.RequestDebugCycleEngineConfiguration();
-        }
-        else if (altF2JustPressed)
-        {
-            _simulation.RequestDebugCycleEngineExhaustState();
         }
         else if (f2JustPressed)
         {

@@ -8,38 +8,42 @@ public sealed class EngineVisualDefinition
         DVec3 glowColour,
         float idleIntensity,
         float thrustIntensity,
-        float brakeIntensity,
+        float velocityCorrectionIntensity,
         float boostIntensity,
-        float flickerAmount)
+        float instabilityAmount)
     {
         if (!IsFiniteColour(glowColour))
             throw new ArgumentOutOfRangeException(nameof(glowColour));
         if (!IsNonNegativeFinite(idleIntensity)
             || !IsNonNegativeFinite(thrustIntensity)
-            || !IsNonNegativeFinite(brakeIntensity)
+            || !IsNonNegativeFinite(velocityCorrectionIntensity)
             || !IsNonNegativeFinite(boostIntensity))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(idleIntensity),
                 "Engine glow intensities must be finite and non-negative.");
         }
-        if (!float.IsFinite(flickerAmount) || flickerAmount < 0f || flickerAmount > 1f)
-            throw new ArgumentOutOfRangeException(nameof(flickerAmount));
+        if (!float.IsFinite(instabilityAmount)
+            || instabilityAmount < 0f
+            || instabilityAmount > 1f)
+        {
+            throw new ArgumentOutOfRangeException(nameof(instabilityAmount));
+        }
 
         GlowColour = glowColour;
         IdleIntensity = idleIntensity;
         ThrustIntensity = thrustIntensity;
-        BrakeIntensity = brakeIntensity;
+        VelocityCorrectionIntensity = velocityCorrectionIntensity;
         BoostIntensity = boostIntensity;
-        FlickerAmount = flickerAmount;
+        InstabilityAmount = instabilityAmount;
     }
 
     public DVec3 GlowColour { get; }
     public float IdleIntensity { get; }
     public float ThrustIntensity { get; }
-    public float BrakeIntensity { get; }
+    public float VelocityCorrectionIntensity { get; }
     public float BoostIntensity { get; }
-    public float FlickerAmount { get; }
+    public float InstabilityAmount { get; }
 
     private static bool IsFiniteColour(DVec3 value)
         => double.IsFinite(value.X) && value.X >= 0.0
@@ -50,22 +54,34 @@ public sealed class EngineVisualDefinition
         => float.IsFinite(value) && value >= 0f;
 }
 
-public readonly record struct EngineVisualState(
-    float Output,
-    float Brake,
-    float Boost)
+public enum EngineVisualMode
 {
-    public static EngineVisualState Idle { get; } = new(0.1f, 0f, 0f);
-    public static EngineVisualState Thrust { get; } = new(1f, 0f, 0f);
-    public static EngineVisualState Braking { get; } = new(0.35f, 1f, 0f);
-    public static EngineVisualState Boosting { get; } = new(1f, 0f, 1f);
+    Idle,
+    Thrust,
+    Boost,
+    VelocityCorrection,
+}
+
+public readonly record struct EngineVisualState(
+    EngineVisualMode Mode,
+    float Output)
+{
+    public static EngineVisualState Idle { get; } = new(EngineVisualMode.Idle, 0f);
+    public static EngineVisualState Thrust { get; } = new(EngineVisualMode.Thrust, 1f);
+    public static EngineVisualState Boost { get; } = new(EngineVisualMode.Boost, 1f);
+    public static EngineVisualState VelocityCorrection { get; } =
+        new(EngineVisualMode.VelocityCorrection, 1f);
 
     public EngineVisualState Validate()
     {
-        if (!IsUnitFinite(Output) || !IsUnitFinite(Brake) || !IsUnitFinite(Boost))
+        if (!Enum.IsDefined(Mode) || !IsUnitFinite(Output))
             throw new ArgumentOutOfRangeException(
                 nameof(EngineVisualState),
-                "Engine visual-state channels must be finite and within [0, 1].");
+                "Engine visual state must have a defined mode and output within [0, 1].");
+        if (Mode == EngineVisualMode.Idle && Output != 0f)
+            throw new ArgumentOutOfRangeException(
+                nameof(EngineVisualState),
+                "Idle engine visual state must have zero output.");
         return this;
     }
 

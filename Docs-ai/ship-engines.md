@@ -540,13 +540,26 @@ Idle	Low, stable glow
 Acceleration	Increased brightness
 Maximum thrust	Strong glow
 Boost	Very bright glow, possible colour shift and instability
-Braking	Increased intensity with flickering/pulsing behaviour
+Velocity correction	Increased intensity with flickering/pulsing behaviour
 
 Glow characteristics are engine-specific.
 Examples:
 industrial engines: warm, broad, less refined glow;
 military engines: intense, controlled glow;
 high-end civilian engines: cleaner, smoother appearance.
+
+Runtime ownership:
+`SpaceSimulation` derives each installed engine's visual state from the commanded
+propulsion activity. `EngineInstance` owns that mutable state, the ship snapshot copies
+it for presentation, and rendering consumes only the snapshot. Rendering does not
+inspect flight input or query simulation state.
+
+Invariant:
+Engine visuals represent commanded propulsion activity, not achieved vehicle
+acceleration. Normal forward, reverse, lateral, and vertical acceleration commands all
+use `Thrust` mode regardless of current velocity. Afterburner uses `Boost`.
+Only active X-Stop correcting nonzero reference-relative velocity uses
+`VelocityCorrection`. Visual state must not otherwise depend on ship velocity.
 
 ### Exhaust Effects
 Exhaust is owned by the engine definition.
@@ -561,14 +574,14 @@ Initial visual concept:
 idle: no visible exhaust particles;
 acceleration: trailing exhaust/plasma;
 boost: strong exhaust effect;
-braking: separate turbulent energy-dump effect.
+velocity correction: separate turbulent energy-dump effect.
 
 Acceleration exhaust particles inherit ship velocity at creation.
 This means exhaust naturally behaves correctly in space:
 when accelerating, particles appear to move behind the ship;
 when coasting, particles retain previous momentum.
 
-Braking uses a separate visual effect rather than simply reversing normal exhaust.
+Velocity correction uses a separate visual effect rather than simply reversing normal exhaust.
 
 ### Engine Visual Parameters
 Engine definitions may contain visual parameters:
@@ -585,7 +598,7 @@ EngineVisualDefinition
     ExhaustSpread;
     ExhaustParticleRate;
 
-    BrakeEffectType;
+    VelocityCorrectionEffectType;
 }
 
 These values describe appearance only.

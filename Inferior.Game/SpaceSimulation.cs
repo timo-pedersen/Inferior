@@ -159,12 +159,6 @@ public sealed class SpaceSimulation : Simulation
     public void RequestDebugCycleEngineConfiguration()
         => Interlocked.Increment(ref _debugEngineConfigurationCycleRequests);
 
-    private int _debugEngineExhaustStateCycleRequests;
-    private EngineExhaustDebugMode _debugEngineExhaustMode;
-
-    public void RequestDebugCycleEngineExhaustState()
-        => Interlocked.Increment(ref _debugEngineExhaustStateCycleRequests);
-
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
     private bool _stationRelocationAppliedThisTick;
@@ -363,6 +357,7 @@ public sealed class SpaceSimulation : Simulation
         _lastDt = dt;
         var ship = _ship;
         if (ship == null) return;
+        EngineVisualState engineVisualState = EngineVisualState.Idle;
 
         int engineRemovalRequest = Interlocked.Exchange(ref _debugEngineRemovalRequest, 0);
         if (engineRemovalRequest != 0)
@@ -382,11 +377,6 @@ public sealed class SpaceSimulation : Simulation
             Interlocked.Exchange(ref _debugEngineConfigurationCycleRequests, 0);
         for (int i = 0; i < engineCycleRequests; i++)
             CycleDebugEngineConfiguration(ship);
-
-        int exhaustCycleRequests =
-            Interlocked.Exchange(ref _debugEngineExhaustStateCycleRequests, 0);
-        for (int i = 0; i < exhaustCycleRequests; i++)
-            CycleDebugEngineExhaustState(ship);
 
         // ── Teleport ─────────────────────────────────────────────────────
         var teleport = _teleportRequest;
@@ -575,18 +565,23 @@ public sealed class SpaceSimulation : Simulation
         {
             case FlightMode.SystemNewtonian:
                 TickNewtonianPhysics(ship, input, dt);
+                engineVisualState = ResolveEngineVisualState(ship, input);
                 break;
             case FlightMode.SystemSlipstream:
                 TickSystemSlipstreamPhysics(ship, dt);
                 break;
             case FlightMode.AtmosphericNewtonian:
                 if (nearBody != null)
+                {
                     TickAtmospherePhysics(ship, input, nearBody, dt);
+                    engineVisualState = ResolveEngineVisualState(ship, input);
+                }
                 break;
         }
 
         // ── Snapshot ──────────────────────────────────────────────────────
         PublishSnapshot:
+        ApplyEngineVisualState(ship, engineVisualState);
         FlightMode snapMode = _currentFlightMode == FlightMode.AtmosphericNewtonian && _slipstreamModeActive
             ? FlightMode.AtmosphericSlipstream
             : _currentFlightMode;
@@ -728,7 +723,6 @@ public sealed class SpaceSimulation : Simulation
                 new EnginePairDefinition($"debug.{variant.VariantId}.pair", variant),
                 port,
                 starboard);
-            ApplyDebugEngineExhaustState(ship);
         }
 
         DataBus.System.Publish(
@@ -736,27 +730,40 @@ public sealed class SpaceSimulation : Simulation
             new SystemMessage(next.Notification, SystemMessagePriority.NB));
     }
 
-    private void CycleDebugEngineExhaustState(Ship ship)
+    private static void ApplyEngineVisualState(Ship ship, EngineVisualState state)
     {
-        _debugEngineExhaustMode = EngineExhaustDebugStates.Next(_debugEngineExhaustMode);
-        ApplyDebugEngineExhaustState(ship);
-        DataBus.System.Publish(
-            Topics.System.All,
-            new SystemMessage(
-                EngineExhaustDebugStates.Notification(_debugEngineExhaustMode),
-                SystemMessagePriority.NB));
-    }
-
-    private void ApplyDebugEngineExhaustState(Ship ship)
-    {
-        EngineVisualState state =
-            EngineExhaustDebugStates.GetState(_debugEngineExhaustMode);
         foreach (EngineInstance engine in ship.EngineMounts
             .Select(mount => mount.InstalledEngine)
             .OfType<EngineInstance>())
         {
             engine.SetVisualState(state);
         }
+    }
+
+    private EngineVisualState ResolveEngineVisualState(Ship ship, PlayerInput input)
+    {
+        if (_currentFlightMode == FlightMode.SystemNewtonian && _afterburnerActive)
+            return EngineVisualState.Boost;
+
+        if (_currentFlightMode == FlightMode.SystemNewtonian
+            && _xStopActive
+            && (ship.Velocity - GetRefVelocity()).Length >= FlightConstants.XStopSnapThreshold)
+        {
+            return EngineVisualState.VelocityCorrection;
+        }
+
+        // Directional glow follows the requested acceleration vector. It deliberately
+        // ignores velocity, thrust taper, and whether the command opposes current motion.
+        double requestedOutput = System.Math.Max(
+            System.Math.Abs(input.ThrustForward),
+            System.Math.Max(
+                System.Math.Abs(input.ThrustLateral),
+                System.Math.Abs(input.ThrustVertical)));
+        return requestedOutput > 0.0
+            ? new EngineVisualState(
+                EngineVisualMode.Thrust,
+                (float)System.Math.Clamp(requestedOutput, 0.0, 1.0))
+            : EngineVisualState.Idle;
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────
@@ -941,7 +948,11 @@ public sealed class SpaceSimulation : Simulation
 
     // ── Atmosphere physics (force-based) ──────────────────────────────────────
 
-    private void TickAtmospherePhysics(Ship ship, PlayerInput input, NearAtmBodyInfo near, double dt)
+    private void TickAtmospherePhysics(
+        Ship ship,
+        PlayerInput input,
+        NearAtmBodyInfo near,
+        double dt)
     {
         var   body    = near.Body;
         DVec3 bodyPos = EclipticToGalaxy(near.EclipticPos);

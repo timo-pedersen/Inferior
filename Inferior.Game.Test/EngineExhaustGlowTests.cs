@@ -1,13 +1,11 @@
 using Inferior.Core.Math;
 using Inferior.Game;
-using Inferior.Game.Input;
 using Inferior.Game.Ships;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Input;
 using Xunit;
 
 namespace Inferior.Game.Test;
@@ -40,24 +38,99 @@ public sealed class EngineExhaustGlowTests
     }
 
     [Fact]
-    public void AltF2_CyclesBothIndependentInstancesThroughAllVisualStates()
+    public void SimulationDerivesIdleAndForwardThrottleForBothEngines()
     {
         var simulation = new SpaceSimulation();
         Ship ship = ShipBuilder.NewShip("type-1").Build();
         simulation.SetShip(ship);
-        simulation.DebugSetFlightModeImmediately(FlightMode.Docked);
+        simulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
 
+        simulation.DebugTickPhysics(PlayerInput.Zero, 1.0 / 60.0);
         AssertVisualState(ship, EngineVisualState.Idle);
-        CycleExhaust(simulation);
-        AssertVisualState(ship, EngineVisualState.Thrust);
-        AssertSnapshotState(simulation, EngineVisualState.Thrust);
+        AssertSnapshotState(simulation, EngineVisualState.Idle);
 
-        CycleExhaust(simulation);
-        AssertVisualState(ship, EngineVisualState.Braking);
-        CycleExhaust(simulation);
-        AssertVisualState(ship, EngineVisualState.Boosting);
-        CycleExhaust(simulation);
-        AssertVisualState(ship, EngineVisualState.Idle);
+        simulation.DebugTickPhysics(
+            PlayerInput.Zero with { ThrustForward = 0.4 },
+            1.0 / 60.0);
+
+        var expected = new EngineVisualState(EngineVisualMode.Thrust, 0.4f);
+        AssertVisualState(ship, expected);
+        AssertSnapshotState(simulation, expected);
+    }
+
+    [Fact]
+    public void DirectionalCommandsDriveThrustModeIndependentOfVelocity()
+    {
+        var commands = new[]
+        {
+            (PlayerInput.Zero with { ThrustForward = 1.0 }, 1f),
+            (PlayerInput.Zero with { ThrustForward = -1.0 }, 1f),
+            (PlayerInput.Zero with { ThrustLateral = 0.6 }, 0.6f),
+            (PlayerInput.Zero with { ThrustVertical = -0.7 }, 0.7f),
+        };
+
+        foreach ((PlayerInput input, float expectedOutput) in commands)
+        {
+            var simulation = new SpaceSimulation();
+            Ship ship = ShipBuilder.NewShip("type-1").Build();
+            ship.Velocity =
+                ship.Forward * FlightConstants.NewtonianGearSpeeds[0];
+            simulation.SetShip(ship);
+            simulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
+
+            simulation.DebugTickPhysics(input, 1.0 / 60.0);
+
+            AssertVisualState(
+                ship,
+                new EngineVisualState(EngineVisualMode.Thrust, expectedOutput));
+        }
+    }
+
+    [Fact]
+    public void OnlyActiveMovingXStopUsesVelocityCorrectionMode()
+    {
+        var xStopSimulation = new SpaceSimulation();
+        Ship xStopShip = ShipBuilder.NewShip("type-1").Build();
+        xStopShip.Velocity = xStopShip.Forward * 10.0;
+        xStopSimulation.SetShip(xStopShip);
+        xStopSimulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
+        xStopSimulation.DebugTickPhysics(
+            PlayerInput.Zero with
+            {
+                XStopToggle = true,
+                XStopToggleSequence = 1
+            },
+            1.0 / 60.0);
+        AssertVisualState(xStopShip, EngineVisualState.VelocityCorrection);
+
+        var stoppedSimulation = new SpaceSimulation();
+        Ship stoppedShip = ShipBuilder.NewShip("type-1").Build();
+        stoppedSimulation.SetShip(stoppedShip);
+        stoppedSimulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
+        stoppedSimulation.DebugTickPhysics(
+            PlayerInput.Zero with
+            {
+                XStopToggle = true,
+                XStopToggleSequence = 1
+            },
+            1.0 / 60.0);
+        AssertVisualState(stoppedShip, EngineVisualState.Idle);
+    }
+
+    [Fact]
+    public void SimulationDerivesAfterburnerBoostState()
+    {
+        var simulation = new SpaceSimulation();
+        Ship ship = ShipBuilder.NewShip("type-1").Build();
+        simulation.SetShip(ship);
+        simulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
+
+        simulation.DebugTickPhysics(
+            PlayerInput.Zero with { AfterburnerToggle = true },
+            1.0 / 60.0);
+
+        AssertVisualState(ship, EngineVisualState.Boost);
+        AssertSnapshotState(simulation, EngineVisualState.Boost);
     }
 
     [Fact]
@@ -66,35 +139,35 @@ public sealed class EngineExhaustGlowTests
         Ship ship = ShipBuilder.NewShip("type-1").Build();
         EngineInstance[] engines = InstalledEngines(ship);
 
-        engines[0].SetVisualState(EngineVisualState.Boosting);
+        engines[0].SetVisualState(EngineVisualState.Boost);
 
-        Assert.Equal(EngineVisualState.Boosting, engines[0].VisualState);
+        Assert.Equal(EngineVisualState.Boost, engines[0].VisualState);
         Assert.Equal(EngineVisualState.Idle, engines[1].VisualState);
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            engines[0].SetVisualState(new EngineVisualState(1.1f, 0f, 0f)));
+            engines[0].SetVisualState(
+                new EngineVisualState(EngineVisualMode.Thrust, 1.1f)));
     }
 
     [Fact]
-    public void SelectedExhaustState_PersistsAcrossPairReplacement()
+    public void ReplacementPairReceivesCurrentSimulationStateInSameTick()
     {
         var simulation = new SpaceSimulation();
         Ship ship = ShipBuilder.NewShip("type-1").Build();
         simulation.SetShip(ship);
-        simulation.DebugSetFlightModeImmediately(FlightMode.Docked);
-
-        CycleExhaust(simulation);
-        CycleExhaust(simulation);
-        CycleExhaust(simulation);
-        AssertVisualState(ship, EngineVisualState.Boosting);
+        simulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
 
         simulation.RequestDebugCycleEngineConfiguration();
-        simulation.DebugTickPhysics(PlayerInput.Zero, 0.0);
+        simulation.DebugTickPhysics(
+            PlayerInput.Zero with { ThrustForward = 0.5 },
+            1.0 / 60.0);
 
         EngineInstance[] engines = InstalledEngines(ship);
         Assert.All(engines, engine =>
             Assert.Equal(NeedleEngineDefinitionFactory.H2VariantId, engine.Variant.VariantId));
         Assert.All(engines, engine =>
-            Assert.Equal(EngineVisualState.Boosting, engine.VisualState));
+            Assert.Equal(
+                new EngineVisualState(EngineVisualMode.Thrust, 0.5f),
+                engine.VisualState));
     }
 
     [Fact]
@@ -130,32 +203,28 @@ public sealed class EngineExhaustGlowTests
             metresToRenderScale: 1f));
     }
 
-    [Theory]
-    [InlineData(Keys.LeftAlt)]
-    [InlineData(Keys.RightAlt)]
-    public void PlatformInput_RecognizesOnlyAltF2RisingEdge(Keys alt)
+    [Fact]
+    public void RemovedEngineHasNoSnapshotWhileRemainingEngineTracksState()
     {
-        var pressed = new KeyboardState(alt, Keys.F2);
+        var simulation = new SpaceSimulation();
+        Ship ship = ShipBuilder.NewShip("type-1").Build();
+        simulation.SetShip(ship);
+        simulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
+        simulation.RequestDebugRemoveEngine(EngineMountSide.Port);
+        simulation.DebugTickPhysics(
+            PlayerInput.Zero with { ThrustForward = 0.6 },
+            1.0 / 60.0);
 
-        Assert.True(EngineExhaustDebugPlatformInput.IsCycleJustPressed(
-            pressed,
-            new KeyboardState()));
-        Assert.False(EngineExhaustDebugPlatformInput.IsCycleJustPressed(pressed, pressed));
-        Assert.False(EngineExhaustDebugPlatformInput.IsCycleJustPressed(
-            new KeyboardState(Keys.F2),
-            new KeyboardState()));
-        Assert.False(EngineExhaustDebugPlatformInput.IsCycleJustPressed(
-            new KeyboardState(alt, Keys.LeftControl, Keys.F2),
-            new KeyboardState()));
-        Assert.False(EngineExhaustDebugPlatformInput.IsCycleJustPressed(
-            new KeyboardState(alt, Keys.LeftShift, Keys.F2),
-            new KeyboardState()));
-    }
-
-    private static void CycleExhaust(SpaceSimulation simulation)
-    {
-        simulation.RequestDebugCycleEngineExhaustState();
-        simulation.DebugTickPhysics(PlayerInput.Zero, 0.0);
+        EngineMountPresentationSnapshot[] mounts =
+            simulation.ShipState!.EngineMounts!.ToArray();
+        Assert.Null(mounts.Single(mount =>
+            mount.Side == EngineMountSide.Port).InstalledEngine);
+        EnginePresentationSnapshot remaining = Assert.IsType<EnginePresentationSnapshot>(
+            mounts.Single(mount =>
+                mount.Side == EngineMountSide.Starboard).InstalledEngine);
+        Assert.Equal(
+            new EngineVisualState(EngineVisualMode.Thrust, 0.6f),
+            remaining.VisualState);
     }
 
     private static void AssertVisualState(Ship ship, EngineVisualState expected)

@@ -440,12 +440,22 @@ public sealed class ShipMeshRenderer : IDisposable
             effect.Parameters["GlowColor"].SetValue(definition.GlowColour.ToVector3());
             effect.Parameters["IdleIntensity"].SetValue(definition.IdleIntensity);
             effect.Parameters["ThrustIntensity"].SetValue(definition.ThrustIntensity);
-            effect.Parameters["BrakeIntensity"].SetValue(definition.BrakeIntensity);
+            effect.Parameters["VelocityCorrectionIntensity"].SetValue(
+                definition.VelocityCorrectionIntensity);
             effect.Parameters["BoostIntensity"].SetValue(definition.BoostIntensity);
-            effect.Parameters["FlickerAmount"].SetValue(definition.FlickerAmount);
-            effect.Parameters["EngineOutput"].SetValue(state.Output);
-            effect.Parameters["EngineBrake"].SetValue(state.Brake);
-            effect.Parameters["EngineBoost"].SetValue(state.Boost);
+            effect.Parameters["InstabilityAmount"].SetValue(definition.InstabilityAmount);
+            effect.Parameters["EngineOutput"].SetValue(
+                state.Mode is EngineVisualMode.Thrust or EngineVisualMode.Boost
+                    ? state.Output
+                    : 0f);
+            effect.Parameters["EngineVelocityCorrection"].SetValue(
+                state.Mode == EngineVisualMode.VelocityCorrection
+                    ? state.Output
+                    : 0f);
+            effect.Parameters["EngineBoost"].SetValue(
+                state.Mode == EngineVisualMode.Boost
+                    ? state.Output
+                    : 0f);
 
             foreach (EffectPass pass in effect.CurrentTechnique.Passes)
             {

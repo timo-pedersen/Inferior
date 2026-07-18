@@ -8,12 +8,12 @@ float3 GlowColor;
 
 float IdleIntensity;
 float ThrustIntensity;
-float BrakeIntensity;
+float VelocityCorrectionIntensity;
 float BoostIntensity;
-float FlickerAmount;
+float InstabilityAmount;
 
 float EngineOutput;
-float EngineBrake;
+float EngineVelocityCorrection;
 float EngineBoost;
 float VisualTime;
 
@@ -51,24 +51,27 @@ float4 PS(VertexOutput input) : COLOR0
     falloff = falloff * falloff * (3.0 - 2.0 * falloff);
 
     float intensity = lerp(IdleIntensity, ThrustIntensity, saturate(EngineOutput));
-    intensity = lerp(intensity, BrakeIntensity, saturate(EngineBrake));
+    intensity = lerp(
+        intensity,
+        VelocityCorrectionIntensity,
+        saturate(EngineVelocityCorrection));
     intensity = lerp(intensity, BoostIntensity, saturate(EngineBoost));
 
-    // Braking is deliberately slow and uneven: layered periods create recognizable
+    // Velocity correction is deliberately uneven: layered periods create recognizable
     // pulses, deep dips, and occasional surges instead of a fine random shimmer.
-    float brakePulse = saturate(
+    float correctionPulse = saturate(
         0.50
         + 0.26 * sin(VisualTime * 12.3)
         + 0.16 * sin(VisualTime * 6.9 + 1.7)
         + 0.10 * sin(VisualTime * 21.9 + 0.6));
-    float brakeFactor = 0.08 + brakePulse * 1.45;
+    float correctionFactor = 0.08 + correctionPulse * 1.45;
     intensity *= lerp(
         1.0,
-        brakeFactor,
-        saturate(EngineBrake) * FlickerAmount);
+        correctionFactor,
+        saturate(EngineVelocityCorrection) * InstabilityAmount);
 
     // Boost stays consistently brightest but retains a restrained energetic ripple.
-    float boostRipple = 1.0 + sin(VisualTime * 13.0) * 0.08 * FlickerAmount;
+    float boostRipple = 1.0 + sin(VisualTime * 13.0) * 0.08 * InstabilityAmount;
     intensity *= lerp(1.0, boostRipple, saturate(EngineBoost));
 
     float whiteCore =
