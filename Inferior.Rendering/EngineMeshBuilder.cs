@@ -6,6 +6,7 @@ namespace Inferior.Rendering;
 public sealed record EngineRenderVertex(Vector3 Position, Vector3 Normal);
 
 public sealed record EngineCpuMeshPart(
+    string PartId,
     EngineVisualMaterial Material,
     IReadOnlyList<EngineRenderVertex> Vertices,
     IReadOnlyList<int> Indices);
@@ -43,6 +44,7 @@ public static class EngineMeshBuilder
             }
 
             parts.Add(new EngineCpuMeshPart(
+                sourcePart.PartId,
                 sourcePart.Material,
                 Array.AsReadOnly(vertices.ToArray()),
                 Array.AsReadOnly(indices.ToArray())));

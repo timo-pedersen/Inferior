@@ -23,7 +23,10 @@ public static class MuleEngineDefinitionFactory
 
         var parts = builders
             .OrderBy(pair => pair.Key)
-            .Select(pair => new EngineVisualMeshPart(pair.Key, Array.AsReadOnly(pair.Value.ToArray())))
+            .Select(pair => new EngineVisualMeshPart(
+                $"mule.{pair.Key.ToString().ToLowerInvariant()}",
+                pair.Key,
+                Array.AsReadOnly(pair.Value.ToArray())))
             .ToArray();
         var geometry = new EngineVisualGeometry(
             "mule.geometry.01",
@@ -36,6 +39,7 @@ public static class MuleEngineDefinitionFactory
                 new EngineLightDefinition(
                     "mule.light.service.01",
                     new DVec3(1.03, 0.18, -1.35),
+                    DVec3.UnitX,
                     new DVec3(1.0, 0.72, 0.18),
                     GlowSizeMeters: 0.12,
                     Intensity: 1.0),
@@ -46,7 +50,19 @@ public static class MuleEngineDefinitionFactory
             "Mule",
             new DVec3(2.10, 2.10, 6.55),
             dryMassKg: 2_400.0,
-            geometry);
+            geometry,
+            new EngineDesignIntent(
+                "cheap forgiving industrial utility engine",
+                EngineIntentRating.Medium,
+                EngineIntentRating.Medium,
+                EngineIntentRating.Medium,
+                EngineIntentRating.High,
+                EngineIntentRating.Low,
+                EngineIntentRating.High,
+                EngineIntentRating.High,
+                EngineIntentRating.Low,
+                EngineIntentRating.Low,
+                AlphaRedProduction: true));
     }
 
     private static void AddBox(

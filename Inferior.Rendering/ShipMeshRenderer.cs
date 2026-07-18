@@ -380,6 +380,8 @@ public sealed class ShipMeshRenderer : IDisposable
             EngineVisualMaterial.Casing => new Color(92, 96, 91),
             EngineVisualMaterial.Nozzle => new Color(40, 43, 44),
             EngineVisualMaterial.Accent => new Color(190, 145, 42),
+            EngineVisualMaterial.LightWhite => new Color(225, 240, 245),
+            EngineVisualMaterial.LightRed => new Color(225, 42, 35),
             _ => Color.Magenta,
         };
         float condition = MathHelper.Lerp(1.0f, 0.45f, (float)damageFraction);
@@ -436,6 +438,7 @@ public sealed class ShipMeshRenderer : IDisposable
 
             Matrix engineTransform = engine.GeometryTransform.LocalToHull;
             AddCross(lines, engineTransform.Translation, 0.16f, Color.White);
+            AddTransformAxes(lines, engineTransform, 0.45f);
             bool mirrored = engine.GeometryTransform.MirroredAcrossHullX;
             foreach (EngineExhaustDefinition exhaust in engine.VisualGeometry.Exhausts)
             {
@@ -453,6 +456,14 @@ public sealed class ShipMeshRenderer : IDisposable
                     EngineMeshBuilder.ToVector3(light.Position, mirrored),
                     engineTransform);
                 AddCross(lines, position, 0.18f, new Color(light.Colour.ToVector3()));
+                Vector3 direction = Vector3.TransformNormal(
+                    EngineMeshBuilder.ToVector3(light.Direction, mirrored),
+                    engineTransform);
+                AddLine(
+                    lines,
+                    position,
+                    position + Vector3.Normalize(direction) * 0.45f,
+                    new Color(light.Colour.ToVector3()));
             }
         }
 

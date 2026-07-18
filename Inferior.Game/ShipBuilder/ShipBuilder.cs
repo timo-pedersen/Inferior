@@ -21,6 +21,7 @@ public sealed class ShipBuilder
     private Quaternion _orientation = Quaternion.Identity;
 
     private bool _installDefaultComponents;
+    private string? _engineVariantId;
 
     private ShipBuilder() { }
 
@@ -59,6 +60,14 @@ public sealed class ShipBuilder
 
     public ShipBuilder WithDefaultStartingComponents() { _installDefaultComponents = true; return this; }
 
+    public ShipBuilder WithEngineVariant(string variantId)
+    {
+        if (string.IsNullOrWhiteSpace(variantId))
+            throw new ArgumentException("Engine variant id must not be empty.", nameof(variantId));
+        _engineVariantId = variantId;
+        return this;
+    }
+
     public Ship Build()
     {
         var hull = HullDefinitionLibrary.Get(_hullTypeId);
@@ -81,7 +90,7 @@ public sealed class ShipBuilder
         };
         ship.SetOrientation(_orientation);
         AddEngineMounts(ship, hull);
-        InstallDefaultEngines(ship, hull);
+        InstallDefaultEngines(ship, hull, _engineVariantId);
 
         if (_installDefaultComponents)
         {
@@ -151,7 +160,10 @@ public sealed class ShipBuilder
         }
     }
 
-    private static void InstallDefaultEngines(Ship ship, HullDefinition hull)
+    private static void InstallDefaultEngines(
+        Ship ship,
+        HullDefinition hull,
+        string? selectedVariantId)
     {
         var configuredSlots = hull.Slots
             .Where(slot => slot.Category == SlotCategory.Engine
@@ -172,8 +184,8 @@ public sealed class ShipBuilder
             throw new InvalidOperationException("Default paired engine slots must select the same engine variant.");
         }
 
-        EngineVariantDefinition variant =
-            EngineDefinitionLibrary.GetVariant(portSlot.DefaultComponentDefinitionId!);
+        EngineVariantDefinition variant = EngineDefinitionLibrary.GetVariant(
+            selectedVariantId ?? portSlot.DefaultComponentDefinitionId!);
         EnginePairGenerator.Generate(
             new EnginePairDefinition($"default.{variant.VariantId}.pair", variant),
             port,

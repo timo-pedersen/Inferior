@@ -5,6 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 namespace Inferior.Rendering;
 
 public sealed record EngineGpuMeshPart(
+    string PartId,
     EngineVisualMaterial Material,
     VertexBuffer VertexBuffer,
     IndexBuffer IndexBuffer) : IDisposable
@@ -43,7 +44,7 @@ public sealed record EngineGpuMesh(IReadOnlyList<EngineGpuMeshPart> Parts) : IDi
                 indices.Length,
                 BufferUsage.WriteOnly);
             indexBuffer.SetData(indices);
-            return new EngineGpuMeshPart(part.Material, vertexBuffer, indexBuffer);
+            return new EngineGpuMeshPart(part.PartId, part.Material, vertexBuffer, indexBuffer);
         }).ToArray();
 
         return new EngineGpuMesh(Array.AsReadOnly(parts));

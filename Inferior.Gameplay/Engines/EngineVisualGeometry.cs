@@ -8,6 +8,8 @@ public enum EngineVisualMaterial
     Casing,
     Nozzle,
     Accent,
+    LightWhite,
+    LightRed,
 }
 
 public readonly record struct EngineVisualTriangle(
@@ -16,6 +18,7 @@ public readonly record struct EngineVisualTriangle(
     DVec3 C);
 
 public sealed record EngineVisualMeshPart(
+    string PartId,
     EngineVisualMaterial Material,
     IReadOnlyList<EngineVisualTriangle> Triangles);
 
@@ -27,6 +30,7 @@ public sealed record EngineExhaustDefinition(
 public sealed record EngineLightDefinition(
     string LightId,
     DVec3 Position,
+    DVec3 Direction,
     DVec3 Colour,
     double GlowSizeMeters,
     double Intensity);
@@ -55,6 +59,7 @@ public sealed class EngineVisualGeometry
         AttachmentInterfacePosition = attachmentInterfacePosition;
         MeshParts = Array.AsReadOnly(meshParts
             .Select(part => new EngineVisualMeshPart(
+                part.PartId,
                 part.Material,
                 Array.AsReadOnly(part.Triangles.ToArray())))
             .ToArray());

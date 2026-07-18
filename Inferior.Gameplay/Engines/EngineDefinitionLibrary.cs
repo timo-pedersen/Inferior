@@ -6,6 +6,7 @@ public static class EngineDefinitionLibrary
         new Dictionary<string, EngineVariantDefinition>(StringComparer.Ordinal)
         {
             [MuleEngineDefinitionFactory.H2VariantId] = MuleEngineDefinitionFactory.CreateH2Variant(),
+            [NeedleEngineDefinitionFactory.H2VariantId] = NeedleEngineDefinitionFactory.CreateH2Variant(),
         };
 
     public static EngineVariantDefinition GetVariant(string variantId)
