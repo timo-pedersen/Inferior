@@ -66,7 +66,7 @@ public sealed class ShipPositionMarkerTests
             DVec3.UnitY);
 
         Assert.Equal(new DVec3(1000, 2030, 3080), targets.DesiredPosition);
-        Assert.Equal(new DVec3(1000, 2000, 2992), targets.LookTarget);
+        Assert.Equal(shipPosition, targets.LookTarget);
         Assert.Equal(Math.Sqrt(80 * 80 + 30 * 30), (targets.DesiredPosition - shipPosition).Length, 9);
     }
 
@@ -76,10 +76,8 @@ public sealed class ShipPositionMarkerTests
         var previousShipPosition = new DVec3(1000, 2000, 3000);
         var previousOffset = new DVec3(0, 30, 80);
         var translatedShipPosition = previousShipPosition + new DVec3(6500, -200, 400);
-        DVec3 smoothedOffset = SystemSpaceState.CalculateSmoothedChaseOffset(
-            previousOffset,
-            previousOffset,
-            previousOffsetValid: true);
+        var chase = new ChaseCameraState();
+        DVec3 smoothedOffset = chase.ResolveWorldOffset(Quaternion.Identity);
 
         DVec3 previousCameraPosition = previousShipPosition + previousOffset;
         DVec3 translatedCameraPosition = translatedShipPosition + smoothedOffset;
@@ -87,6 +85,19 @@ public sealed class ShipPositionMarkerTests
         Assert.Equal(
             translatedShipPosition - previousShipPosition,
             translatedCameraPosition - previousCameraPosition);
+    }
+
+    [Fact]
+    public void ChasePose_IsHullLocalAndFollowsShipOrientation()
+    {
+        var chase = new ChaseCameraState();
+        Quaternion yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathHelper.PiOver2);
+
+        DVec3 worldOffset = chase.ResolveWorldOffset(yaw);
+        DVec3 expected = ChaseCameraState.Transform(chase.DesiredHullLocalOffset, yaw);
+
+        Assert.Equal(expected, worldOffset);
+        Assert.Equal(chase.Radius, worldOffset.Length, 5);
     }
 
     [Fact]

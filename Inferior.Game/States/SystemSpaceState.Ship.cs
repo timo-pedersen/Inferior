@@ -33,25 +33,13 @@ public sealed partial class SystemSpaceState
 
     private void UpdateThirdPersonCamera(SpaceSimulation.ShipSnapshot snap)
     {
-        ChaseCameraTargets targets = CalculateChaseCameraTargets(
-            snap.Position,
-            snap.Forward,
-            snap.Up);
-
-        // Smooth only ship-relative framing. Snapshot translation remains exact, so
-        // fast flight cannot leave the camera easing across stale universe space.
-        DVec3 desiredOffset = targets.DesiredPosition - snap.Position;
-        _tpCamOffset = CalculateSmoothedChaseOffset(
-            desiredOffset,
-            _tpCamOffset,
-            _tpCamOffsetValid);
-        _tpCamOffsetValid = true;
-        DVec3 cameraPosition = snap.Position + _tpCamOffset;
+        DVec3 worldOffset = _chaseCamera.ResolveWorldOffset(snap.Orientation);
+        DVec3 cameraPosition = snap.Position + worldOffset;
 
         // Use ship's own up axis so the camera rolls with the ship — eliminates the
         // singularity that occurs when the ship points near vertical and world-up is
         // nearly parallel to the look direction.
-        DVec3 lookDir = DVec3.Normalize(targets.LookTarget - cameraPosition);
+        DVec3 lookDir = DVec3.Normalize(snap.Position - cameraPosition);
         _camera.SetPose(cameraPosition, QuatLookAtWithUp(lookDir, snap.Up));
     }
 
@@ -71,16 +59,8 @@ public sealed partial class SystemSpaceState
         // Camera sits 80 m behind and 30 m above the ship, looking 8 m ahead of CoM.
         return new ChaseCameraTargets(
             shipPosition - shipForward * 80.0 + shipUp * 30.0,
-            shipPosition + shipForward * 8.0);
+            shipPosition);
     }
-
-    internal static DVec3 CalculateSmoothedChaseOffset(
-        DVec3 desiredOffset,
-        DVec3 previousOffset,
-        bool previousOffsetValid)
-        => previousOffsetValid
-            ? DVec3.Lerp(previousOffset, desiredOffset, 0.08)
-            : desiredOffset;
 
     // Builds a quaternion whose -Z axis aligns with `forward` and whose +Y axis
     // aligns as closely as possible with `shipUp`. No singularity because shipUp is
