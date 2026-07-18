@@ -167,7 +167,8 @@ public sealed partial class SystemSpaceState : GameState
     // ── Camera modes ──────────────────────────────────────────────────────────
     // TAB  — toggles between ship-control and mouse-driven UI interaction.
     // F11  — toggles between ship camera (cockpit) and free debug camera.
-    // F2   — toggles engine mount/module transform debug.
+    // F2        — toggles engine mount/module transform debug.
+    // Ctrl+F2   — cycles the installed engine pair through debug configurations.
     // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
@@ -675,14 +676,8 @@ public sealed partial class SystemSpaceState : GameState
         bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
         bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
         bool shiftDown = keys.IsKeyDown(Keys.LeftShift) || keys.IsKeyDown(Keys.RightShift);
-        bool prevShiftDown = _prevKeys.IsKeyDown(Keys.LeftShift) || _prevKeys.IsKeyDown(Keys.RightShift);
-        bool ctrlF2JustPressed = ctrlDown
-            && keys.IsKeyDown(Keys.F2)
-            && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F2));
-        bool shiftF2JustPressed = !ctrlDown
-            && shiftDown
-            && keys.IsKeyDown(Keys.F2)
-            && !(prevShiftDown && _prevKeys.IsKeyDown(Keys.F2));
+        bool ctrlF2JustPressed =
+            EngineDebugCyclePlatformInput.IsCycleJustPressed(keys, _prevKeys);
         bool f2JustPressed = !ctrlDown
             && !shiftDown
             && keys.IsKeyDown(Keys.F2)
@@ -706,17 +701,7 @@ public sealed partial class SystemSpaceState : GameState
             RequestStationProximityDiagnostic();
         if (ctrlF2JustPressed)
         {
-            _simulation.RequestDebugRemoveEngine(EngineMountSide.Port);
-            _hudAlert.AddMessage(new SystemMessage(
-                "Requested debug removal of port engine.",
-                SystemMessagePriority.Info));
-        }
-        else if (shiftF2JustPressed)
-        {
-            _simulation.RequestDebugRemoveEngine(EngineMountSide.Starboard);
-            _hudAlert.AddMessage(new SystemMessage(
-                "Requested debug removal of starboard engine.",
-                SystemMessagePriority.Info));
+            _simulation.RequestDebugCycleEngineConfiguration();
         }
         else if (f2JustPressed)
         {

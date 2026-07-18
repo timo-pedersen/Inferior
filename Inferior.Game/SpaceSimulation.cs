@@ -154,6 +154,11 @@ public sealed class SpaceSimulation : Simulation
     public void RequestDebugRemoveEngine(EngineMountSide side)
         => Interlocked.Exchange(ref _debugEngineRemovalRequest, (int)side + 1);
 
+    private int _debugEngineConfigurationCycleRequests;
+
+    public void RequestDebugCycleEngineConfiguration()
+        => Interlocked.Increment(ref _debugEngineConfigurationCycleRequests);
+
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
     private bool _stationRelocationAppliedThisTick;
@@ -366,6 +371,11 @@ public sealed class SpaceSimulation : Simulation
                         ? $"{side} engine mount is already empty."
                         : $"Debug removed {side.ToString().ToLowerInvariant()} engine '{removed.Variant.Engine.DisplayName}'."));
         }
+
+        int engineCycleRequests =
+            Interlocked.Exchange(ref _debugEngineConfigurationCycleRequests, 0);
+        for (int i = 0; i < engineCycleRequests; i++)
+            CycleDebugEngineConfiguration(ship);
 
         // ── Teleport ─────────────────────────────────────────────────────
         var teleport = _teleportRequest;
@@ -662,6 +672,54 @@ public sealed class SpaceSimulation : Simulation
             })
             .ToArray();
         return Array.AsReadOnly(snapshots);
+    }
+
+    private static void CycleDebugEngineConfiguration(Ship ship)
+    {
+        EngineMount? port = ship.EngineMounts.SingleOrDefault(mount =>
+            mount.Side == EngineMountSide.Port);
+        EngineMount? starboard = ship.EngineMounts.SingleOrDefault(mount =>
+            mount.Side == EngineMountSide.Starboard);
+        if (port is null || starboard is null)
+        {
+            DataBus.System.Publish(
+                Topics.System.All,
+                new SystemMessage(
+                    "ENGINE CONFIGURATION\nShip does not have a paired engine mount.",
+                    SystemMessagePriority.Warning));
+            return;
+        }
+
+        EngineDebugConfiguration next = EngineDebugConfigurations.GetNext(ship.EngineMounts);
+        EngineVariantDefinition? variant = next.VariantId is null
+            ? null
+            : EngineDefinitionLibrary.GetVariant(next.VariantId);
+        if (variant is not null
+            && (!variant.IsCompatibleWith(port.MountStandardId)
+                || !variant.IsCompatibleWith(starboard.MountStandardId)))
+        {
+            DataBus.System.Publish(
+                Topics.System.All,
+                new SystemMessage(
+                    $"ENGINE CONFIGURATION\n{variant.Engine.DisplayName} is incompatible with " +
+                    $"{port.MountStandardId}/{starboard.MountStandardId} mounts.",
+                    SystemMessagePriority.Warning));
+            return;
+        }
+
+        port.RemoveInstalledEngine();
+        starboard.RemoveInstalledEngine();
+        if (variant is not null)
+        {
+            EnginePairGenerator.Generate(
+                new EnginePairDefinition($"debug.{variant.VariantId}.pair", variant),
+                port,
+                starboard);
+        }
+
+        DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(next.Notification, SystemMessagePriority.NB));
     }
 
     // ── SystemNewtonian physics ───────────────────────────────────────────────
