@@ -11,6 +11,7 @@ using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
@@ -90,7 +91,7 @@ public sealed partial class SystemSpaceState
 
     private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
-        var ship = ShipBuilder.NewShip("type-1")
+        var ship = ShipBuilder.NewShip(AsteriskHullDefinitionFactory.HullId)
             .WithPosition(startPos)
             .WithOrientation(orientation)
             .WithDefaultStartingComponents()

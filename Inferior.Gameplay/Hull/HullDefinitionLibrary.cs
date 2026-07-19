@@ -18,6 +18,7 @@ public static class HullDefinitionLibrary
     static HullDefinitionLibrary()
     {
         Register(AriesHullDefinitionFactory.Create());
+        Register(AsteriskHullDefinitionFactory.Create());
         Register(Sidewinder());
         Register(Cobra());
     }

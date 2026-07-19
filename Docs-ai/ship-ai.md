@@ -106,7 +106,16 @@ Superseded by `Docs-ai/ship-cockpits.md`.
 Cockpit placement is now resolved from a hull-owned physical cockpit mount, an installed
 cockpit, and the cockpit module's camera transform. The old hull-level cockpit offset/pose
 fields remain transitional compatibility data for hulls that have not yet acquired mounts;
-they are not authoritative for Aries or future cockpit-enabled hulls.
+they are not authoritative for Aries, Asterisk, or future cockpit-enabled hulls.
+
+---
+
+## Authored flyable hulls
+
+| Hull | Role and physical arrangement |
+|---|---|
+| Aries (`type-1`) | Small two-container utility hauler with paired Mule engines and a port-offset roof C2 cockpit. |
+| Asterisk (`asterisk`) | Minimum-cost 8.6 m one-container hauler. A closed front cargo door feeds one canonical 2.5 × 2.5 × 6.0 m longitudinal container bay. The C2 command blister protrudes from starboard, one Mule occupies the opposite port side, and the camera looks forward plus 30° outward toward starboard. The cargo door is visual and non-animated. |
 
 ---
 

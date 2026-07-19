@@ -511,10 +511,17 @@ The first implementation should prove:
 - engine generation; - Done
 - mount compatibility; - Done
 - paired generation; - Done
+- independent one-engine installation; - Done (Asterisk)
 - mirrored geometry; - Done
 - engine rendering; - Done
 - exhaust placement; - Done
 - engine lights. - Partly done
+
+Runtime default construction is mount-count agnostic: `ShipBuilder` resolves each
+hull-authored engine slot and installs one independent engine instance through
+`EngineInstallationGenerator`. Aries currently supplies two Mule defaults; Asterisk
+supplies one port-side Mule. Pair-specific generation remains available where mirrored
+pair validation is itself required.
 
 Gameplay systems such as:
 - damage;
@@ -656,4 +663,3 @@ Notes:
 - Strafing is still normal thrust.
 - Vertical thrust is still normal thrust.
 - The engine does not know or care whether the ship is "winning" against its current velocity.
-

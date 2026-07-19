@@ -1172,7 +1172,7 @@ The former Type-1 ship path bakes hull, nacelles, and pylons into one fixed fact
 
 Checkpoint Aries rendering note: `type-1` is now semantically registered as Aries and its third-person structural hull is generated from those semantic polygons. The old `Type1HullFactory` remains only as a temporary fallback for registrations that do not yet provide semantic visual geometry. Aries does not use that factory or its legacy 180-degree orientation correction. The fallback mesh is not authoritative for any hull semantics and must be removed once all renderable hull registrations provide `VisualGeometry`.
 
-This checkpoint renders only the closed structural shell and its semantic material groups. It does not render generated armour, engines, landing feet, marker-light fixtures, beam illumination, cargo-door animation, or detailed cockpit interiors. Visual correctness remains unverified until Timo inspects Aries in-engine.
+The current composite path renders the closed semantic shell plus snapshot-published installed engines and cockpit modules. It does not yet render generated armour, landing feet, beam illumination, cargo-door animation, or detailed cockpit interiors. Aries' installed cockpit and ship-forward reticle have been visually accepted; each newly authored hull still requires its own in-engine acceptance.
 
 ### 28.1 Aries semantic rendering checkpoint
 
@@ -1195,6 +1195,21 @@ In-engine inspection controls:
 - `F4`: toggle between normal materials and semantic surface-role colours. Role mode also draws ship-local axes (`+X` red, `+Y` green, `-Z` cyan) and a white vertex-derived hull bounding box.
 
 The role view draws existing face index ranges with diagnostic colours; it does not create alternate geometry or change the semantic definition. Face-ID cycling was omitted because it was optional and the retained face ranges already provide the required selection foundation.
+
+### 28.2 Asterisk Phase 1 checkpoint
+
+Asterisk (`asterisk`) is an authored semantic hull, not a scaled Aries or a renderer
+special case. Its structural envelope is 8.6 m long, 2.8 m wide, and 3.2 m high before
+the attached modules. One canonical 2.5 × 2.5 × 6.0 m container occupies the longitudinal
+design volume. The bow is a permanently closed cargo-door assembly with separate raised
+frame and lock geometry.
+
+Viewed from the front under the native `+X` starboard convention, the starboard cockpit
+appears on viewer-left and the single port Mule appears on viewer-right. The hull owns
+their opposed C2/H2 sockets and support geometry; the installed modules remain separate.
+The Asterisk cockpit camera is a definition-owned child looking 30 degrees toward
+starboard, so the generic projected ship-forward reticle appears left of screen centre.
+First-person own-ship geometry remains hidden.
 
 The current size-class code must be corrected to:
 

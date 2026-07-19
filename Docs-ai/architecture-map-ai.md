@@ -98,17 +98,26 @@ Simulation domain model. Depends on Core, Galaxy.
 - `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
+- `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
+
+**Engines/**
+
+- `EngineInstallationGenerator.cs` — installs one engine instance on one authored mount, including handed geometry and physical interface validation; default construction loops this operation for any mount count.
+- `EnginePairGenerator.cs` — mirrored-pair validation/generation retained for workflows that specifically require a paired installation.
+- `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2 and Needle H2.
+- `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
 
 **Cockpit/**
 
 - `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
-- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry, initially containing the Aries civilian canopy cockpit.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy and Asterisk starboard command blister.
 - `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
 - `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
 - `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
 - `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
+- `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
 - `CockpitPresentationSnapshot.cs` — immutable installed-cockpit root pose and light state published for rendering.
 
 **Physics/**
@@ -294,7 +303,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 **ShipBuilder/**
 
-- `ShipBuilder.cs` — fluent builder for constructing `Ship` from `ShipRecord` (mostly stubbed — see current-state doc).
+- `ShipBuilder.cs` — fluent builder for constructing `Ship` from `ShipRecord`; resolves hull-authored cockpit and engine defaults, installing each configured engine mount independently (other component/persistence mapping remains mostly stubbed).
 - `ShipExtensions.cs` — mapping between the `Ship` domain object and `ShipRecord` persistence.
 - `ShipPersistenceService.cs` — async load/save bridge between `Ship` and `IShipRepository`.
 

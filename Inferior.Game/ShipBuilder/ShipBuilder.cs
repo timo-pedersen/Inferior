@@ -230,23 +230,20 @@ public sealed class ShipBuilder
         if (configuredSlots.Count == 0)
             return;
 
-        EngineMount port = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Port);
-        EngineMount starboard = ship.EngineMounts.Single(mount => mount.Side == EngineMountSide.Starboard);
-        if (!configuredSlots.TryGetValue(port.ComponentSlotId, out HullSlot? portSlot)
-            || !configuredSlots.TryGetValue(starboard.ComponentSlotId, out HullSlot? starboardSlot)
-            || !string.Equals(
-                portSlot.DefaultComponentDefinitionId,
-                starboardSlot.DefaultComponentDefinitionId,
-                StringComparison.Ordinal))
+        var mountsBySlot = ship.EngineMounts.ToDictionary(
+            mount => mount.ComponentSlotId,
+            StringComparer.Ordinal);
+        foreach ((string slotId, HullSlot slot) in configuredSlots)
         {
-            throw new InvalidOperationException("Default paired engine slots must select the same engine variant.");
-        }
+            if (!mountsBySlot.TryGetValue(slotId, out EngineMount? mount))
+            {
+                throw new InvalidOperationException(
+                    $"Default engine slot '{slotId}' has no runtime engine mount.");
+            }
 
-        EngineVariantDefinition variant = EngineDefinitionLibrary.GetVariant(
-            selectedVariantId ?? portSlot.DefaultComponentDefinitionId!);
-        EnginePairGenerator.Generate(
-            new EnginePairDefinition($"default.{variant.VariantId}.pair", variant),
-            port,
-            starboard);
+            EngineVariantDefinition variant = EngineDefinitionLibrary.GetVariant(
+                selectedVariantId ?? slot.DefaultComponentDefinitionId!);
+            EngineInstallationGenerator.Install(variant, mount);
+        }
     }
 }

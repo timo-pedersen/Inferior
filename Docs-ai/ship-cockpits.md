@@ -320,16 +320,16 @@ deferred — see **Future extensions**.
 
 ---
 
-# Initial implementation
+# Implemented modules
 
-The first implementation requires only:
-
-- one cockpit mount on Aries;
-- one compatible cockpit module;
-- one cockpit camera position;
-- the minimal command endpoints above (canopy/cockpit lighting toggle).
-
-No gameplay UI is required. No interior rendering is required.
+- Aries: one top-facing C2 mount with the Aries civilian canopy cockpit.
+- Asterisk: one starboard-facing C2 mount with a compact side command blister.
+  Its camera looks primarily forward and 30 degrees outward toward starboard.
+- Both modules own their external geometry, camera child pose, dark backing, and
+  independent canopy/internal light elements.
+- Own-ship geometry remains hidden in first-person. No cockpit interior is rendered.
+- The projected ship-forward reticle consumes the resolved camera pose and requires
+  no hull-specific offset.
 
 ---
 
