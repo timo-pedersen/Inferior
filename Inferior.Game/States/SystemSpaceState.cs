@@ -254,7 +254,6 @@ public sealed partial class SystemSpaceState : GameState
                 // Approach from double-click — force new spawn near the body.
                 // _system is freshly generated, so p.TargetBody is a different object instance.
                 // Look up by name to find the matching body and its parent in the new system.
-                _ship = null;
                 OrbitalBody? resolvedBody = null;
                 DVec3        parentPos    = DVec3.Zero;
 
@@ -291,21 +290,17 @@ public sealed partial class SystemSpaceState : GameState
             {
                 // Approach a station from system map double-click. The simulation
                 // owns station resolution, position, velocity, reference and facing.
-                _ship = null;
                 var startPos = new DVec3(0, 0.5e11, 3e11);
                 var startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
                 _camera = new Camera3D(startPos, AspectRatio);
                 _camera.SetPose(startPos, startOri);
                 SpawnShip(startPos, startOri);
             }
-            else if (_ship != null)
+            else if (_simulation.ShipState is { } existingShip)
             {
-                // Returning from a map — ship instance is already alive in the simulation
-                // with the correct position. Just re-register it and sync the camera.
-                _simulation.SetShip(_ship);
-                var snap = _simulation.ShipState;
-                var camPos = snap?.CockpitWorldPosition ?? _ship.CockpitWorldPosition;
-                var camOri = snap?.Orientation          ?? _ship.Orientation;
+                // Returning from a map: the simulation-owned ship remains authoritative.
+                var camPos = existingShip.CockpitWorldPosition;
+                var camOri = existingShip.CockpitWorldOrientation;
                 _camera = new Camera3D(camPos, AspectRatio);
                 _camera.SetPose(camPos, camOri);
             }
@@ -492,7 +487,9 @@ public sealed partial class SystemSpaceState : GameState
         UpdateUI();
 
         _cockpitUI = new CockpitUI(_gd, _font, _pixel, _targeting, _hudAlert,
-            GalaxyToEcliptic, on => { if (_shield != null) _shield.PowerOn = on; });
+            GalaxyToEcliptic,
+            _simulation.RequestSetShieldPower,
+            _simulation.RequestCycleShipHull);
         _uiMouseMode     = false;
         _debugCameraMode = false;
         _shipMouseLook.RequestRebase();
@@ -1274,8 +1271,4 @@ public sealed partial class SystemSpaceState : GameState
     }
 
     // ── Ship ──────────────────────────────────────────────────────────────────
-    // _ship persists between OnEnter/OnExit calls — only recreated for new spawns.
-
-    private Ship?             _ship;
-    private ShieldComponent?  _shield;
 }

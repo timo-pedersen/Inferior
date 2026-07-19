@@ -99,6 +99,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
+- `BerenHullDefinitionFactory.cs` — medium 3-by-3-container cargo platform, aft cargo-door assembly, downward C2 cockpit mount, and four independent Needle H2 engine mounts.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
 
@@ -112,12 +113,13 @@ Simulation domain model. Depends on Core, Galaxy.
 **Cockpit/**
 
 - `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
-- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy and Asterisk starboard command blister.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, and Beren underslung command pod.
 - `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
 - `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
 - `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
 - `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
 - `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
+- `BerenUnderslungCockpitGeometryFactory.cs` — full downward-mounted C2 command pod with collar, housing, faceted canopy, frame, backing, and independent light geometry.
 - `CockpitPresentationSnapshot.cs` — immutable installed-cockpit root pose and light state published for rendering.
 
 **Physics/**
@@ -255,7 +257,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation: `RequestStationRelocation(persistenceId, standOffMeters)` — resolves live station position, applies stand-off, matches reference-frame velocity, faces the station. Used by new-game start, system-map arrival, and debug station cycle.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
+- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
@@ -294,7 +297,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 **UI/**
 
-- `CockpitUI.cs` — fields, constructor (full instrument/panel/rail construction), `Dispose`, lifecycle, subscriptions.
+- `CockpitUI.cs` — fields, constructor (full instrument/panel/rail construction), `Dispose`, lifecycle, subscriptions, and the CTRL-panel `NEXT SHIP` command button.
 - `CockpitUI.DirectionBalls.cs` — direction-ball updates, radar-contact notify.
 - `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, projected ship-forward reticle, UI-tree/alert draw).
 - `ShipForwardReticleProjector.cs` — pure camera-originated ship-forward ray projection with viewport-edge clamping; independent of velocity and ship-centre convergence.

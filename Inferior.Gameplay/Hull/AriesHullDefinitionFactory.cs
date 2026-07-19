@@ -8,7 +8,7 @@ namespace Inferior.Gameplay.Hull;
 
 public static class AriesHullDefinitionFactory
 {
-    private const string HullId = "type-1";
+    public const string HullId = "type-1";
     private const string CargoDoorId = $"{HullId}.rear.cargo-door.01";
     private const string CargoDoorPortPanelSeatId = $"{HullId}.rear.cargo-door.port.01";
     private const string CargoDoorStarboardPanelSeatId = $"{HullId}.rear.cargo-door.starboard.01";

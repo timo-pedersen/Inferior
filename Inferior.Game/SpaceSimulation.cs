@@ -2,10 +2,12 @@ using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Core.Simulation;   // GameClock
 using Inferior.Galaxy;
+using Inferior.Game.Ships;
 using Inferior.Gameplay;          // Simulation base, FlightMode
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Physics;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
@@ -170,6 +172,16 @@ public sealed class SpaceSimulation : Simulation
 
     public void RequestDebugCycleEngineConfiguration()
         => Interlocked.Increment(ref _debugEngineConfigurationCycleRequests);
+
+    private int _shipHullCycleRequests;
+
+    public void RequestCycleShipHull()
+        => Interlocked.Increment(ref _shipHullCycleRequests);
+
+    private int _shieldPowerRequest = -1;
+
+    public void RequestSetShieldPower(bool enabled)
+        => Interlocked.Exchange(ref _shieldPowerRequest, enabled ? 1 : 0);
 
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
@@ -367,15 +379,26 @@ public sealed class SpaceSimulation : Simulation
     protected override void TickPhysics(PlayerInput input, double dt)
     {
         _lastDt = dt;
-        var ship = _ship;
+        Ship? ship = _ship;
         if (ship == null) return;
         EngineVisualState engineVisualState = EngineVisualState.Idle;
+
+        int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
+        for (int i = 0; i < shipCycleRequests; i++)
+            ship = CycleShipHull(ship);
+
+        int shieldPowerRequest = Interlocked.Exchange(ref _shieldPowerRequest, -1);
+        if (shieldPowerRequest >= 0)
+        {
+            foreach (ShieldComponent shield in ship.Components.OfType<ShieldComponent>())
+                shield.PowerOn = shieldPowerRequest == 1;
+        }
 
         int engineRemovalRequest = Interlocked.Exchange(ref _debugEngineRemovalRequest, 0);
         if (engineRemovalRequest != 0)
         {
             EngineMountSide side = (EngineMountSide)(engineRemovalRequest - 1);
-            EngineMount? mount = ship.EngineMounts.SingleOrDefault(candidate => candidate.Side == side);
+            EngineMount? mount = ship.EngineMounts.FirstOrDefault(candidate => candidate.Side == side);
             EngineInstance? removed = mount?.RemoveInstalledEngine();
             DataBus.System.Publish(
                 Topics.System.All,
@@ -711,19 +734,23 @@ public sealed class SpaceSimulation : Simulation
 
     private void CycleDebugEngineConfiguration(Ship ship)
     {
-        EngineMount? port = ship.EngineMounts.SingleOrDefault(mount =>
-            mount.Side == EngineMountSide.Port);
-        EngineMount? starboard = ship.EngineMounts.SingleOrDefault(mount =>
-            mount.Side == EngineMountSide.Starboard);
-        if (port is null || starboard is null)
+        EngineMount[] portMounts = ship.EngineMounts
+            .Where(mount => mount.Side == EngineMountSide.Port)
+            .ToArray();
+        EngineMount[] starboardMounts = ship.EngineMounts
+            .Where(mount => mount.Side == EngineMountSide.Starboard)
+            .ToArray();
+        if (portMounts.Length != 1 || starboardMounts.Length != 1)
         {
             DataBus.System.Publish(
                 Topics.System.All,
                 new SystemMessage(
-                    "ENGINE CONFIGURATION\nShip does not have a paired engine mount.",
+                    "ENGINE CONFIGURATION\nDebug cycling requires exactly one mirrored engine pair.",
                     SystemMessagePriority.Warning));
             return;
         }
+        EngineMount port = portMounts[0];
+        EngineMount starboard = starboardMounts[0];
 
         EngineDebugConfiguration next = EngineDebugConfigurations.GetNext(ship.EngineMounts);
         EngineVariantDefinition? variant = next.VariantId is null
@@ -755,6 +782,26 @@ public sealed class SpaceSimulation : Simulation
         DataBus.System.Publish(
             Topics.System.All,
             new SystemMessage(next.Notification, SystemMessagePriority.NB));
+    }
+
+    private Ship CycleShipHull(Ship current)
+    {
+        string nextHullTypeId = PlayerShipCycleCatalog.GetNext(current.HullTypeId);
+        var replacement = ShipBuilder.NewShip(nextHullTypeId)
+            .WithPosition(current.Position)
+            .WithOrientation(current.Orientation)
+            .WithDefaultStartingComponents()
+            .Build();
+        replacement.Velocity = current.Velocity;
+        SetShip(replacement);
+
+        HullDefinition hull = HullDefinitionLibrary.Get(nextHullTypeId);
+        DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(
+                $"SHIP CHANGED\n{hull.DisplayName}",
+                SystemMessagePriority.NB));
+        return replacement;
     }
 
     private static void ApplyEngineVisualState(Ship ship, EngineVisualState state)

@@ -97,8 +97,6 @@ public sealed partial class SystemSpaceState
             .WithDefaultStartingComponents()
             .Build();
 
-        _shield = ship.Components.OfType<ShieldComponent>().First();
-        _ship = ship;
         _simulation.SetShip(ship);
     }
 

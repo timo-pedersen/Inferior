@@ -1211,6 +1211,24 @@ The Asterisk cockpit camera is a definition-owned child looking 30 degrees towar
 starboard, so the generic projected ship-forward reticle appears left of screen centre.
 First-person own-ship geometry remains hidden.
 
+### 28.3 Beren Phase 1 checkpoint
+
+Beren (`beren`) is a medium authored semantic hull with a 27 m by 20 m broad, mildly
+spade-shaped upper platform and a total structural depth of 6.2 m. Its underside cargo
+volume contains a 3 by 3 arrangement of canonical 2.5 m by 2.5 m by 6.0 m containers.
+The central aft cargo door is a distinct, permanently closed visual assembly.
+
+Four Needle H2 engines are installed independently on authored attachment ports: an
+upper and lower engine on each side. A complete C2 command pod hangs from the forward
+downward-facing cockpit socket. Its camera looks 10 degrees below ship-forward, placing
+the generic projected ship-forward reticle above screen centre. Own-ship geometry remains
+hidden in first-person.
+
+The cockpit CTRL rail includes a `NEXT SHIP` button. It requests the stable cycle
+Aries -> Asterisk -> Beren -> Aries. `SpaceSimulation` performs the replacement and
+preserves the current position, velocity, orientation, and flight state; rendering and
+UI do not retain a second mutable ship authority.
+
 The current size-class code must be corrected to:
 
 ```text

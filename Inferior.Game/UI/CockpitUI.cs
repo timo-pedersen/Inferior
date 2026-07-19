@@ -30,6 +30,7 @@ public sealed partial class CockpitUI : IDisposable
     private readonly HudAlertDisplay        _hudAlert;
     private readonly Func<DVec3, DVec3>     _galaxyToEcliptic;
     private readonly Action<bool>           _onShieldToggle;
+    private readonly Action                 _onShipCycle;
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
     private UIManager?       _ui;
@@ -85,7 +86,8 @@ public sealed partial class CockpitUI : IDisposable
         TargetingSystem targeting,
         HudAlertDisplay hudAlert,
         Func<DVec3, DVec3> galaxyToEcliptic,
-        Action<bool> onShieldToggle)
+        Action<bool> onShieldToggle,
+        Action onShipCycle)
     {
         _gd               = gd;
         _font             = font;
@@ -94,6 +96,7 @@ public sealed partial class CockpitUI : IDisposable
         _hudAlert         = hudAlert;
         _galaxyToEcliptic = galaxyToEcliptic;
         _onShieldToggle   = onShieldToggle;
+        _onShipCycle      = onShipCycle;
 
         // ── DataBus UI setup ──────────────────────────────────────────────────
         var theme = Theme.InferiorDark(_font);
@@ -300,7 +303,14 @@ public sealed partial class CockpitUI : IDisposable
         // Right side (3 tabs): DOCK, LOG, CTRL
         _cockpitRail.AddCenterTab("DOCK",     _dockingInstrument);
         _cockpitRail.AddCenterTab("LOG",      _console);
-        _cockpitRail.AddCenterTab("CTRL",     new Panel { DrawBackground = false, DrawBorder = false });
+        var controlPanel = new Panel { DrawBackground = false, DrawBorder = false };
+        var shipCycleButton = new Button("NEXT SHIP", new Rectangle(8, 8, 150, 32))
+        {
+            FontScale = 0.72f,
+        };
+        shipCycleButton.Clicked += _ => _onShipCycle();
+        controlPanel.Add(shipCycleButton);
+        _cockpitRail.AddCenterTab("CTRL", controlPanel);
         _drivePanel = new DriveInstrumentPanel();
         _cockpitRail.RightWing.Add(_drivePanel);     // drawn first, under shield button
         _cockpitRail.RightWing.Add(_shieldToggleButton);

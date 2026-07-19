@@ -520,8 +520,10 @@ The first implementation should prove:
 Runtime default construction is mount-count agnostic: `ShipBuilder` resolves each
 hull-authored engine slot and installs one independent engine instance through
 `EngineInstallationGenerator`. Aries currently supplies two Mule defaults; Asterisk
-supplies one port-side Mule. Pair-specific generation remains available where mirrored
-pair validation is itself required.
+supplies one port-side Mule; Beren supplies four Needle defaults arranged as vertical
+port and starboard pairs. Pair-specific generation remains available where mirrored pair
+validation is itself required. Debug pair cycling applies only to ships with exactly one
+port and one starboard engine, avoiding ambiguous replacement on multi-engine hulls.
 
 Gameplay systems such as:
 - damage;

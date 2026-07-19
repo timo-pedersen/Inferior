@@ -116,6 +116,7 @@ they are not authoritative for Aries, Asterisk, or future cockpit-enabled hulls.
 |---|---|
 | Aries (`type-1`) | Small two-container utility hauler with paired Mule engines and a port-offset roof C2 cockpit. |
 | Asterisk (`asterisk`) | Minimum-cost 8.6 m one-container hauler. A closed front cargo door feeds one canonical 2.5 × 2.5 × 6.0 m longitudinal container bay. The C2 command blister protrudes from starboard, one Mule occupies the opposite port side, and the camera looks forward plus 30° outward toward starboard. The cargo door is visual and non-animated. |
+| Beren (`beren`) | Medium 27 m by 20 m cargo platform built around a 3 by 3 arrangement of canonical containers. It has a closed visual aft cargo door, four independently installed Needle engines in vertical port/starboard pairs, and a forward underslung C2 cockpit whose camera looks 10 degrees down from ship-forward. |
 
 ---
 
