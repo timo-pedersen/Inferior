@@ -2,6 +2,7 @@ using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
@@ -22,6 +23,7 @@ public sealed class ShipBuilder
 
     private bool _installDefaultComponents;
     private string? _engineVariantId;
+    private InstalledCockpit? _cockpit;
 
     private ShipBuilder() { }
 
@@ -30,13 +32,26 @@ public sealed class ShipBuilder
         if (string.IsNullOrEmpty(record.Id))
             throw new ArgumentException("ShipRecord.Id must not be empty", nameof(record));
 
-        return new ShipBuilder
+        var builder = new ShipBuilder
         {
             _id          = record.Id,
             _hullTypeId  = record.HullTypeId,
             _name        = record.Name,
             _createdDate = record.CreatedDate,
         };
+        if (record.Cockpit is not null)
+        {
+            builder._cockpit = new InstalledCockpit
+            {
+                MountId = record.Cockpit.MountId,
+                DefinitionId = record.Cockpit.DefinitionId,
+                InstallationRotation = FromRecord(record.Cockpit.InstallationRotation),
+                CanopyLightsOn = record.Cockpit.CanopyLightsOn,
+                CockpitLightsOn = record.Cockpit.CockpitLightsOn,
+            };
+        }
+
+        return builder;
     }
 
     public static ShipBuilder NewShip(string hullTypeId) => new()
@@ -71,6 +86,8 @@ public sealed class ShipBuilder
     public Ship Build()
     {
         var hull = HullDefinitionLibrary.Get(_hullTypeId);
+        InstalledCockpit? cockpit = _cockpit ?? CreateDefaultCockpit(hull);
+        ValidateCockpitInstallation(hull, cockpit);
 
         var ship = new Ship
         {
@@ -81,6 +98,7 @@ public sealed class ShipBuilder
             SizeClass   = hull.SizeClass,
             MoveSpeedMs = 5e9,                    // same default SpawnShip used
             HullMass    = hull.HullMass,
+            Cockpit = cockpit,
             CockpitOffset = hull.CockpitOffset,
             CockpitPose = hull.CockpitPose,
             AerodynamicLift = hull.AerodynamicLift,
@@ -132,6 +150,46 @@ public sealed class ShipBuilder
 
         return ship;
     }
+
+    private static InstalledCockpit? CreateDefaultCockpit(HullDefinition hull)
+    {
+        CockpitMountDefinition? mount = hull.CockpitMounts.SingleOrDefault(candidate =>
+            !string.IsNullOrWhiteSpace(candidate.DefaultCockpitDefinitionId));
+        if (mount is null)
+            return null;
+
+        return new InstalledCockpit
+        {
+            MountId = mount.MountId,
+            DefinitionId = mount.DefaultCockpitDefinitionId!,
+            InstallationRotation = CockpitRotationStep.Deg0,
+        };
+    }
+
+    private static void ValidateCockpitInstallation(
+        HullDefinition hull,
+        InstalledCockpit? cockpit)
+    {
+        if (cockpit is null)
+            return;
+
+        CockpitMountDefinition mount = hull.CockpitMounts.SingleOrDefault(candidate =>
+            string.Equals(candidate.MountId, cockpit.MountId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Hull '{hull.HullTypeId}' has no cockpit mount '{cockpit.MountId}'.");
+        CockpitModuleDefinition definition = CockpitDefinitionLibrary.Get(cockpit.DefinitionId);
+        cockpit.ValidateInstallation(mount, definition);
+    }
+
+    private static CockpitRotationStep FromRecord(CockpitRotationStepRecord rotation)
+        => rotation switch
+        {
+            CockpitRotationStepRecord.Deg0 => CockpitRotationStep.Deg0,
+            CockpitRotationStepRecord.Deg90 => CockpitRotationStep.Deg90,
+            CockpitRotationStepRecord.Deg180 => CockpitRotationStep.Deg180,
+            CockpitRotationStepRecord.Deg270 => CockpitRotationStep.Deg270,
+            _ => throw new ArgumentOutOfRangeException(nameof(rotation)),
+        };
 
     private static void AddEngineMounts(Ship ship, HullDefinition hull)
     {

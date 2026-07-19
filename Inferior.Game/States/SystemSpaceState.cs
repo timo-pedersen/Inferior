@@ -8,6 +8,7 @@ using Inferior.Game.Hyperspace;
 using Inferior.Game.StationGen;
 using Inferior.Game.UI;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
 using Inferior.Gameplay.Engines;
@@ -200,7 +201,7 @@ public sealed partial class SystemSpaceState : GameState
     // methods rather than only as a local Draw() parameter.
     private SpriteBatch? _frameSpriteBatch;
 
-    // Colour-invert blend for the crosshair: result = src - dest.
+    // Colour-invert blend for the ship-forward reticle: result = src - dest.
     // With white source this gives (1-R, 1-G, 1-B) — readable against any background.
     // Static to follow the MonoGame convention for built-in BlendState singletons;
     // the OS reclaims the GPU resource on application exit.
@@ -683,6 +684,8 @@ public sealed partial class SystemSpaceState : GameState
         bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
         bool shiftDown = keys.IsKeyDown(Keys.LeftShift) || keys.IsKeyDown(Keys.RightShift);
         bool altDown = keys.IsKeyDown(Keys.LeftAlt) || keys.IsKeyDown(Keys.RightAlt);
+        CockpitLightDebugAction cockpitLightAction =
+            CockpitLightDebugInput.Read(keys, _prevKeys);
         bool ctrlF2JustPressed =
             EngineDebugCyclePlatformInput.IsCycleJustPressed(keys, _prevKeys);
         bool f2JustPressed = !ctrlDown
@@ -707,6 +710,22 @@ public sealed partial class SystemSpaceState : GameState
         }
         if (f10JustPressed)
             RequestStationProximityDiagnostic();
+        if (cockpitLightAction == CockpitLightDebugAction.ToggleCanopy)
+        {
+            bool lightsOn = !(_frameShipSnap?.Cockpit?.CanopyLightsOn ?? false);
+            CommandBus.Send(CockpitCommandTopics.CanopyLightsSet, lightsOn ? 1.0 : 0.0);
+            _hudAlert.AddMessage(new SystemMessage(
+                $"Cockpit canopy lights {(lightsOn ? "on" : "off")}.",
+                SystemMessagePriority.Info));
+        }
+        else if (cockpitLightAction == CockpitLightDebugAction.ToggleInternal)
+        {
+            bool lightsOn = !(_frameShipSnap?.Cockpit?.CockpitLightsOn ?? false);
+            CommandBus.Send(CockpitCommandTopics.InternalLightsSet, lightsOn ? 1.0 : 0.0);
+            _hudAlert.AddMessage(new SystemMessage(
+                $"Cockpit internal lights {(lightsOn ? "on" : "off")}.",
+                SystemMessagePriority.Info));
+        }
         if (ctrlF2JustPressed)
         {
             _simulation.RequestDebugCycleEngineConfiguration();
@@ -725,7 +744,9 @@ public sealed partial class SystemSpaceState : GameState
             if (_debugCameraMode)
             {
                 if (_frameShipSnap != null)
-                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+                    _camera.SetPose(
+                        _frameShipSnap.CockpitWorldPosition,
+                        _frameShipSnap.CockpitWorldOrientation);
                 _shipMouseLook.RequestRebase();
             }
             _debugCameraMode = !_debugCameraMode;
@@ -1081,11 +1102,24 @@ public sealed partial class SystemSpaceState : GameState
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
-        if (!_uiMouseMode)
+        if (!_uiMouseMode
+            && !_debugCameraMode
+            && !_chaseCamera.IsActive
+            && _frameShipSnap is { } reticleSnapshot)
         {
-            sb.Begin(blendState: _invertBlend);
-            _cockpitUI.DrawCrosshair(sb);
-            sb.End();
+            ShipForwardReticleProjection? reticle =
+                ShipForwardReticleProjector.Project(
+                    reticleSnapshot.CockpitWorldPosition,
+                    reticleSnapshot.Orientation,
+                    _effect.View,
+                    _effect.Projection,
+                    _gd.Viewport);
+            if (reticle is { } visibleReticle)
+            {
+                sb.Begin(blendState: _invertBlend);
+                _cockpitUI.DrawShipForwardReticle(sb, visibleReticle);
+                sb.End();
+            }
         }
 
         // UI library draws on top — owns its own SpriteBatch
@@ -1153,7 +1187,8 @@ public sealed partial class SystemSpaceState : GameState
                 _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal,
                 _frameShipSnap.EngineMounts,
                 _engineModuleDebug,
-                _frameShipSnap.SimTime);
+                _frameShipSnap.SimTime,
+                _frameShipSnap.Cockpit);
             WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
         }
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);

@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Ship;
 using Microsoft.Xna.Framework;
@@ -24,6 +25,26 @@ public static class AriesHullDefinitionFactory
         DisplayName  = "Aries",
         SizeClass    = ShipSizeClass.Small,
         HullMass     = 72_000.0,
+        CockpitMounts =
+        [
+            new CockpitMountDefinition
+            {
+                MountId = "type-1.cockpit.top.01",
+                MountClass = CockpitMountClass.C2,
+                ShipLocalPosition = CockpitPosition,
+                ShipLocalOrientation = CockpitOrientation,
+                SocketSizeMeters = new DVec3(1.5, 1.5, 1.0),
+                Facing = MountFacing.Up,
+                AllowedRotations = new HashSet<CockpitRotationStep>
+                {
+                    CockpitRotationStep.Deg0,
+                    CockpitRotationStep.Deg90,
+                    CockpitRotationStep.Deg180,
+                    CockpitRotationStep.Deg270,
+                },
+                DefaultCockpitDefinitionId = CockpitDefinitionLibrary.AriesCivilianCanopyId,
+            },
+        ],
         CockpitOffset = CockpitPosition,
         CockpitPose = new CockpitPoseDefinition(CockpitPosition, CockpitOrientation),
 
@@ -106,14 +127,14 @@ public static class AriesHullDefinitionFactory
 
         var faceSpecs = new (string id, int section, int edge, HullSurfaceRole role, string material, string? assembly)[]
         {
-            ($"{HullId}.top.cockpit-glass.01", 0, 0, HullSurfaceRole.CockpitGlass, "cockpit-glass", null),
+            ($"{HullId}.top.forward-armour.01", 0, 0, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.head-armour.01", 0, 1, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.forward-side.01", 0, 2, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.lower-forward-service.01", 0, 3, HullSurfaceRole.ServiceSurface, "structural-hull", null),
             ($"{HullId}.underside.forward-service.01", 0, 4, HullSurfaceRole.ServiceSurface, "structural-hull", null),
             ($"{HullId}.port.lower-forward-service.01", 0, 5, HullSurfaceRole.ServiceSurface, "structural-hull", null),
             ($"{HullId}.port.forward-side.01", 0, 6, HullSurfaceRole.PanelSeat, "panel-exterior", null),
-            ($"{HullId}.port.cockpit-frame.01", 0, 7, HullSurfaceRole.CockpitFrame, "cockpit-frame", null),
+            ($"{HullId}.port.forward-armour.01", 0, 7, HullSurfaceRole.PanelSeat, "panel-exterior", null),
 
             ($"{HullId}.top.cargo.01", 1, 0, HullSurfaceRole.PanelSeat, "panel-exterior", null),
             ($"{HullId}.starboard.cargo-shoulder.01", 1, 1, HullSurfaceRole.PanelSeat, "panel-exterior", null),

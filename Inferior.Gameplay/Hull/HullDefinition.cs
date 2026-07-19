@@ -1,11 +1,12 @@
 using Inferior.Core.Math;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Ship;
 
 namespace Inferior.Gameplay.Hull;
 
 /// <summary>
 /// Immutable template for a ship hull class.
-/// Defines what slots exist, the hull's base mass, cockpit offset, and size class.
+/// Defines what slots and cockpit mounts exist, the hull's base mass, and size class.
 ///
 /// Each Hull has exactly one entry in <see cref="HullDefinitionLibrary"/>.
 /// Ship instances reference their hull via <see cref="HullTypeId"/>.
@@ -23,13 +24,15 @@ public sealed class HullDefinition
     /// <summary>Hull mass in kg, excluding all components.</summary>
     public required double HullMass { get; init; }
 
+    /// <summary>Physical cockpit sockets authored as part of this hull.</summary>
+    public IReadOnlyList<CockpitMountDefinition> CockpitMounts { get; init; } = [];
+
     /// <summary>
-    /// Camera/cockpit eye point offset from the ship's centre of mass in ship-local space.
-    /// The camera follows the cockpit, not CoM.
+    /// Transitional camera offset for hulls that do not yet define a physical cockpit mount.
     /// </summary>
     public required DVec3 CockpitOffset { get; init; }
 
-    /// <summary>Full hull-local cockpit camera pose, including its authored view orientation.</summary>
+    /// <summary>Transitional camera pose for hulls without a physical cockpit mount.</summary>
     public required CockpitPoseDefinition CockpitPose { get; init; }
 
     /// <summary>All component slots available on this hull.</summary>
@@ -55,6 +58,57 @@ public sealed class HullDefinition
     public IReadOnlyList<string> Validate()
     {
         var errors = new List<string>();
+
+        foreach (IGrouping<string, CockpitMountDefinition> duplicate in CockpitMounts
+                     .GroupBy(mount => mount.MountId, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            errors.Add($"Duplicate cockpit mount id '{duplicate.Key}'.");
+        }
+
+        foreach (CockpitMountDefinition mount in CockpitMounts)
+        {
+            if (string.IsNullOrWhiteSpace(mount.MountId))
+                errors.Add("Cockpit mount id must not be empty.");
+            if (mount.SocketSizeMeters.X <= 0.0
+                || mount.SocketSizeMeters.Y <= 0.0
+                || mount.SocketSizeMeters.Z <= 0.0)
+            {
+                errors.Add($"Cockpit mount '{mount.MountId}' has invalid socket dimensions.");
+            }
+            if (mount.AllowedRotations.Count == 0)
+                errors.Add($"Cockpit mount '{mount.MountId}' has no allowed installation rotations.");
+
+            if (string.IsNullOrWhiteSpace(mount.DefaultCockpitDefinitionId))
+                continue;
+
+            if (!CockpitDefinitionLibrary.TryGet(
+                    mount.DefaultCockpitDefinitionId,
+                    out CockpitModuleDefinition? definition))
+            {
+                errors.Add(
+                    $"Cockpit mount '{mount.MountId}' references unknown default cockpit " +
+                    $"'{mount.DefaultCockpitDefinitionId}'.");
+            }
+            else if (definition!.RequiredMountClass != mount.MountClass)
+            {
+                errors.Add(
+                    $"Default cockpit '{definition.DefinitionId}' is incompatible with " +
+                    $"mount '{mount.MountId}'.");
+            }
+
+            if (!mount.AllowedRotations.Contains(CockpitRotationStep.Deg0))
+            {
+                errors.Add(
+                    $"Cockpit mount '{mount.MountId}' default installation does not allow Deg0.");
+            }
+        }
+
+        if (CockpitMounts.Count(mount =>
+                !string.IsNullOrWhiteSpace(mount.DefaultCockpitDefinitionId)) > 1)
+        {
+            errors.Add("Hull defines more than one default active cockpit.");
+        }
 
         if (VisualGeometry is null)
             return errors;

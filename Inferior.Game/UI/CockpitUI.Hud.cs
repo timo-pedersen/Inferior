@@ -10,18 +10,23 @@ namespace Inferior.Game.UI;
 
 public sealed partial class CockpitUI
 {
-    public void DrawCrosshair(SpriteBatch sb)
+    public void DrawShipForwardReticle(
+        SpriteBatch sb,
+        ShipForwardReticleProjection projection)
     {
-        int cx  = _gd.Viewport.Width  / 2;
-        int cy  = _gd.Viewport.Height / 2;
+        int cx = (int)MathF.Round(projection.ScreenPosition.X);
+        int cy = (int)MathF.Round(projection.ScreenPosition.Y);
         int arm = 10;
         int gap = 4;
+        Color colour = projection.IsClampedToViewport
+            ? new Color(255, 214, 92)
+            : Color.White;
 
         // Four arms only — no centre dot (avoids obscuring distant targets)
-        sb.Draw(_pixel, new Rectangle(cx - arm - gap, cy, arm, 1), Color.White);
-        sb.Draw(_pixel, new Rectangle(cx + gap + 1,   cy, arm, 1), Color.White);
-        sb.Draw(_pixel, new Rectangle(cx, cy - arm - gap, 1, arm), Color.White);
-        sb.Draw(_pixel, new Rectangle(cx, cy + gap + 1,   1, arm), Color.White);
+        sb.Draw(_pixel, new Rectangle(cx - arm - gap, cy, arm, 1), colour);
+        sb.Draw(_pixel, new Rectangle(cx + gap + 1, cy, arm, 1), colour);
+        sb.Draw(_pixel, new Rectangle(cx, cy - arm - gap, 1, arm), colour);
+        sb.Draw(_pixel, new Rectangle(cx, cy + gap + 1, 1, arm), colour);
     }
 
     public void DrawHud(SpriteBatch sb,

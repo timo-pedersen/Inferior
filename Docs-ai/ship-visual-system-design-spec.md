@@ -433,11 +433,13 @@ A flat mounting surface for an external engine root or attachment stem. It does 
 
 ### CockpitFrame
 
-Structural cockpit surround. It may be rendered separately for material reasons but belongs to the fixed hull design.
+Legacy/integrated structural cockpit surround. Replaceable installed-cockpit framing belongs
+to the cockpit module under `ship-cockpits.md`; Aries no longer uses this hull surface role.
 
 ### CockpitGlass
 
-Glass or viewport area. It does not accept armour.
+Legacy/integrated glass or viewport area. It does not accept armour. Replaceable installed
+canopies belong to cockpit-module geometry; Aries no longer uses this hull surface role.
 
 ### CargoDoor
 

@@ -95,10 +95,21 @@ Simulation domain model. Depends on Core, Galaxy.
 
 **Hull/**
 
-- `HullDefinition.cs` — immutable hull-class template: slots, mass, cockpit offset, size, aerodynamics.
+- `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
+- `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
+
+**Cockpit/**
+
+- `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry, initially containing the Aries civilian canopy cockpit.
+- `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
+- `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
+- `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
+- `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
+- `CockpitPresentationSnapshot.cs` — immutable installed-cockpit root pose and light state published for rendering.
 
 **Physics/**
 
@@ -152,7 +163,8 @@ Simulation domain model. Depends on Core, Galaxy.
 - `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
-- `ShipMeshRenderer.cs` — owns and draws the ship hull/nacelle/pylon meshes (built via `Type1HullFactory`).
+- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry.
+- `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
 - `Type1HullFactory.cs` — builds the Type-1 ship hull/nacelle/pylon meshes.
 
@@ -211,6 +223,7 @@ Pure IO, no live objects. Depends on Core only.
 - `ConsumablesRecord.cs` — serializable reactor fuel/coolant/fuel-rod quantities.
 - `HullElementStateRecord.cs` — serializable hull-panel integrity/identity by face.
 - `InstalledComponentRecord.cs` — serializable mounted-component record (damage, power, settings).
+- `InstalledCockpitRecord.cs` — serializable cockpit installation, rotation, and light state.
 - `LogEntryRecord.cs` — serializable timestamped ship-log entry with type and hash chain.
 - `ShipRecord.cs` — top-level serializable record bundling all persistent ship state.
 
@@ -274,7 +287,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `CockpitUI.cs` — fields, constructor (full instrument/panel/rail construction), `Dispose`, lifecycle, subscriptions.
 - `CockpitUI.DirectionBalls.cs` — direction-ball updates, radar-contact notify.
-- `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, crosshair, UI-tree/alert draw).
+- `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, projected ship-forward reticle, UI-tree/alert draw).
+- `ShipForwardReticleProjector.cs` — pure camera-originated ship-forward ray projection with viewport-edge clamping; independent of velocity and ship-centre convergence.
 - `CockpitUI.Targeting.cs` — targeting HUD drawing, radar/landing-radar/targeting-dirball updates.
 - `DriveInstrumentPanel.cs` — right cockpit-rail wing: drive mode, gear/harmonic, speed readouts.
 

@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Microsoft.Xna.Framework;
@@ -38,6 +39,8 @@ public sealed class ShipMeshRenderer : IDisposable
     private readonly BasicEffect _debugLineEffect;
     private readonly Dictionary<string, SemanticHullGpuMesh> _semanticMeshCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string GeometryId, bool Mirrored), EngineGpuMesh> _engineMeshCache = [];
+    private readonly Dictionary<string, CockpitGpuMesh> _cockpitMeshCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private LegacyFallbackMesh? _legacyFallback;
 
@@ -82,7 +85,8 @@ public sealed class ShipMeshRenderer : IDisposable
         SemanticHullDebugMode debugMode = SemanticHullDebugMode.Normal,
         IReadOnlyList<EngineMountPresentationSnapshot>? engineMounts = null,
         bool engineModuleDebug = false,
-        double engineVisualTimeSeconds = 0.0)
+        double engineVisualTimeSeconds = 0.0,
+        CockpitPresentationSnapshot? cockpit = null)
     {
         float renderScale = (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
@@ -128,6 +132,9 @@ public sealed class ShipMeshRenderer : IDisposable
             if (engineModuleDebug)
                 DrawEngineModuleDebug(engineMounts, world, currentView, currentProjection);
         }
+
+        if (cockpit is not null)
+            DrawInstalledCockpit(camera, cockpit, currentView, currentProjection, sunColour);
 
         _gd.RasterizerState = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
@@ -402,6 +409,83 @@ public sealed class ShipMeshRenderer : IDisposable
         return mesh;
     }
 
+    private void DrawInstalledCockpit(
+        Camera3D camera,
+        CockpitPresentationSnapshot cockpit,
+        Matrix view,
+        Matrix projection,
+        Color sunColour)
+    {
+        if (!CockpitDefinitionLibrary.TryGet(
+                cockpit.DefinitionId,
+                out CockpitModuleDefinition? definition)
+            || definition?.VisualGeometry is not { } geometry)
+        {
+            return;
+        }
+
+        CockpitGpuMesh mesh = GetOrCreateCockpitMesh(geometry);
+        Matrix world = BuildCockpitWorldTransform(
+            (float)Camera3D.RenderScale,
+            camera.ToRenderSpace(cockpit.WorldPosition),
+            cockpit.WorldOrientation);
+
+        foreach (CockpitGpuMeshPart part in mesh.Parts)
+        {
+            bool emissive = part.Material switch
+            {
+                CockpitVisualMaterial.CanopyLight => cockpit.CanopyLightsOn,
+                CockpitVisualMaterial.InternalGlow => cockpit.CockpitLightsOn,
+                _ => false,
+            };
+            _meshRenderer.DrawDynamicLit(
+                part.VertexBuffer,
+                part.IndexBuffer,
+                world,
+                view,
+                projection,
+                CockpitMaterialColour(
+                    part.Material,
+                    cockpit.CanopyLightsOn,
+                    cockpit.CockpitLightsOn),
+                SceneLighting.SunDirection,
+                emissive ? Color.Black : sunColour,
+                emissive ? 1.0f : SceneLighting.Ambient);
+        }
+    }
+
+    private CockpitGpuMesh GetOrCreateCockpitMesh(CockpitVisualGeometry geometry)
+    {
+        if (_cockpitMeshCache.TryGetValue(geometry.GeometryId, out CockpitGpuMesh? mesh))
+            return mesh;
+
+        mesh = CockpitGpuMesh.Create(_gd, CockpitMeshBuilder.Build(geometry));
+        _cockpitMeshCache.Add(geometry.GeometryId, mesh);
+        return mesh;
+    }
+
+    public static Color CockpitMaterialColour(
+        CockpitVisualMaterial material,
+        bool canopyLightsOn,
+        bool cockpitLightsOn)
+        => material switch
+        {
+            CockpitVisualMaterial.MountingBase => new Color(45, 49, 48),
+            CockpitVisualMaterial.Housing => new Color(68, 72, 69),
+            CockpitVisualMaterial.Frame => new Color(30, 34, 35),
+            CockpitVisualMaterial.Canopy => cockpitLightsOn
+                ? new Color(24, 39, 43)
+                : new Color(12, 24, 31),
+            CockpitVisualMaterial.Interior => new Color(5, 7, 8),
+            CockpitVisualMaterial.CanopyLight => canopyLightsOn
+                ? new Color(255, 116, 38)
+                : new Color(42, 13, 7),
+            CockpitVisualMaterial.InternalGlow => cockpitLightsOn
+                ? new Color(190, 122, 62)
+                : new Color(7, 8, 9),
+            _ => Color.Magenta,
+        };
+
     private void DrawEngineExhaustGlows(
         IReadOnlyList<EngineMountPresentationSnapshot> engineMounts,
         Matrix shipWorld,
@@ -632,6 +716,14 @@ public sealed class ShipMeshRenderer : IDisposable
          * Matrix.CreateFromQuaternion(shipOrientation)
          * Matrix.CreateTranslation(cameraRelativeRenderPosition);
 
+    public static Matrix BuildCockpitWorldTransform(
+        float renderScale,
+        Vector3 cameraRelativeRenderPosition,
+        Quaternion cockpitWorldOrientation)
+        => Matrix.CreateScale(renderScale)
+         * Matrix.CreateFromQuaternion(cockpitWorldOrientation)
+         * Matrix.CreateTranslation(cameraRelativeRenderPosition);
+
     private static Matrix BuildLegacyWorldTransform(
         float renderScale,
         Vector3 cameraRelativeRenderPosition,
@@ -678,6 +770,8 @@ public sealed class ShipMeshRenderer : IDisposable
         foreach (var mesh in _semanticMeshCache.Values)
             mesh.Dispose();
         foreach (var mesh in _engineMeshCache.Values)
+            mesh.Dispose();
+        foreach (var mesh in _cockpitMeshCache.Values)
             mesh.Dispose();
 
         _legacyFallback?.Dispose();

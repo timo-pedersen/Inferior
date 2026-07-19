@@ -49,7 +49,7 @@ public sealed partial class SystemSpaceState
         if (_chaseCamera.IsActive)
             UpdateThirdPersonCamera(snap);
         else
-            _camera.SetPose(snap.CockpitWorldPosition, snap.Orientation);
+            _camera.SetPose(snap.CockpitWorldPosition, snap.CockpitWorldOrientation);
     }
 
     internal static ChaseCameraTargets CalculateChaseCameraTargets(

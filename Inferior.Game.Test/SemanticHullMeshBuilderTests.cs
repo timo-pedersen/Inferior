@@ -124,8 +124,6 @@ public sealed class SemanticHullMeshBuilderTests
                 SemanticHullRenderGroup.StructuralHull,
                 SemanticHullRenderGroup.EngineMount,
                 SemanticHullRenderGroup.CargoDoor,
-                SemanticHullRenderGroup.CockpitFrame,
-                SemanticHullRenderGroup.CockpitGlass,
             ],
             groups);
         Assert.All(mesh.Parts, part =>
@@ -134,11 +132,9 @@ public sealed class SemanticHullMeshBuilderTests
             Assert.NotEqual(default, part.MaterialColour);
             Assert.NotEmpty(part.FaceRanges);
         });
-        Assert.Equal(42, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.StructuralHull).TriangleCount);
+        Assert.Equal(46, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.StructuralHull).TriangleCount);
         Assert.Equal(56, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.EngineMount).TriangleCount);
         Assert.Equal(6, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.CargoDoor).TriangleCount);
-        Assert.Equal(2, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.CockpitFrame).TriangleCount);
-        Assert.Equal(2, mesh.Parts.Single(part => part.RenderGroup == SemanticHullRenderGroup.CockpitGlass).TriangleCount);
     }
 
     private static SemanticHullGeometry PentagonalFaceGeometry()

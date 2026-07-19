@@ -4,6 +4,7 @@ using Inferior.Core.Simulation;   // GameClock
 using Inferior.Galaxy;
 using Inferior.Gameplay;          // Simulation base, FlightMode
 using Inferior.Gameplay.Components;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Physics;
 using Inferior.Gameplay.Sensors;
@@ -92,8 +93,17 @@ public sealed class SpaceSimulation : Simulation
 
     // ── Ship ──────────────────────────────────────────────────────────────────
     private volatile Ship? _ship;
+    private IDisposable? _cockpitCommandSubscription;
 
-    public void SetShip(Ship ship) => _ship = ship;
+    public void SetShip(Ship ship)
+    {
+        ArgumentNullException.ThrowIfNull(ship);
+        _cockpitCommandSubscription?.Dispose();
+        _ship = ship;
+        _cockpitCommandSubscription = CommandBus.Subscribe(
+            CockpitCommandTopics.Prefix,
+            command => _ship?.ApplyCockpitCommand(command));
+    }
 
     // ── Ship state snapshot (written by sim thread, read by main thread) ──────
     public sealed record ShipSnapshot(
@@ -102,6 +112,7 @@ public sealed class SpaceSimulation : Simulation
         Quaternion Orientation,
         string     HullTypeId,
         DVec3      CockpitWorldPosition,
+        Quaternion CockpitWorldOrientation,
         DVec3      Forward,
         DVec3      Up,
         double     SimTime,
@@ -131,7 +142,8 @@ public sealed class SpaceSimulation : Simulation
         // "snapshot is non-null", to avoid racing snapshots published before the sim
         // thread has resolved the request.
         int        RelocationSequence = 0,
-        IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null);
+        IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null,
+        CockpitPresentationSnapshot? Cockpit = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -603,7 +615,8 @@ public sealed class SpaceSimulation : Simulation
         var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
 
         _shipSnapshot = new ShipSnapshot(
-            ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId, ship.CockpitWorldPosition,
+            ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId,
+            ship.CockpitWorldPosition, ship.CockpitWorldOrientation,
             ship.Forward, ship.Up,
             GameClock.SimTime,
             snapTickSequence,
@@ -625,7 +638,8 @@ public sealed class SpaceSimulation : Simulation
             snapFwdSpd,
             snapAccel,
             _relocationSequence,
-            BuildEngineMountSnapshots(ship));
+            BuildEngineMountSnapshots(ship),
+            BuildCockpitSnapshot(ship));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -680,6 +694,19 @@ public sealed class SpaceSimulation : Simulation
             })
             .ToArray();
         return Array.AsReadOnly(snapshots);
+    }
+
+    private static CockpitPresentationSnapshot? BuildCockpitSnapshot(Ship ship)
+    {
+        if (ship.Cockpit is not { } cockpit)
+            return null;
+
+        return new CockpitPresentationSnapshot(
+            cockpit.DefinitionId,
+            ship.CockpitRootWorldPosition,
+            ship.CockpitRootWorldOrientation,
+            cockpit.CanopyLightsOn,
+            cockpit.CockpitLightsOn);
     }
 
     private void CycleDebugEngineConfiguration(Ship ship)

@@ -265,8 +265,12 @@ public sealed class ShipVisualSystemTests
         Assert.Equal(28, geometry.Faces.Count(f => f.Role == HullSurfaceRole.EngineMount));
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ServiceSurface) >= 6);
         Assert.True(geometry.Faces.Count(f => f.Role == HullSurfaceRole.ExposedStructure) >= 4);
-        Assert.Contains(geometry.Faces, f => f.Id == "type-1.top.cockpit-glass.01" && f.Role == HullSurfaceRole.CockpitGlass);
-        Assert.Contains(geometry.Faces, f => f.Id == "type-1.port.cockpit-frame.01" && f.Role == HullSurfaceRole.CockpitFrame);
+        Assert.DoesNotContain(geometry.Faces, f =>
+            f.Role is HullSurfaceRole.CockpitGlass or HullSurfaceRole.CockpitFrame);
+        Assert.Contains(geometry.Faces, f =>
+            f.Id == "type-1.top.forward-armour.01" && f.Role == HullSurfaceRole.PanelSeat);
+        Assert.Contains(geometry.Faces, f =>
+            f.Id == "type-1.port.forward-armour.01" && f.Role == HullSurfaceRole.PanelSeat);
         Assert.Equal(4, geometry.MarkerLights.Count);
         Assert.Equal(2, geometry.BeamLights.Count);
     }
