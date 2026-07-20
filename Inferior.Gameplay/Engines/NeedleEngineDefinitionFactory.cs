@@ -163,7 +163,7 @@ public static class NeedleEngineDefinitionFactory
             dryMassKg: 1_650.0,
             forwardThrustN: 187_800.0,
             maneuveringThrustN: 93_900.0,
-            rotationalTorqueNm: 300_000.0,
+            rotationalTorqueNm: 1_050_000.0,
             geometry,
             new EngineDesignIntent(
                 "premium high-performance civilian engine",

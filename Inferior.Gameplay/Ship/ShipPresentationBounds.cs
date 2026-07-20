@@ -3,6 +3,7 @@ using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Microsoft.Xna.Framework;
+using System.Runtime.CompilerServices;
 
 namespace Inferior.Gameplay.Ship;
 
@@ -15,12 +16,26 @@ public readonly record struct ShipPresentationBounds(DVec3 Min, DVec3 Max)
 
 public static class ShipPresentationBoundsCalculator
 {
+    private static readonly ConditionalWeakTable<Ship, CachedBounds> Cache = new();
+
     public static ShipPresentationBounds? TryCalculate(Ship ship)
     {
         ArgumentNullException.ThrowIfNull(ship);
         return HullDefinitionLibrary.TryGet(ship.HullTypeId, out _)
-            ? Calculate(ship)
+            ? GetConfiguredBounds(ship)
             : null;
+    }
+
+    public static ShipPresentationBounds GetConfiguredBounds(Ship ship)
+    {
+        ArgumentNullException.ThrowIfNull(ship);
+        CachedBounds cached = Cache.GetOrCreateValue(ship);
+        lock (cached)
+        {
+            if (!cached.Matches(ship))
+                cached.Update(ship, Calculate(ship));
+            return cached.Bounds;
+        }
     }
 
     public static ShipPresentationBounds Calculate(Ship ship)
@@ -135,6 +150,52 @@ public static class ShipPresentationBoundsCalculator
             if (!_hasPoint)
                 throw new InvalidOperationException("Ship presentation bounds contain no geometry.");
             return new ShipPresentationBounds(_min, _max);
+        }
+    }
+
+    private sealed class CachedBounds
+    {
+        private bool _hasBounds;
+        private int[] _mountRevisions = [];
+        private string? _cockpitDefinitionId;
+        private string? _cockpitMountId;
+        private CockpitRotationStep? _cockpitRotation;
+
+        public ShipPresentationBounds Bounds { get; private set; }
+
+        public bool Matches(Ship ship)
+        {
+            if (!_hasBounds
+                || _mountRevisions.Length != ship.EngineMounts.Count
+                || !string.Equals(
+                    _cockpitDefinitionId,
+                    ship.Cockpit?.DefinitionId,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    _cockpitMountId,
+                    ship.Cockpit?.MountId,
+                    StringComparison.Ordinal)
+                || _cockpitRotation != ship.Cockpit?.InstallationRotation)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < _mountRevisions.Length; i++)
+                if (_mountRevisions[i] != ship.EngineMounts[i].ConfigurationRevision)
+                    return false;
+            return true;
+        }
+
+        public void Update(Ship ship, ShipPresentationBounds bounds)
+        {
+            Bounds = bounds;
+            _hasBounds = true;
+            _mountRevisions = ship.EngineMounts
+                .Select(mount => mount.ConfigurationRevision)
+                .ToArray();
+            _cockpitDefinitionId = ship.Cockpit?.DefinitionId;
+            _cockpitMountId = ship.Cockpit?.MountId;
+            _cockpitRotation = ship.Cockpit?.InstallationRotation;
         }
     }
 }

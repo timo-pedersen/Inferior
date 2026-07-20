@@ -3,7 +3,7 @@ using Microsoft.Xna.Framework.Input;
 
 namespace Inferior.Game.Input;
 
-internal readonly record struct MouseLookInput(double PitchInput, double YawInput, bool Rebased);
+internal readonly record struct MouseLookInput(double PitchInput, double HorizontalInput, bool Rebased);
 
 internal sealed class MouseLookRebaser
 {
@@ -55,8 +55,8 @@ internal sealed class MouseLookRebaser
             return new MouseLookInput(0.0, 0.0, Rebased: true);
         }
 
-        double yawInput = -(mouse.X - center.X) * sensitivity;
+        double horizontalInput = -(mouse.X - center.X) * sensitivity;
         double pitchInput = -(mouse.Y - center.Y) * sensitivity;
-        return new MouseLookInput(pitchInput, yawInput, Rebased: false);
+        return new MouseLookInput(pitchInput, horizontalInput, Rebased: false);
     }
 }

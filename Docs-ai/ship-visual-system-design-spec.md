@@ -1253,7 +1253,7 @@ an Antega-specific camera path. Antega, the bridge, four Atlas engines, exhaust 
 and camera framing were visually accepted by Timo on 2026-07-20.
 
 Propulsion is now instance-aggregated. Atlas owns provisional numeric dry mass, forward
-thrust, maneuvering thrust, and future rotational torque; all four installed instances
+thrust, maneuvering thrust, and active rotational torque; all four installed instances
 contribute independently through `ShipPropulsion`. See
 `Docs-ai/ship-mass-and-propulsion.md` for current values and deferred work.
 

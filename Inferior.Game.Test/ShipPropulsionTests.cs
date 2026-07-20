@@ -41,10 +41,10 @@ public sealed class ShipPropulsionTests
     }
 
     [Theory]
-    [InlineData(AriesHullDefinitionFactory.HullId, 78_000.0, 4_800.0, 2, 312_000.0, 156_000.0, 500_000.0, 4.0, 2.0)]
-    [InlineData(AsteriskHullDefinitionFactory.HullId, 15_600.0, 2_400.0, 1, 117_000.0, 58_500.0, 150_000.0, 7.5, 3.75)]
-    [InlineData(BerenHullDefinitionFactory.HullId, 187_800.0, 6_600.0, 4, 751_200.0, 375_600.0, 1_200_000.0, 4.0, 2.0)]
-    [InlineData(AntegaHullDefinitionFactory.HullId, 3_585_200.0, 384_000.0, 4, 14_340_800.0, 3_585_200.0, 40_000_000.0, 4.0, 1.0)]
+    [InlineData(AriesHullDefinitionFactory.HullId, 78_000.0, 4_800.0, 2, 312_000.0, 156_000.0, 1_200_000.0, 4.0, 2.0)]
+    [InlineData(AsteriskHullDefinitionFactory.HullId, 15_600.0, 2_400.0, 1, 117_000.0, 58_500.0, 360_000.0, 7.5, 3.75)]
+    [InlineData(BerenHullDefinitionFactory.HullId, 187_800.0, 6_600.0, 4, 751_200.0, 375_600.0, 4_200_000.0, 4.0, 2.0)]
+    [InlineData(AntegaHullDefinitionFactory.HullId, 3_585_200.0, 384_000.0, 4, 14_340_800.0, 3_585_200.0, 360_000_000.0, 4.0, 1.0)]
     public void ConfiguredShips_AggregateMassAndPropulsion(
         string hullId,
         double expectedMass,

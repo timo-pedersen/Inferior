@@ -5,6 +5,7 @@ using Inferior.Galaxy;
 using Inferior.Game;
 using Inferior.Game.States;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
 using Microsoft.Xna.Framework;
 using Xunit;
@@ -35,7 +36,11 @@ public sealed class StarterStationRelocationTests
         var (star, system, starterStation) = StarterSystemWithStarterStation();
 
         var simulation = new SpaceSimulation();
-        var ship = new Ship { Position = DefaultStarterSpawn };
+        var ship = new Ship
+        {
+            HullTypeId = AriesHullDefinitionFactory.HullId,
+            Position = DefaultStarterSpawn,
+        };
         simulation.SetShip(ship);
         simulation.InstallSystem(star, system);
 
@@ -68,7 +73,11 @@ public sealed class StarterStationRelocationTests
     {
         GameClock.Reset();
         var simulation = new SpaceSimulation();
-        var ship = new Ship { Position = DefaultStarterSpawn };
+        var ship = new Ship
+        {
+            HullTypeId = AriesHullDefinitionFactory.HullId,
+            Position = DefaultStarterSpawn,
+        };
         simulation.SetShip(ship);
         // Deliberately no InstallSystem call — the request must be rejected (no system
         // context installed), not merely deferred, so a waiter can never hang forever.
@@ -209,7 +218,11 @@ public sealed class StarterStationRelocationTests
 
         GameClock.Reset();
         var simulation = new SpaceSimulation();
-        var ship = new Ship { Position = DefaultStarterSpawn };
+        var ship = new Ship
+        {
+            HullTypeId = AriesHullDefinitionFactory.HullId,
+            Position = DefaultStarterSpawn,
+        };
         simulation.SetShip(ship);
         simulation.InstallSystem(star, StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star)));
         simulation.TickForTests(PlayerInput.Zero, 1.0 / 60.0);
@@ -256,6 +269,7 @@ public sealed class StarterStationRelocationTests
         var simulation = new SpaceSimulation();
         var ship = new Ship
         {
+            HullTypeId = AriesHullDefinitionFactory.HullId,
             Position = DefaultStarterSpawn,
             Velocity = new DVec3(123.0, -456.0, 789.0),
         };

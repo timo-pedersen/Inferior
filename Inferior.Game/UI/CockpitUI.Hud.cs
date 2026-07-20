@@ -99,7 +99,11 @@ public sealed partial class CockpitUI
 
         DrawAtmosPanel(sb, shipSnap);
         if (showPropulsionDiagnostics && shipSnap?.Propulsion is { } propulsion)
-            DrawPropulsionDiagnostics(sb, shipSnap.HullTypeId, propulsion);
+            DrawPropulsionDiagnostics(
+                sb,
+                shipSnap.HullTypeId,
+                propulsion,
+                shipSnap.Rotation);
 
         // Controls hint — changes with mode
         if (uiMouseMode)
@@ -114,7 +118,7 @@ public sealed partial class CockpitUI
         }
         else
         {
-            SpritePrimitives.DrawText(sb, _font, "Mouse: look   WASD: fwd/strafe   QE: roll   RF/Space: vertical   M: system map   N: galaxy map   F11: debug   TAB: UI",
+            SpritePrimitives.DrawText(sb, _font, "Mouse Y: pitch   Mouse X: roll   Q/E: yaw   WASD: fwd/strafe   RF/Space: vertical   M: system map   N: galaxy map   F11: debug   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
         }
     }
@@ -122,9 +126,10 @@ public sealed partial class CockpitUI
     private void DrawPropulsionDiagnostics(
         SpriteBatch sb,
         string hullTypeId,
-        Inferior.Gameplay.Ship.ShipPropulsionSnapshot propulsion)
+        Inferior.Gameplay.Ship.ShipPropulsionSnapshot propulsion,
+        Inferior.Gameplay.Ship.ShipRotationSnapshot? rotation)
     {
-        string[] lines =
+        List<string> lines =
         [
             $"PROPULSION  {hullTypeId}",
             $"MASS       {propulsion.CurrentMassKg:N0} kg",
@@ -137,16 +142,26 @@ public sealed partial class CockpitUI
             $"APPLIED    {propulsion.AppliedForceShipLocalN.ToString(0)} N",
             $"ACCEL      {propulsion.ResultingAccelerationShipLocalMps2.ToString(2)} m/s2",
         ];
+        if (rotation is not null)
+        {
+            lines.Add("ROTATION");
+            lines.Add($"BOUNDS      {rotation.ConfiguredDimensionsMeters.ToString(1)} m");
+            lines.Add($"INERTIA     {rotation.AxisInertiaKgM2.X:E2} / {rotation.AxisInertiaKgM2.Y:E2} / {rotation.AxisInertiaKgM2.Z:E2}");
+            lines.Add($"ANG ACCEL   {rotation.AvailableAngularAccelerationRadPerSec2.ToString(4)} rad/s2");
+            lines.Add($"ANG VEL     {rotation.AngularVelocityLocalRadPerSec.ToString(3)} rad/s");
+            lines.Add($"TARGET      {rotation.TargetAngularVelocityLocalRadPerSec.ToString(3)} rad/s");
+            lines.Add($"ASSIST      {(rotation.FlightAssistOn ? "ON" : "OFF")}");
+        }
 
         const int x = 14;
         const int y = 12;
-        const int width = 390;
+        const int width = 520;
         const int lineHeight = 18;
-        int height = lines.Length * lineHeight + 14;
+        int height = lines.Count * lineHeight + 14;
         sb.Draw(_pixel, new Rectangle(x, y, width, height), new Color(5, 9, 16, 220));
         sb.Draw(_pixel, new Rectangle(x, y, width, 1), ColBorder);
         sb.Draw(_pixel, new Rectangle(x, y + height - 1, width, 1), ColBorder);
-        for (int i = 0; i < lines.Length; i++)
+        for (int i = 0; i < lines.Count; i++)
         {
             SpritePrimitives.DrawText(
                 sb,

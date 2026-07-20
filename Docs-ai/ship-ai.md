@@ -97,6 +97,12 @@ The drive always provides baseline rotational authority. A gyro component enhanc
 
 **Turn rate is asymmetric:** up-pitch can be faster than down-pitch and yaw, because most engines allow additional downward thrust (same vector used for planetary landing). Implement as a getter from day one even when stubbed — avoids refactoring later.
 
+Current implementation: the retained asymmetric values are assisted target-rate limits,
+not direct rotation. Installed operational engine torque divided by three configured-box
+scalar inertias determines how quickly ship-local pitch, yaw, and roll angular velocity
+approach or brake toward those targets. Full flight-assist-OFF torque control and optional
+gyro contribution remain deferred.
+
 ---
 
 ## Cockpit placement

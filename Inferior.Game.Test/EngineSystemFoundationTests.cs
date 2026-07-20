@@ -214,7 +214,7 @@ public sealed class EngineSystemFoundationTests
             dryMassKg: 2_400.0,
             forwardThrustN: 156_000.0,
             maneuveringThrustN: 78_000.0,
-            rotationalTorqueNm: 250_000.0);
+            rotationalTorqueNm: 600_000.0);
         return new EngineVariantDefinition(
             $"mule-2.{mountStandardId.ToLowerInvariant()}",
             family,

@@ -125,6 +125,7 @@ public sealed class EngineMount
     public DVec3? HullRootPosition { get; }
     public DVec3? AttachmentInterfacePosition { get; }
     public EngineInstance? InstalledEngine { get; private set; }
+    public int ConfigurationRevision { get; private set; }
 
     public bool CanAccept(EngineVariantDefinition variant)
         => InstalledEngine is null
@@ -151,6 +152,7 @@ public sealed class EngineMount
 
         engine.Install(MountId, geometryTransform);
         InstalledEngine = engine;
+        ConfigurationRevision++;
         return true;
     }
 
@@ -162,6 +164,7 @@ public sealed class EngineMount
 
         InstalledEngine = null;
         engine.Uninstall();
+        ConfigurationRevision++;
         return engine;
     }
 

@@ -36,6 +36,12 @@ public static class FlightConstants
     // ── ENGINE DEFAULT (placeholder until component system) ───────────────
     public const int    DefaultNodeCount = 10;
 
+    public const double MaximumAssistedPitchUpRateRadPerSec = 1.4;
+    public const double MaximumAssistedPitchDownRateRadPerSec = 1.0;
+    public const double MaximumAssistedYawRateRadPerSec = 1.0;
+    public const double MaximumAssistedRollRateRadPerSec = 1.5;
+    public const double RotationInputReferenceHz = 60.0;
+
     // ── X-STOP ───────────────────────────────────────────────────────────
     // Snap-to-reference threshold — below this, X-stop considers braking complete.
     public const double XStopSnapThreshold = 0.5;  // m/s
@@ -103,10 +109,6 @@ public static class FlightConstants
     // Constant forward accel while active = current full-throttle accel × this.
     public const double AfterburnerAccelMultiplier = 5.0;
 
-    // Random pitch/yaw jitter added on top of mouse-look each tick while active (radians).
-    // Deliberately affects the ship's real orientation (and so its actual forward vector and
-    // travel direction) rather than being a purely cosmetic camera overlay — a Brownian-ish
-    // wobble, not a perfectly straight boosted line. Roughly 1-2 mouse-look pixels' worth
-    // per tick (MouseSensitivity in SystemSpaceState.Ship.cs is 0.0012 rad/pixel).
+    // Legacy angle-scale jitter converted into a torque-limited assisted target perturbation.
     public const double AfterburnerShakeRadians = 0.0015;
 }

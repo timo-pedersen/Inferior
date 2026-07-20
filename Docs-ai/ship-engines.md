@@ -544,20 +544,25 @@ Provisional Stage-1 tuning:
 
 | Family | Dry mass | Forward thrust | Maneuvering thrust | Rotational torque |
 |---|---:|---:|---:|---:|
-| Mule | 2,400 kg | 156,000 N | 78,000 N | 250,000 N m |
-| Needle | 1,650 kg | 187,800 N | 93,900 N | 300,000 N m |
-| Atlas Civilian Drive | 96,000 kg | 3,585,200 N | 896,300 N | 10,000,000 N m |
+| Mule | 2,400 kg | 156,000 N | 78,000 N | 600,000 N m |
+| Needle | 1,650 kg | 187,800 N | 93,900 N | 1,050,000 N m |
+| Atlas Civilian Drive | 96,000 kg | 3,585,200 N | 896,300 N | 90,000,000 N m |
 
 These are initial handling calibration values, not final economy, power, or balance data.
 Installed engines contribute mass individually. Operational force and torque contributions
 are transformed from engine-local forward (`-Z`) through each installation orientation and
 summed by `ShipPropulsion`. Current runtime operational filtering uses
 `1 - EngineInstance.DamageFraction`; wear is not yet a propulsion modifier. Rotational
-torque is aggregated and published but current fixed pitch/yaw/roll behaviour does not use it.
+torque is active: assisted rotation divides the effective aggregate by the configured
+ship's three box-derived scalar inertias to limit angular acceleration and braking.
 
 Asterisk is explicitly authored as a designed single-engine layout. Its hull-owned
 efficiencies are 0.75 forward, 0.75 maneuvering, and 0.60 rotation. The efficiencies do
 not belong to Mule and do not activate when a normal multi-engine ship loses engines.
+
+The Stage-1 torque values were retuned when rotation became active. Initial calculated
+times were impractical, especially Antega at roughly 106 seconds to full assisted pitch.
+The values above are provisional handling calibration, not final engine balance.
 
 Gameplay systems such as:
 - damage;

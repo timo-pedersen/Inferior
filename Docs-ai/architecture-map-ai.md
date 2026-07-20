@@ -118,7 +118,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2, Needle H2, and Atlas Civilian Drive H10.
 - `AtlasEngineDefinitionFactory.cs` — 58.4 m large civilian H10 drive geometry, design intent, lights, and aft exhaust metadata.
 - `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
-- `EngineDefinition.cs` — immutable engine-family data including validated SI mass, forward thrust, maneuvering thrust, and future rotational torque.
+- `EngineDefinition.cs` — immutable engine-family data including validated SI mass, forward thrust, maneuvering thrust, and active rotational torque.
 
 **Cockpit/**
 
@@ -160,9 +160,10 @@ Simulation domain model. Depends on Core, Galaxy.
 
 **Ship/**
 
-- `Ship.cs` — the unique physical object in the universe: position, velocity, orientation, components, config.
+- `Ship.cs` — the unique physical object in the universe: position, velocity, normalized orientation, simulation-owned ship-local angular velocity, components, and configuration.
 - `ShipPropulsion.cs` — pure simulation-domain aggregation of installed engine mass, orientation-transformed forward force, maneuvering authority, rotational torque, normalized translation commands, applied force, and acceleration.
-- `ShipPresentationBounds.cs` — pure composite ship-local bounds from authored hull vertices plus transformed installed engine and cockpit geometry.
+- `ShipRotation.cs` — validated box-derived pitch/yaw/roll inertias, torque/inertia angular acceleration, assisted target-rate resolution, and bounded angular-velocity stepping.
+- `ShipPresentationBounds.cs` — gameplay-owned composite ship-local bounds from authored hull vertices plus transformed installed engine and cockpit geometry; cached by configuration revision for simulation inertia and presentation framing.
 - `SizeClass.cs` — hull class ratings: Small, Medium, Large, Capital.
 
 **Root**
@@ -171,7 +172,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `FlightConstants.cs` — tunable Newtonian/slipstream physics: gear speeds, thrust taper, station zones, X-stop.
 - `FlightMode.cs` — enum: Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream, EnteringFlatHyperspace, FlatHyperspace.
 - `HyperspacePlane.cs` — 2D hyperspace plane defined by ship up-vector + position; projects stars onto the plane.
-- `PlayerInput.cs` — immutable input snapshot (thrust, rotation, toggles), read once per sim tick.
+- `PlayerInput.cs` — immutable input snapshot (thrust, normalized assisted rotation commands, toggles), read once per sim tick.
 - `Simulation.cs` — 60 Hz background sim loop: clock, environment, physics, power, damage, radar, publish.
 
 ---
@@ -270,7 +271,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); applies installed-engine force divided by current configured mass in every Newtonian gear and atmospheric translation, then publishes `ShipSnapshot` with immutable `ShipPropulsionSnapshot` diagnostics. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); applies installed-engine force/current mass translation and torque/box-inertia assisted rotation. Publishes immutable `ShipPropulsionSnapshot` and `ShipRotationSnapshot`. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
 - `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 

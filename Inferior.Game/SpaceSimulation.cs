@@ -144,10 +144,12 @@ public sealed class SpaceSimulation : Simulation
         IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null,
         CockpitPresentationSnapshot? Cockpit = null,
         ShipPresentationBounds? PresentationBounds = null,
-        ShipPropulsionSnapshot? Propulsion = null);
+        ShipPropulsionSnapshot? Propulsion = null,
+        ShipRotationSnapshot? Rotation = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
     private ShipPropulsionApplication _lastPropulsionApplication;
+    private DVec3 _lastTargetAngularVelocityLocalRadPerSec;
 
     public ShipSnapshot? ShipState => _shipSnapshot;
 
@@ -382,6 +384,7 @@ public sealed class SpaceSimulation : Simulation
         Ship? ship = _ship;
         if (ship == null) return;
         _lastPropulsionApplication = default;
+        _lastTargetAngularVelocityLocalRadPerSec = DVec3.Zero;
         EngineVisualState engineVisualState = EngineVisualState.Idle;
 
         int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
@@ -420,6 +423,7 @@ public sealed class SpaceSimulation : Simulation
         {
             ship.Position = teleport.Position;
             ship.Velocity = DVec3.Zero;
+            ship.ResetAngularVelocity();
             ship.SetOrientation(teleport.Orientation);
             _teleportRequest = null;
         }
@@ -460,18 +464,24 @@ public sealed class SpaceSimulation : Simulation
         }
 
         // ── Rotation ─────────────────────────────────────────────────────
-        // While the afterburner burns, add a small random pitch/yaw jitter on top of mouse-look —
-        // a Brownian-ish shake that also nudges the ship's real forward vector (and so its actual
-        // travel direction) slightly, rather than a purely cosmetic camera overlay. Roll is
-        // untouched either way.
+        // Afterburner jitter perturbs the assisted target command and remains torque-limited.
         double pitchInput = input.PitchInput;
         double yawInput   = input.YawInput;
         if (_afterburnerActive)
         {
-            pitchInput += (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0) * FlightConstants.AfterburnerShakeRadians;
-            yawInput   += (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0) * FlightConstants.AfterburnerShakeRadians;
+            double pitchJitter =
+                (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0)
+                * FlightConstants.AfterburnerShakeRadians;
+            double yawJitter =
+                (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0)
+                * FlightConstants.AfterburnerShakeRadians;
+            double pitchMaximum = pitchJitter >= 0.0
+                ? ship.TurnRatePitchUp
+                : ship.TurnRatePitchDown;
+            pitchInput += ShipRotation.NormalizeLegacyMouseInput(pitchJitter, pitchMaximum);
+            yawInput += ShipRotation.NormalizeLegacyMouseInput(yawJitter, ship.TurnRateYaw);
         }
-        ship.ApplyRotation(pitchInput, yawInput, input.RollInput, dt);
+        TickAssistedRotation(ship, pitchInput, yawInput, input.RollInput, dt);
 
         // ── Flight Assist toggle (atmospheric only, rising edge) ──────────
         if (input.FlightAssistToggle && !_prevFlightAssistToggle)
@@ -637,6 +647,8 @@ public sealed class SpaceSimulation : Simulation
         DVec3 shipMovementDuringTick = ship.Position - _nearestStationShipPosition;
         var postPhysicsProximity = ComputeNearestStationProximity(ship.Position, GameClock.SimTime);
         var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
+        ShipPresentationBounds? configuredBounds =
+            ShipPresentationBoundsCalculator.TryCalculate(ship);
 
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId,
@@ -664,8 +676,9 @@ public sealed class SpaceSimulation : Simulation
             _relocationSequence,
             BuildEngineMountSnapshots(ship),
             BuildCockpitSnapshot(ship),
-            ShipPresentationBoundsCalculator.TryCalculate(ship),
-            BuildPropulsionSnapshot(ship));
+            configuredBounds,
+            BuildPropulsionSnapshot(ship),
+            BuildRotationSnapshot(ship, configuredBounds));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -737,6 +750,54 @@ public sealed class SpaceSimulation : Simulation
             capability.AvailableRotationalTorqueNm,
             _lastPropulsionApplication.AppliedForceShipLocalN,
             _lastPropulsionApplication.ResultingAccelerationShipLocalMps2);
+    }
+
+    private ShipRotationSnapshot? BuildRotationSnapshot(
+        Ship ship,
+        ShipPresentationBounds? configuredBounds)
+    {
+        if (configuredBounds is not { } bounds)
+            return null;
+
+        ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+        ShipRotationCapability rotation = ShipRotation.Resolve(
+            propulsion.CurrentMassKg,
+            bounds,
+            propulsion.AvailableRotationalTorqueNm);
+        return new ShipRotationSnapshot(
+            rotation.ConfiguredDimensionsMeters,
+            rotation.AxisInertiaKgM2,
+            rotation.AvailableRotationalTorqueNm,
+            rotation.AvailableAngularAccelerationRadPerSec2,
+            ship.AngularVelocityLocalRadPerSec,
+            _lastTargetAngularVelocityLocalRadPerSec,
+            FlightAssistOn: true);
+    }
+
+    private void TickAssistedRotation(
+        Ship ship,
+        double pitchInput,
+        double yawInput,
+        double rollInput,
+        double dt)
+    {
+        ShipPresentationBounds bounds =
+            ShipPresentationBoundsCalculator.GetConfiguredBounds(ship);
+        ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+        ShipRotationCapability rotation = ShipRotation.Resolve(
+            propulsion.CurrentMassKg,
+            bounds,
+            propulsion.AvailableRotationalTorqueNm);
+        RotationCommand command = RotationCommand.Clamp(pitchInput, yawInput, rollInput);
+        DVec3 target = ShipRotation.ResolveTargetAngularVelocity(ship, command);
+        DVec3 next = ShipRotation.MoveTowardsTarget(
+            ship.AngularVelocityLocalRadPerSec,
+            target,
+            rotation.AvailableAngularAccelerationRadPerSec2,
+            dt);
+        _lastTargetAngularVelocityLocalRadPerSec = target;
+        ship.SetAngularVelocityLocal(next);
+        ship.IntegrateAngularVelocity(dt);
     }
 
     private static CockpitPresentationSnapshot? BuildCockpitSnapshot(Ship ship)
@@ -813,6 +874,7 @@ public sealed class SpaceSimulation : Simulation
             .WithDefaultStartingComponents()
             .Build();
         replacement.Velocity = current.Velocity;
+        replacement.SetAngularVelocityLocal(current.AngularVelocityLocalRadPerSec);
         SetShip(replacement);
 
         HullDefinition hull = HullDefinitionLibrary.Get(nextHullTypeId);
@@ -1189,6 +1251,7 @@ public sealed class SpaceSimulation : Simulation
             DVec3 surfaceNormal = (ship.Position - bodyPos) / distAfter;
             ship.Position = bodyPos + surfaceNormal * minDist;
             ship.Velocity = DVec3.Zero;
+            ship.ResetAngularVelocity();
 
             if (!_surfaceContact)
             {
@@ -1603,6 +1666,7 @@ public sealed class SpaceSimulation : Simulation
 
         ship.Position = relocatedPosition;
         ship.SetOrientation(orientation);
+        ship.ResetAngularVelocity();
 
         UpdateReferenceFrame(ship);
         MatchShipVelocityToReference(ship, GetRefVelocity());

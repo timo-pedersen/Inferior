@@ -39,8 +39,7 @@ For every installed engine:
 5. Apply explicit hull-owned designed-single-engine efficiencies where authored.
 
 There is no hull-ID propulsion branch and no engine-count multiplied by a global force.
-Rotational torque is resolved and published but does not alter the existing fixed rotation
-rates in this stage.
+Rotational torque drives assisted angular acceleration as described below.
 
 ## Translation calculation
 
@@ -91,12 +90,79 @@ installed and operational engine counts; available force and torque; and the lat
 applied ship-local force and acceleration. The existing `F2` ship-module debug toggle
 shows these values in a temporary HUD panel for in-engine acceptance.
 
+## Assisted rotation
+
+Coordinate convention:
+
+```text
+local X = width axis  = pitch angular velocity
+local Y = height axis = yaw angular velocity
+local Z = length axis = roll angular velocity
+forward = local -Z
+```
+
+`ShipPresentationBoundsCalculator.GetConfiguredBounds` supplies stable gameplay-owned
+configured bounds from hull semantic geometry plus transformed installed engine and
+cockpit geometry. The result is cached per ship and invalidated by engine-mount
+configuration revision or cockpit installation identity. Simulation does not query
+rendering or GPU state.
+
+For current mass `M`, width `W`, height `H`, and length `L`:
+
+```text
+Pitch inertia Ixx = M * (H^2 + L^2) / 12
+Yaw inertia   Iyy = M * (W^2 + L^2) / 12
+Roll inertia  Izz = M * (W^2 + H^2) / 12
+
+axis angular acceleration = effective installed rotational torque / axis inertia
+```
+
+These are three independent scalar cuboid approximations, not a full inertia tensor.
+Component mass positions, centre of mass, gyroscopic coupling, and off-diagonal terms are
+not represented.
+
+`PlayerInput` pitch, yaw, and roll fields are normalized assisted-rate commands. Mouse
+deltas are normalized at `ShipInputMapper`; mouse vertical drives pitch, mouse horizontal
+drives roll, and `Q/E` drives digital yaw. Mouse-right produces positive roll command,
+`Q` produces positive (left) yaw, and `E` produces negative (right) yaw. Because
+ship-forward is local `-Z`, positive roll input maps to negative local-Z angular velocity.
+Assisted target limits remain:
+
+| Axis | Maximum target rate |
+|---|---:|
+| Pitch up | 1.4 rad/s |
+| Pitch down | 1.0 rad/s |
+| Yaw | 1.0 rad/s |
+| Roll | 1.5 rad/s |
+
+Each simulation tick moves ship-local angular velocity toward the target independently on
+each axis by at most `available angular acceleration * dt`. Returning input to zero uses
+the same torque to brake without overshoot; there is no passive angular damping.
+Orientation integrates an axis-angle quaternion from the local angular-velocity vector
+using `Orientation * localDelta`, then normalizes.
+
+Configured provisional results after activating and retuning engine torque:
+
+| Ship | W x H x L | Effective torque | Ixx / Iyy / Izz (kg m2) | Angular accel pitch / yaw / roll | Time to max pitch / yaw / roll |
+|---|---:|---:|---:|---:|---:|
+| Aries | 12.04 x 5.02 x 16.07 m | 1.20 MN m | 1.843e6 / 2.621e6 / 1.106e6 | 0.651 / 0.458 / 1.085 rad/s2 | 2.15 / 2.18 / 1.38 s |
+| Asterisk | 5.31 x 3.34 x 8.71 m | 0.36 MN m | 1.131e5 / 1.353e5 / 5.116e4 | 3.182 / 2.661 / 7.037 rad/s2 | 0.44 / 0.38 / 0.21 s |
+| Beren | 19.10 x 5.73 x 27.00 m | 4.20 MN m | 1.192e7 / 1.712e7 / 6.223e6 | 0.352 / 0.245 / 0.675 rad/s2 | 3.97 / 4.08 / 2.22 s |
+| Antega | 34.10 x 17.08 x 99.22 m | 360.00 MN m | 3.028e9 / 3.289e9 / 4.346e8 | 0.119 / 0.109 / 0.828 rad/s2 | 11.78 / 9.14 / 1.81 s |
+
+Ship-local angular velocity is simulation-owned and published in
+`ShipSnapshot.Rotation`. Explicit teleports, station relocation, and surface collision
+velocity resets clear angular velocity. Ship cycling preserves instantaneous angular
+velocity. Camera changes do not modify it. Rotational assisted semantics remain active;
+flight-assist-OFF torque control is deferred.
+
 ## Deferred
 
 - cargo and container mass;
 - derived centre of mass and rotation pivot changes;
-- inertia tensors and angular velocity;
-- torque-driven rotation and asymmetric failure torque;
+- full inertia tensors and per-component inertia;
+- asymmetric failure torque;
+- flight-assist-OFF direct torque controls;
 - engine power, fuel, and thermal limits;
 - detailed engine operational/damage states;
 - inertial-dampener acceleration limits.

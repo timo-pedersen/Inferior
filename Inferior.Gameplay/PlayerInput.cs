@@ -7,6 +7,7 @@ namespace Inferior.Gameplay;
 /// are sent here so the sim owns the actual enabled/disabled state.
 /// XStopToggleSequence and GearChangeSequence/Steps identify distinct edge events so the
 /// sim can consume a retained input snapshot once.
+/// PitchInput, YawInput, and RollInput are normalized assisted-rate commands in [-1, 1].
 /// </summary>
 public record PlayerInput(
     double ThrustForward,
