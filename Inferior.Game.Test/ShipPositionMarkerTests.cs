@@ -1,0 +1,124 @@
+using Inferior.Core.Math;
+using Inferior.Game.States;
+using Microsoft.Xna.Framework;
+using Xunit;
+
+namespace Inferior.Game.Test;
+
+public sealed class ShipPositionMarkerTests
+{
+    [Fact]
+    public void MatrixDifference_IsZeroForIdenticalMatricesAndDetectsChangedTranslation()
+    {
+        Matrix baseline = Matrix.CreateLookAt(Vector3.Zero, -Vector3.UnitZ, Vector3.UnitY);
+        Matrix translated = baseline;
+        translated.M41 += 6500f;
+
+        Assert.Equal(0f, SystemSpaceState.MaxMatrixElementDifference(baseline, baseline));
+        Assert.Equal(6500f, SystemSpaceState.MaxMatrixElementDifference(baseline, translated));
+    }
+
+    [Fact]
+    public void MarkerGeometry_ContainsWireCubeAndThreeWorldAxes()
+    {
+        var lines = SystemSpaceState.BuildShipPositionMarkerLines();
+
+        Assert.Equal(30, lines.Length);
+        Assert.Equal(24, lines.Count(vertex => vertex.Color == Color.Yellow));
+        Assert.Contains(lines, vertex => vertex.Position == Vector3.UnitX * 40.0f && vertex.Color == Color.Red);
+        Assert.Contains(lines, vertex => vertex.Position == Vector3.UnitY * 40.0f && vertex.Color == Color.LimeGreen);
+        Assert.Contains(lines, vertex => vertex.Position == Vector3.UnitZ * 40.0f && vertex.Color == Color.Cyan);
+        Assert.Equal(-12.0f, lines.Where(vertex => vertex.Color == Color.Yellow).Min(vertex => vertex.Position.X));
+        Assert.Equal(12.0f, lines.Where(vertex => vertex.Color == Color.Yellow).Max(vertex => vertex.Position.X));
+    }
+
+    [Fact]
+    public void PositionLog_ReportsSimulationCameraAndRenderSources()
+    {
+        string log = SystemSpaceState.FormatShipPositionMarkerLog(
+            new DVec3(1.25, -2.5, 3.75),
+            new DVec3(4.5, 5.25, -6.125),
+            new DVec3(7.0, 8.0, 9.0),
+            new DVec3(10.0, 11.0, 12.0),
+            new SystemSpaceState.ChaseCameraTargets(
+                new DVec3(13.0, 14.0, 15.0),
+                new DVec3(16.0, 17.0, 18.0)));
+
+        Assert.Contains("[ShipMarker]", log);
+        Assert.Contains("Sim position:", log);
+        Assert.Contains("Snapshot ship position:", log);
+        Assert.Contains("Presentation ship position / render source:", log);
+        Assert.Contains("Camera desired position:", log);
+        Assert.Contains("Camera target:", log);
+        Assert.Contains("Camera position:", log);
+        Assert.Contains("    X: 1.25", log);
+        Assert.Contains("    Z: 12", log);
+        Assert.Contains("    Y: 8", log);
+    }
+
+    [Fact]
+    public void ChaseTargets_UseSnapshotBasisAsMetreOffsets()
+    {
+        var shipPosition = new DVec3(1000, 2000, 3000);
+        var targets = SystemSpaceState.CalculateChaseCameraTargets(
+            shipPosition,
+            new DVec3(0, 0, -1),
+            DVec3.UnitY);
+
+        Assert.Equal(new DVec3(1000, 2030, 3080), targets.DesiredPosition);
+        Assert.Equal(shipPosition, targets.LookTarget);
+        Assert.Equal(Math.Sqrt(80 * 80 + 30 * 30), (targets.DesiredPosition - shipPosition).Length, 9);
+    }
+
+    [Fact]
+    public void ChaseSmoothing_DoesNotEaseAcrossShipUniverseTranslation()
+    {
+        var previousShipPosition = new DVec3(1000, 2000, 3000);
+        var previousOffset = new DVec3(0, 30, 80);
+        var translatedShipPosition = previousShipPosition + new DVec3(6500, -200, 400);
+        var chase = new ChaseCameraState();
+        DVec3 smoothedOffset = chase.ResolveWorldOffset(Quaternion.Identity);
+
+        DVec3 previousCameraPosition = previousShipPosition + previousOffset;
+        DVec3 translatedCameraPosition = translatedShipPosition + smoothedOffset;
+
+        Assert.Equal(
+            translatedShipPosition - previousShipPosition,
+            translatedCameraPosition - previousCameraPosition);
+    }
+
+    [Fact]
+    public void ChasePose_IsHullLocalAndFollowsShipOrientation()
+    {
+        var chase = new ChaseCameraState();
+        Quaternion yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathHelper.PiOver2);
+
+        DVec3 worldOffset = chase.ResolveWorldOffset(yaw);
+        DVec3 expected = ChaseCameraState.Transform(chase.DesiredHullLocalOffset, yaw);
+
+        Assert.Equal(expected, worldOffset);
+        Assert.Equal(chase.Radius, worldOffset.Length, 5);
+    }
+
+    [Fact]
+    public void ChaseOrientation_PointsCameraAtCalculatedTarget()
+    {
+        var targets = SystemSpaceState.CalculateChaseCameraTargets(
+            new DVec3(1000, 2000, 3000),
+            new DVec3(0.6, 0.0, -0.8),
+            DVec3.UnitY);
+        DVec3 lookDirection = (targets.LookTarget - targets.DesiredPosition).Normalized();
+
+        Quaternion orientation = SystemSpaceState.QuatLookAtWithUp(
+            lookDirection,
+            DVec3.UnitY);
+        Vector3 cameraForward = Vector3.Normalize(
+            Vector3.Transform(-Vector3.UnitZ, orientation));
+        var expected = new Vector3(
+            (float)lookDirection.X,
+            (float)lookDirection.Y,
+            (float)lookDirection.Z);
+
+        Assert.True(Vector3.Dot(cameraForward, expected) > 0.9999f);
+    }
+}

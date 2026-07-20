@@ -239,7 +239,7 @@ public sealed class SlipstreamHarmonyRetargetingTests
         FlightMode mode = FlightMode.SystemSlipstream)
     {
         var sim = new SpaceSimulation();
-        var ship = ShipBuilder.NewShip("type1")
+        var ship = ShipBuilder.NewShip("type-1")
             .WithPosition(DVec3.Zero)
             .WithOrientation(Quaternion.Identity)
             .WithDefaultStartingComponents()

@@ -23,9 +23,11 @@ public static class CommandBus
     /// Register a handler for all commands whose topic starts with <paramref name="prefix"/>.
     /// Call from the sim thread during component initialization.
     /// </summary>
-    public static void Subscribe(string prefix, Action<ComponentCommand> handler)
+    public static IDisposable Subscribe(string prefix, Action<ComponentCommand> handler)
     {
-        lock (_lock) _handlers.Add((prefix, handler));
+        var subscription = (prefix, handler);
+        lock (_lock) _handlers.Add(subscription);
+        return new Subscription(subscription);
     }
 
     /// <summary>
@@ -40,5 +42,22 @@ public static class CommandBus
             foreach (var (prefix, handler) in snapshot)
                 if (cmd.Topic.StartsWith(prefix, StringComparison.Ordinal))
                     handler(cmd);
+    }
+
+    private sealed class Subscription(
+        (string Prefix, Action<ComponentCommand> Handler) subscription) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            lock (_lock)
+            {
+                if (_disposed)
+                    return;
+                _disposed = true;
+                _handlers.Remove(subscription);
+            }
+        }
     }
 }

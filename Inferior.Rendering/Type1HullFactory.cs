@@ -4,8 +4,8 @@ using Microsoft.Xna.Framework.Graphics;
 namespace Inferior.Rendering;
 
 /// <summary>
-/// Builds the Type-1 player ship mesh as three separate GPU buffer pairs so each
-/// component can be drawn with a distinct diffuse colour under dynamic lighting.
+/// Builds the pre-semantic placeholder ship mesh used only when a registered hull
+/// has no <c>VisualGeometry</c>. Aries/type-1 does not use this factory.
 ///
 /// Vertex coordinates assume Y=up, Z=forward (nose), X=right — ship-local space
 /// with the centre of mass at the origin.  The world matrix must include a

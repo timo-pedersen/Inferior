@@ -10,6 +10,7 @@ public record ShipRecord
     public string?  Name          { get; init; }
     public DateTime CreatedDate   { get; init; }
 
+    public InstalledCockpitRecord? Cockpit { get; init; }
     public InstalledComponentRecord[] Components   { get; init; } = [];
     public CockpitLayoutRecord        PanelLayout  { get; init; } = new();
     public HullElementStateRecord[]   HullElements { get; init; } = [];

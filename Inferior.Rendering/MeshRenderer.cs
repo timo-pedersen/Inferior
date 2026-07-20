@@ -59,6 +59,29 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx);
     }
 
+    public void DrawDynamicLitRange(
+        VertexBuffer vb, IndexBuffer ib,
+        int startIndex, int indexCount,
+        Matrix world, Matrix view, Matrix projection,
+        Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        Texture2D? texture = null)
+    {
+        if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
+            throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
+
+        var fx = _litSurfaceEffect;
+        fx.CurrentTechnique = fx.Techniques["DynamicLit"];
+        fx.Parameters["World"].SetValue(world);
+        fx.Parameters["View"].SetValue(view);
+        fx.Parameters["Projection"].SetValue(projection);
+        fx.Parameters["SunDirection"].SetValue(sunDirection);
+        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
+        fx.Parameters["Ambient"].SetValue(ambient);
+        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
+        fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
+        Draw(vb, ib, fx, startIndex, indexCount / 3);
+    }
+
     public void DrawDynamicLitShadowed(
         VertexBuffer vb, IndexBuffer ib,
         Matrix world, Matrix view, Matrix projection,
@@ -138,7 +161,12 @@ public sealed class MeshRenderer : IDisposable
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    private void Draw(VertexBuffer vb, IndexBuffer ib, Effect effect)
+    private void Draw(
+        VertexBuffer vb,
+        IndexBuffer ib,
+        Effect effect,
+        int startIndex = 0,
+        int? primitiveCount = null)
     {
         var gd = _gd;
         gd.SetVertexBuffer(vb);
@@ -149,7 +177,11 @@ public sealed class MeshRenderer : IDisposable
         foreach (var pass in effect.CurrentTechnique.Passes)
         {
             pass.Apply();
-            gd.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, ib.IndexCount / 3);
+            gd.DrawIndexedPrimitives(
+                PrimitiveType.TriangleList,
+                baseVertex: 0,
+                startIndex,
+                primitiveCount ?? ib.IndexCount / 3);
         }
     }
 

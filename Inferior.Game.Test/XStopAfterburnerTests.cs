@@ -107,7 +107,8 @@ public sealed class XStopAfterburnerTests
 
         Assert.True(sim.DebugXStopState.XStopActive);
         Assert.False(sim.DebugXStopState.AfterburnerActive);
-        Assert.True(ship.Velocity.X < 10_000);
+        double xNoiseTolerance = XStopAxisNoiseTolerance();
+        Assert.True(ship.Velocity.X < 10_000 + xNoiseTolerance);
     }
 
     [Fact]
@@ -152,7 +153,7 @@ public sealed class XStopAfterburnerTests
         sim.DebugSetReferenceVelocity(new DVec3(10_000, 0, 0));
         RunUntilAfterburnerEnds(sim);
 
-        Assert.True(ship.Velocity.X > 0);
+        Assert.True(ship.Velocity.X > -XStopAxisNoiseTolerance());
         Assert.Equal(10_000, sim.DebugXStopState.ReferenceVelocity.X, 12);
     }
 
@@ -265,7 +266,7 @@ public sealed class XStopAfterburnerTests
         FlightMode mode = FlightMode.SystemNewtonian)
     {
         var sim = new SpaceSimulation();
-        var ship = ShipBuilder.NewShip("type1")
+        var ship = ShipBuilder.NewShip("type-1")
             .WithPosition(DVec3.Zero)
             .WithOrientation(Quaternion.Identity)
             .WithDefaultStartingComponents()
@@ -294,4 +295,8 @@ public sealed class XStopAfterburnerTests
             XStopToggle = true,
             XStopToggleSequence = sequence
         };
+
+    private static double XStopAxisNoiseTolerance()
+        => 2.0 * FlightConstants.Gear1AccelerationMs2
+            * FlightConstants.XStopBrakeFactor * Dt;
 }

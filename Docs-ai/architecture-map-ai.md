@@ -38,6 +38,13 @@ Foundation layer — no dependencies on any other Inferior project.
 - `GameClock.cs` — sim-time clock (SimTime, in-game date), advanced once per tick.
 - `Noise.cs` — noise generator library (Simplex1, White, Pink, Periodic, Spike).
 
+**Time/**
+
+- `GameDate.cs` — immutable absolute-day date value with ordering and day arithmetic.
+- `GameCalendar.cs` — proleptic-Gregorian civil conversion, validation, arithmetic, and weekday operations.
+- `GalacticEraTimeline.cs` — Galactic Era overlay, fixed initial game date, strict canonical formatting/parsing, and Era-boundary validation.
+- `GameDateJsonConverter.cs` — numeric JSON persistence for `GameDate.AbsoluteDay`.
+
 **Root**
 
 - `GameState.cs` — `GameStateId` enum, `StateTransition`, abstract `GameState` base class, `GameStateMachine`.
@@ -95,10 +102,32 @@ Simulation domain model. Depends on Core, Galaxy.
 
 **Hull/**
 
-- `HullDefinition.cs` — immutable hull-class template: slots, mass, cockpit offset, size, aerodynamics.
+- `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
+- `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
+- `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
+- `BerenHullDefinitionFactory.cs` — medium 3-by-3-container cargo platform, aft cargo-door assembly, downward C2 cockpit mount, and four independent Needle H2 engine mounts.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
+
+**Engines/**
+
+- `EngineInstallationGenerator.cs` — installs one engine instance on one authored mount, including handed geometry and physical interface validation; default construction loops this operation for any mount count.
+- `EnginePairGenerator.cs` — mirrored-pair validation/generation retained for workflows that specifically require a paired installation.
+- `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2 and Needle H2.
+- `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
+
+**Cockpit/**
+
+- `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, and Beren underslung command pod.
+- `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
+- `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
+- `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
+- `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
+- `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
+- `BerenUnderslungCockpitGeometryFactory.cs` — full downward-mounted C2 command pod with collar, housing, faceted canopy, frame, backing, and independent light geometry.
+- `CockpitPresentationSnapshot.cs` — immutable installed-cockpit root pose and light state published for rendering.
 
 **Physics/**
 
@@ -152,7 +181,8 @@ Simulation domain model. Depends on Core, Galaxy.
 - `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
-- `ShipMeshRenderer.cs` — owns and draws the ship hull/nacelle/pylon meshes (built via `Type1HullFactory`).
+- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry.
+- `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
 - `Type1HullFactory.cs` — builds the Type-1 ship hull/nacelle/pylon meshes.
 
@@ -211,6 +241,7 @@ Pure IO, no live objects. Depends on Core only.
 - `ConsumablesRecord.cs` — serializable reactor fuel/coolant/fuel-rod quantities.
 - `HullElementStateRecord.cs` — serializable hull-panel integrity/identity by face.
 - `InstalledComponentRecord.cs` — serializable mounted-component record (damage, power, settings).
+- `InstalledCockpitRecord.cs` — serializable cockpit installation, rotation, and light state.
 - `LogEntryRecord.cs` — serializable timestamped ship-log entry with type and hash chain.
 - `ShipRecord.cs` — top-level serializable record bundling all persistent ship state.
 
@@ -233,7 +264,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation: `RequestStationRelocation(persistenceId, standOffMeters)` — resolves live station position, applies stand-off, matches reference-frame velocity, faces the station. Used by new-game start, system-map arrival, and debug station cycle.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
+- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
@@ -272,15 +304,16 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 **UI/**
 
-- `CockpitUI.cs` — fields, constructor (full instrument/panel/rail construction), `Dispose`, lifecycle, subscriptions.
+- `CockpitUI.cs` — fields, constructor (full instrument/panel/rail construction), `Dispose`, lifecycle, subscriptions, and the CTRL-panel `NEXT SHIP` command button.
 - `CockpitUI.DirectionBalls.cs` — direction-ball updates, radar-contact notify.
-- `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, crosshair, UI-tree/alert draw).
+- `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, projected ship-forward reticle, UI-tree/alert draw).
+- `ShipForwardReticleProjector.cs` — pure camera-originated ship-forward ray projection with viewport-edge clamping; independent of velocity and ship-centre convergence.
 - `CockpitUI.Targeting.cs` — targeting HUD drawing, radar/landing-radar/targeting-dirball updates.
 - `DriveInstrumentPanel.cs` — right cockpit-rail wing: drive mode, gear/harmonic, speed readouts.
 
 **ShipBuilder/**
 
-- `ShipBuilder.cs` — fluent builder for constructing `Ship` from `ShipRecord` (mostly stubbed — see current-state doc).
+- `ShipBuilder.cs` — fluent builder for constructing `Ship` from `ShipRecord`; resolves hull-authored cockpit and engine defaults, installing each configured engine mount independently (other component/persistence mapping remains mostly stubbed).
 - `ShipExtensions.cs` — mapping between the `Ship` domain object and `ShipRecord` persistence.
 - `ShipPersistenceService.cs` — async load/save bridge between `Ship` and `IShipRepository`.
 

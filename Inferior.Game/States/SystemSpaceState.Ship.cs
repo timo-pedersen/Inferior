@@ -11,6 +11,7 @@ using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
@@ -27,30 +28,46 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    internal readonly record struct ChaseCameraTargets(
+        DVec3 DesiredPosition,
+        DVec3 LookTarget);
 
     private void UpdateThirdPersonCamera(SpaceSimulation.ShipSnapshot snap)
     {
-        // Camera sits 80 m behind and 30 m above the ship, looks slightly ahead of CoM.
-        DVec3 targetCamPos = snap.Position - snap.Forward * 80.0 + snap.Up * 30.0;
-        DVec3 lookTarget   = snap.Position + snap.Forward * 8.0;
-
-        // Snap on the first frame after entering third-person; lerp smoothly after that.
-        _tpCamPos = _tpCamPosValid
-            ? DVec3.Lerp(_tpCamPos, targetCamPos, 0.08)
-            : targetCamPos;
-        _tpCamPosValid = true;
+        DVec3 worldOffset = _chaseCamera.ResolveWorldOffset(snap.Orientation);
+        DVec3 cameraPosition = snap.Position + worldOffset;
 
         // Use ship's own up axis so the camera rolls with the ship — eliminates the
         // singularity that occurs when the ship points near vertical and world-up is
         // nearly parallel to the look direction.
-        DVec3 lookDir = DVec3.Normalize(lookTarget - _tpCamPos);
-        _camera.SetPose(_tpCamPos, QuatLookAtWithUp(lookDir, snap.Up));
+        _camera.SetPose(
+            cameraPosition,
+            _chaseCamera.ResolveCameraOrientation(worldOffset, snap.Up));
+    }
+
+    private void UpdateShipFollowingCamera(SpaceSimulation.ShipSnapshot snap)
+    {
+        if (_chaseCamera.IsActive)
+            UpdateThirdPersonCamera(snap);
+        else
+            _camera.SetPose(snap.CockpitWorldPosition, snap.CockpitWorldOrientation);
+    }
+
+    internal static ChaseCameraTargets CalculateChaseCameraTargets(
+        DVec3 shipPosition,
+        DVec3 shipForward,
+        DVec3 shipUp)
+    {
+        // Camera sits 80 m behind and 30 m above the ship, looking at hull origin.
+        return new ChaseCameraTargets(
+            shipPosition - shipForward * 80.0 + shipUp * 30.0,
+            shipPosition);
     }
 
     // Builds a quaternion whose -Z axis aligns with `forward` and whose +Y axis
     // aligns as closely as possible with `shipUp`. No singularity because shipUp is
     // always perpendicular to shipForward (orthogonal ship axes).
-    private static Quaternion QuatLookAtWithUp(DVec3 forward, DVec3 shipUp)
+    internal static Quaternion QuatLookAtWithUp(DVec3 forward, DVec3 shipUp)
     {
         var fwd    = new Vector3((float)forward.X, (float)forward.Y, (float)forward.Z);
         var upHint = new Vector3((float)shipUp.X,  (float)shipUp.Y,  (float)shipUp.Z);
@@ -74,14 +91,12 @@ public sealed partial class SystemSpaceState
 
     private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
-        var ship = ShipBuilder.NewShip("type1")
+        var ship = ShipBuilder.NewShip(AsteriskHullDefinitionFactory.HullId)
             .WithPosition(startPos)
             .WithOrientation(orientation)
             .WithDefaultStartingComponents()
             .Build();
 
-        _shield = ship.Components.OfType<ShieldComponent>().First();
-        _ship = ship;
         _simulation.SetShip(ship);
     }
 
@@ -129,6 +144,44 @@ public sealed partial class SystemSpaceState
             GearChangeSteps = gearChangeSteps
         };
     }
+
+    internal static ChaseCameraEditInput ReadChaseCameraEditInput(
+        KeyboardState keys,
+        KeyboardState previousKeys)
+    {
+        double horizontal =
+            (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
+        double vertical =
+            (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
+        double roll =
+            (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
+        double radial =
+            (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0)
+          - (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0);
+        bool reset = keys.IsKeyDown(Keys.X) && !previousKeys.IsKeyDown(Keys.X);
+        return new ChaseCameraEditInput(horizontal, vertical, roll, radial, reset);
+    }
+
+    internal static PlayerInput ConsumeOrbitalCameraFlightInput(PlayerInput input)
+        => input with
+        {
+            ThrustForward = 0.0,
+            ThrustLateral = 0.0,
+            ThrustVertical = 0.0,
+            RollInput = 0.0,
+            PitchInput = 0.0,
+            YawInput = 0.0,
+            XStopToggle = false,
+            XStopToggleSequence = 0,
+        };
+
+    private void PublishCameraMessage(string text)
+        => DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(text, SystemMessagePriority.NB));
 
     // ── Cockpit layout ────────────────────────────────────────────────────────
 

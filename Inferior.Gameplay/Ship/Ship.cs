@@ -1,7 +1,11 @@
 using Microsoft.Xna.Framework;
 using Inferior.Core.Math;
+using Inferior.Core.DataBus;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Engines;
+using Inferior.Gameplay.Hull;
 
 namespace Inferior.Gameplay.Ship;
 
@@ -51,6 +55,27 @@ public sealed class Ship
             c.Tick(dt);
     }
 
+    private readonly List<EngineMount> _engineMounts = [];
+    public IReadOnlyList<EngineMount> EngineMounts => _engineMounts;
+
+    public void AddEngineMount(EngineMount mount)
+    {
+        ArgumentNullException.ThrowIfNull(mount);
+        if (_engineMounts.Any(existing =>
+            string.Equals(existing.MountId, mount.MountId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"Duplicate engine mount id '{mount.MountId}'.");
+        }
+        if (_engineMounts.Any(existing =>
+            string.Equals(existing.ComponentSlotId, mount.ComponentSlotId, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"Duplicate engine mount component slot '{mount.ComponentSlotId}'.");
+        }
+
+        _engineMounts.Add(mount);
+    }
+
     /// <summary>True when at least one GyroComponent is running. Reduces slipstream exit tumble.</summary>
     public bool HasGyro => _components.Any(c => c is GyroComponent { Status: ComponentStatus.Running });
 
@@ -60,18 +85,61 @@ public sealed class Ship
     public double Mass          => HullMass + ComponentMass;
 
     // ── Cockpit ───────────────────────────────────────────────────────────────
-    /// <summary>Offset from centre of mass in ship-local space. Camera eye point.</summary>
+    public InstalledCockpit? Cockpit { get; init; }
+
+    /// <summary>Transitional camera offset for hulls without an installed cockpit.</summary>
     public DVec3 CockpitOffset { get; init; } = DVec3.Zero;
 
-    /// <summary>World-space cockpit position. The camera follows this, not Position.</summary>
+    /// <summary>Transitional camera pose for hulls without an installed cockpit.</summary>
+    public CockpitPoseDefinition CockpitPose { get; init; } = new(DVec3.Zero, Quaternion.Identity);
+
+    /// <summary>World-space physical cockpit camera position.</summary>
     public DVec3 CockpitWorldPosition
     {
         get
         {
-            if (CockpitOffset == DVec3.Zero) return Position;
-            var rotated = Vector3.Transform(CockpitOffset.ToVector3(), Orientation);
+            (DVec3 localPosition, _) = ResolveCockpitShipLocalPose();
+            var rotated = Vector3.Transform(localPosition.ToVector3(), Orientation);
             return Position + new DVec3(rotated.X, rotated.Y, rotated.Z);
         }
+    }
+
+    /// <summary>World-space physical cockpit camera orientation.</summary>
+    public Quaternion CockpitWorldOrientation
+    {
+        get
+        {
+            (_, Quaternion localOrientation) = ResolveCockpitShipLocalPose();
+            return Quaternion.Normalize(Orientation * localOrientation);
+        }
+    }
+
+    public DVec3 CockpitRootWorldPosition
+    {
+        get
+        {
+            (DVec3 localPosition, _) = ResolveCockpitShipLocalRootPose();
+            Vector3 rotated = Vector3.Transform(localPosition.ToVector3(), Orientation);
+            return Position + new DVec3(rotated.X, rotated.Y, rotated.Z);
+        }
+    }
+
+    public Quaternion CockpitRootWorldOrientation
+    {
+        get
+        {
+            (_, Quaternion localOrientation) = ResolveCockpitShipLocalRootPose();
+            return Quaternion.Normalize(Orientation * localOrientation);
+        }
+    }
+
+    public bool ApplyCockpitCommand(ComponentCommand command)
+    {
+        if (Cockpit is null)
+            return false;
+
+        CockpitModuleDefinition definition = CockpitDefinitionLibrary.Get(Cockpit.DefinitionId);
+        return Cockpit.ApplyCommand(command, definition);
     }
 
     // ── Derived orientation axes ───────────────────────────────────────────────
@@ -98,9 +166,6 @@ public sealed class Ship
     // Number of engine nodes — governs gear table depth and Slipstream harmonic count.
     public int NodeCount { get; init; } = FlightConstants.DefaultNodeCount;
 
-    // Forward acceleration in m/s² (derived from thrust and mass).
-    public double FlightAcceleration => MaxForwardThrustN / Mass;
-
     // Newtonian gear speed ceilings — bottom NodeCount entries from the global table.
     public double[] NewtonianGears =>
         FlightConstants.NewtonianGearSpeeds.Take(NodeCount).ToArray();
@@ -126,13 +191,7 @@ public sealed class Ship
         + FlightConstants.ClunkNodePenaltyMs * (24 - NodeCount);
 
     // ── Atmosphere / aerodynamics ──────────────────────────────────────────────
-    // Set from HullDefinition at ship construction.
-
-    /// <summary>Maximum downward (gravity-opposing) engine thrust in newtons.</summary>
-    public double MaxDownThrustN          { get; init; } = 300_000.0;
-
-    /// <summary>Maximum forward thrust ≈ 3× down thrust (engines more efficient forward).</summary>
-    public double MaxForwardThrustN       => MaxDownThrustN * 3.0;
+    // Aerodynamics are set from HullDefinition at ship construction.
 
     public double AerodynamicLift         { get; init; } = 0.0;
     public double AerodynamicBrakeFront   { get; init; } = 0.0;
@@ -187,4 +246,36 @@ public sealed class Ship
     private Vector3 UpF      => new((float)Up.X,      (float)Up.Y,      (float)Up.Z);
 
     private static DVec3 Vec3(Vector3 v) => new(v.X, v.Y, v.Z);
+
+    private (DVec3 Position, Quaternion Orientation) ResolveCockpitShipLocalPose()
+    {
+        if (Cockpit is null)
+            return (CockpitPose.Position, CockpitPose.Orientation);
+
+        HullDefinition hull = HullDefinitionLibrary.Get(HullTypeId);
+        CockpitMountDefinition mount = hull.CockpitMounts.SingleOrDefault(candidate =>
+            string.Equals(candidate.MountId, Cockpit.MountId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Ship '{Id}' cockpit references unknown mount '{Cockpit.MountId}'.");
+        CockpitModuleDefinition definition = CockpitDefinitionLibrary.Get(Cockpit.DefinitionId);
+        return (
+            Cockpit.ResolveShipLocalCameraPosition(mount, definition),
+            Cockpit.ResolveShipLocalCameraOrientation(mount, definition));
+    }
+
+    private (DVec3 Position, Quaternion Orientation) ResolveCockpitShipLocalRootPose()
+    {
+        if (Cockpit is null)
+            return (CockpitPose.Position, CockpitPose.Orientation);
+
+        HullDefinition hull = HullDefinitionLibrary.Get(HullTypeId);
+        CockpitMountDefinition mount = hull.CockpitMounts.SingleOrDefault(candidate =>
+            string.Equals(candidate.MountId, Cockpit.MountId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Ship '{Id}' cockpit references unknown mount '{Cockpit.MountId}'.");
+        CockpitModuleDefinition definition = CockpitDefinitionLibrary.Get(Cockpit.DefinitionId);
+        return (
+            Cockpit.ResolveShipLocalRootPosition(mount, definition),
+            Cockpit.ResolveShipLocalRootOrientation(mount, definition));
+    }
 }

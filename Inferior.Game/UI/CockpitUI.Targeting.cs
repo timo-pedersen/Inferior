@@ -30,7 +30,7 @@ public sealed partial class CockpitUI
         if (_targeting.HasRadarTarget)
         {
             var contact = _targeting.CurrentRadarTarget!.Value;
-            float distM = contact.RelativePosition.Length();
+            float distM = contact.EffectiveShipDistanceMeters;
             var col = tc?.TargetShip ?? new Color(0, 220, 220);
             var dir = Vector3.Normalize(contact.RelativePosition);
             _targetingDirBall.SetVector("ship", dir, col, "T");
@@ -160,7 +160,7 @@ public sealed partial class CockpitUI
             if (screen == null) continue;
 
             bool  isTarget = _targeting.CurrentRadarTarget?.Id == contact.Id;
-            float dist     = contact.RelativePosition.Length();
+            float dist     = contact.EffectiveShipDistanceMeters;
             float size     = MathHelper.Clamp(3e6f / dist, 8f, 44f);
             float arm      = size * 0.40f;
 

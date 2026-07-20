@@ -2,8 +2,12 @@ using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Core.Simulation;   // GameClock
 using Inferior.Galaxy;
+using Inferior.Game.Ships;
 using Inferior.Gameplay;          // Simulation base, FlightMode
 using Inferior.Gameplay.Components;
+using Inferior.Gameplay.Cockpit;
+using Inferior.Gameplay.Engines;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Physics;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
@@ -20,6 +24,9 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
+    private const double LegacyEngineDownThrustN = 300_000.0;
+    private const double LegacyEngineForwardThrustN = LegacyEngineDownThrustN * 3.0;
+
     public sealed record StationProximityTickDiagnostic(
         long TickSequence,
         double EnvironmentSimTime,
@@ -88,15 +95,26 @@ public sealed class SpaceSimulation : Simulation
 
     // ── Ship ──────────────────────────────────────────────────────────────────
     private volatile Ship? _ship;
+    private IDisposable? _cockpitCommandSubscription;
 
-    public void SetShip(Ship ship) => _ship = ship;
+    public void SetShip(Ship ship)
+    {
+        ArgumentNullException.ThrowIfNull(ship);
+        _cockpitCommandSubscription?.Dispose();
+        _ship = ship;
+        _cockpitCommandSubscription = CommandBus.Subscribe(
+            CockpitCommandTopics.Prefix,
+            command => _ship?.ApplyCockpitCommand(command));
+    }
 
     // ── Ship state snapshot (written by sim thread, read by main thread) ──────
     public sealed record ShipSnapshot(
         DVec3      Position,
         DVec3      Velocity,
         Quaternion Orientation,
+        string     HullTypeId,
         DVec3      CockpitWorldPosition,
+        Quaternion CockpitWorldOrientation,
         DVec3      Forward,
         DVec3      Up,
         double     SimTime,
@@ -125,7 +143,9 @@ public sealed class SpaceSimulation : Simulation
         // Compare against the value RequestStationRelocation returned, not against
         // "snapshot is non-null", to avoid racing snapshots published before the sim
         // thread has resolved the request.
-        int        RelocationSequence = 0);
+        int        RelocationSequence = 0,
+        IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null,
+        CockpitPresentationSnapshot? Cockpit = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -142,6 +162,26 @@ public sealed class SpaceSimulation : Simulation
 
     public void TeleportShip(DVec3 position, Quaternion orientation)
         => _teleportRequest = new TeleportRequest(position, orientation);
+
+    private int _debugEngineRemovalRequest;
+
+    public void RequestDebugRemoveEngine(EngineMountSide side)
+        => Interlocked.Exchange(ref _debugEngineRemovalRequest, (int)side + 1);
+
+    private int _debugEngineConfigurationCycleRequests;
+
+    public void RequestDebugCycleEngineConfiguration()
+        => Interlocked.Increment(ref _debugEngineConfigurationCycleRequests);
+
+    private int _shipHullCycleRequests;
+
+    public void RequestCycleShipHull()
+        => Interlocked.Increment(ref _shipHullCycleRequests);
+
+    private int _shieldPowerRequest = -1;
+
+    public void RequestSetShieldPower(bool enabled)
+        => Interlocked.Exchange(ref _shieldPowerRequest, enabled ? 1 : 0);
 
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
@@ -339,8 +379,39 @@ public sealed class SpaceSimulation : Simulation
     protected override void TickPhysics(PlayerInput input, double dt)
     {
         _lastDt = dt;
-        var ship = _ship;
+        Ship? ship = _ship;
         if (ship == null) return;
+        EngineVisualState engineVisualState = EngineVisualState.Idle;
+
+        int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
+        for (int i = 0; i < shipCycleRequests; i++)
+            ship = CycleShipHull(ship);
+
+        int shieldPowerRequest = Interlocked.Exchange(ref _shieldPowerRequest, -1);
+        if (shieldPowerRequest >= 0)
+        {
+            foreach (ShieldComponent shield in ship.Components.OfType<ShieldComponent>())
+                shield.PowerOn = shieldPowerRequest == 1;
+        }
+
+        int engineRemovalRequest = Interlocked.Exchange(ref _debugEngineRemovalRequest, 0);
+        if (engineRemovalRequest != 0)
+        {
+            EngineMountSide side = (EngineMountSide)(engineRemovalRequest - 1);
+            EngineMount? mount = ship.EngineMounts.FirstOrDefault(candidate => candidate.Side == side);
+            EngineInstance? removed = mount?.RemoveInstalledEngine();
+            DataBus.System.Publish(
+                Topics.System.All,
+                new SystemMessage(
+                    removed is null
+                        ? $"{side} engine mount is already empty."
+                        : $"Debug removed {side.ToString().ToLowerInvariant()} engine '{removed.Variant.Engine.DisplayName}'."));
+        }
+
+        int engineCycleRequests =
+            Interlocked.Exchange(ref _debugEngineConfigurationCycleRequests, 0);
+        for (int i = 0; i < engineCycleRequests; i++)
+            CycleDebugEngineConfiguration(ship);
 
         // ── Teleport ─────────────────────────────────────────────────────
         var teleport = _teleportRequest;
@@ -529,18 +600,23 @@ public sealed class SpaceSimulation : Simulation
         {
             case FlightMode.SystemNewtonian:
                 TickNewtonianPhysics(ship, input, dt);
+                engineVisualState = ResolveEngineVisualState(ship, input);
                 break;
             case FlightMode.SystemSlipstream:
                 TickSystemSlipstreamPhysics(ship, dt);
                 break;
             case FlightMode.AtmosphericNewtonian:
                 if (nearBody != null)
+                {
                     TickAtmospherePhysics(ship, input, nearBody, dt);
+                    engineVisualState = ResolveEngineVisualState(ship, input);
+                }
                 break;
         }
 
         // ── Snapshot ──────────────────────────────────────────────────────
         PublishSnapshot:
+        ApplyEngineVisualState(ship, engineVisualState);
         FlightMode snapMode = _currentFlightMode == FlightMode.AtmosphericNewtonian && _slipstreamModeActive
             ? FlightMode.AtmosphericSlipstream
             : _currentFlightMode;
@@ -562,7 +638,8 @@ public sealed class SpaceSimulation : Simulation
         var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
 
         _shipSnapshot = new ShipSnapshot(
-            ship.Position, ship.Velocity, ship.Orientation, ship.CockpitWorldPosition,
+            ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId,
+            ship.CockpitWorldPosition, ship.CockpitWorldOrientation,
             ship.Forward, ship.Up,
             GameClock.SimTime,
             snapTickSequence,
@@ -583,7 +660,9 @@ public sealed class SpaceSimulation : Simulation
             snapRelSpd,
             snapFwdSpd,
             snapAccel,
-            _relocationSequence);
+            _relocationSequence,
+            BuildEngineMountSnapshots(ship),
+            BuildCockpitSnapshot(ship));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -605,6 +684,162 @@ public sealed class SpaceSimulation : Simulation
             snapMode);
     }
 
+    private static IReadOnlyList<EngineMountPresentationSnapshot> BuildEngineMountSnapshots(Ship ship)
+    {
+        var snapshots = ship.EngineMounts
+            .Select(mount =>
+            {
+                EngineInstance? engine = mount.InstalledEngine;
+                EnginePresentationSnapshot? engineSnapshot = null;
+                if (engine?.GeometryTransform is not null
+                    && engine.Variant.Engine.VisualGeometry is not null)
+                {
+                    engineSnapshot = new EnginePresentationSnapshot(
+                        engine.InstanceId,
+                        engine.Variant.VariantId,
+                        engine.Variant.Engine.VisualGeometry,
+                        engine.Variant.Engine.VisualDefinition,
+                        engine.VisualState,
+                        engine.GeometryTransform,
+                        engine.DamageFraction,
+                        engine.WearFraction);
+                }
+
+                return new EngineMountPresentationSnapshot(
+                    mount.MountId,
+                    mount.ComponentSlotId,
+                    mount.MountStandardId,
+                    mount.Side,
+                    mount.Pose,
+                    mount.HullRootPosition,
+                    mount.AttachmentInterfacePosition,
+                    engineSnapshot);
+            })
+            .ToArray();
+        return Array.AsReadOnly(snapshots);
+    }
+
+    private static CockpitPresentationSnapshot? BuildCockpitSnapshot(Ship ship)
+    {
+        if (ship.Cockpit is not { } cockpit)
+            return null;
+
+        return new CockpitPresentationSnapshot(
+            cockpit.DefinitionId,
+            ship.CockpitRootWorldPosition,
+            ship.CockpitRootWorldOrientation,
+            cockpit.CanopyLightsOn,
+            cockpit.CockpitLightsOn);
+    }
+
+    private void CycleDebugEngineConfiguration(Ship ship)
+    {
+        EngineMount[] portMounts = ship.EngineMounts
+            .Where(mount => mount.Side == EngineMountSide.Port)
+            .ToArray();
+        EngineMount[] starboardMounts = ship.EngineMounts
+            .Where(mount => mount.Side == EngineMountSide.Starboard)
+            .ToArray();
+        if (portMounts.Length != 1 || starboardMounts.Length != 1)
+        {
+            DataBus.System.Publish(
+                Topics.System.All,
+                new SystemMessage(
+                    "ENGINE CONFIGURATION\nDebug cycling requires exactly one mirrored engine pair.",
+                    SystemMessagePriority.Warning));
+            return;
+        }
+        EngineMount port = portMounts[0];
+        EngineMount starboard = starboardMounts[0];
+
+        EngineDebugConfiguration next = EngineDebugConfigurations.GetNext(ship.EngineMounts);
+        EngineVariantDefinition? variant = next.VariantId is null
+            ? null
+            : EngineDefinitionLibrary.GetVariant(next.VariantId);
+        if (variant is not null
+            && (!variant.IsCompatibleWith(port.MountStandardId)
+                || !variant.IsCompatibleWith(starboard.MountStandardId)))
+        {
+            DataBus.System.Publish(
+                Topics.System.All,
+                new SystemMessage(
+                    $"ENGINE CONFIGURATION\n{variant.Engine.DisplayName} is incompatible with " +
+                    $"{port.MountStandardId}/{starboard.MountStandardId} mounts.",
+                    SystemMessagePriority.Warning));
+            return;
+        }
+
+        port.RemoveInstalledEngine();
+        starboard.RemoveInstalledEngine();
+        if (variant is not null)
+        {
+            EnginePairGenerator.Generate(
+                new EnginePairDefinition($"debug.{variant.VariantId}.pair", variant),
+                port,
+                starboard);
+        }
+
+        DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(next.Notification, SystemMessagePriority.NB));
+    }
+
+    private Ship CycleShipHull(Ship current)
+    {
+        string nextHullTypeId = PlayerShipCycleCatalog.GetNext(current.HullTypeId);
+        var replacement = ShipBuilder.NewShip(nextHullTypeId)
+            .WithPosition(current.Position)
+            .WithOrientation(current.Orientation)
+            .WithDefaultStartingComponents()
+            .Build();
+        replacement.Velocity = current.Velocity;
+        SetShip(replacement);
+
+        HullDefinition hull = HullDefinitionLibrary.Get(nextHullTypeId);
+        DataBus.System.Publish(
+            Topics.System.All,
+            new SystemMessage(
+                $"SHIP CHANGED\n{hull.DisplayName}",
+                SystemMessagePriority.NB));
+        return replacement;
+    }
+
+    private static void ApplyEngineVisualState(Ship ship, EngineVisualState state)
+    {
+        foreach (EngineInstance engine in ship.EngineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EngineInstance>())
+        {
+            engine.SetVisualState(state);
+        }
+    }
+
+    private EngineVisualState ResolveEngineVisualState(Ship ship, PlayerInput input)
+    {
+        if (_currentFlightMode == FlightMode.SystemNewtonian && _afterburnerActive)
+            return EngineVisualState.Boost;
+
+        if (_currentFlightMode == FlightMode.SystemNewtonian
+            && _xStopActive
+            && (ship.Velocity - GetRefVelocity()).Length >= FlightConstants.XStopSnapThreshold)
+        {
+            return EngineVisualState.VelocityCorrection;
+        }
+
+        // Directional glow follows the requested acceleration vector. It deliberately
+        // ignores velocity, thrust taper, and whether the command opposes current motion.
+        double requestedOutput = System.Math.Max(
+            System.Math.Abs(input.ThrustForward),
+            System.Math.Max(
+                System.Math.Abs(input.ThrustLateral),
+                System.Math.Abs(input.ThrustVertical)));
+        return requestedOutput > 0.0
+            ? new EngineVisualState(
+                EngineVisualMode.Thrust,
+                (float)System.Math.Clamp(requestedOutput, 0.0, 1.0))
+            : EngineVisualState.Idle;
+    }
+
     // ── SystemNewtonian physics ───────────────────────────────────────────────
 
     private void TickNewtonianPhysics(Ship ship, PlayerInput input, double dt)
@@ -619,7 +854,7 @@ public sealed class SpaceSimulation : Simulation
         double reverseCeiling = gearCeiling * FlightConstants.ReverseSpeedRatio;
         double accel          = _newtonianGear == 0
             ? FlightConstants.Gear1AccelerationMs2
-            : ship.FlightAcceleration;
+            : LegacyEngineForwardThrustN / ship.Mass;
 
         DVec3  refVel = GetRefVelocity();
         string refId  = GetRefSourceId();
@@ -787,7 +1022,11 @@ public sealed class SpaceSimulation : Simulation
 
     // ── Atmosphere physics (force-based) ──────────────────────────────────────
 
-    private void TickAtmospherePhysics(Ship ship, PlayerInput input, NearAtmBodyInfo near, double dt)
+    private void TickAtmospherePhysics(
+        Ship ship,
+        PlayerInput input,
+        NearAtmBodyInfo near,
+        double dt)
     {
         var   body    = near.Body;
         DVec3 bodyPos = EclipticToGalaxy(near.EclipticPos);
@@ -843,13 +1082,13 @@ public sealed class SpaceSimulation : Simulation
                     totalForce += ship.Up * (ship.AerodynamicLift * density * vFwd * System.Math.Abs(vFwd));
             }
 
-            totalForce += ship.Forward * (input.ThrustForward  * ship.MaxForwardThrustN);
-            totalForce += ship.Right   * (input.ThrustLateral   * ship.MaxDownThrustN * 0.5);
-            totalForce += ship.Up      * (input.ThrustVertical   * ship.MaxDownThrustN);
+            totalForce += ship.Forward * (input.ThrustForward  * LegacyEngineForwardThrustN);
+            totalForce += ship.Right   * (input.ThrustLateral   * LegacyEngineDownThrustN * 0.5);
+            totalForce += ship.Up      * (input.ThrustVertical   * LegacyEngineDownThrustN);
 
             if (_flightAssistEnabled && density >= AtmoSlipstreamMinDensity)
             {
-                double faN = System.Math.Min(ship.MaxDownThrustN, gMag * ship.Mass);
+                double faN = System.Math.Min(LegacyEngineDownThrustN, gMag * ship.Mass);
                 totalForce += ship.Up * faN;
             }
         }

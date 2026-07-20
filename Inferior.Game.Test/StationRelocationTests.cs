@@ -192,7 +192,7 @@ public sealed class StationRelocationTests
         string mapSource = File.ReadAllText(Path.Combine(RepoRoot(), "Inferior.Game", "States", "SystemMapState.cs"));
         string arrivalBlock = stateSource[
             stateSource.IndexOf("else if (p.StationArrival != null)", StringComparison.Ordinal)..
-            stateSource.IndexOf("else if (_ship != null)", StringComparison.Ordinal)];
+            stateSource.IndexOf("else if (_simulation.ShipState is", StringComparison.Ordinal)];
 
         Assert.Contains("StationArrival", mapSource);
         Assert.DoesNotContain("TargetStation:", mapSource);

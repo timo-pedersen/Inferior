@@ -8,8 +8,10 @@ using Inferior.Game.Hyperspace;
 using Inferior.Game.StationGen;
 using Inferior.Game.UI;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Sensors;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
@@ -65,6 +67,7 @@ public sealed partial class SystemSpaceState : GameState
     private BasicEffect _effect = null!;
     private Effect?     _atmosEffect;
     private Effect      _litSurfaceEffect = null!;
+    private Effect      _engineExhaustGlowEffect = null!;
     private Matrix      _eclipticRotation = Matrix.Identity;
 
     // ── Celestial body rendering ──────────────────────────────────────────────
@@ -120,7 +123,7 @@ public sealed partial class SystemSpaceState : GameState
     // VertexBuffer/IndexBuffer (see PlacedContainer) — geometry differs per instance.
     private MeshRenderer?  _meshRenderer;
 
-    // ── Ship mesh (three components, built once per session entry) ────────────
+    // ── Ship hull and installed child-module meshes ───────────────────────────
     private ShipMeshRenderer _shipMeshRenderer = null!;
 
     // ── UI ────────────────────────────────────────────────────────────────────
@@ -166,12 +169,14 @@ public sealed partial class SystemSpaceState : GameState
     // ── Camera modes ──────────────────────────────────────────────────────────
     // TAB  — toggles between ship-control and mouse-driven UI interaction.
     // F11  — toggles between ship camera (cockpit) and free debug camera.
+    // F2        — toggles engine mount/module transform debug.
+    // Ctrl+F2   — cycles the installed engine pair through debug configurations.
     // F3   — toggles third-person camera (ship mesh visible behind camera).
     private bool _uiMouseMode;
     private bool _debugCameraMode;
-    private bool _thirdPersonMode;
-    private DVec3 _tpCamPos;       // smoothed third-person camera position
-    private bool  _tpCamPosValid;
+    private bool _semanticHullDebug;
+    private bool _engineModuleDebug;
+    private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
     private bool _prevUiMouseMode;
     private readonly MouseLookRebaser _shipMouseLook = new();
@@ -196,7 +201,7 @@ public sealed partial class SystemSpaceState : GameState
     // methods rather than only as a local Draw() parameter.
     private SpriteBatch? _frameSpriteBatch;
 
-    // Colour-invert blend for the crosshair: result = src - dest.
+    // Colour-invert blend for the ship-forward reticle: result = src - dest.
     // With white source this gives (1-R, 1-G, 1-B) — readable against any background.
     // Static to follow the MonoGame convention for built-in BlendState singletons;
     // the OS reclaims the GPU resource on application exit.
@@ -249,7 +254,6 @@ public sealed partial class SystemSpaceState : GameState
                 // Approach from double-click — force new spawn near the body.
                 // _system is freshly generated, so p.TargetBody is a different object instance.
                 // Look up by name to find the matching body and its parent in the new system.
-                _ship = null;
                 OrbitalBody? resolvedBody = null;
                 DVec3        parentPos    = DVec3.Zero;
 
@@ -286,21 +290,17 @@ public sealed partial class SystemSpaceState : GameState
             {
                 // Approach a station from system map double-click. The simulation
                 // owns station resolution, position, velocity, reference and facing.
-                _ship = null;
                 var startPos = new DVec3(0, 0.5e11, 3e11);
                 var startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
                 _camera = new Camera3D(startPos, AspectRatio);
                 _camera.SetPose(startPos, startOri);
                 SpawnShip(startPos, startOri);
             }
-            else if (_ship != null)
+            else if (_simulation.ShipState is { } existingShip)
             {
-                // Returning from a map — ship instance is already alive in the simulation
-                // with the correct position. Just re-register it and sync the camera.
-                _simulation.SetShip(_ship);
-                var snap = _simulation.ShipState;
-                var camPos = snap?.CockpitWorldPosition ?? _ship.CockpitWorldPosition;
-                var camOri = snap?.Orientation          ?? _ship.Orientation;
+                // Returning from a map: the simulation-owned ship remains authoritative.
+                var camPos = existingShip.CockpitWorldPosition;
+                var camOri = existingShip.CockpitWorldOrientation;
                 _camera = new Camera3D(camPos, AspectRatio);
                 _camera.SetPose(camPos, camOri);
             }
@@ -370,13 +370,18 @@ public sealed partial class SystemSpaceState : GameState
 
         // Container renderer — geometry is built per-instance in SpawnContainers
         _litSurfaceEffect = _content.Load<Effect>("Effects/LitSurface");
+        _engineExhaustGlowEffect = _content.Load<Effect>("Effects/EngineExhaustGlow");
         _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
         InitializeStationShadows();
 
-        // Ship mesh — three components; built once per session entry on the main thread
-        _shipMeshRenderer = new ShipMeshRenderer(_gd, _meshRenderer);
-        _thirdPersonMode  = false;
-        _tpCamPosValid    = false;
+        // Ship hull and installed child modules; GPU meshes are cached on the main thread.
+        _shipMeshRenderer = new ShipMeshRenderer(
+            _gd,
+            _meshRenderer,
+            _engineExhaustGlowEffect);
+        _chaseCamera.Deactivate();
+        _chaseCamera.ResetSmoothing();
+        InitializeShipPositionMarker();
 
         // Ring primitive reused for both orbit rings and station orbit rings
         _ringPrimitive = new RingPrimitive();
@@ -482,7 +487,9 @@ public sealed partial class SystemSpaceState : GameState
         UpdateUI();
 
         _cockpitUI = new CockpitUI(_gd, _font, _pixel, _targeting, _hudAlert,
-            GalaxyToEcliptic, on => { if (_shield != null) _shield.PowerOn = on; });
+            GalaxyToEcliptic,
+            _simulation.RequestSetShieldPower,
+            _simulation.RequestCycleShipHull);
         _uiMouseMode     = false;
         _debugCameraMode = false;
         _shipMouseLook.RequestRebase();
@@ -551,10 +558,12 @@ public sealed partial class SystemSpaceState : GameState
         _meshRenderer = null;
         DisposeStationShadows();
         _shipMeshRenderer?.Dispose();
+        DisposeShipPositionMarker();
         _pixel?.Dispose();
         _navGlowTex?.Dispose();
         _atmosEffect = null; // owned by ContentManager — do not dispose manually
         _litSurfaceEffect = null!; // owned by ContentManager — do not dispose manually
+        _engineExhaustGlowEffect = null!; // owned by ContentManager
     }
 
     public override void OnResize(int width, int height)
@@ -656,10 +665,40 @@ public sealed partial class SystemSpaceState : GameState
 
 
         // TAB — UI mode toggle; F11 — ship/debug camera toggle; F3 — third-person toggle
+        FlightMode presentationFlightMode =
+            _frameShipSnap?.FlightMode ?? FlightMode.Docked;
+        bool chaseAvailable =
+            ChaseCameraState.IsAvailableIn(presentationFlightMode);
+        bool chaseForcedOff =
+            _chaseCamera.EnforceFlightMode(presentationFlightMode);
+        if (chaseForcedOff)
+            PublishCameraMessage("Chase camera unavailable outside Newtonian flight.");
+
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
-        bool f3JustPressed  = keys.IsKeyDown(Keys.F3)  && !_prevKeys.IsKeyDown(Keys.F3);
+        bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
+        bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
+        bool shiftDown = keys.IsKeyDown(Keys.LeftShift) || keys.IsKeyDown(Keys.RightShift);
+        bool altDown = keys.IsKeyDown(Keys.LeftAlt) || keys.IsKeyDown(Keys.RightAlt);
+        CockpitLightDebugAction cockpitLightAction =
+            CockpitLightDebugInput.Read(keys, _prevKeys);
+        bool ctrlF2JustPressed =
+            EngineDebugCyclePlatformInput.IsCycleJustPressed(keys, _prevKeys);
+        bool f2JustPressed = !ctrlDown
+            && !shiftDown
+            && !altDown
+            && keys.IsKeyDown(Keys.F2)
+            && !_prevKeys.IsKeyDown(Keys.F2);
+        bool ctrlF3Down = ctrlDown && keys.IsKeyDown(Keys.F3);
+        bool ctrlF3JustPressed = ctrlF3Down
+                              && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F3));
+        bool f3JustPressed = !ctrlDown
+                          && keys.IsKeyDown(Keys.F3)
+                          && !_prevKeys.IsKeyDown(Keys.F3);
+        bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
+        bool f5JustPressed  = keys.IsKeyDown(Keys.F5)  && !_prevKeys.IsKeyDown(Keys.F5);
+        bool shipPositionMarkerToggledOn = false;
 
         if (tabJustPressed)
         {
@@ -668,21 +707,94 @@ public sealed partial class SystemSpaceState : GameState
         }
         if (f10JustPressed)
             RequestStationProximityDiagnostic();
+        if (cockpitLightAction == CockpitLightDebugAction.ToggleCanopy)
+        {
+            bool lightsOn = !(_frameShipSnap?.Cockpit?.CanopyLightsOn ?? false);
+            CommandBus.Send(CockpitCommandTopics.CanopyLightsSet, lightsOn ? 1.0 : 0.0);
+            _hudAlert.AddMessage(new SystemMessage(
+                $"Cockpit canopy lights {(lightsOn ? "on" : "off")}.",
+                SystemMessagePriority.Info));
+        }
+        else if (cockpitLightAction == CockpitLightDebugAction.ToggleInternal)
+        {
+            bool lightsOn = !(_frameShipSnap?.Cockpit?.CockpitLightsOn ?? false);
+            CommandBus.Send(CockpitCommandTopics.InternalLightsSet, lightsOn ? 1.0 : 0.0);
+            _hudAlert.AddMessage(new SystemMessage(
+                $"Cockpit internal lights {(lightsOn ? "on" : "off")}.",
+                SystemMessagePriority.Info));
+        }
+        if (ctrlF2JustPressed)
+        {
+            _simulation.RequestDebugCycleEngineConfiguration();
+        }
+        else if (f2JustPressed)
+        {
+            _engineModuleDebug = !_engineModuleDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _engineModuleDebug
+                    ? "Ship module debug: mounts, origins, exhausts, lights."
+                    : "Ship module debug disabled.",
+                SystemMessagePriority.Info));
+        }
         if (f11JustPressed)
         {
             if (_debugCameraMode)
             {
                 if (_frameShipSnap != null)
-                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+                    _camera.SetPose(
+                        _frameShipSnap.CockpitWorldPosition,
+                        _frameShipSnap.CockpitWorldOrientation);
                 _shipMouseLook.RequestRebase();
             }
             _debugCameraMode = !_debugCameraMode;
-            if (_debugCameraMode) _thirdPersonMode = false;  // can't combine with debug cam
+            if (_debugCameraMode) _chaseCamera.Deactivate();  // can't combine with debug cam
         }
-        if (f3JustPressed && !_debugCameraMode)
+        if (ctrlF3JustPressed && !_debugCameraMode && chaseAvailable)
         {
-            _thirdPersonMode = !_thirdPersonMode;
-            _tpCamPosValid   = false;  // force immediate snap on first frame
+            if (_chaseCamera.ToggleOrbitalEdit())
+            {
+                PublishCameraMessage(
+                    _chaseCamera.IsOrbitalEditActive
+                        ? "Orbital camera edit enabled."
+                        : "Orbital camera edit disabled.");
+            }
+            else
+            {
+                PublishCameraMessage("Orbital camera requires chase view.");
+            }
+        }
+        else if (f3JustPressed && !_debugCameraMode)
+        {
+            if (!chaseAvailable)
+            {
+                if (!chaseForcedOff)
+                    PublishCameraMessage("Chase camera unavailable outside Newtonian flight.");
+            }
+            else
+            {
+                bool enabled = _chaseCamera.ToggleActive();
+                PublishCameraMessage(
+                    enabled ? "Chase camera enabled." : "Chase camera disabled.");
+            }
+        }
+        if (f4JustPressed)
+        {
+            _semanticHullDebug = !_semanticHullDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _semanticHullDebug
+                    ? "Semantic hull debug: surface roles, axes, bounds."
+                    : "Semantic hull debug: normal materials.",
+                SystemMessagePriority.Info));
+        }
+        if (f5JustPressed)
+        {
+            _shipPositionMarkerEnabled = !_shipPositionMarkerEnabled;
+            shipPositionMarkerToggledOn = _shipPositionMarkerEnabled;
+            _hudAlert.AddMessage(new SystemMessage(
+                _shipPositionMarkerEnabled
+                    ? "Ship simulation position marker enabled."
+                    : "Ship simulation position marker disabled.",
+                SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);
 
@@ -720,7 +832,7 @@ public sealed partial class SystemSpaceState : GameState
                 // Ship camera must still track the ship — without this the camera freezes
                 // while thrust keeps the ship moving, causing a snap on UI-mode exit.
                 if (_frameShipSnap != null)
-                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
+                    UpdateShipFollowingCamera(_frameShipSnap);
             }
             // Preserve the last flight-mode thrust so relative speed is unchanged when
             // the player opens the UI. Rotation inputs are zeroed to keep the ship still.
@@ -772,14 +884,17 @@ public sealed partial class SystemSpaceState : GameState
             // Cursor is locked to window centre so mouse can't escape the window.
             HandleStationCycleInput(keys);
             _lastFlightInput = BuildShipInput(lookMouse, keys, IsGameActive);
+            if (_chaseCamera.IsOrbitalEditActive)
+            {
+                ChaseCameraEditInput editInput = ReadChaseCameraEditInput(keys, _prevKeys);
+                _chaseCamera.ApplyEdit(editInput, dt);
+                if (editInput.Reset)
+                    PublishCameraMessage("Chase camera reset.");
+                _lastFlightInput = ConsumeOrbitalCameraFlightInput(_lastFlightInput);
+            }
             _simulation.SetInput(_lastFlightInput);
             if (_frameShipSnap != null)
-            {
-                if (_thirdPersonMode)
-                    UpdateThirdPersonCamera(_frameShipSnap);
-                else
-                    _camera.SetPose(_frameShipSnap.CockpitWorldPosition, _frameShipSnap.Orientation);
-            }
+                UpdateShipFollowingCamera(_frameShipSnap);
             if (IsGameActive) Mouse.SetPosition(_gd.Viewport.Width / 2, _gd.Viewport.Height / 2);
         }
 
@@ -869,6 +984,7 @@ public sealed partial class SystemSpaceState : GameState
 
         // Flat hyperspace update runs every tick regardless of UI mode
         _hyperspace.Update(dt, lookMouse, _camera, _star, _frameShipSnap);
+        UpdateShipPositionMarkerDiagnostics(shipPositionMarkerToggledOn, f3JustPressed);
 
         var inputState = new InputState(mouse, _prevMouse, keys, _prevKeys);
         _hudAlert.Update(dt);
@@ -983,11 +1099,24 @@ public sealed partial class SystemSpaceState : GameState
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
-        if (!_uiMouseMode)
+        if (!_uiMouseMode
+            && !_debugCameraMode
+            && !_chaseCamera.IsActive
+            && _frameShipSnap is { } reticleSnapshot)
         {
-            sb.Begin(blendState: _invertBlend);
-            _cockpitUI.DrawCrosshair(sb);
-            sb.End();
+            ShipForwardReticleProjection? reticle =
+                ShipForwardReticleProjector.Project(
+                    reticleSnapshot.CockpitWorldPosition,
+                    reticleSnapshot.Orientation,
+                    _effect.View,
+                    _effect.Projection,
+                    _gd.Viewport);
+            if (reticle is { } visibleReticle)
+            {
+                sb.Begin(blendState: _invertBlend);
+                _cockpitUI.DrawShipForwardReticle(sb, visibleReticle);
+                sb.End();
+            }
         }
 
         // UI library draws on top — owns its own SpriteBatch
@@ -1046,9 +1175,19 @@ public sealed partial class SystemSpaceState : GameState
         DrawStations(level);
         DrawContainers(level);
         DrawCalibrationCube(level);
-        if (_thirdPersonMode && _frameShipSnap != null)
-            _shipMeshRenderer.Draw(_camera, _effect.View, _effect.Projection,
-                _frameShipSnap.Position, _frameShipSnap.Orientation, level);
+        DrawShipPositionMarker();
+        if (_chaseCamera.IsActive && _frameShipSnap != null)
+        {
+            ShipRenderTransformDiagnostic diagnostic = _shipMeshRenderer.Draw(
+                _camera, _effect.View, _effect.Projection,
+                _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
+                _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal,
+                _frameShipSnap.EngineMounts,
+                _engineModuleDebug,
+                _frameShipSnap.SimTime,
+                _frameShipSnap.Cockpit);
+            WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
+        }
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 
@@ -1132,8 +1271,4 @@ public sealed partial class SystemSpaceState : GameState
     }
 
     // ── Ship ──────────────────────────────────────────────────────────────────
-    // _ship persists between OnEnter/OnExit calls — only recreated for new spawns.
-
-    private Ship?             _ship;
-    private ShieldComponent?  _shield;
 }

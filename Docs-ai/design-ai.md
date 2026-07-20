@@ -53,6 +53,26 @@ as reserved later phases). The failed first shadow experiment is quarantined on
 Principle: **visual systems must not become authoritative sources for station position,
 orientation, velocity, or relocation.**
 
+Camera authority rules:
+
+Simulation owns:
+- ship position
+- ship orientation
+- velocity
+- world state
+
+Presentation owns:
+- camera position
+- camera smoothing
+- chase offsets
+
+Camera position must never be used as a substitute for ship position.
+
+Chase camera:
+- uses snapshot ship transform as anchor
+- smooths only local camera offset
+- never interpolates absolute universe coordinates
+
 ---
 
 ## Flight & physics

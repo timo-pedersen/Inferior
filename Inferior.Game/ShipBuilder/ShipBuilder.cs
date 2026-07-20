@@ -2,6 +2,9 @@ using Inferior.Core;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Components;
 using Inferior.Gameplay.Components.Power;
+using Inferior.Gameplay.Cockpit;
+using Inferior.Gameplay.Engines;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
 using Inferior.Persistence.Data;
 using Microsoft.Xna.Framework;
@@ -19,6 +22,8 @@ public sealed class ShipBuilder
     private Quaternion _orientation = Quaternion.Identity;
 
     private bool _installDefaultComponents;
+    private string? _engineVariantId;
+    private InstalledCockpit? _cockpit;
 
     private ShipBuilder() { }
 
@@ -27,13 +32,26 @@ public sealed class ShipBuilder
         if (string.IsNullOrEmpty(record.Id))
             throw new ArgumentException("ShipRecord.Id must not be empty", nameof(record));
 
-        return new ShipBuilder
+        var builder = new ShipBuilder
         {
             _id          = record.Id,
             _hullTypeId  = record.HullTypeId,
             _name        = record.Name,
             _createdDate = record.CreatedDate,
         };
+        if (record.Cockpit is not null)
+        {
+            builder._cockpit = new InstalledCockpit
+            {
+                MountId = record.Cockpit.MountId,
+                DefinitionId = record.Cockpit.DefinitionId,
+                InstallationRotation = FromRecord(record.Cockpit.InstallationRotation),
+                CanopyLightsOn = record.Cockpit.CanopyLightsOn,
+                CockpitLightsOn = record.Cockpit.CockpitLightsOn,
+            };
+        }
+
+        return builder;
     }
 
     public static ShipBuilder NewShip(string hullTypeId) => new()
@@ -57,19 +75,40 @@ public sealed class ShipBuilder
 
     public ShipBuilder WithDefaultStartingComponents() { _installDefaultComponents = true; return this; }
 
+    public ShipBuilder WithEngineVariant(string variantId)
+    {
+        if (string.IsNullOrWhiteSpace(variantId))
+            throw new ArgumentException("Engine variant id must not be empty.", nameof(variantId));
+        _engineVariantId = variantId;
+        return this;
+    }
+
     public Ship Build()
     {
+        var hull = HullDefinitionLibrary.Get(_hullTypeId);
+        InstalledCockpit? cockpit = _cockpit ?? CreateDefaultCockpit(hull);
+        ValidateCockpitInstallation(hull, cockpit);
+
         var ship = new Ship
         {
             Id          = _id,
             HullTypeId  = _hullTypeId,
             Name        = _name,
             CreatedDate = _createdDate,
-            SizeClass   = ShipSizeClass.Medium,   // same default SpawnShip used
+            SizeClass   = hull.SizeClass,
             MoveSpeedMs = 5e9,                    // same default SpawnShip used
+            HullMass    = hull.HullMass,
+            Cockpit = cockpit,
+            CockpitOffset = hull.CockpitOffset,
+            CockpitPose = hull.CockpitPose,
+            AerodynamicLift = hull.AerodynamicLift,
+            AerodynamicBrakeFront = hull.AerodynamicBrakeFront,
+            AerodynamicBrakeLateral = hull.AerodynamicBrakeLateral,
             Position    = _position,
         };
         ship.SetOrientation(_orientation);
+        AddEngineMounts(ship, hull);
+        InstallDefaultEngines(ship, hull, _engineVariantId);
 
         if (_installDefaultComponents)
         {
@@ -110,5 +149,101 @@ public sealed class ShipBuilder
         }
 
         return ship;
+    }
+
+    private static InstalledCockpit? CreateDefaultCockpit(HullDefinition hull)
+    {
+        CockpitMountDefinition? mount = hull.CockpitMounts.SingleOrDefault(candidate =>
+            !string.IsNullOrWhiteSpace(candidate.DefaultCockpitDefinitionId));
+        if (mount is null)
+            return null;
+
+        return new InstalledCockpit
+        {
+            MountId = mount.MountId,
+            DefinitionId = mount.DefaultCockpitDefinitionId!,
+            InstallationRotation = CockpitRotationStep.Deg0,
+        };
+    }
+
+    private static void ValidateCockpitInstallation(
+        HullDefinition hull,
+        InstalledCockpit? cockpit)
+    {
+        if (cockpit is null)
+            return;
+
+        CockpitMountDefinition mount = hull.CockpitMounts.SingleOrDefault(candidate =>
+            string.Equals(candidate.MountId, cockpit.MountId, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException(
+                $"Hull '{hull.HullTypeId}' has no cockpit mount '{cockpit.MountId}'.");
+        CockpitModuleDefinition definition = CockpitDefinitionLibrary.Get(cockpit.DefinitionId);
+        cockpit.ValidateInstallation(mount, definition);
+    }
+
+    private static CockpitRotationStep FromRecord(CockpitRotationStepRecord rotation)
+        => rotation switch
+        {
+            CockpitRotationStepRecord.Deg0 => CockpitRotationStep.Deg0,
+            CockpitRotationStepRecord.Deg90 => CockpitRotationStep.Deg90,
+            CockpitRotationStepRecord.Deg180 => CockpitRotationStep.Deg180,
+            CockpitRotationStepRecord.Deg270 => CockpitRotationStep.Deg270,
+            _ => throw new ArgumentOutOfRangeException(nameof(rotation)),
+        };
+
+    private static void AddEngineMounts(Ship ship, HullDefinition hull)
+    {
+        if (hull.VisualGeometry is null)
+            return;
+
+        foreach (var port in hull.VisualGeometry.AttachmentPorts.Where(port =>
+            port.Capabilities.HasFlag(AttachmentCapability.Engine)))
+        {
+            if (string.IsNullOrWhiteSpace(port.ComponentSlotId)
+                || string.IsNullOrWhiteSpace(port.EngineMountStandardId)
+                || port.EngineMountSide is null)
+            {
+                throw new InvalidOperationException(
+                    $"Hull engine attachment port '{port.PortId}' lacks runtime mount metadata.");
+            }
+
+            ship.AddEngineMount(new EngineMount(
+                port.PortId,
+                port.ComponentSlotId,
+                port.EngineMountStandardId,
+                port.EngineMountSide.Value,
+                new EngineMountPose(port.Position, port.Normal, port.Up),
+                port.MountRootPosition,
+                port.AttachmentInterfacePosition));
+        }
+    }
+
+    private static void InstallDefaultEngines(
+        Ship ship,
+        HullDefinition hull,
+        string? selectedVariantId)
+    {
+        var configuredSlots = hull.Slots
+            .Where(slot => slot.Category == SlotCategory.Engine
+                && !string.IsNullOrWhiteSpace(slot.DefaultComponentDefinitionId))
+            .ToDictionary(slot => slot.SlotId, StringComparer.Ordinal);
+        if (configuredSlots.Count == 0)
+            return;
+
+        var mountsBySlot = ship.EngineMounts.ToDictionary(
+            mount => mount.ComponentSlotId,
+            StringComparer.Ordinal);
+        foreach ((string slotId, HullSlot slot) in configuredSlots)
+        {
+            if (!mountsBySlot.TryGetValue(slotId, out EngineMount? mount))
+            {
+                throw new InvalidOperationException(
+                    $"Default engine slot '{slotId}' has no runtime engine mount.");
+            }
+
+            EngineVariantDefinition variant = EngineDefinitionLibrary.GetVariant(
+                selectedVariantId ?? slot.DefaultComponentDefinitionId!);
+            EngineInstallationGenerator.Install(variant, mount);
+        }
     }
 }

@@ -264,7 +264,7 @@ public sealed class TargetingSystem
     }
 
     // Projects a contact's render-space position to screen pixels.
-    // RelativePosition is in metres (relative to ship = camera origin).
+    // RelativePosition is in metres from the current render camera origin.
     // Returns null when the contact is behind the camera or off-screen.
     internal static Vector2? ProjectToScreen(Vector3 relPosMetres, Matrix viewProjection, Viewport vp)
     {

@@ -101,15 +101,22 @@ The drive always provides baseline rotational authority. A gyro component enhanc
 
 ## Cockpit placement
 
-Defined as a **vector offset from centre of mass** in ship coordinate space. The camera follows cockpit position; the ship rotates around CoM.
+Superseded by `Docs-ai/ship-cockpits.md`.
 
-- Explorer: nose
-- Large freighter: side or underneath (Millennium Falcon / ED Type-7 style)
-- Military capital: far back, top of hull
+Cockpit placement is now resolved from a hull-owned physical cockpit mount, an installed
+cockpit, and the cockpit module's camera transform. The old hull-level cockpit offset/pose
+fields remain transitional compatibility data for hulls that have not yet acquired mounts;
+they are not authoritative for Aries, Asterisk, or future cockpit-enabled hulls.
 
-Cockpit placement directly affects flight feel — a side-mounted cockpit on a freighter is a fundamentally different experience. This is a feature. Define on ship class; cheap to implement now, painful to retrofit.
+---
 
-Additional cameras planned but deferred — cockpit camera is the default; design should not preclude switching later.
+## Authored flyable hulls
+
+| Hull | Role and physical arrangement |
+|---|---|
+| Aries (`type-1`) | Small two-container utility hauler with paired Mule engines and a port-offset roof C2 cockpit. |
+| Asterisk (`asterisk`) | Minimum-cost 8.6 m one-container hauler. A closed front cargo door feeds one canonical 2.5 × 2.5 × 6.0 m longitudinal container bay. The C2 command blister protrudes from starboard, one Mule occupies the opposite port side, and the camera looks forward plus 30° outward toward starboard. The cargo door is visual and non-animated. |
+| Beren (`beren`) | Medium 27 m by 20 m cargo platform built around a 3 by 3 arrangement of canonical containers. It has a closed visual aft cargo door, four independently installed Needle engines in vertical port/starboard pairs, and a forward underslung C2 cockpit whose camera looks 10 degrees down from ship-forward. |
 
 ---
 

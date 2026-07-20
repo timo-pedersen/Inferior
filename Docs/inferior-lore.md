@@ -14,6 +14,32 @@ All lore in Inferior is **load-bearing**. Nothing is purely decorative. Every wo
 
 ## History — the three ages
 
+### Timeline
+
+No intergalacic time standard existed. 
+Humans reached hyper space and became a member of what would become 
+the U.F. in the earth year 2814.
+U.F became established in earth year 2877.
+In the earth year 3046 humans acheived absolute galactic dominance. 
+The year 3047 became year one of the First Aeon.
+
+| Era | Galactic time | Earth date | Major event |
+|---|---|---|---|
+| BE | BE.1          | 3046-06-06 | The human domination began | 
+| E1 | E1.1-01-01    | 3047-01-01 | Start of human dominated U.F, also called the Human Empire, Human Intergalactic Era etc. | 
+|    | E1.2475-08-16 | 5521-08-16 | First HyperSpace Eclipse | 
+| O1 | O1.1-01-01    | 5522-01-01 | Official start of First Hyperspace Eclipse era | 
+|    | O1.250-05-2 6 | 5771-05-26 | Hyperspace reinvented, signals end of era. | 
+| E2 | E2.1-01-01    | 5772-01-01 | Official first day of new aion A2, the second age. | 
+|    | E2.641-03-03  | 6412-03-03 | Second hyperspace eclipse begins | 
+| O2 | O2.1-01-01    | 6413-01-01 | Official start of new hyperspace eclipse era, O2. | 
+|    | O2.126-11-03  | 6538-11-03 | Hyperspace reinvented | 
+| E3 | E3.1-01-01    | 6539-01-01 | Official start of Current Era, E3 | 
+|    | E3.326-07-19  | 6864-07-19 | Current date translated to in-game. A simple convention to track time in-game. |
+
+To refer back to times before the first era, a "BE" is used together with a negative date.
+So the year 3046 becomes "BE.1", excluding year zero.
+
 ### First Age: human dominance
 
 Humans were one of the last species to achieve hyperspace capability, but within a few centuries came to dominate and control most of known space. The human empire was not particularly liked — empires seldom are — but it provided a measure of order and, critically, standardisation. The legacy of the First Age is felt everywhere in the Third:
