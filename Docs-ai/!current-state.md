@@ -18,7 +18,8 @@
 | DVec3 + origin shifting | ✓ Done | Double-precision coordinates throughout |
 | GravitySensor | ✓ Done | PassiveSensor with noise; publishes to Instruments |
 | Noise library | ✓ Done | Simplex1, White, Pink, Periodic, Spike |
-| GameClock | ✓ Done | SimTime, InGameDate |
+| GameClock | ✓ SimTime done; calendar integration pending | `SimTime` advances on the simulation thread. The existing `DateTime InGameDate` remains a legacy placeholder and is not the new calendar authority. |
+| Galactic civil calendar | ✓ Done | `Inferior.Core.Time`: immutable numeric `GameDate` (`AbsoluteDay`), continuous proleptic-Gregorian civil conversion/arithmetic, Galactic Era overlay (`BE`, `E1`, `O1`, `E2`, `O2`, `E3`), strict full-date parsing/formatting, and direct numeric JSON persistence. Fixed setting anchor: `6864-07-19` / `E3.326-07-19`. Manufacturer integration, time of day, and simulation advancement are deliberately not implemented. |
 | Environment query class | ✓ Done | Gravity, nearest star/body, field vectors |
 | Persistence layer | ✓ Partial | Architecture designed; file implementations in progress |
 | ShipSizeClass enum | ✓ Stubbed | Exists, not yet enforced |
@@ -198,7 +199,7 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 ## Project structure
 
 ```
-Inferior.Core        — DVec3, Units, DataBus, CommandBus, BusSubscription<T>, GameClock, Noise, Topics
+Inferior.Core        — DVec3, Units, DataBus, CommandBus, BusSubscription<T>, GameClock, GameDate/calendar, Noise, Topics
 Inferior.Galaxy      — star/system generation, OrbitalBody, StarPhysics, StarterSystemSelector
 Inferior.Gameplay    — Simulation, Physics/, SensorData/, Sensors/, PlayerInput
 Inferior.Persistence — ShipRecord, repositories, log (pure IO, no live objects)
@@ -242,7 +243,7 @@ See `stations-ai.md` for full reference. Key facts:
 | Faction / reputation system | Not designed |
 | Internal component penetration formula — `(1 − integrity)²` confirmed | Partially decided |
 | Generator fuel: nuclear or consumable? | **Undecided** |
-| Lore epoch / time scale for in-game date | **Undecided** |
+| In-game calendar advancement / time scale | Initial date fixed at `6864-07-19` (`E3.326-07-19`); simulation advancement and time scale remain **undecided** |
 | Hyperspace interference lock formula | Placeholder only |
 | Shield coverage mapping — which hull faces a given shield covers | Pending |
 | Weapons system | Not yet designed |

@@ -38,6 +38,13 @@ Foundation layer — no dependencies on any other Inferior project.
 - `GameClock.cs` — sim-time clock (SimTime, in-game date), advanced once per tick.
 - `Noise.cs` — noise generator library (Simplex1, White, Pink, Periodic, Spike).
 
+**Time/**
+
+- `GameDate.cs` — immutable absolute-day date value with ordering and day arithmetic.
+- `GameCalendar.cs` — proleptic-Gregorian civil conversion, validation, arithmetic, and weekday operations.
+- `GalacticEraTimeline.cs` — Galactic Era overlay, fixed initial game date, strict canonical formatting/parsing, and Era-boundary validation.
+- `GameDateJsonConverter.cs` — numeric JSON persistence for `GameDate.AbsoluteDay`.
+
 **Root**
 
 - `GameState.cs` — `GameStateId` enum, `StateTransition`, abstract `GameState` base class, `GameStateMachine`.
