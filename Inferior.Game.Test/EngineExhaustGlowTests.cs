@@ -73,8 +73,8 @@ public sealed class EngineExhaustGlowTests
         {
             var simulation = new SpaceSimulation();
             Ship ship = ShipBuilder.NewShip("type-1").Build();
-            ship.Velocity =
-                ship.Forward * FlightConstants.NewtonianGearSpeeds[0];
+            ship.Velocity = ship.Forward
+                * MuleEngineDefinitionFactory.CreateDefinition().MinimumSpeedCeilingMps;
             simulation.SetShip(ship);
             simulation.DebugSetFlightModeImmediately(FlightMode.SystemNewtonian);
 

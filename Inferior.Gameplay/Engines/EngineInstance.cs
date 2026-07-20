@@ -16,6 +16,7 @@ public sealed class EngineInstance
     public EngineVariantDefinition Variant { get; }
     public double DamageFraction { get; private set; }
     public double WearFraction { get; private set; }
+    public int SelectedHarmony { get; private set; } = 1;
     public EngineVisualState VisualState { get; private set; } = EngineVisualState.Idle;
     public EngineGeometryTransform? GeometryTransform { get; private set; }
     public string? InstalledMountId { get; private set; }
@@ -30,6 +31,19 @@ public sealed class EngineInstance
 
     public void SetVisualState(EngineVisualState value)
         => VisualState = value.Validate();
+
+    public void SetSelectedHarmony(int value)
+    {
+        if (value < 1 || value > Variant.Engine.HarmonyCount)
+            throw new ArgumentOutOfRangeException(nameof(value));
+        SelectedHarmony = value;
+    }
+
+    public void ShiftHarmony(int steps)
+        => SelectedHarmony = Math.Clamp(
+            SelectedHarmony + steps,
+            1,
+            Variant.Engine.HarmonyCount);
 
     internal void Install(string mountId, EngineGeometryTransform geometryTransform)
     {

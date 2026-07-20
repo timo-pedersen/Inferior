@@ -19,6 +19,7 @@ internal static class ShipInputMapper
         double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
         double vert = (keys.IsKeyDown(Keys.R) || keys.IsKeyDown(Keys.Space) ? 1.0 : 0.0)
                     - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
+        bool useLiftChannel = keys.IsKeyDown(Keys.Space) && vert > 0.0;
         double keyboardYaw = (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0)
                            - (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0);
 
@@ -51,6 +52,7 @@ internal static class ShipInputMapper
             XStopToggle:        xStopToggle,
             GearUp:             gearUp,
             GearDown:           gearDown,
-            AfterburnerToggle:  afterburnerToggle);
+            AfterburnerToggle:  afterburnerToggle,
+            UseLiftChannel:     useLiftChannel);
     }
 }

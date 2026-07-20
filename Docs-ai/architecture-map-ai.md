@@ -118,7 +118,8 @@ Simulation domain model. Depends on Core, Galaxy.
 - `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2, Needle H2, and Atlas Civilian Drive H10.
 - `AtlasEngineDefinitionFactory.cs` — 58.4 m large civilian H10 drive geometry, design intent, lights, and aft exhaust metadata.
 - `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
-- `EngineDefinition.cs` — immutable engine-family data including validated SI mass, forward thrust, maneuvering thrust, and active rotational torque.
+- `EngineDefinition.cs` — immutable engine-family data including validated SI mass, maximum forward thrust, directional fractions, rotational torque, harmony count/endpoints, and quadratic harmony resolution.
+- `EngineInstance.cs` — unique installed engine condition and simulation-owned selected harmony state.
 
 **Cockpit/**
 
@@ -161,7 +162,7 @@ Simulation domain model. Depends on Core, Galaxy.
 **Ship/**
 
 - `Ship.cs` — the unique physical object in the universe: position, velocity, normalized orientation, simulation-owned ship-local angular velocity, components, and configuration.
-- `ShipPropulsion.cs` — pure simulation-domain aggregation of installed engine mass, orientation-transformed forward force, maneuvering authority, rotational torque, normalized translation commands, applied force, and acceleration.
+- `ShipPropulsion.cs` — per-engine harmony/directional resolution, shared translational-envelope allocation, installation-oriented force aggregation, hull efficiency, lowest-engine speed ceiling, applied acceleration, snapshots, and diagnostic hover estimates.
 - `ShipRotation.cs` — validated box-derived pitch/yaw/roll inertias, torque/inertia angular acceleration, assisted target-rate resolution, and bounded angular-velocity stepping.
 - `ShipPresentationBounds.cs` — gameplay-owned composite ship-local bounds from authored hull vertices plus transformed installed engine and cockpit geometry; cached by configuration revision for simulation inertia and presentation framing.
 - `SizeClass.cs` — hull class ratings: Small, Medium, Large, Capital.
@@ -169,10 +170,10 @@ Simulation domain model. Depends on Core, Galaxy.
 **Root**
 
 - `FlatHyperspaceConstants.cs` — tunable 2D hyperspace travel: speed, disturbance field, dropout, alignment.
-- `FlightConstants.cs` — tunable Newtonian/slipstream physics: gear speeds, thrust taper, station zones, X-stop.
+- `FlightConstants.cs` — shared Newtonian/slipstream physics constants: thrust taper, reverse ceiling ratio, station zones, X-stop, and assisted-rate limits; Newtonian harmony endpoints are engine-owned.
 - `FlightMode.cs` — enum: Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream, EnteringFlatHyperspace, FlatHyperspace.
 - `HyperspacePlane.cs` — 2D hyperspace plane defined by ship up-vector + position; projects stars onto the plane.
-- `PlayerInput.cs` — immutable input snapshot (thrust, normalized assisted rotation commands, toggles), read once per sim tick.
+- `PlayerInput.cs` — immutable input snapshot (translation, lift-channel selection, normalized assisted rotation commands, toggles), read once per sim tick.
 - `Simulation.cs` — 60 Hz background sim loop: clock, environment, physics, power, damage, radar, publish.
 
 ---
@@ -271,7 +272,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); applies installed-engine force/current mass translation and torque/box-inertia assisted rotation. Publishes immutable `ShipPropulsionSnapshot` and `ShipRotationSnapshot`. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); owns shared pilot harmony changes, applies per-engine allocated force/current-mass translation and harmony-scaled torque/box-inertia assisted rotation, and publishes immutable propulsion/rotation diagnostics. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
 - `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
@@ -317,7 +318,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, projected ship-forward reticle, UI-tree/alert draw).
 - `ShipForwardReticleProjector.cs` — pure camera-originated ship-forward ray projection with viewport-edge clamping; independent of velocity and ship-centre convergence.
 - `CockpitUI.Targeting.cs` — targeting HUD drawing, radar/landing-radar/targeting-dirball updates.
-- `DriveInstrumentPanel.cs` — right cockpit-rail wing: drive mode, gear/harmonic, speed readouts.
+- `DriveInstrumentPanel.cs` — right cockpit-rail wing: drive mode, Newtonian engine harmony or slipstream harmonic, and speed readouts.
 
 **ShipBuilder/**
 

@@ -6,26 +6,7 @@ namespace Inferior.Gameplay;
 /// </summary>
 public static class FlightConstants
 {
-    // ── NEWTONIAN GEAR TABLE ──────────────────────────────────────────────
-    // Forward speed ceilings (m/s) for each gear, index 0 = gear 1.
-    // Log-scaled ~×2 per step.
-    public static readonly double[] NewtonianGearSpeeds =
-    [
-          50,    // G1
-         100,    // G2
-         200,    // G3
-         400,    // G4
-         800,    // G5
-       1_600,    // G6
-       3_200,    // G7
-       6_400,    // G8
-      12_800,    // G9
-      25_600,    // G10
-    ];
-
-    public static int NewtonianGearCount => NewtonianGearSpeeds.Length;
-
-    // Reverse speed ceiling as a fraction of the current gear's forward ceiling.
+    // Reverse Newtonian speed ceiling relative to the selected engine harmony ceiling.
     public const double ReverseSpeedRatio = 0.25;
 
     // Thrust taper exponent: at speed fraction f of ceiling,

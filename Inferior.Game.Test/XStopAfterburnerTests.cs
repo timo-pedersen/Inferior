@@ -306,6 +306,6 @@ public sealed class XStopAfterburnerTests
         EngineDefinition mule = MuleEngineDefinitionFactory.CreateDefinition();
         const double hullAndComponentMassKg = 72_000.0 + 1_200.0;
         double currentMassKg = hullAndComponentMassKg + 2.0 * mule.DryMassKg;
-        return 2.0 * mule.ForwardThrustN / currentMassKg;
+        return 2.0 * mule.MaximumForwardThrustN * mule.MinimumThrustFraction / currentMassKg;
     }
 }

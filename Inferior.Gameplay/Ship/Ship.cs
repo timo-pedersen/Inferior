@@ -177,12 +177,8 @@ public sealed class Ship
     // Used by debug camera proximity scaling; Newtonian flight does not read MoveSpeedMs.
     public double MoveSpeedMs { get; set; } = 5e9;  // m/s
 
-    // Number of engine nodes — governs gear table depth and Slipstream harmonic count.
+    // Transitional slipstream node count. Newtonian harmony comes from installed engines.
     public int NodeCount { get; init; } = FlightConstants.DefaultNodeCount;
-
-    // Newtonian gear speed ceilings — bottom NodeCount entries from the global table.
-    public double[] NewtonianGears =>
-        FlightConstants.NewtonianGearSpeeds.Take(NodeCount).ToArray();
 
     // Slipstream harmonic speeds — NodeCount entries, log-scaled from min to max.
     public double[] SlipstreamHarmonics

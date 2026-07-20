@@ -142,6 +142,9 @@ public sealed class MouseLookRebaserTests
         Assert.Equal(1.0, space.ThrustVertical);
         Assert.Equal(r.ThrustVertical, space.ThrustVertical);
         Assert.Equal(1.0, both.ThrustVertical);
+        Assert.True(space.UseLiftChannel);
+        Assert.False(r.UseLiftChannel);
+        Assert.True(both.UseLiftChannel);
     }
 
     [Theory]

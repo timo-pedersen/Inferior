@@ -136,7 +136,7 @@ public sealed class DriveInstrumentPanel : Control
             int    gc  = (int)_gearCount;
             int    mg  = (int)(_maxGear < 0 ? gc : _maxGear);
             string lkm = _lkmZone > 0.5 ? $" LKM{(int)_lkmZone}" : "";
-            string gearStr = $"G{g:D2} / G{mg:D2}{lkm}";
+            string gearStr = $"H{g:D2} / H{mg:D2}{lkm}";
             string ceilStr = Units.FormatSpeed(_gearCeiling);
 
             // Signed forward speed: "+" prefix when positive
@@ -148,7 +148,7 @@ public sealed class DriveInstrumentPanel : Control
             double accel   = _accelMs2;
             string accelStr = (accel >= 0 ? "+" : "") + $"{accel:F2} m/s²";
 
-            DrawRow(sb, renderer, theme, "GEAR",  gearStr,  px, ref y, pw, S, colDim, colNorm);
+            DrawRow(sb, renderer, theme, "HARM",  gearStr,  px, ref y, pw, S, colDim, colNorm);
             DrawRow(sb, renderer, theme, "CEIL",  ceilStr,  px, ref y, pw, S, colDim, colNorm);
             DrawRow(sb, renderer, theme, "FWD",   fwdStr,   px, ref y, pw, S, colDim, colNorm);
             DrawRow(sb, renderer, theme, "ACC.",  accelStr, px, ref y, pw, S, colDim, colNorm);

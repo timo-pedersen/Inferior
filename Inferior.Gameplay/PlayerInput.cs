@@ -8,6 +8,8 @@ namespace Inferior.Gameplay;
 /// XStopToggleSequence and GearChangeSequence/Steps identify distinct edge events so the
 /// sim can consume a retained input snapshot once.
 /// PitchInput, YawInput, and RollInput are normalized assisted-rate commands in [-1, 1].
+/// UseLiftChannel selects the stronger positive-vertical engine channel without adding
+/// another translation axis.
 /// </summary>
 public record PlayerInput(
     double ThrustForward,
@@ -25,7 +27,8 @@ public record PlayerInput(
     bool   GearDown            = false,
     bool   AfterburnerToggle   = false,
     long   GearChangeSequence  = 0,
-    int    GearChangeSteps     = 0)
+    int    GearChangeSteps     = 0,
+    bool   UseLiftChannel      = false)
 {
     public static readonly PlayerInput Zero = new(0, 0, 0, 0, 0, 0, false);
 }

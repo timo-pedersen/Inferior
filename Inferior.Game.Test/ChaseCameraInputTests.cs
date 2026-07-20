@@ -40,6 +40,7 @@ public sealed class ChaseCameraInputTests
         Assert.Equal(0.0, consumed.ThrustForward);
         Assert.Equal(0.0, consumed.ThrustLateral);
         Assert.Equal(0.0, consumed.ThrustVertical);
+        Assert.False(consumed.UseLiftChannel);
         Assert.Equal(0.0, consumed.RollInput);
         Assert.Equal(0.0, consumed.PitchInput);
         Assert.Equal(0.0, consumed.YawInput);

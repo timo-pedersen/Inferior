@@ -1,7 +1,7 @@
 # Ship Mass and Translational Propulsion
 
-This is the active implementation reference for configured ship mass and Stage-1
-installed-engine propulsion. Broader rationale and future centre-of-mass design remain in
+This is the active implementation reference for configured ship mass, engine harmony,
+and installed-engine propulsion. Broader rationale and future centre-of-mass design remain in
 `Docs/inferior-design-docs-side-track/ship-mass-and-propulsion.md`.
 
 ## Authority and ownership
@@ -33,52 +33,66 @@ For every installed engine:
 
 1. Add `EngineDefinition.DryMassKg`.
 2. Resolve its operational factor as `1 - DamageFraction`.
-3. Transform engine-local forward (`-Z`) through `EngineGeometryTransform`.
-4. Add transformed `ForwardThrustN`, scalar `ManeuveringThrustN`, and scalar
-   `RotationalTorqueNm`, multiplied by the operational factor.
-5. Apply explicit hull-owned designed-single-engine efficiencies where authored.
+3. Resolve the instance's selected harmony through its definition-owned quadratic curve.
+4. Derive forward, reverse, lateral, lift, and rotational maxima from the harmony-scaled
+   maximum forward thrust and authored directional fractions.
+5. Transform the engine-local force through installation orientation.
+6. Apply explicit hull-owned designed-single-engine efficiencies where authored.
 
 There is no hull-ID propulsion branch and no engine-count multiplied by a global force.
 Rotational torque drives assisted angular acceleration as described below.
 
+For selected harmony `h` in `1..HarmonyCount`, `x = (h - 1) / (HarmonyCount - 1)`
+and `curve = x^2`. Both thrust multiplier and speed ceiling interpolate their authored
+minimum/maximum endpoints with that same curve. Harmony count changes granularity only.
+Rotational torque uses the positive thrust multiplier; rotation does not consume the
+shared translational envelope.
+
 ## Translation calculation
 
-`PlayerInput` remains the immutable command path. Translation axes are clamped to
-`[-1, 1]`, then the combined command magnitude is clamped to 1.
+`PlayerInput` remains the immutable command path. `EngineTranslationCommand` clamps
+longitudinal, lateral, and vertical axes independently to `[-1, 1]`. The shared envelope
+uses `usage = sqrt(f^2 + l^2 + v^2)` and divides all three axes by usage when it exceeds
+one. Every installed engine evaluates that same allocated command against its own harmony
+and fractions; simultaneous directions therefore compete for one finite normalized budget.
 
 ```text
-available force
+selected engine harmony
+  -> quadratic thrust multiplier and speed ceiling
+  -> per-engine directional maxima
   -> hull layout efficiency
-  -> normalized player command
-  -> gear ceiling taper for forward/reverse
+  -> shared translation allocation
+  -> harmony ceiling taper for forward/reverse
   -> applied force
   -> acceleration = applied force / current mass
   -> velocity integration
 ```
 
-All System Newtonian gears use this calculation. Gear 1 retains its speed ceiling but has
-no fixed-acceleration bypass. Reverse retains the existing separate speed ceiling
-(`ReverseSpeedRatio`) and full low-speed forward-engine authority. Lateral and vertical
-commands use the aggregated maneuvering authority.
+The existing Newtonian scroll/gear command now selects engine harmony; there is no global
+Newtonian speed table. Each engine owns its selected step and authored endpoints. The ship
+speed ceiling is the lowest operational installed-engine ceiling. Reverse uses its authored
+fraction and retains the separate reverse ceiling ratio. Existing approach-to-ceiling
+tapering scales longitudinal force rather than replacing force/mass physics.
 
-The existing `R` binding is positive ship-local vertical (up); `F` is negative. `Space`
-now commands the same full positive direction as `R`, and `R + Space` remains clamped to
-one full command.
+`R` is positive ship-local vertical using lateral-strength output; `F` is negative and
+also uses lateral strength. `Space` requests the same positive axis using the stronger
+lift fraction. It replaces that direction's channel maximum rather than adding an axis,
+so `R + Space` remains one full lift command. Negative vertical never uses lift strength.
 
 Atmospheric translation uses the same engine aggregation. Atmospheric Flight Assist may
-add positive vertical force up to the available maneuvering authority. Gravity,
+add positive vertical force up to the available lateral authority. Gravity,
 aerodynamic lift, and drag remain separate external forces.
 
-## Provisional configured results
+## Provisional configured results at maximum harmony
 
 All masses include the current 1,200 kg default reactor contribution.
 
-| Ship | Engines | Current mass | Engine mass | Forward force | Maneuver force | Forward accel | Maneuver accel |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Aries | 2 Mule | 78,000 kg | 4,800 kg | 312,000 N | 156,000 N | 4.00 m/s2 | 2.00 m/s2 |
-| Asterisk | 1 Mule | 15,600 kg | 2,400 kg | 117,000 N | 58,500 N | 7.50 m/s2 | 3.75 m/s2 |
-| Beren | 4 Needle | 187,800 kg | 6,600 kg | 751,200 N | 375,600 N | 4.00 m/s2 | 2.00 m/s2 |
-| Antega | 4 Atlas | 3,585,200 kg | 384,000 kg | 14,340,800 N | 3,585,200 N | 4.00 m/s2 | 1.00 m/s2 |
+| Ship | Engines | Mass | Forward accel | Lateral accel | Lift accel | Empty hover estimate |
+|---|---:|---:|---:|---:|---:|---:|
+| Aries | 2 Mule | 78,000 kg | 4.00 m/s2 | 2.00 m/s2 | 3.00 m/s2 | 0.306 g |
+| Asterisk | 1 Mule | 15,600 kg | 7.50 m/s2 | 3.75 m/s2 | 5.625 m/s2 | 0.574 g |
+| Beren | 4 Needle | 187,800 kg | 4.00 m/s2 | 2.00 m/s2 | 3.00 m/s2 | 0.306 g |
+| Antega | 4 Atlas | 3,585,200 kg | 4.00 m/s2 | 1.00 m/s2 | 2.00 m/s2 | 0.204 g |
 
 Asterisk efficiencies are provisionally 0.75 forward, 0.75 maneuvering, and 0.60
 rotation. All current other hulls use 1.0.
@@ -87,8 +101,11 @@ rotation. All current other hulls use 1.0.
 
 `ShipSnapshot.Propulsion` publishes current, hull, component, and installed-engine mass;
 installed and operational engine counts; available force and torque; and the latest
-applied ship-local force and acceleration. The existing `F2` ship-module debug toggle
-shows these values in a temporary HUD panel for in-engine acceptance.
+applied ship-local force and acceleration. It also publishes selected harmony detail,
+curve/multiplier, engine-derived speed ceiling, directional maxima, command usage and
+allocation, and diagnostic lift/hover estimates. `SafeLandingGravityG` is only the maximum
+hover estimate divided by a temporary 1.25 reserve; it is not authored or legal capability.
+The existing `F2` toggle shows these values for in-engine acceptance.
 
 ## Assisted rotation
 
@@ -141,7 +158,7 @@ the same torque to brake without overshoot; there is no passive angular damping.
 Orientation integrates an axis-angle quaternion from the local angular-velocity vector
 using `Orientation * localDelta`, then normalizes.
 
-Configured provisional results after activating and retuning engine torque:
+Configured provisional results at maximum harmony after activating and retuning engine torque:
 
 | Ship | W x H x L | Effective torque | Ixx / Iyy / Izz (kg m2) | Angular accel pitch / yaw / roll | Time to max pitch / yaw / roll |
 |---|---:|---:|---:|---:|---:|
@@ -164,5 +181,8 @@ flight-assist-OFF torque control is deferred.
 - asymmetric failure torque;
 - flight-assist-OFF direct torque controls;
 - engine power, fuel, and thermal limits;
+- fuel compatibility and consumption;
+- new planetary-gravity, automatic-hover, and gravity-compensation behavior;
+- rotation sharing the translational envelope;
 - detailed engine operational/damage states;
 - inertial-dampener acceleration limits.

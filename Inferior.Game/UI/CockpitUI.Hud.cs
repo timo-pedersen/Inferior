@@ -74,10 +74,9 @@ public sealed partial class CockpitUI
                 string flightLine;
                 if (snap.FlightMode == FlightMode.SystemNewtonian)
                 {
-                    double gearSpeed = snap.NewtonianGear < FlightConstants.NewtonianGearSpeeds.Length
-                        ? FlightConstants.NewtonianGearSpeeds[snap.NewtonianGear] : 0;
+                    double gearSpeed = snap.Propulsion?.SpeedCeilingMps ?? 0.0;
                     string lkmStr   = snap.LkmZone > 0 ? $"  LKM-{snap.LkmZone}" : "";
-                    flightLine = $"[{modeName}]  G{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}";
+                    flightLine = $"[{modeName}]  H{snap.NewtonianGear + 1} ({Units.FormatSpeed(gearSpeed)}){lkmStr}";
                 }
                 else if (snap.FlightMode == FlightMode.SystemSlipstream)
                 {
@@ -136,12 +135,29 @@ public sealed partial class CockpitUI
             $"HULL/COMP  {propulsion.HullMassKg:N0} / {propulsion.ComponentMassKg:N0} kg",
             $"ENGINE MASS {propulsion.InstalledEngineMassKg:N0} kg",
             $"ENGINES    {propulsion.InstalledEngineCount} installed / {propulsion.OperationalEngineCount} operational",
-            $"FORWARD    {propulsion.AvailableForwardForceShipLocalN.Length / 1e6:F3} MN",
-            $"MANEUVER   {propulsion.AvailableManeuveringThrustN / 1e6:F3} MN",
-            $"TORQUE     {propulsion.AvailableRotationalTorqueNm / 1e6:F3} MN m",
+            $"SPEED LIMIT {propulsion.SpeedCeilingMps:N1} m/s",
+            $"MAX FWD    {propulsion.AvailableForwardForceShipLocalN.Length / 1e6:F3} MN",
+            $"MAX REV    {propulsion.AvailableReverseThrustN / 1e6:F3} MN",
+            $"MAX LAT    {propulsion.AvailableLateralThrustN / 1e6:F3} MN",
+            $"MAX LIFT   {propulsion.AvailableLiftThrustN / 1e6:F3} MN",
+            $"MAX TORQUE {propulsion.AvailableRotationalTorqueNm / 1e6:F3} MN m",
+            $"COMMAND    {propulsion.TranslationAllocation.Command.Longitudinal:F3} / {propulsion.TranslationAllocation.Command.Lateral:F3} / {propulsion.TranslationAllocation.Command.Vertical:F3}" +
+                (propulsion.TranslationAllocation.Command.UseLiftChannel ? " LIFT" : ""),
+            $"USAGE      {propulsion.TranslationAllocation.Usage:F3}",
+            $"ALLOCATED  {propulsion.TranslationAllocation.Longitudinal:F3} / {propulsion.TranslationAllocation.Lateral:F3} / {propulsion.TranslationAllocation.Vertical:F3}",
             $"APPLIED    {propulsion.AppliedForceShipLocalN.ToString(0)} N",
             $"ACCEL      {propulsion.ResultingAccelerationShipLocalMps2.ToString(2)} m/s2",
+            $"LIFT ACCEL {propulsion.MaximumLiftAccelerationMps2:F3} m/s2",
+            $"HOVER EST  {propulsion.MaximumHoverGravityG:F3} g max / {propulsion.SafeLandingGravityG:F3} g safe",
         ];
+        if (propulsion.Engines.FirstOrDefault() is { } engine)
+        {
+            lines.Insert(5, $"ENGINE 1/{propulsion.Engines.Count} {engine.FamilyId}");
+            lines.Insert(6, $"HARMONY    {engine.SelectedHarmony} / {engine.HarmonyCount}");
+            lines.Insert(7, $"HARMONY X  {engine.NormalizedPosition:F4}");
+            lines.Insert(8, $"CURVE      {engine.Curve:F4}");
+            lines.Insert(9, $"THRUST MULT {engine.ThrustMultiplier:F4}");
+        }
         if (rotation is not null)
         {
             lines.Add("ROTATION");
@@ -155,7 +171,7 @@ public sealed partial class CockpitUI
 
         const int x = 14;
         const int y = 12;
-        const int width = 520;
+        const int width = 600;
         const int lineHeight = 18;
         int height = lines.Count * lineHeight + 14;
         sb.Draw(_pixel, new Rectangle(x, y, width, height), new Color(5, 9, 16, 220));

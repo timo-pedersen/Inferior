@@ -175,6 +175,7 @@ public sealed partial class SystemSpaceState
             ThrustForward = 0.0,
             ThrustLateral = 0.0,
             ThrustVertical = 0.0,
+            UseLiftChannel = false,
             RollInput = 0.0,
             PitchInput = 0.0,
             YawInput = 0.0,

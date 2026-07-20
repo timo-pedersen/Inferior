@@ -75,11 +75,8 @@ public sealed record EngineGeometryTransform(
 
     public DVec3 TransformDirection(DVec3 direction)
     {
-        DVec3 corrected = MirroredAcrossHullX
-            ? new DVec3(-direction.X, direction.Y, direction.Z)
-            : direction;
         Vector3 transformed = Vector3.Transform(
-            corrected.ToVector3(),
+            direction.ToVector3(),
             Matrix.CreateFromQuaternion(Orientation));
         return new DVec3(transformed.X, transformed.Y, transformed.Z);
     }
