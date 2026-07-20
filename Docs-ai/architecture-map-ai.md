@@ -107,6 +107,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
 - `BerenHullDefinitionFactory.cs` — medium 3-by-3-container cargo platform, aft cargo-door assembly, downward C2 cockpit mount, and four independent Needle H2 engine mounts.
+- `AntegaHullDefinitionFactory.cs` — 99 m, 120-container civilian hauler with segmented forward hatch, dorsal aft C5 bridge mount, and four external Atlas H10 engine mounts.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
 
@@ -114,19 +115,21 @@ Simulation domain model. Depends on Core, Galaxy.
 
 - `EngineInstallationGenerator.cs` — installs one engine instance on one authored mount, including handed geometry and physical interface validation; default construction loops this operation for any mount count.
 - `EnginePairGenerator.cs` — mirrored-pair validation/generation retained for workflows that specifically require a paired installation.
-- `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2 and Needle H2.
+- `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2, Needle H2, and Atlas Civilian Drive H10.
+- `AtlasEngineDefinitionFactory.cs` — 58.4 m large civilian H10 drive geometry, design intent, lights, and aft exhaust metadata.
 - `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
 
 **Cockpit/**
 
 - `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
-- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, and Beren underslung command pod.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, Beren underslung command pod, and Antega C5 civilian bridge.
 - `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
 - `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
 - `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
 - `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
 - `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
 - `BerenUnderslungCockpitGeometryFactory.cs` — full downward-mounted C2 command pod with collar, housing, faceted canopy, frame, backing, and independent light geometry.
+- `AntegaCivilianBridgeGeometryFactory.cs` — broad keyed C5 bridge plug, armoured base and housing, framed forward/side glazing, backing, and restrained light geometry.
 - `CockpitPresentationSnapshot.cs` — immutable installed-cockpit root pose and light state published for rendering.
 
 **Physics/**
@@ -157,6 +160,7 @@ Simulation domain model. Depends on Core, Galaxy.
 **Ship/**
 
 - `Ship.cs` — the unique physical object in the universe: position, velocity, orientation, components, config.
+- `ShipPresentationBounds.cs` — pure composite ship-local bounds from authored hull vertices plus transformed installed engine and cockpit geometry.
 - `SizeClass.cs` — hull class ratings: Small, Medium, Large, Capital.
 
 **Root**
@@ -265,7 +269,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
 - `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
-- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Aries order used by the simulation-owned cockpit control.
+- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
@@ -275,7 +279,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `SystemSpaceState.CelestialBodies.cs` — nearly empty; one Stations-owned texture helper left (`CreateNavGlowTexture`).
 - `SystemSpaceState.Containers.cs` — station-placed shipping containers: real `ShippingContainerFactory` geometry, standard rendering path, rails kinematics (`SpawnContainers`/`PlacedContainer`/`DrawContainers`).
 - `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
-- `SystemSpaceState.Ship.cs` — spawn/input mapping, third-person camera math, cockpit-layout capture.
+- `SystemSpaceState.Ship.cs` — spawn/input mapping, bounds-centred third-person camera math, cockpit-layout capture.
+- `ChaseCameraState.cs` — persistent chase/orbital direction, radius, and roll; enforces a generic minimum framing radius from snapshot-published composite ship bounds.
 - `SystemSpaceState.Shadows.cs` — station shadow-map owner: 2048² StationMap render target, CullNone caster pass, fitted station-local light camera, F6/F7/F8/F9 diagnostics. Phase C: separate `_decoCasterMeshes` per module (one extra draw, hull caster unchanged) composed from `StationModuleMesh.DecorClassRanges` filtered by the current `CasterStage`; Ctrl+F6 cycles `CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }`, defaulting to whatever `StationDecorator.DecorCastingPolicy` already has landed. `FitStationShadowLight` fits from `_shadowCasterHullBounds` ∪ `_shadowCasterDecoBounds` (module-local AABBs precomputed once at caster-build time from real caster vertex data via `StationModuleMesh.ComputeFaceRangeBounds`/`ComputeIndexRangeBounds`), not `Definition.BoundingBox`. `TryGetMeshFactoryHullFaceRange` (internal, pure, no GraphicsDevice) is the single decision for which face range a MeshFactory module's hull caster uses — generalized off any category special-case after a bug where non-docking-bay MeshFactory modules (octagonal blocks) got no hull caster while their decoration still cast (floating shadows); a post-composition safety net warns via SystemMessage if any module ends up with no hull caster at all.
 - `SystemSpaceState.Skybox.cs` — star hover/click hyperspace-target selection (rendering itself lives in `SkyboxRenderer`).
 - `SystemSpaceState.Stations.cs` — station mesh/glow/dot drawing (next extraction candidate — see current-state doc).

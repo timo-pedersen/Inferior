@@ -133,6 +133,12 @@ public sealed class Ship
         }
     }
 
+    public DVec3 CockpitRootShipLocalPosition =>
+        ResolveCockpitShipLocalRootPose().Position;
+
+    public Quaternion CockpitRootShipLocalOrientation =>
+        ResolveCockpitShipLocalRootPose().Orientation;
+
     public bool ApplyCockpitCommand(ComponentCommand command)
     {
         if (Cockpit is null)

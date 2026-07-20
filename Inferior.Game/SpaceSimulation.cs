@@ -145,7 +145,8 @@ public sealed class SpaceSimulation : Simulation
         // thread has resolved the request.
         int        RelocationSequence = 0,
         IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null,
-        CockpitPresentationSnapshot? Cockpit = null);
+        CockpitPresentationSnapshot? Cockpit = null,
+        ShipPresentationBounds? PresentationBounds = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
 
@@ -662,7 +663,8 @@ public sealed class SpaceSimulation : Simulation
             snapAccel,
             _relocationSequence,
             BuildEngineMountSnapshots(ship),
-            BuildCockpitSnapshot(ship));
+            BuildCockpitSnapshot(ship),
+            ShipPresentationBoundsCalculator.TryCalculate(ship));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,

@@ -521,9 +521,20 @@ Runtime default construction is mount-count agnostic: `ShipBuilder` resolves eac
 hull-authored engine slot and installs one independent engine instance through
 `EngineInstallationGenerator`. Aries currently supplies two Mule defaults; Asterisk
 supplies one port-side Mule; Beren supplies four Needle defaults arranged as vertical
-port and starboard pairs. Pair-specific generation remains available where mirrored pair
-validation is itself required. Debug pair cycling applies only to ships with exactly one
-port and one starboard engine, avoiding ambiguous replacement on multi-engine hulls.
+port and starboard pairs; Antega supplies four Atlas Civilian Drive defaults on H10 mounts,
+also arranged as vertical port and starboard pairs. Atlas is a definition-owned 58.4 m
+industrial engine with a substantial forward mount section, segmented main body, service
+details, and an aft exhaust aperture. Pair-specific generation remains available where
+mirrored pair validation is itself required. Debug pair cycling applies only to ships with
+exactly one port and one starboard engine, avoiding ambiguous replacement on multi-engine
+hulls.
+
+Current propulsion limitation: engine definitions do not yet own numeric thrust,
+rotational authority, or down-thrust values. Atlas therefore has qualitative `High`
+forward-thrust intent but no simulated per-engine thrust. Newtonian flight still applies
+the legacy ship-wide 900 kN forward value regardless of installed engine count, and engine
+dry mass is not included in `Ship.Mass`. Do not balance Atlas against those transitional
+figures as though they were its final engine parameters.
 
 Gameplay systems such as:
 - damage;

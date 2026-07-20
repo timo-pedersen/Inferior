@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Ship;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.States;
@@ -16,14 +17,28 @@ internal sealed class ChaseCameraState
 
     private DVec3 _easedHullLocalOffset;
     private bool _easedOffsetValid;
+    private double _minimumFramingRadius = MinimumRadiusMeters;
 
     public DVec3 HullLocalDirection { get; private set; } = DefaultOffset.Normalized();
     public double Radius { get; private set; } = DefaultOffset.Length;
+    public double MinimumFramingRadius => _minimumFramingRadius;
     public double RollRadians { get; private set; }
     public bool IsActive { get; private set; }
     public bool IsOrbitalEditActive { get; private set; }
 
     public DVec3 DesiredHullLocalOffset => HullLocalDirection * Radius;
+
+    public void ApplyPresentationBounds(ShipPresentationBounds? bounds)
+    {
+        _minimumFramingRadius = bounds is { } value
+            ? Math.Clamp(value.RadiusMeters * 2.25, MinimumRadiusMeters, MaximumRadiusMeters)
+            : MinimumRadiusMeters;
+        if (Radius < _minimumFramingRadius)
+        {
+            Radius = _minimumFramingRadius;
+            ResetSmoothing();
+        }
+    }
 
     public void ResetSmoothing() => _easedOffsetValid = false;
 
@@ -76,7 +91,7 @@ internal sealed class ChaseCameraState
         ApplyOrbit(input.Horizontal, input.Vertical, dt);
         Radius = Math.Clamp(
             Radius + input.Radial * RadialSpeedMetersPerSecond * dt,
-            MinimumRadiusMeters,
+            _minimumFramingRadius,
             MaximumRadiusMeters);
         RollRadians = WrapAngle(
             RollRadians + input.Roll * RollSpeedRadiansPerSecond * dt);
@@ -85,7 +100,7 @@ internal sealed class ChaseCameraState
     public void ResetPose()
     {
         HullLocalDirection = DefaultOffset.Normalized();
-        Radius = DefaultOffset.Length;
+        Radius = Math.Max(DefaultOffset.Length, _minimumFramingRadius);
         RollRadians = 0.0;
         ResetSmoothing();
     }
