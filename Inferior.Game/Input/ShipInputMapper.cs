@@ -16,7 +16,8 @@ internal static class ShipInputMapper
         // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = roll
         double fwd  = (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
         double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
-        double vert = (keys.IsKeyDown(Keys.R) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
+        double vert = (keys.IsKeyDown(Keys.R) || keys.IsKeyDown(Keys.Space) ? 1.0 : 0.0)
+                    - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
         double roll = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
 
         // V = Flight Assist toggle, G = Slipstream/mode toggle, X = X-Stop, Z = Afterburner.

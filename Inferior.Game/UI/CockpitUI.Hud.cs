@@ -32,7 +32,8 @@ public sealed partial class CockpitUI
     public void DrawHud(SpriteBatch sb,
         bool debugCameraMode, DVec3 cameraActualVelocity, DVec3 refVelocity, string refName,
         SpaceSimulation.ShipSnapshot? shipSnap, double gameTimeSeconds,
-        bool uiMouseMode, FlightMode hyperspaceMode, double cameraMoveSpeedMs)
+        bool uiMouseMode, FlightMode hyperspaceMode, double cameraMoveSpeedMs,
+        bool showPropulsionDiagnostics)
     {
         int bottom = _gd.Viewport.Height;
 
@@ -97,6 +98,8 @@ public sealed partial class CockpitUI
         SpritePrimitives.DrawText(sb, _font, $"T+{Units.FormatTime(gameTimeSeconds)}", new Vector2(16, bottom - 58), ColHUDDim, 0.8f);
 
         DrawAtmosPanel(sb, shipSnap);
+        if (showPropulsionDiagnostics && shipSnap?.Propulsion is { } propulsion)
+            DrawPropulsionDiagnostics(sb, shipSnap.HullTypeId, propulsion);
 
         // Controls hint — changes with mode
         if (uiMouseMode)
@@ -111,8 +114,47 @@ public sealed partial class CockpitUI
         }
         else
         {
-            SpritePrimitives.DrawText(sb, _font, "Mouse: look   WASD: fwd/strafe   QE: roll   RF: up/down   M: system map   N: galaxy map   F11: debug   TAB: UI",
+            SpritePrimitives.DrawText(sb, _font, "Mouse: look   WASD: fwd/strafe   QE: roll   RF/Space: vertical   M: system map   N: galaxy map   F11: debug   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
+        }
+    }
+
+    private void DrawPropulsionDiagnostics(
+        SpriteBatch sb,
+        string hullTypeId,
+        Inferior.Gameplay.Ship.ShipPropulsionSnapshot propulsion)
+    {
+        string[] lines =
+        [
+            $"PROPULSION  {hullTypeId}",
+            $"MASS       {propulsion.CurrentMassKg:N0} kg",
+            $"HULL/COMP  {propulsion.HullMassKg:N0} / {propulsion.ComponentMassKg:N0} kg",
+            $"ENGINE MASS {propulsion.InstalledEngineMassKg:N0} kg",
+            $"ENGINES    {propulsion.InstalledEngineCount} installed / {propulsion.OperationalEngineCount} operational",
+            $"FORWARD    {propulsion.AvailableForwardForceShipLocalN.Length / 1e6:F3} MN",
+            $"MANEUVER   {propulsion.AvailableManeuveringThrustN / 1e6:F3} MN",
+            $"TORQUE     {propulsion.AvailableRotationalTorqueNm / 1e6:F3} MN m",
+            $"APPLIED    {propulsion.AppliedForceShipLocalN.ToString(0)} N",
+            $"ACCEL      {propulsion.ResultingAccelerationShipLocalMps2.ToString(2)} m/s2",
+        ];
+
+        const int x = 14;
+        const int y = 12;
+        const int width = 390;
+        const int lineHeight = 18;
+        int height = lines.Length * lineHeight + 14;
+        sb.Draw(_pixel, new Rectangle(x, y, width, height), new Color(5, 9, 16, 220));
+        sb.Draw(_pixel, new Rectangle(x, y, width, 1), ColBorder);
+        sb.Draw(_pixel, new Rectangle(x, y + height - 1, width, 1), ColBorder);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            SpritePrimitives.DrawText(
+                sb,
+                _font,
+                lines[i],
+                new Vector2(x + 8, y + 7 + i * lineHeight),
+                i == 0 ? ColHUD : ColHUDDim,
+                0.72f);
         }
     }
 

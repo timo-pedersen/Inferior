@@ -25,11 +25,6 @@ public static class FlightConstants
 
     public static int NewtonianGearCount => NewtonianGearSpeeds.Length;
 
-    // Gear 1 (index 0) uses a reduced acceleration instead of the current engine acceleration —
-    // makes close-quarters maneuvering (docking, flying around debris) controllable.
-    // All other gears use the ship's normal acceleration, unchanged.
-    public const double Gear1AccelerationMs2 = 4.0;
-
     // Reverse speed ceiling as a fraction of the current gear's forward ceiling.
     public const double ReverseSpeedRatio = 0.25;
 
@@ -40,8 +35,6 @@ public static class FlightConstants
 
     // ── ENGINE DEFAULT (placeholder until component system) ───────────────
     public const int    DefaultNodeCount = 10;
-    public const double DefaultShipMass  = 48_000.0;   // kg (~48 tonnes)
-    public const double DefaultMaxThrust = 980_000.0;  // N (~1 g at ship mass)
 
     // ── X-STOP ───────────────────────────────────────────────────────────
     // Snap-to-reference threshold — below this, X-stop considers braking complete.

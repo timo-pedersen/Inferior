@@ -529,12 +529,35 @@ mirrored pair validation is itself required. Debug pair cycling applies only to 
 exactly one port and one starboard engine, avoiding ambiguous replacement on multi-engine
 hulls.
 
-Current propulsion limitation: engine definitions do not yet own numeric thrust,
-rotational authority, or down-thrust values. Atlas therefore has qualitative `High`
-forward-thrust intent but no simulated per-engine thrust. Newtonian flight still applies
-the legacy ship-wide 900 kN forward value regardless of installed engine count, and engine
-dry mass is not included in `Ship.Mass`. Do not balance Atlas against those transitional
-figures as though they were its final engine parameters.
+Engine definitions own simulation-authoritative numeric values in SI units:
+
+- `DryMassKg`;
+- `ForwardThrustN`;
+- `ManeuveringThrustN`;
+- `RotationalTorqueNm`.
+
+`EngineDefinition` requires positive finite mass and forward thrust, and non-negative
+finite maneuvering thrust and rotational torque. Qualitative `EngineDesignIntent`
+metadata remains descriptive only.
+
+Provisional Stage-1 tuning:
+
+| Family | Dry mass | Forward thrust | Maneuvering thrust | Rotational torque |
+|---|---:|---:|---:|---:|
+| Mule | 2,400 kg | 156,000 N | 78,000 N | 250,000 N m |
+| Needle | 1,650 kg | 187,800 N | 93,900 N | 300,000 N m |
+| Atlas Civilian Drive | 96,000 kg | 3,585,200 N | 896,300 N | 10,000,000 N m |
+
+These are initial handling calibration values, not final economy, power, or balance data.
+Installed engines contribute mass individually. Operational force and torque contributions
+are transformed from engine-local forward (`-Z`) through each installation orientation and
+summed by `ShipPropulsion`. Current runtime operational filtering uses
+`1 - EngineInstance.DamageFraction`; wear is not yet a propulsion modifier. Rotational
+torque is aggregated and published but current fixed pitch/yaw/roll behaviour does not use it.
+
+Asterisk is explicitly authored as a designed single-engine layout. Its hull-owned
+efficiencies are 0.75 forward, 0.75 maneuvering, and 0.60 rotation. The efficiencies do
+not belong to Mule and do not activate when a normal multi-engine ship loses engines.
 
 Gameplay systems such as:
 - damage;

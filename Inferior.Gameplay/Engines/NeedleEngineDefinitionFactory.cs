@@ -161,6 +161,9 @@ public static class NeedleEngineDefinitionFactory
             "Needle",
             new DVec3(1.35, 1.55, 6.20),
             dryMassKg: 1_650.0,
+            forwardThrustN: 187_800.0,
+            maneuveringThrustN: 93_900.0,
+            rotationalTorqueNm: 300_000.0,
             geometry,
             new EngineDesignIntent(
                 "premium high-performance civilian engine",

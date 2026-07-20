@@ -175,6 +175,9 @@ public static class AtlasEngineDefinitionFactory
             "Atlas Civilian Drive",
             new DVec3(5.45, 5.25, 58.40),
             dryMassKg: 96_000.0,
+            forwardThrustN: 3_585_200.0,
+            maneuveringThrustN: 896_300.0,
+            rotationalTorqueNm: 10_000_000.0,
             geometry,
             new EngineDesignIntent(
                 "largest normal civilian sustained heavy-hauler drive",

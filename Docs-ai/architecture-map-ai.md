@@ -102,7 +102,7 @@ Simulation domain model. Depends on Core, Galaxy.
 
 **Hull/**
 
-- `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics.
+- `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics, and optional designed-single-engine propulsion efficiencies.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
@@ -118,6 +118,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2, Needle H2, and Atlas Civilian Drive H10.
 - `AtlasEngineDefinitionFactory.cs` — 58.4 m large civilian H10 drive geometry, design intent, lights, and aft exhaust metadata.
 - `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
+- `EngineDefinition.cs` — immutable engine-family data including validated SI mass, forward thrust, maneuvering thrust, and future rotational torque.
 
 **Cockpit/**
 
@@ -160,6 +161,7 @@ Simulation domain model. Depends on Core, Galaxy.
 **Ship/**
 
 - `Ship.cs` — the unique physical object in the universe: position, velocity, orientation, components, config.
+- `ShipPropulsion.cs` — pure simulation-domain aggregation of installed engine mass, orientation-transformed forward force, maneuvering authority, rotational torque, normalized translation commands, applied force, and acceleration.
 - `ShipPresentationBounds.cs` — pure composite ship-local bounds from authored hull vertices plus transformed installed engine and cockpit geometry.
 - `SizeClass.cs` — hull class ratings: Small, Medium, Large, Capital.
 
@@ -268,7 +270,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); applies installed-engine force divided by current configured mass in every Newtonian gear and atmospheric translation, then publishes `ShipSnapshot` with immutable `ShipPropulsionSnapshot` diagnostics. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
 - `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 

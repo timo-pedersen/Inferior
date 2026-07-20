@@ -24,9 +24,6 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
-    private const double LegacyEngineDownThrustN = 300_000.0;
-    private const double LegacyEngineForwardThrustN = LegacyEngineDownThrustN * 3.0;
-
     public sealed record StationProximityTickDiagnostic(
         long TickSequence,
         double EnvironmentSimTime,
@@ -146,9 +143,11 @@ public sealed class SpaceSimulation : Simulation
         int        RelocationSequence = 0,
         IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null,
         CockpitPresentationSnapshot? Cockpit = null,
-        ShipPresentationBounds? PresentationBounds = null);
+        ShipPresentationBounds? PresentationBounds = null,
+        ShipPropulsionSnapshot? Propulsion = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
+    private ShipPropulsionApplication _lastPropulsionApplication;
 
     public ShipSnapshot? ShipState => _shipSnapshot;
 
@@ -382,6 +381,7 @@ public sealed class SpaceSimulation : Simulation
         _lastDt = dt;
         Ship? ship = _ship;
         if (ship == null) return;
+        _lastPropulsionApplication = default;
         EngineVisualState engineVisualState = EngineVisualState.Idle;
 
         int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
@@ -664,7 +664,8 @@ public sealed class SpaceSimulation : Simulation
             _relocationSequence,
             BuildEngineMountSnapshots(ship),
             BuildCockpitSnapshot(ship),
-            ShipPresentationBoundsCalculator.TryCalculate(ship));
+            ShipPresentationBoundsCalculator.TryCalculate(ship),
+            BuildPropulsionSnapshot(ship));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -719,6 +720,23 @@ public sealed class SpaceSimulation : Simulation
             })
             .ToArray();
         return Array.AsReadOnly(snapshots);
+    }
+
+    private ShipPropulsionSnapshot BuildPropulsionSnapshot(Ship ship)
+    {
+        ShipPropulsionCapability capability = ShipPropulsion.Resolve(ship);
+        return new ShipPropulsionSnapshot(
+            capability.CurrentMassKg,
+            capability.HullMassKg,
+            capability.ComponentMassKg,
+            capability.InstalledEngineCount,
+            capability.OperationalEngineCount,
+            capability.InstalledEngineMassKg,
+            capability.AvailableForwardForceShipLocalN,
+            capability.AvailableManeuveringThrustN,
+            capability.AvailableRotationalTorqueNm,
+            _lastPropulsionApplication.AppliedForceShipLocalN,
+            _lastPropulsionApplication.ResultingAccelerationShipLocalMps2);
     }
 
     private static CockpitPresentationSnapshot? BuildCockpitSnapshot(Ship ship)
@@ -854,9 +872,7 @@ public sealed class SpaceSimulation : Simulation
 
         double gearCeiling    = gears[_newtonianGear];
         double reverseCeiling = gearCeiling * FlightConstants.ReverseSpeedRatio;
-        double accel          = _newtonianGear == 0
-            ? FlightConstants.Gear1AccelerationMs2
-            : LegacyEngineForwardThrustN / ship.Mass;
+        ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
 
         DVec3  refVel = GetRefVelocity();
         string refId  = GetRefSourceId();
@@ -878,13 +894,15 @@ public sealed class SpaceSimulation : Simulation
         _prevRefVel      = refVel;
         _prevRefSourceId = refId;
 
-        // Afterburner — constant forward accel at AfterburnerAccelMultiplier × the current
-        // full-throttle accel above, applied automatically for the whole burn. Not
+        // Afterburner applies an untapered multiplier to installed forward force for the
+        // whole burn. It is not
         // player-steerable: WASD and X-Stop are entirely skipped while active (their toggles
         // are also gated in TickPhysics so they can't be engaged/cancelled mid-burn either).
         if (_afterburnerActive)
         {
-            ship.Velocity += ship.Forward * (accel * FlightConstants.AfterburnerAccelMultiplier * dt);
+            DVec3 forceLocal = propulsion.AvailableForwardForceShipLocalN
+                * FlightConstants.AfterburnerAccelMultiplier;
+            ApplyPropulsionForce(ship, propulsion, forceLocal, dt);
             ship.Position += ship.Velocity * dt;
             return;
         }
@@ -920,36 +938,49 @@ public sealed class SpaceSimulation : Simulation
             }
             else
             {
-                ship.Velocity += relVel.Normalized() * (-accel * FlightConstants.XStopBrakeFactor * dt);
+                DVec3 brakeWorld = -relVel.Normalized()
+                    * (propulsion.AvailableForwardForceShipLocalN.Length
+                        * FlightConstants.XStopBrakeFactor);
+                ApplyPropulsionForce(
+                    ship,
+                    propulsion,
+                    WorldToShipLocal(ship, brakeWorld),
+                    dt);
             }
             ship.Position += ship.Velocity * dt;
             return;
         }
 
         // Forward thrust — tapered as speed approaches gear ceiling
-        if (input.ThrustForward > 0)
+        DVec3 command = ShipPropulsion.ClampTranslationCommand(
+            input.ThrustForward,
+            input.ThrustLateral,
+            input.ThrustVertical);
+        double forwardScale = 1.0;
+
+        if (command.Z > 0)
         {
             double speedAlongFwd = DVec3.Dot(relVel, fwdDir);
             double fraction      = System.Math.Clamp(speedAlongFwd / gearCeiling, 0, 1);
-            double thrustFactor  = System.Math.Max(0,
+            forwardScale = System.Math.Max(0,
                 1.0 - System.Math.Pow(fraction, FlightConstants.ThrustTaperExponent));
-            ship.Velocity += fwdDir * (accel * thrustFactor * input.ThrustForward * dt);
         }
 
         // Reverse thrust — separate ceiling
-        if (input.ThrustForward < 0)
+        if (command.Z < 0)
         {
             double speedAgainstFwd = DVec3.Dot(relVel, -fwdDir);
             double fraction        = System.Math.Clamp(speedAgainstFwd / reverseCeiling, 0, 1);
-            double thrustFactor    = System.Math.Max(0,
+            forwardScale = System.Math.Max(0,
                 1.0 - System.Math.Pow(fraction, FlightConstants.ThrustTaperExponent));
-            ship.Velocity += (-fwdDir) * (accel * thrustFactor * System.Math.Abs(input.ThrustForward) * dt);
         }
 
-        // Strafe and vertical (uncapped — small inputs, no separate ceiling defined)
-        double strafeAccel = accel * 0.5;
-        if (input.ThrustLateral  != 0) ship.Velocity += ship.Right * (strafeAccel * input.ThrustLateral  * dt);
-        if (input.ThrustVertical != 0) ship.Velocity += ship.Up    * (strafeAccel * input.ThrustVertical * dt);
+        // Forward, lateral, and vertical share one normalized translation command.
+        DVec3 appliedForceLocal = ShipPropulsion.ResolveAppliedForce(
+            propulsion,
+            command,
+            forwardScale);
+        ApplyPropulsionForce(ship, propulsion, appliedForceLocal, dt);
 
         ship.Position += ship.Velocity * dt;
     }
@@ -1084,15 +1115,25 @@ public sealed class SpaceSimulation : Simulation
                     totalForce += ship.Up * (ship.AerodynamicLift * density * vFwd * System.Math.Abs(vFwd));
             }
 
-            totalForce += ship.Forward * (input.ThrustForward  * LegacyEngineForwardThrustN);
-            totalForce += ship.Right   * (input.ThrustLateral   * LegacyEngineDownThrustN * 0.5);
-            totalForce += ship.Up      * (input.ThrustVertical   * LegacyEngineDownThrustN);
+            ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+            DVec3 command = ShipPropulsion.ClampTranslationCommand(
+                input.ThrustForward,
+                input.ThrustLateral,
+                input.ThrustVertical);
+            DVec3 appliedForceLocal = ShipPropulsion.ResolveAppliedForce(propulsion, command);
 
             if (_flightAssistEnabled && density >= AtmoSlipstreamMinDensity)
             {
-                double faN = System.Math.Min(LegacyEngineDownThrustN, gMag * ship.Mass);
-                totalForce += ship.Up * faN;
+                double faN = System.Math.Min(
+                    propulsion.AvailableManeuveringThrustN,
+                    gMag * ship.Mass);
+                appliedForceLocal += DVec3.UnitY * faN;
             }
+
+            ShipPropulsionApplication application =
+                ShipPropulsion.Apply(propulsion, appliedForceLocal);
+            _lastPropulsionApplication = application;
+            totalForce += ShipLocalToWorld(ship, application.AppliedForceShipLocalN);
         }
 
         ship.Velocity += totalForce / ship.Mass * dt;
@@ -1357,6 +1398,26 @@ public sealed class SpaceSimulation : Simulation
         _lastConsumedXStopToggleSequence = input.XStopToggleSequence;
         return input.XStopToggle;
     }
+
+    private void ApplyPropulsionForce(
+        Ship ship,
+        ShipPropulsionCapability capability,
+        DVec3 forceShipLocalN,
+        double dt)
+    {
+        ShipPropulsionApplication application = ShipPropulsion.Apply(capability, forceShipLocalN);
+        _lastPropulsionApplication = application;
+        ship.Velocity += ShipLocalToWorld(ship, application.ResultingAccelerationShipLocalMps2) * dt;
+    }
+
+    private static DVec3 ShipLocalToWorld(Ship ship, DVec3 local)
+        => ship.Right * local.X + ship.Up * local.Y - ship.Forward * local.Z;
+
+    private static DVec3 WorldToShipLocal(Ship ship, DVec3 world)
+        => new(
+            DVec3.Dot(world, ship.Right),
+            DVec3.Dot(world, ship.Up),
+            -DVec3.Dot(world, ship.Forward));
 
     internal void DebugTickPhysics(PlayerInput input, double dt) => TickPhysics(input, dt);
 

@@ -82,7 +82,10 @@ public sealed class Ship
     // ── Mass ──────────────────────────────────────────────────────────────────
     public double HullMass      { get; init; } = 50_000.0;  // kg, hull only
     public double ComponentMass { get; set;  } = 0.0;       // kg, updated as components change
-    public double Mass          => HullMass + ComponentMass;
+    public double InstalledEngineMass => _engineMounts.Sum(
+        mount => mount.InstalledEngine?.Variant.Engine.DryMassKg ?? 0.0);
+    public double Mass          => HullMass + ComponentMass + InstalledEngineMass;
+    public DesignedSingleEngineEfficiency? SingleEngineEfficiency { get; init; }
 
     // ── Cockpit ───────────────────────────────────────────────────────────────
     public InstalledCockpit? Cockpit { get; init; }

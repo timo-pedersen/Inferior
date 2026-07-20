@@ -1252,9 +1252,10 @@ derives its minimum radius from the composite bounding sphere; this is generic f
 an Antega-specific camera path. Antega, the bridge, four Atlas engines, exhaust glows, scale,
 and camera framing were visually accepted by Timo on 2026-07-20.
 
-Propulsion remains transitional: Atlas has qualitative design intent but no numeric
-per-engine thrust, rotational contribution, or down-thrust. Runtime Newtonian flight still
-uses legacy ship-wide constants and does not aggregate installed engine dry mass.
+Propulsion is now instance-aggregated. Atlas owns provisional numeric dry mass, forward
+thrust, maneuvering thrust, and future rotational torque; all four installed instances
+contribute independently through `ShipPropulsion`. See
+`Docs-ai/ship-mass-and-propulsion.md` for current values and deferred work.
 
 The current size-class code must be corrected to:
 

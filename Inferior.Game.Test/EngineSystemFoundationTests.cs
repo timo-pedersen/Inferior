@@ -211,7 +211,10 @@ public sealed class EngineSystemFoundationTests
             "mule-2",
             "Mule 2",
             new DVec3(1.8, 2.2, 5.5),
-            dryMassKg: 2_400.0);
+            dryMassKg: 2_400.0,
+            forwardThrustN: 156_000.0,
+            maneuveringThrustN: 78_000.0,
+            rotationalTorqueNm: 250_000.0);
         return new EngineVariantDefinition(
             $"mule-2.{mountStandardId.ToLowerInvariant()}",
             family,

@@ -24,6 +24,8 @@ public sealed class HullDefinition
     /// <summary>Hull mass in kg, excluding all components.</summary>
     public required double HullMass { get; init; }
 
+    public DesignedSingleEngineEfficiency? SingleEngineEfficiency { get; init; }
+
     /// <summary>Physical cockpit sockets authored as part of this hull.</summary>
     public IReadOnlyList<CockpitMountDefinition> CockpitMounts { get; init; } = [];
 
@@ -176,5 +178,31 @@ public sealed class HullDefinition
             errors.Add($"Semantic hull defines {landingPorts.Length} landing gear attachment ports, expected 3.");
 
         return errors;
+    }
+}
+
+public sealed record DesignedSingleEngineEfficiency
+{
+    public DesignedSingleEngineEfficiency(
+        double forward,
+        double maneuvering,
+        double rotation)
+    {
+        ValidateFraction(forward, nameof(forward));
+        ValidateFraction(maneuvering, nameof(maneuvering));
+        ValidateFraction(rotation, nameof(rotation));
+        Forward = forward;
+        Maneuvering = maneuvering;
+        Rotation = rotation;
+    }
+
+    public double Forward { get; }
+    public double Maneuvering { get; }
+    public double Rotation { get; }
+
+    private static void ValidateFraction(double value, string name)
+    {
+        if (!double.IsFinite(value) || value < 0.0 || value > 1.0)
+            throw new ArgumentOutOfRangeException(name, "Efficiency must be within [0, 1].");
     }
 }

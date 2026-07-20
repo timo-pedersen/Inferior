@@ -54,6 +54,9 @@ public static class MuleEngineDefinitionFactory
             "Mule",
             new DVec3(2.10, 2.10, 6.55),
             dryMassKg: 2_400.0,
+            forwardThrustN: 156_000.0,
+            maneuveringThrustN: 78_000.0,
+            rotationalTorqueNm: 250_000.0,
             geometry,
             new EngineDesignIntent(
                 "cheap forgiving industrial utility engine",

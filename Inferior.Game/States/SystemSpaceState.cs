@@ -1090,7 +1090,8 @@ public sealed partial class SystemSpaceState : GameState
 
         sb.Begin(blendState: BlendState.AlphaBlend);
         _cockpitUI.DrawHud(sb, _debugCameraMode, _cameraActualVelocity, _refVelocity, _refName,
-            _frameShipSnap, _gameTimeSeconds, _uiMouseMode, _hyperspace.Mode, _camera.MoveSpeedMs);
+            _frameShipSnap, _gameTimeSeconds, _uiMouseMode, _hyperspace.Mode, _camera.MoveSpeedMs,
+            _engineModuleDebug);
         DrawStationDots(sb);
         _cockpitUI.DrawTargetingHud(sb, _camera, _effect.View, _padWorldPos, _padDistance);
         DrawSkyboxStarOverlay(sb);

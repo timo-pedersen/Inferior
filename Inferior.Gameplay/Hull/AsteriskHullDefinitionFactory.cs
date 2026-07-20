@@ -24,6 +24,10 @@ public static class AsteriskHullDefinitionFactory
         DisplayName = "Asterisk",
         SizeClass = ShipSizeClass.Small,
         HullMass = 12_000.0,
+        SingleEngineEfficiency = new DesignedSingleEngineEfficiency(
+            forward: 0.75,
+            maneuvering: 0.75,
+            rotation: 0.60),
         CockpitMounts =
         [
             new CockpitMountDefinition

@@ -123,6 +123,25 @@ public sealed class MouseLookRebaserTests
         Assert.False(input.GearDown);
     }
 
+    [Fact]
+    public void SpaceMatchesPositiveVerticalInputWithoutStackingWithR()
+    {
+        var lookInput = new MouseLookInput(0.0, 0.0, Rebased: false);
+        var previous = new KeyboardState();
+        MouseState mouse = Mouse(400, 300);
+
+        var space = ShipInputMapper.Build(
+            new KeyboardState(Keys.Space), previous, mouse, mouse, lookInput);
+        var r = ShipInputMapper.Build(
+            new KeyboardState(Keys.R), previous, mouse, mouse, lookInput);
+        var both = ShipInputMapper.Build(
+            new KeyboardState(Keys.R, Keys.Space), previous, mouse, mouse, lookInput);
+
+        Assert.Equal(1.0, space.ThrustVertical);
+        Assert.Equal(r.ThrustVertical, space.ThrustVertical);
+        Assert.Equal(1.0, both.ThrustVertical);
+    }
+
     private static MouseState Mouse(int x, int y, int scroll = 0)
         => new(x, y, scroll,
             ButtonState.Released, ButtonState.Released, ButtonState.Released,

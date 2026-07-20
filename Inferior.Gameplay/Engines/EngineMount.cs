@@ -72,6 +72,17 @@ public sealed record EngineGeometryTransform(
         Vector3 transformed = Vector3.Transform(corrected.ToVector3(), LocalToHull);
         return new DVec3(transformed.X, transformed.Y, transformed.Z);
     }
+
+    public DVec3 TransformDirection(DVec3 direction)
+    {
+        DVec3 corrected = MirroredAcrossHullX
+            ? new DVec3(-direction.X, direction.Y, direction.Z)
+            : direction;
+        Vector3 transformed = Vector3.Transform(
+            corrected.ToVector3(),
+            Matrix.CreateFromQuaternion(Orientation));
+        return new DVec3(transformed.X, transformed.Y, transformed.Z);
+    }
 }
 
 /// <summary>A physical installation location owned by one live ship instance.</summary>
