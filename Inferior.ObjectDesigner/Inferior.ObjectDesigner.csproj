@@ -5,39 +5,30 @@
     <RollForward>Major</RollForward>
     <PublishReadyToRun>false</PublishReadyToRun>
     <TieredCompilation>false</TieredCompilation>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
-  <PropertyGroup>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Icon.ico</ApplicationIcon>
-  </PropertyGroup>
-  <ItemGroup>
-    <None Remove="Icon.ico" />
-    <None Remove="Icon.bmp" />
-  </ItemGroup>
-  <ItemGroup>
-    <EmbeddedResource Include="Icon.ico">
-      <LogicalName>Icon.ico</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Icon.bmp">
-      <LogicalName>Icon.bmp</LogicalName>
-    </EmbeddedResource>
-  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
-    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />
   </ItemGroup>
+
   <ItemGroup>
+    <ProjectReference Include="..\Inferior.Game\Inferior.Game.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\Inferior.Core\Inferior.Core.csproj" />
-    <ProjectReference Include="..\Inferior.Galaxy\Inferior.Galaxy.csproj" />
     <ProjectReference Include="..\Inferior.Gameplay\Inferior.Gameplay.csproj" />
-    <ProjectReference Include="..\Inferior.Persistence\Inferior.Persistence.csproj" />
     <ProjectReference Include="..\Inferior.Rendering\Inferior.Rendering.csproj" />
     <ProjectReference Include="..\Inferior.UI\Inferior.UI.csproj" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="States\" />
-  </ItemGroup>
+
   <ItemGroup>
     <None Include="..\Assets\Ships\beren.ship.json" Link="Assets\Ships\beren.ship.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+
+  <Target Name="CopyGameContent" AfterTargets="Build">
+    <ItemGroup>
+      <GameContent Include="..\Inferior.Game\bin\$(Configuration)\net10.0\Content\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GameContent)" DestinationFiles="@(GameContent->'$(OutputPath)Content\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

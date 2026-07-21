@@ -1,0 +1,30 @@
+
+#----------------------------- Global Properties ----------------------------#
+
+/outputDir:bin/$(Platform)
+/intermediateDir:obj/$(Platform)
+/platform:DesktopGL
+/config:
+/profile:Reach
+/compress:False
+
+#---------------------------------- Content ---------------------------------#
+
+#begin Effects/EngineExhaustGlow.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:../../Inferior.Game/Content/Effects/EngineExhaustGlow.fx;Effects/EngineExhaustGlow.fx
+
+#begin Effects/LitSurface.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:../../Inferior.Game/Content/Effects/LitSurface.fx;Effects/LitSurface.fx
+
+#begin Fonts/DefaultFont.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/processorParam:PremultiplyAlpha=True
+/processorParam:TextureFormat=Compressed
+/build:../../Inferior.Game/Content/Fonts/DefaultFont.spritefont;Fonts/DefaultFont.spritefont

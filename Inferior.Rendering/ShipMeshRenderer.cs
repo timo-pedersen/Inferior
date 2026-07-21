@@ -86,21 +86,26 @@ public sealed class ShipMeshRenderer : IDisposable
         IReadOnlyList<EngineMountPresentationSnapshot>? engineMounts = null,
         bool engineModuleDebug = false,
         double engineVisualTimeSeconds = 0.0,
-        CockpitPresentationSnapshot? cockpit = null)
+        CockpitPresentationSnapshot? cockpit = null,
+        HullDefinition? hullOverride = null,
+        float? renderScaleOverride = null)
     {
-        float renderScale = (float)Camera3D.RenderScale;
+        float renderScale = renderScaleOverride ?? (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
         var sunColour = new Color(SceneLighting.SunColour);
         ShipHullRenderPath renderPath;
         Matrix world;
 
-        if (HullDefinitionLibrary.TryGet(hullTypeId, out var hullDefinition)
-            && hullDefinition?.VisualGeometry is not null)
+        HullDefinition? selectedHull = hullOverride;
+        if (selectedHull is null)
+            HullDefinitionLibrary.TryGet(hullTypeId, out selectedHull);
+
+        if (selectedHull?.VisualGeometry is not null)
         {
             renderPath = ShipHullRenderPath.SemanticHull;
             world = BuildSemanticWorldTransform(renderScale, renderPos, shipOrientation);
             DrawSemanticHull(
-                hullDefinition,
+                selectedHull,
                 world,
                 currentView,
                 currentProjection,
@@ -156,6 +161,12 @@ public sealed class ShipMeshRenderer : IDisposable
         => hullDefinition?.VisualGeometry is not null
             ? ShipHullRenderPath.SemanticHull
             : ShipHullRenderPath.LegacyFallback;
+
+    public void InvalidateSemanticHull(string hullTypeId)
+    {
+        if (_semanticMeshCache.Remove(hullTypeId, out SemanticHullGpuMesh? mesh))
+            mesh.Dispose();
+    }
 
     private void DrawSemanticHull(
         HullDefinition hullDefinition,

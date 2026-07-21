@@ -7,6 +7,16 @@
 
 ---
 
+## Assets
+
+Loose source assets, separate from MonoGame compiled Content.
+
+**Ships/**
+
+- `beren.ship.json` — versioned authoring source for the Beren hull; loaded by both the game and `Inferior.ObjectDesigner`.
+
+---
+
 ## Inferior.Core
 
 Foundation layer — no dependencies on any other Inferior project.
@@ -106,10 +116,16 @@ Simulation domain model. Depends on Core, Galaxy.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
-- `BerenHullDefinitionFactory.cs` — medium 3-by-3-container cargo platform, aft cargo-door assembly, downward C2 cockpit mount, and four independent Needle H2 engine mounts.
+- `BerenHullDefinitionFactory.cs` — thin loader-backed adapter for `Assets/Ships/beren.ship.json`.
 - `AntegaHullDefinitionFactory.cs` — 99 m, 120-container civilian hauler with segmented forward hatch, dorsal aft C5 bridge mount, and four external Atlas H10 engine mounts.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
+
+**Hull/Authoring/**
+
+- `HullAuthoringDtos.cs` — schema-versioned loose JSON DTOs for ship/hull authoring assets, including semantic geometry, cargo, mounts, and slots.
+- `ShipAuthoringConverter.cs` — converts between authoring DTOs and runtime `HullDefinition` / semantic hull records.
+- `ShipAuthoringJson.cs` — deterministic JSON options, asset path probing, load/save, and authoring validation diagnostics.
 
 **Engines/**
 
@@ -189,7 +205,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
-- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry.
+- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override and invalidate the semantic mesh cache after edits.
 - `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
 - `Type1HullFactory.cs` — builds the Type-1 ship hull/nacelle/pylon meshes.
@@ -236,6 +252,23 @@ Self-contained UI framework. Depends on Core only.
 - `LandingRadarPanel.cs` — top-down approach radar, relative ship position vs. landing pad.
 - `RadarDisplay.cs` — tactical radar: range scales, log mode, exclusion zones, LED status.
 - `SpectrumGraph.cs` — smoothed filled-area graph for solar/stellar spectrum (Catmull-Rom interpolation).
+
+---
+
+## Inferior.ObjectDesigner
+
+Standalone MonoGame engineering tool for versioned loose object/ship authoring. Depends on Core, Gameplay, Rendering, UI. Copies the game-built Content output and the loose Beren JSON asset into its output directory.
+
+- `Program.cs` — entry point, runs `ObjectDesignerGame`.
+- `ObjectDesignerGame.cs` — Beren editor shell: perspective preview, active orthographic projection, vertex pick/drag, numeric coordinate edits, save/reload, validation panel, and reuse of `ShipMeshRenderer`.
+- `Content/Content.mgcb` — reference content manifest retained for source clarity; the project currently copies built game content instead of invoking a second content build.
+
+**Editing/**
+
+- `ProjectionKind.cs` — top/side/front orthographic projection enum.
+- `OrthographicProjection.cs` — screen/model projection math and axis labels.
+- `EditCommands.cs` — `IEditCommand`, vertex move command, and undo/redo clean-state tracking.
+- `ObjectDesignerSession.cs` — loaded document/session owner: selected vertex, rebuild, validation, save/reload, and stable-ID vertex mutation.
 
 ---
 

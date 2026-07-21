@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Inferior.Game\Inferior.Game.csproj" />
+    <ProjectReference Include="..\Inferior.ObjectDesigner\Inferior.ObjectDesigner.csproj" />
     <ProjectReference Include="..\Inferior.Persistence\Inferior.Persistence.csproj" />
   </ItemGroup>
 
