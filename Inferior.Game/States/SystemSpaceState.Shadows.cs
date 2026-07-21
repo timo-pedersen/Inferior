@@ -10,7 +10,6 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
-    private const int StationShadowMapSize = 2048;
     private const float StationShadowPaddingMetres = 5f;
     private const float StationShadowCorrectionLimit = 0.01f;
     // Constant tie-break bias — first rung past zero bias, per the spec's acne ladder.
@@ -19,8 +18,35 @@ public sealed partial class SystemSpaceState
     // the normalized depth units LitSurface.fx's ShadowBiasDepth compares in.
     private const float StationShadowBiasMetres = 0.005f;
 
+    // Per-station shadow-map resolution (Docs/station-lighting-pipeline-spec.md Brief E1
+    // Step 1). The map is fit per-station (FitStationShadowLight), so texel density is
+    // (map extent / resolution) — holding resolution constant across the catalogue and
+    // stepping up only for the mega class keeps near-dock density roughly uniform. Only
+    // one station's map is ever live at a time (SelectShadowedStation picks the nearest),
+    // so worst case GPU residency is the mega size, and only while actually near a mega.
+    private const float StationShadowMegaBreakpointMetres = 1500f;
+    private const int StationShadowMapSizeStandard = 8192;
+    private const int StationShadowMapSizeMega = 16384;
+
+    private enum StationShadowResolutionClass { Standard, Mega }
+
+    private static StationShadowResolutionClass ClassifyStationShadowResolution(float longestAxisMetres) =>
+        longestAxisMetres > StationShadowMegaBreakpointMetres
+            ? StationShadowResolutionClass.Mega
+            : StationShadowResolutionClass.Standard;
+
+    private static int StationShadowResolutionFor(StationShadowResolutionClass cls) => cls switch
+    {
+        StationShadowResolutionClass.Mega => StationShadowMapSizeMega,
+        _ => StationShadowMapSizeStandard,
+    };
+
     private Effect? _shadowCasterEffect;
     private RenderTarget2D? _stationShadowMap;
+    // Resolution of the currently-live _stationShadowMap. Only reallocated when a newly
+    // selected station's size class differs from this — same station, or a different
+    // station of the same class, reuses the existing target (never per-frame realloc).
+    private int _stationShadowMapResolution;
     private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _shadowCasterMeshes = [];
     // Decoration caster, separate from the hull caster above (Phase C) — one extra draw per
     // module's deco mesh, composed from whichever DecorClass ranges are enabled for
@@ -86,13 +112,18 @@ public sealed partial class SystemSpaceState
         Vector2 InvSize,
         float Near,
         float DepthSpan,
+        float StationExtentMetres,
+        int Resolution,
         double BuildMilliseconds);
 
     private void InitializeStationShadows()
     {
         _shadowCasterEffect = _content.Load<Effect>("Effects/ShadowCaster");
-        _stationShadowMap = new RenderTarget2D(_gd, StationShadowMapSize, StationShadowMapSize,
-            false, SurfaceFormat.Single, DepthFormat.Depth24);
+        // Resolution depends on the target station's size, unknown until the first
+        // RenderStationShadowMap call selects one — allocated lazily there instead of a
+        // fixed size here.
+        _stationShadowMap = null;
+        _stationShadowMapResolution = 0;
         _stationShadowContext = null;
         _stationShadowLogged = false;
         _stationShadowFreezeLogged = false;
@@ -116,6 +147,7 @@ public sealed partial class SystemSpaceState
         _shadowCasterDecoBounds.Clear();
         _stationShadowMap?.Dispose();
         _stationShadowMap = null;
+        _stationShadowMapResolution = 0;
         _shadowCasterEffect = null;
         _stationShadowContext = null;
     }
@@ -301,7 +333,7 @@ public sealed partial class SystemSpaceState
 
     private void RenderStationShadowMap()
     {
-        if (_stationShadowMap == null || _shadowCasterEffect == null) return;
+        if (_shadowCasterEffect == null) return;
         if (_freezeStationShadowMap && _stationShadowContext != null)
         {
             LogStationShadowFreeze(_stationShadowContext);
@@ -318,6 +350,23 @@ public sealed partial class SystemSpaceState
         var (station, _) = target.Value;
         if (!_stationGeometry.TryGetValue(station, out var modules)) return;
 
+        // One corner list feeds both the size-class decision and the light fit below — the
+        // brief requires a single source of truth for station size, not a separately-derived
+        // measure (e.g. Definition.BoundingBox) that could disagree with the fit.
+        var stationLocalCorners = CollectStationLocalCasterCorners(modules);
+        float stationExtentMetres = StationLongestAxisMetres(stationLocalCorners);
+        var resolutionClass = ClassifyStationShadowResolution(stationExtentMetres);
+        int requiredResolution = StationShadowResolutionFor(resolutionClass);
+
+        bool needsRealloc = _stationShadowMap == null || _stationShadowMapResolution != requiredResolution;
+        if (needsRealloc)
+        {
+            _stationShadowMap?.Dispose();
+            _stationShadowMap = new RenderTarget2D(_gd, requiredResolution, requiredResolution,
+                false, SurfaceFormat.Single, DepthFormat.Depth24);
+            _stationShadowMapResolution = requiredResolution;
+        }
+
         var sysQ = station.GetOrientation(_gameTimeSeconds);
         var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
         Matrix stationRotation = Matrix.CreateFromQuaternion(stRotQ);
@@ -328,7 +377,7 @@ public sealed partial class SystemSpaceState
         localSun.Normalize();
 
         Matrix lightView = Matrix.CreateLookAt(localSun * 5000f, Vector3.Zero, ChooseLightUp(localSun));
-        if (!FitStationShadowLight(modules, lightView, out var minXY, out var maxXY, out float near, out float far))
+        if (!FitStationShadowLight(stationLocalCorners, lightView, out var minXY, out var maxXY, out float near, out float far))
             return;
 
         float width = Math.Max(1f, maxXY.X - minXY.X);
@@ -407,7 +456,12 @@ public sealed partial class SystemSpaceState
         _stationShadowContext = new StationShadowContext(
             station, stationRotation, lightView, lightProjection,
             minXY, new Vector2(1f / width, 1f / height), near, span,
+            stationExtentMetres, requiredResolution,
             sw.Elapsed.TotalMilliseconds);
+        // Class changes (station switch across the size breakpoint) re-open the log gate so
+        // the resulting extent/class/resolution line is actually visible when it matters —
+        // Step 1's realloc-correctness check is exactly "does this fire at the boundary."
+        if (needsRealloc) _stationShadowLogged = false;
         LogStationShadowFirstGeneration(_stationShadowContext);
     }
 
@@ -431,22 +485,17 @@ public sealed partial class SystemSpaceState
         return best;
     }
 
-    // Phase C: fits from each module's actual enabled caster geometry (_shadowCasterHullBounds
-    // unioned with _shadowCasterDecoBounds when present), not Definition.BoundingBox — so a
-    // landmark antenna mast or dish extending past the module's envelope box is no longer
-    // clipped out of the light frustum. Both bounds dictionaries are precomputed once when the
-    // caster meshes are (re)built, not per frame — this just transforms the 8 corners of the
-    // cached box through the current lightView, same cost shape as before.
-    private bool FitStationShadowLight(
-        IReadOnlyList<PlacedModule> modules, Matrix lightView,
-        out Vector2 minXY, out Vector2 maxXY, out float near, out float far)
+    // Phase C: collects each module's actual enabled caster geometry
+    // (_shadowCasterHullBounds unioned with _shadowCasterDecoBounds when present), not
+    // Definition.BoundingBox — so a landmark antenna mast or dish extending past the
+    // module's envelope box is no longer clipped out of the light frustum. Both bounds
+    // dictionaries are precomputed once when the caster meshes are (re)built, not per
+    // frame. Station-local (not light-view) so this same corner set can also answer "how
+    // big is this station" (StationLongestAxisMetres) without a second, separately-derived
+    // measure that could disagree with the fit.
+    private List<Vector3> CollectStationLocalCasterCorners(IReadOnlyList<PlacedModule> modules)
     {
-        Vector2 min = new(float.MaxValue, float.MaxValue);
-        Vector2 max = new(float.MinValue, float.MinValue);
-        float minDepth = float.MaxValue;
-        float maxDepth = float.MinValue;
-        bool any = false;
-
+        var corners = new List<Vector3>(modules.Count * 8);
         foreach (var mod in modules)
         {
             if (!_shadowCasterHullBounds.TryGetValue(mod, out var hullBounds)) continue;
@@ -467,20 +516,50 @@ public sealed partial class SystemSpaceState
                     ix == 0 ? boundsMin.X : boundsMax.X,
                     iy == 0 ? boundsMin.Y : boundsMax.Y,
                     iz == 0 ? boundsMin.Z : boundsMax.Z);
-                Vector3 stationLocal = Vector3.Transform(local, mod.Transform);
-                Vector3 light = Vector3.Transform(stationLocal, lightView);
-                min.X = MathF.Min(min.X, light.X);
-                min.Y = MathF.Min(min.Y, light.Y);
-                max.X = MathF.Max(max.X, light.X);
-                max.Y = MathF.Max(max.Y, light.Y);
-                float d = -light.Z;
-                minDepth = MathF.Min(minDepth, d);
-                maxDepth = MathF.Max(maxDepth, d);
-                any = true;
+                corners.Add(Vector3.Transform(local, mod.Transform));
             }
         }
+        return corners;
+    }
 
-        if (!any)
+    // Step 1 resolution input: the union station-local AABB's largest dimension, from the
+    // same corner set FitStationShadowLight fits against.
+    private static float StationLongestAxisMetres(IReadOnlyList<Vector3> stationLocalCorners)
+    {
+        if (stationLocalCorners.Count == 0) return 0f;
+        Vector3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 max = new(float.MinValue, float.MinValue, float.MinValue);
+        foreach (var c in stationLocalCorners)
+        {
+            min = Vector3.Min(min, c);
+            max = Vector3.Max(max, c);
+        }
+        Vector3 extent = max - min;
+        return MathF.Max(extent.X, MathF.Max(extent.Y, extent.Z));
+    }
+
+    private bool FitStationShadowLight(
+        IReadOnlyList<Vector3> stationLocalCorners, Matrix lightView,
+        out Vector2 minXY, out Vector2 maxXY, out float near, out float far)
+    {
+        Vector2 min = new(float.MaxValue, float.MaxValue);
+        Vector2 max = new(float.MinValue, float.MinValue);
+        float minDepth = float.MaxValue;
+        float maxDepth = float.MinValue;
+
+        foreach (var stationLocal in stationLocalCorners)
+        {
+            Vector3 light = Vector3.Transform(stationLocal, lightView);
+            min.X = MathF.Min(min.X, light.X);
+            min.Y = MathF.Min(min.Y, light.Y);
+            max.X = MathF.Max(max.X, light.X);
+            max.Y = MathF.Max(max.Y, light.Y);
+            float d = -light.Z;
+            minDepth = MathF.Min(minDepth, d);
+            maxDepth = MathF.Max(maxDepth, d);
+        }
+
+        if (stationLocalCorners.Count == 0)
         {
             minXY = maxXY = Vector2.Zero;
             near = far = 0f;
@@ -520,8 +599,11 @@ public sealed partial class SystemSpaceState
     {
         float width = 1f / ctx.InvSize.X;
         float height = 1f / ctx.InvSize.Y;
+        float texelMetres = width / ctx.Resolution;
+        string className = ctx.Resolution >= StationShadowMapSizeMega ? "Mega" : "Standard";
         string message =
-            $"[{label}] {ctx.Station.Name}: {width:F1} x {height:F1} m, " +
+            $"[{label}] {ctx.Station.Name}: extent {ctx.StationExtentMetres:F1} m -> {className} class -> " +
+            $"{ctx.Resolution}^2 ({texelMetres * 1000f:F1} mm/texel), map {width:F1} x {height:F1} m, " +
             $"depth {ctx.DepthSpan:F1} m, {ctx.BuildMilliseconds:F2} ms. " +
             "Keys F6 delta, F7 binary, F8 overlay, F9 freeze, Ctrl+F6 caster stage.";
         System.Console.WriteLine(message);

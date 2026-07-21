@@ -99,7 +99,7 @@ public sealed partial class SystemSpaceState
                         mod.TextureInstance, _stationShadowMap!, mod.Transform,
                         ctx.StationLocalToLightView, ctx.MinXY, ctx.InvSize, ctx.Near,
                         ctx.DepthSpan,
-                        new Vector2(1f / StationShadowMapSize, 1f / StationShadowMapSize),
+                        new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
                         StationShadowCorrectionLimit, shadowBiasDepth,
                         _stationShadowBinaryView, _stationShadowDeltaView);
                 }
@@ -160,7 +160,7 @@ public sealed partial class SystemSpaceState
                         SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
                         _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
                         ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
-                        new Vector2(1f / StationShadowMapSize, 1f / StationShadowMapSize),
+                        new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
                         StationShadowCorrectionLimit, shadowBiasDepth,
                         _stationShadowBinaryView, _stationShadowDeltaView);
                 }
