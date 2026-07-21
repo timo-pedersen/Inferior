@@ -58,6 +58,10 @@ float    ShadowCorrectionLimit = 0.01;
 float    ShadowBiasDepth;
 float    ShadowBinaryView = 0.0;
 float    ShadowDeltaView = 0.0;
+// Step 2 (Brief E1): manual PCF kernel radius in whole texels — 0 = single tap (Off),
+// 1 = 3x3, 2 = 5x5. No HLSL initializer, same policy as the other shadow parameters
+// above; set explicitly every shadowed draw call (SystemSpaceState.Stations.cs).
+float    ShadowKernelRadius;
 
 texture ShadowMap;
 sampler ShadowSampler = sampler_state
@@ -113,28 +117,31 @@ VertexOutput VS(VertexInput input)
     return o;
 }
 
-// Returns true if stationPos maps inside the shadow map's XY and depth range, and
-// outputs the receiver-minus-stored depth delta in METRES (after the same
-// receiver-plane correction, evaluated at the sampled texel centre) — positive means the
-// receiver is behind the stored (occluding) depth, i.e. in shadow; negative means in
-// front, i.e. lit. Shared by StationShadowTerm and the delta diagnostic view (F6) so both
-// read the exact same comparison — the whole point of the diagnostic is to show what the
-// real shadow term is actually doing, not a second, possibly-diverging computation.
-bool StationShadowDeltaMetres(float3 stationPos, float3 stationNormal, out float deltaMetres)
+// Shared projection/correction setup: station-space position/normal to the light-space
+// UV, the texel-snapped sample point, and the receiver-plane-corrected receiver depth
+// (still in normalized depth units, bias NOT yet applied). Returns false if stationPos
+// falls outside the map's XY or depth range. Both StationShadowDeltaMetres (single-tap
+// delta diagnostic, F6) and StationShadowTerm (production term, PCF-wrapped) read this
+// exact same setup — a debug capture must describe the real comparison, not a second,
+// possibly-diverging one. The correction itself stays single-tap even under PCF (Step 2
+// non-goal: no per-tap slope correction, see LitSurface.fx history/brief) — only the
+// stored-depth fetch varies per tap.
+bool StationShadowSetup(float3 stationPos, float3 stationNormal, out float2 texel, out float receiverDepth)
 {
     float4 lightView = mul(float4(stationPos, 1.0), StationLocalToLightView);
     float2 uv = (lightView.xy - ShadowMinXY) * ShadowInvSize;
     uv.y = 1.0 - uv.y;
 
-    deltaMetres = 0.0;
+    texel = float2(0.0, 0.0);
+    receiverDepth = 0.0;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
         return false;
 
-    float receiverDepth = (-lightView.z - ShadowNear) / ShadowDepthSpan;
+    receiverDepth = (-lightView.z - ShadowNear) / ShadowDepthSpan;
     if (receiverDepth < 0.0 || receiverDepth > 1.0)
         return false;
 
-    float2 texel = floor(uv / ShadowTexelSize) * ShadowTexelSize + ShadowTexelSize * 0.5;
+    texel = floor(uv / ShadowTexelSize) * ShadowTexelSize + ShadowTexelSize * 0.5;
     float2 deltaUv = texel - uv;
 
     float3 lightNormal = normalize(mul(stationNormal, (float3x3)StationLocalToLightView));
@@ -149,8 +156,29 @@ bool StationShadowDeltaMetres(float3 stationPos, float3 stationNormal, out float
         correction = clamp(correction, -ShadowCorrectionLimit, ShadowCorrectionLimit);
         receiverDepth += correction;
     }
+    return true;
+}
 
-    float storedDepth = tex2D(ShadowSampler, texel).r;
+// Returns true if stationPos maps inside the shadow map's XY and depth range, and
+// outputs the receiver-minus-stored depth delta in METRES (single centre tap) — positive
+// means the receiver is behind the stored (occluding) depth, i.e. in shadow; negative
+// means in front, i.e. lit. Deliberately not PCF-averaged: this is the classification
+// diagnostic (F6 delta view), and Step 2 is explicit that PCF blurs genuine edges, not
+// classification — softening this view would hide the thing it exists to show.
+bool StationShadowDeltaMetres(float3 stationPos, float3 stationNormal, out float deltaMetres)
+{
+    float2 texel;
+    float  receiverDepth;
+    deltaMetres = 0.0;
+    if (!StationShadowSetup(stationPos, stationNormal, texel, receiverDepth))
+        return false;
+
+    // tex2Dlod, not tex2D: ShadowSampler has no mips (Point MipFilter, single level), so
+    // there's no gradient to compute; an explicit LOD 0 says that outright instead of
+    // leaving the compiler to infer it (matters once StationShadowTapLit below puts the
+    // same fetch in a variable-offset loop — tex2D there triggers a "gradient instruction
+    // in a loop" compiler warning even though the map has nothing to take a gradient of).
+    float storedDepth = tex2Dlod(ShadowSampler, float4(texel, 0.0, 0.0)).r;
     // Constant tie-break bias, applied here so the shadow term AND the delta diagnostic
     // agree on exactly the same biased comparison — ShadowBiasDepth is already in
     // normalized depth units (C# divides the metres constant by ShadowDepthSpan), so it
@@ -159,12 +187,47 @@ bool StationShadowDeltaMetres(float3 stationPos, float3 stationNormal, out float
     return true;
 }
 
+// One biased tap: fetch stored depth at `texel` (already texel-centre snapped, optionally
+// offset by whole texels for a PCF neighbour) and compare against the once-computed,
+// already-corrected receiverDepth. Same comparison StationShadowDeltaMetres does for its
+// single centre tap, factored out so the PCF loop below is a literal wrap, not a fork.
+float StationShadowTapLit(float2 texel, float receiverDepth)
+{
+    float storedDepth = tex2Dlod(ShadowSampler, float4(texel, 0.0, 0.0)).r;
+    float delta = (receiverDepth - ShadowBiasDepth - storedDepth) * ShadowDepthSpan;
+    return delta <= 0.0 ? 1.0 : 0.0;
+}
+
+// Production shadow term: 1.0 = fully lit, 0.0 = fully shadowed, in between = PCF
+// penumbra fraction. ShadowKernelRadius selects Off (1x1, byte-identical to pre-Step-2)
+// / 3x3 / 5x5 — every tap reuses the single centre-tap receiverDepth (already bias- and
+// slope-corrected), varying only which stored-depth texel it samples.
 float StationShadowTerm(float3 stationPos, float3 stationNormal)
 {
-    float delta;
-    if (!StationShadowDeltaMetres(stationPos, stationNormal, delta))
+    float2 texel;
+    float  receiverDepth;
+    if (!StationShadowSetup(stationPos, stationNormal, texel, receiverDepth))
         return 1.0;   // outside the map, or beyond its depth range: lit
-    return delta <= 0.0 ? 1.0 : 0.0;
+
+    if (ShadowKernelRadius < 0.5)
+        return StationShadowTapLit(texel, receiverDepth);
+
+    if (ShadowKernelRadius < 1.5)
+    {
+        float lit = 0.0;
+        for (int i = -1; i <= 1; i++)
+        for (int j = -1; j <= 1; j++)
+            lit += StationShadowTapLit(texel + float2(i, j) * ShadowTexelSize, receiverDepth);
+        return lit / 9.0;
+    }
+
+    {
+        float lit = 0.0;
+        for (int i = -2; i <= 2; i++)
+        for (int j = -2; j <= 2; j++)
+            lit += StationShadowTapLit(texel + float2(i, j) * ShadowTexelSize, receiverDepth);
+        return lit / 25.0;
+    }
 }
 
 // Colour ramp for the delta diagnostic view: green = 0, red = positive (in shadow),

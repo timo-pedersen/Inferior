@@ -41,6 +41,36 @@ public sealed partial class SystemSpaceState
         _ => StationShadowMapSizeStandard,
     };
 
+    // Step 2 (Brief E1): manual PCF kernel, toggled at runtime (Shift+F6) so Timo can A/B
+    // blur off/on and tune tap count by eye at the dock. Radius is in whole texels; the
+    // shader wraps its existing single-tap comparison in a loop over this many neighbours
+    // each side, it doesn't fork the comparison (see LitSurface.fx StationShadowTerm).
+    // Default is 5x5 — Timo's in-engine gate picked it over 3x3/Off at both a typical and
+    // a mega station; still toggleable for further A/B, not hardcoded away.
+    private enum ShadowKernelMode { Off, Kernel3x3, Kernel5x5 }
+    private ShadowKernelMode _shadowKernelMode = ShadowKernelMode.Kernel5x5;
+
+    private static int ShadowKernelRadiusFor(ShadowKernelMode mode) => mode switch
+    {
+        ShadowKernelMode.Kernel3x3 => 1,
+        ShadowKernelMode.Kernel5x5 => 2,
+        _ => 0,
+    };
+
+    private static string ShadowKernelLabel(ShadowKernelMode mode) => mode switch
+    {
+        ShadowKernelMode.Kernel3x3 => "3x3",
+        ShadowKernelMode.Kernel5x5 => "5x5",
+        _ => "Off (1x1)",
+    };
+
+    // Penumbra width is texel-size x kernel radius (Brief E1 Step 2) — texel size varies
+    // by station resolution class (Step 1), so the same kernel reads as a tighter band on
+    // a mega station's 16384^2 map than on a standard 8192^2 one. World-space, not tap
+    // count, is what actually describes the visible penumbra.
+    private static float ShadowPenumbraWidthMetres(float mapWidthMetres, int resolution, ShadowKernelMode mode) =>
+        (mapWidthMetres / resolution) * ShadowKernelRadiusFor(mode);
+
     private Effect? _shadowCasterEffect;
     private RenderTarget2D? _stationShadowMap;
     // Resolution of the currently-live _stationShadowMap. Only reallocated when a newly
@@ -292,6 +322,17 @@ public sealed partial class SystemSpaceState
         bool prevCtrlDown = _prevKeys.IsKeyDown(Keys.LeftControl) || _prevKeys.IsKeyDown(Keys.RightControl);
         bool ctrlF6 = ctrlDown && keys.IsKeyDown(Keys.F6) && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F6));
 
+        // Shift+F6 checked the same way for Step 2's kernel toggle: every F-key (1-12) is
+        // already bound at least once elsewhere in this codebase (plain and/or Ctrl+),
+        // and F1 already has a Shift+ variant (CockpitLightDebugInput) — so a third
+        // modifier on the existing shadow-debug key (F6) rather than hunting for an
+        // entirely free key, keeping the whole family (delta/caster-stage/kernel) on one
+        // physical key. Grep of LeftShift/RightShift found no existing Shift+F6 binding.
+        bool shiftDown = keys.IsKeyDown(Keys.LeftShift) || keys.IsKeyDown(Keys.RightShift);
+        bool prevShiftDown = _prevKeys.IsKeyDown(Keys.LeftShift) || _prevKeys.IsKeyDown(Keys.RightShift);
+        bool shiftF6 = !ctrlDown && shiftDown && keys.IsKeyDown(Keys.F6)
+            && !(prevShiftDown && _prevKeys.IsKeyDown(Keys.F6));
+
         if (ctrlF6)
         {
             _casterStage = (CasterStage)(((int)_casterStage + 1) % 5);
@@ -300,7 +341,23 @@ public sealed partial class SystemSpaceState
                 new SystemMessage($"Station shadow caster stage: {_casterStage}", SystemMessagePriority.NB));
         }
 
-        if (f6 && !ctrlDown)
+        if (shiftF6)
+        {
+            _shadowKernelMode = (ShadowKernelMode)(((int)_shadowKernelMode + 1) % 3);
+            string label = ShadowKernelLabel(_shadowKernelMode);
+            string penumbraNote = "";
+            if (_stationShadowContext != null)
+            {
+                float width = 1f / _stationShadowContext.InvSize.X;
+                float penumbraMetres = ShadowPenumbraWidthMetres(
+                    width, _stationShadowContext.Resolution, _shadowKernelMode);
+                penumbraNote = $" (penumbra ~{penumbraMetres * 1000f:F1} mm)";
+            }
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage($"Station shadow kernel: {label}{penumbraNote}", SystemMessagePriority.NB));
+        }
+
+        if (f6 && !ctrlDown && !shiftDown)
         {
             _stationShadowDeltaView = !_stationShadowDeltaView;
             DataBus.System.Publish(Topics.System.All,
@@ -601,11 +658,13 @@ public sealed partial class SystemSpaceState
         float height = 1f / ctx.InvSize.Y;
         float texelMetres = width / ctx.Resolution;
         string className = ctx.Resolution >= StationShadowMapSizeMega ? "Mega" : "Standard";
+        float penumbraMetres = ShadowPenumbraWidthMetres(width, ctx.Resolution, _shadowKernelMode);
         string message =
             $"[{label}] {ctx.Station.Name}: extent {ctx.StationExtentMetres:F1} m -> {className} class -> " +
             $"{ctx.Resolution}^2 ({texelMetres * 1000f:F1} mm/texel), map {width:F1} x {height:F1} m, " +
-            $"depth {ctx.DepthSpan:F1} m, {ctx.BuildMilliseconds:F2} ms. " +
-            "Keys F6 delta, F7 binary, F8 overlay, F9 freeze, Ctrl+F6 caster stage.";
+            $"depth {ctx.DepthSpan:F1} m, kernel {ShadowKernelLabel(_shadowKernelMode)} " +
+            $"(penumbra {penumbraMetres * 1000f:F1} mm), {ctx.BuildMilliseconds:F2} ms. " +
+            "Keys F6 delta, F7 binary, F8 overlay, F9 freeze, Ctrl+F6 caster stage, Shift+F6 kernel.";
         System.Console.WriteLine(message);
         DataBus.System.Publish(Topics.System.All, new SystemMessage(message, SystemMessagePriority.NB));
     }

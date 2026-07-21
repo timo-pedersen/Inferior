@@ -101,7 +101,8 @@ public sealed partial class SystemSpaceState
                         ctx.DepthSpan,
                         new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
                         StationShadowCorrectionLimit, shadowBiasDepth,
-                        _stationShadowBinaryView, _stationShadowDeltaView);
+                        _stationShadowBinaryView, _stationShadowDeltaView,
+                        ShadowKernelRadiusFor(_shadowKernelMode));
                 }
                 else
                 {
@@ -162,7 +163,8 @@ public sealed partial class SystemSpaceState
                         ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
                         new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
                         StationShadowCorrectionLimit, shadowBiasDepth,
-                        _stationShadowBinaryView, _stationShadowDeltaView);
+                        _stationShadowBinaryView, _stationShadowDeltaView,
+                        ShadowKernelRadiusFor(_shadowKernelMode));
                 }
                 else
                 {

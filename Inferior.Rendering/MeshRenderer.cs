@@ -91,7 +91,7 @@ public sealed class MeshRenderer : IDisposable
         Vector2 shadowMinXY, Vector2 shadowInvSize,
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
         float shadowCorrectionLimit, float shadowBiasDepth,
-        bool binaryShadowView, bool deltaShadowView)
+        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
@@ -105,7 +105,8 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Texture"].SetValue(texture);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
-            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView);
+            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
+            shadowKernelRadius);
         Draw(vb, ib, fx);
     }
 
@@ -140,7 +141,7 @@ public sealed class MeshRenderer : IDisposable
         Vector2 shadowMinXY, Vector2 shadowInvSize,
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
         float shadowCorrectionLimit, float shadowBiasDepth,
-        bool binaryShadowView, bool deltaShadowView)
+        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["BakedColorLitShadowed"];
@@ -153,7 +154,8 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Texture"].SetValue(texture);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
-            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView);
+            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
+            shadowKernelRadius);
         Draw(vb, ib, fx);
     }
 
@@ -191,7 +193,7 @@ public sealed class MeshRenderer : IDisposable
         Vector2 shadowMinXY, Vector2 shadowInvSize,
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
         float shadowCorrectionLimit, float shadowBiasDepth,
-        bool binaryShadowView, bool deltaShadowView)
+        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius)
     {
         fx.Parameters["ShadowMap"].SetValue(shadowMap);
         fx.Parameters["ModuleToStationLocal"].SetValue(moduleToStationLocal);
@@ -208,5 +210,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["ShadowBiasDepth"].SetValue(shadowBiasDepth);
         fx.Parameters["ShadowBinaryView"].SetValue(binaryShadowView ? 1.0f : 0.0f);
         fx.Parameters["ShadowDeltaView"].SetValue(deltaShadowView ? 1.0f : 0.0f);
+        // Step 2 (Brief E1): 0 = Off (1x1, byte-identical to Step 1), 1 = 3x3, 2 = 5x5.
+        fx.Parameters["ShadowKernelRadius"].SetValue((float)shadowKernelRadius);
     }
 }
