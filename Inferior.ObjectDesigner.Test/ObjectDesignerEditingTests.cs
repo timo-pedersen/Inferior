@@ -6,7 +6,7 @@ using Inferior.ObjectDesigner.Editing;
 using Microsoft.Xna.Framework;
 using Xunit;
 
-namespace Inferior.Game.Test;
+namespace Inferior.ObjectDesigner.Test;
 
 public sealed class ObjectDesignerEditingTests
 {
@@ -31,6 +31,27 @@ public sealed class ObjectDesignerEditingTests
         session.Redo();
         Assert.True(session.IsDirty);
         Assert.Equal(after, session.GetVertexPosition(vertexId));
+    }
+
+    [Fact]
+    public void Move_vertices_undoes_as_one_history_entry()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        string a = session.Document.Hull.VisualGeometry.Vertices[0].Id;
+        string b = session.Document.Hull.VisualGeometry.Vertices[1].Id;
+        Dictionary<string, DVec3> before = new(StringComparer.Ordinal)
+        {
+            [a] = session.GetVertexPosition(a),
+            [b] = session.GetVertexPosition(b),
+        };
+        Dictionary<string, DVec3> after = before.ToDictionary(pair => pair.Key, pair => pair.Value + DVec3.UnitX, StringComparer.Ordinal);
+
+        session.Execute(new MoveVerticesCommand(before, after));
+        session.Undo();
+
+        Assert.Equal(before[a], session.GetVertexPosition(a));
+        Assert.Equal(before[b], session.GetVertexPosition(b));
     }
 
     [Fact]
@@ -61,13 +82,31 @@ public sealed class ObjectDesignerEditingTests
     }
 
     [Fact]
-    public void Save_blocks_when_validation_has_errors()
+    public void Save_blocks_without_throwing_when_validation_has_errors()
     {
         using TempAsset asset = TempAsset.FromBeren();
         ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
         session.Document.Hull.VisualGeometry.Faces[0].VertexIds[0] = "missing";
+        session.Rebuild();
 
-        Assert.Throws<InvalidOperationException>(() => session.Save());
+        Assert.False(session.Save());
+        Assert.True(session.HasValidationErrors);
+        Assert.True(session.IsPreviewStale);
+    }
+
+    [Fact]
+    public void Selection_tracks_multiple_vertices_and_active_vertex()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        string a = session.Document.Hull.VisualGeometry.Vertices[0].Id;
+        string b = session.Document.Hull.VisualGeometry.Vertices[1].Id;
+
+        session.SelectVertex(a, extend: false);
+        session.SelectVertex(b, extend: true);
+
+        Assert.Equal([a, b], session.SelectedVertexIds);
+        Assert.Equal(b, session.ActiveVertexId);
     }
 
     [Theory]

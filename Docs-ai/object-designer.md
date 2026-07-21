@@ -1,6 +1,6 @@
 # Inferior Object Designer
 
-> Active implementation reference for the first Beren JSON authoring slice.
+> Active implementation reference for the Beren JSON authoring/object-designer slice.
 
 ## Purpose
 
@@ -13,7 +13,7 @@ Assets/Ships/beren.ship.json
     -> shared JSON load and validation
     -> runtime HullDefinition
     -> existing semantic hull renderer
-    -> orthographic vertex edit
+    -> orthographic vertex edits
     -> command undo/redo
     -> deterministic save/reload
     -> game loads the same asset
@@ -27,7 +27,7 @@ The authoring layer contains DTOs, JSON serializer options, asset path probing, 
 
 Editor state stays in `Inferior.ObjectDesigner`:
 
-- selected vertex;
+- selected vertices and active vertex;
 - projection mode;
 - camera state;
 - command history;
@@ -97,16 +97,21 @@ Validation ownership:
 
 - `ShipAuthoringValidator` handles schema, object kind, duplicate document IDs, cargo-door references, default cockpit references and default engine references.
 - `HullDefinition.Validate()` and `SemanticHullGeometry.Validate()` remain the runtime semantic validation path for hull geometry, cockpit mounts, attachment ports, closed hull checks and triangulation prerequisites.
+- `AuthoringDiagnostic` now carries stable `Code`, `Summary`, optional details, measured/tolerance values, and related entity IDs in addition to the legacy message/entity fields.
 - Invalid authoring assets fail load with actionable diagnostics.
-- The designer permits invalid in-memory edits but blocks save while errors exist.
+- The designer permits invalid in-memory edits, keeps the last renderable preview hull visible, and blocks save while errors exist without throwing through the UI.
 
 ## Editing
 
-Current editable operation:
+Current editable operations:
 
-- select one existing semantic vertex in the active orthographic projection;
-- move it by mouse drag;
-- edit exact X/Y/Z values through text boxes;
+- click-select or Shift-toggle semantic vertices in the active orthographic projection;
+- drag a single selected vertex or the current multi-selection;
+- marquee-select vertices by dragging empty space;
+- clear selection with Escape;
+- edit exact X/Y/Z values for the active vertex through text boxes;
+- constrain drag movement to view plane, X/Y/Z axis, or the active incident face plane;
+- inspect active-vertex incident face IDs in the properties panel;
 - rebuild validation and GPU hull mesh immediately;
 - save/reload the JSON asset.
 
@@ -116,11 +121,13 @@ Projection mapping:
 - side edits Z/Y;
 - front edits X/Y;
 - the hidden coordinate is preserved.
+- mouse wheel zooms the 2D editor;
+- middle mouse pans the 2D editor.
 
 Command history:
 
 - `IEditCommand` with `Execute`, `Undo`, and `Description`;
-- vertex drag commits one `MoveVertexCommand` on mouse release;
+- vertex drag commits one `MoveVertexCommand` or `MoveVerticesCommand` on mouse release;
 - numeric coordinate entry also uses `MoveVertexCommand`;
 - redo is cleared by a new command after undo;
 - save marks the current command position clean;
@@ -132,10 +139,22 @@ The tool uses MonoGame and `Inferior.UI`.
 
 Current layout:
 
-- toolbar;
-- perspective viewport;
-- active orthographic viewport;
-- right-side hierarchy/properties/validation panel.
+- top menu/toolbar;
+- active 2D editor on the left;
+- 3D preview on the right;
+- collapsible properties/diagnostics below the 3D preview;
+- full-width status bar.
+
+The editor panes are UI-owned `DesignerSurfaceControl`s. Drawing, hit testing, fit-to-view and clipping all use the arranged surface content bounds. The 3D preview renders into a pane-sized render target and is blitted into the UI surface instead of assigning a per-pane `GraphicsDevice.Viewport`.
+
+3D preview controls:
+
+- left drag orbits;
+- middle drag pans the target;
+- right drag rotates the editor light;
+- wheel zooms.
+
+The UI foundation now includes generic `OverflowMode`, `Thickness`, `GridPanel`, `StackPanel`, `CollapsiblePanel`, `ScrollPanel`, `TextBlock`, exclusive toggle grouping, and simple menu/popup controls.
 
 Rendering reuses:
 
@@ -160,7 +179,6 @@ Deferred by this slice:
 - object cloning or new objects;
 - file browser;
 - multiple simultaneous documents;
-- UI library split;
 - final universal object schema.
 
 Visual equivalence and usability remain pending Timo's in-engine/manual confirmation.

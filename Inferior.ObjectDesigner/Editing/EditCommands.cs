@@ -19,6 +19,23 @@ public sealed record MoveVertexCommand(
     public void Undo(ObjectDesignerSession session) => session.SetVertexPosition(VertexId, Before);
 }
 
+public sealed record MoveVerticesCommand(
+    IReadOnlyDictionary<string, DVec3> Before,
+    IReadOnlyDictionary<string, DVec3> After,
+    string Description = "Move vertices") : IEditCommand
+{
+    public void Execute(ObjectDesignerSession session) => Apply(session, After);
+    public void Undo(ObjectDesignerSession session) => Apply(session, Before);
+
+    private static void Apply(ObjectDesignerSession session, IReadOnlyDictionary<string, DVec3> positions)
+    {
+        foreach ((string vertexId, DVec3 position) in positions)
+            session.SetVertexPosition(vertexId, position, rebuild: false);
+        session.RecomputeFaceNormals();
+        session.Rebuild();
+    }
+}
+
 public sealed class EditHistory
 {
     private readonly List<IEditCommand> _commands = [];

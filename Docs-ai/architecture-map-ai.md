@@ -223,8 +223,10 @@ Self-contained UI framework. Depends on Core only.
 - `Control.cs` — base class for all UI controls: hierarchy, layout, input routing, theme support.
 - `FontHelper.cs` — safe font wrappers, sanitizing text before measuring/drawing to prevent crashes.
 - `InputState.cs` — immutable per-frame input snapshot (mouse, keyboard, typed chars) with edge detection.
+- `OverflowMode.cs` — overflow behavior enum for visible vs clipped control contents.
 - `SpritePrimitives.cs` — shared static `DrawText`/`DrawRect`/`DrawRectBorder` helpers.
 - `TextFilters.cs` — profanity filter, case-preserving.
+- `Thickness.cs` — immutable four-sided layout spacing value.
 - `Theme.cs` — visual style config (colours, fonts, geometry); `InferiorDark`/`Light` presets.
 - `UIManager.cs` — root UI system: top-level controls, focus, hover, input routing, draw order.
 - `UIRenderer.cs` — centralized drawing backend: primitives, buttons, windows, textboxes, clipping.
@@ -233,14 +235,20 @@ Self-contained UI framework. Depends on Core only.
 
 - `AnalogueNeedle.cs` — 180° sweep gauge, self-subscribes to DataBus via `Topic`.
 - `Button.cs` — clickable button, Space/Enter activation, `Clicked` event.
+- `CollapsiblePanel.cs` — titled panel that can hide/show arranged child content.
 - `EdgePanelHost.cs` — sliding edge-mounted panel with tab strip (left/right/top/bottom).
+- `GridPanel.cs` — fixed/auto/star row-column layout container.
 - `InstrumentMeter.cs` — horizontal bar meter, animated smoothing, self-subscribes via `Topic`.
 - `Label.cs` — non-interactive text label, left/centre/right alignment.
 - `LedIndicator.cs` — standalone LED lamp: colour ranges, blinking, easing brightness transitions.
+- `MenuControls.cs` — simple menu bar, menu buttons, popup menus, and menu items.
 - `Panel.cs` — simple container with optional background/border and content padding.
+- `ScrollPanel.cs` — clipped vertical scrolling container.
+- `StackPanel.cs` — horizontal/vertical stack layout container.
 - `SystemConsole.cs` — scrolling message log, priority-coloured, word-wrap/clip line-break modes.
+- `TextBlock.cs` — wrapped multiline read-only text control.
 - `TextBox.cs` — full text input: selection, multiline, clipboard, scrolling, swear filtering.
-- `ToggleButton.cs` — two-state button with pending/confirmed indicator for async feedback.
+- `ToggleButton.cs` — two-state button with pending/confirmed indicator for async feedback; includes `ExclusiveButtonGroup`.
 - `Window.cs` — draggable titled window with close button.
 
 **Controls.Cockpit/**
@@ -260,15 +268,28 @@ Self-contained UI framework. Depends on Core only.
 Standalone MonoGame engineering tool for versioned loose object/ship authoring. Depends on Core, Gameplay, Rendering, UI. Copies the game-built Content output and the loose Beren JSON asset into its output directory.
 
 - `Program.cs` — entry point, runs `ObjectDesignerGame`.
-- `ObjectDesignerGame.cs` — Beren editor shell: perspective preview, active orthographic projection, vertex pick/drag, numeric coordinate edits, save/reload, validation panel, and reuse of `ShipMeshRenderer`.
+- `DesignerSurfaceControl.cs` — UI-owned 2D/3D editor surface bounds and clipping container.
+- `ObjectDesignerGame.cs` — Beren editor shell: menu/toolbar, 3D render-target preview, active orthographic projection, multi-select vertex pick/drag/marquee/pan/zoom, numeric coordinate edits, save/reload, diagnostics/status panels, and reuse of `ShipMeshRenderer`.
 - `Content/Content.mgcb` — reference content manifest retained for source clarity; the project currently copies built game content instead of invoking a second content build.
 
 **Editing/**
 
 - `ProjectionKind.cs` — top/side/front orthographic projection enum.
-- `OrthographicProjection.cs` — screen/model projection math and axis labels.
-- `EditCommands.cs` — `IEditCommand`, vertex move command, and undo/redo clean-state tracking.
-- `ObjectDesignerSession.cs` — loaded document/session owner: selected vertex, rebuild, validation, save/reload, and stable-ID vertex mutation.
+- `OrthographicProjection.cs` — screen/model projection math, projection axes, and axis labels.
+- `EditCommands.cs` — `IEditCommand`, single/multi-vertex move commands, and undo/redo clean-state tracking.
+- `ObjectDesignerSession.cs` — loaded document/session owner: multi-selection, last-valid preview hull, rebuild, validation, save/reload, incident-face lookup, and stable-ID vertex mutation.
+
+## Inferior.UI.Test
+
+- `LayoutControlTests.cs` — xUnit coverage for stack/grid arrangement, clipping hit tests, and collapsed panel input behavior.
+
+## Inferior.ObjectDesigner.Test
+
+- `ObjectDesignerEditingTests.cs` — xUnit coverage for designer command history, multi-selection, save blocking, stable IDs, and projection math.
+
+## Inferior.Gameplay.Test
+
+- `BerenAuthoringJsonTests.cs` — xUnit coverage for Beren authoring JSON load/rejection/round-trip, structured diagnostics, and semantic triangulation.
 
 ---
 

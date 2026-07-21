@@ -36,25 +36,35 @@ public sealed class ObjectDesignerGame : Game
     private bool _showCockpit = true;
     private bool _showBounds = true;
     private bool _showCargo = true;
+    private EditingConstraintMode _constraintMode = EditingConstraintMode.ViewPlane;
     private float _yaw = -0.6f;
     private float _pitch = -0.25f;
     private float _distance = 42f;
+    private Vector3 _previewTarget = Vector3.Zero;
     private double _time;
     private string _status = "";
 
     private bool _draggingVertex;
-    private string? _dragVertexId;
-    private DVec3 _dragStartPosition;
+    private IReadOnlyDictionary<string, DVec3> _dragStartPositions = new Dictionary<string, DVec3>();
     private Point _dragStartMouse;
+    private bool _panningOrtho;
+    private Point _selectionStartMouse;
+    private bool _rectangleSelecting;
 
-    private Panel _rightPanel = null!;
+    private GridPanel _rootLayout = null!;
+    private DesignerSurfaceControl _perspectiveSurface = null!;
+    private DesignerSurfaceControl _orthoSurface = null!;
+    private Panel _propertiesPanel = null!;
+    private TextBlock _validationBlock = null!;
     private TextBox _xBox = null!;
     private TextBox _yBox = null!;
     private TextBox _zBox = null!;
     private Label _titleLabel = null!;
     private Label _selectionLabel = null!;
-    private Label _validationLabel = null!;
+    private Label _statusLabel = null!;
     private bool _updatingTextBoxes;
+    private RenderTarget2D? _previewTargetTexture;
+    private static readonly RasterizerState ScissorLineState = new() { ScissorTestEnable = true, CullMode = CullMode.None };
 
     public ObjectDesignerGame()
     {
@@ -128,12 +138,6 @@ public sealed class ObjectDesignerGame : Game
         if (input.IsKeyPressed(Keys.F4))
             _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal;
 
-        if (input.RightHeld && PerspectiveViewport.Contains(input.MousePosition))
-        {
-            _yaw -= (Mouse.GetState().X - _previousMouse.X) * 0.01f;
-            _pitch = MathHelper.Clamp(_pitch - (Mouse.GetState().Y - _previousMouse.Y) * 0.01f, -1.35f, 1.35f);
-        }
-
         if (input.ScrollDelta != 0)
         {
             if (PerspectiveViewport.Contains(input.MousePosition))
@@ -142,8 +146,10 @@ public sealed class ObjectDesignerGame : Game
                 _projection.PixelsPerMeter = MathHelper.Clamp(_projection.PixelsPerMeter + input.ScrollDelta * 0.02f, 4f, 120f);
         }
 
+        _rootLayout.Bounds = new Rectangle(0, 0, GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height);
         _ui.Animate(dt);
         _ui.Update(dt, input);
+        HandlePerspectiveInput(input);
         HandleOrthographicInput(input);
         RefreshDynamicLabels();
 
@@ -161,30 +167,37 @@ public sealed class ObjectDesignerGame : Game
 
     private void DrawPerspective()
     {
-        Viewport old = GraphicsDevice.Viewport;
-        GraphicsDevice.Viewport = new Viewport(PerspectiveViewport);
+        Rectangle viewport = PerspectiveViewport;
+        if (viewport.Width <= 2 || viewport.Height <= 2)
+            return;
+        EnsurePreviewTarget(viewport.Width, viewport.Height);
+        RenderTarget2D target = _previewTargetTexture!;
+        RenderTargetBinding[] oldTargets = GraphicsDevice.GetRenderTargets();
+        GraphicsDevice.SetRenderTarget(target);
+        GraphicsDevice.Clear(new Color(8, 10, 11));
         Matrix rotation = Matrix.CreateRotationX(_pitch) * Matrix.CreateRotationY(_yaw);
-        Vector3 cameraPosition = Vector3.Transform(new Vector3(0, 4, _distance), rotation);
-        Matrix view = Matrix.CreateLookAt(cameraPosition, Vector3.Zero, Vector3.UnitY);
+        Vector3 cameraPosition = _previewTarget + Vector3.Transform(new Vector3(0, 4, _distance), rotation);
+        Matrix view = Matrix.CreateLookAt(cameraPosition, _previewTarget, Vector3.UnitY);
         Matrix projection = Matrix.CreatePerspectiveFieldOfView(
             MathHelper.ToRadians(55f),
-            Math.Max(0.1f, PerspectiveViewport.Width / (float)PerspectiveViewport.Height),
+            Math.Max(0.1f, viewport.Width / (float)viewport.Height),
             0.05f,
             400f);
         var camera = new Camera3D(DVec3.Zero, 1f);
         camera.SetPose(DVec3.Zero, Quaternion.Identity);
 
+        HullDefinition previewHull = _session.PreviewHullDefinition;
         IReadOnlyList<EngineMountPresentationSnapshot>? engines = _showEngines
-            ? BuildEngineMountSnapshots(_session.HullDefinition)
+            ? BuildEngineMountSnapshots(previewHull)
             : null;
         CockpitPresentationSnapshot? cockpit = _showCockpit
-            ? BuildCockpitSnapshot(_session.HullDefinition)
+            ? BuildCockpitSnapshot(previewHull)
             : null;
         _shipRenderer.Draw(
             camera,
             view,
             projection,
-            _session.HullDefinition.HullTypeId,
+            previewHull.HullTypeId,
             DVec3.Zero,
             Quaternion.Identity,
             DetailLevel.Full,
@@ -193,17 +206,37 @@ public sealed class ObjectDesignerGame : Game
             engineModuleDebug: false,
             engineVisualTimeSeconds: _time,
             cockpit,
-            _session.HullDefinition,
+            previewHull,
             renderScaleOverride: 1.0f);
 
         if (_showCargo)
             DrawCargoPreview(view, projection);
-        GraphicsDevice.Viewport = old;
+        GraphicsDevice.SetRenderTargets(oldTargets);
+
+        _spriteBatch.Begin(blendState: BlendState.AlphaBlend, samplerState: SamplerState.PointClamp);
+        _spriteBatch.Draw(target, viewport, Color.White);
+        if (_session.IsPreviewStale)
+            _spriteBatch.DrawString(_font, "Preview using last valid hull", new Vector2(viewport.X + 10, viewport.Y + 28), new Color(230, 190, 80), 0f, Vector2.Zero, 0.78f, SpriteEffects.None, 0f);
+        _spriteBatch.End();
+    }
+
+    private void EnsurePreviewTarget(int width, int height)
+    {
+        if (_previewTargetTexture is not null
+            && _previewTargetTexture.Width == width
+            && _previewTargetTexture.Height == height)
+        {
+            return;
+        }
+        _previewTargetTexture?.Dispose();
+        _previewTargetTexture = new RenderTarget2D(GraphicsDevice, width, height, false, SurfaceFormat.Color, DepthFormat.Depth24);
     }
 
     private void DrawOrthographic()
     {
         Rectangle vp = OrthoViewport;
+        if (vp.Width <= 2 || vp.Height <= 2)
+            return;
         var lines = new List<VertexPositionColor>();
         AddGrid(lines, vp);
         if (_showEdges)
@@ -220,59 +253,142 @@ public sealed class ObjectDesignerGame : Game
             0,
             0,
             1);
+        Rectangle oldScissor = GraphicsDevice.ScissorRectangle;
+        RasterizerState oldRasterizer = GraphicsDevice.RasterizerState;
+        GraphicsDevice.ScissorRectangle = vp;
+        GraphicsDevice.RasterizerState = ScissorLineState;
         foreach (EffectPass pass in _lineEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
             if (lines.Count > 0)
                 GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
         }
+        GraphicsDevice.ScissorRectangle = oldScissor;
+        GraphicsDevice.RasterizerState = oldRasterizer;
 
         _spriteBatch.Begin(blendState: BlendState.AlphaBlend);
-        _spriteBatch.DrawString(_font, $"{_projection.Kind} | H: {_projection.HorizontalAxisLabel} | V: {_projection.VerticalAxisLabel}", new Vector2(vp.X + 8, vp.Y + 8), Color.White, 0, Vector2.Zero, 0.85f, SpriteEffects.None, 0);
+        _spriteBatch.DrawString(_font, $"{_projection.Kind} | H: {_projection.HorizontalAxisLabel} | V: {_projection.VerticalAxisLabel}", new Vector2(vp.X + 8, vp.Y + 28), Color.White, 0, Vector2.Zero, 0.85f, SpriteEffects.None, 0);
         if (_showVertices)
             DrawVertexMarkers(vp);
+        if (_rectangleSelecting)
+            DrawSelectionRectangle();
         _spriteBatch.End();
     }
 
     private void HandleOrthographicInput(InputState input)
     {
-        if (_ui.FindAt(input.MousePosition) is not null)
+        Control? hit = _ui.FindAt(input.MousePosition);
+        if (hit is not null && !ReferenceEquals(hit, _orthoSurface))
             return;
         Rectangle viewport = OrthoViewport;
+        if (input.IsKeyPressed(Keys.Escape))
+        {
+            _session.ClearSelection();
+            RefreshUiText();
+            return;
+        }
+
+        if (input.MiddlePressed && viewport.Contains(input.MousePosition))
+        {
+            _panningOrtho = true;
+            return;
+        }
+
+        if (_panningOrtho && input.MiddleReleased)
+            _panningOrtho = false;
+        if (_panningOrtho && input.MouseDelta != Point.Zero)
+        {
+            _projection.PanPixels += input.MouseDelta.ToVector2();
+            return;
+        }
+
         if (input.LeftPressed && viewport.Contains(input.MousePosition))
         {
             string? vertexId = PickVertex(input.MousePosition, viewport);
             if (vertexId is not null)
             {
-                _session.SelectedVertexId = vertexId;
+                if (input.Shift)
+                    _session.ToggleVertexSelection(vertexId);
+                else
+                    _session.SelectVertex(vertexId, extend: false);
                 _draggingVertex = true;
-                _dragVertexId = vertexId;
-                _dragStartPosition = _session.GetVertexPosition(vertexId);
+                _dragStartPositions = _session.SelectedVertexIds.ToDictionary(id => id, id => _session.GetVertexPosition(id), StringComparer.Ordinal);
                 _dragStartMouse = input.MousePosition;
+                RefreshUiText();
+            }
+            else
+            {
+                _rectangleSelecting = true;
+                _selectionStartMouse = input.MousePosition;
+                if (!input.Shift)
+                    _session.ClearSelection();
                 RefreshUiText();
             }
         }
 
-        if (_draggingVertex && input.LeftHeld && _dragVertexId is not null)
+        if (_draggingVertex && input.LeftHeld && _dragStartPositions.Count > 0)
         {
             Vector2 delta = (input.MousePosition - _dragStartMouse).ToVector2();
-            _session.SetVertexPosition(_dragVertexId, _projection.ApplyScreenDelta(_dragStartPosition, delta));
-            _shipRenderer.InvalidateSemanticHull(_session.HullDefinition.HullTypeId);
+            foreach ((string vertexId, DVec3 before) in _dragStartPositions)
+                _session.SetVertexPosition(vertexId, ApplyConstraint(before, _projection.ApplyScreenDelta(before, delta)), rebuild: false);
+            _session.RecomputeFaceNormals();
+            _session.Rebuild();
+            _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
             RefreshUiText();
         }
 
-        if (_draggingVertex && input.LeftReleased && _dragVertexId is not null)
+        if (_draggingVertex && input.LeftReleased && _dragStartPositions.Count > 0)
         {
-            DVec3 after = _session.GetVertexPosition(_dragVertexId);
-            if ((after - _dragStartPosition).Length > 1e-9)
+            Dictionary<string, DVec3> after = _dragStartPositions.Keys.ToDictionary(id => id, id => _session.GetVertexPosition(id), StringComparer.Ordinal);
+            if (after.Any(pair => (pair.Value - _dragStartPositions[pair.Key]).Length > 1e-9))
             {
-                _session.SetVertexPosition(_dragVertexId, _dragStartPosition);
-                _session.Execute(new MoveVertexCommand(_dragVertexId, _dragStartPosition, after, $"Move {_dragVertexId}"));
+                foreach ((string vertexId, DVec3 before) in _dragStartPositions)
+                    _session.SetVertexPosition(vertexId, before, rebuild: false);
+                _session.RecomputeFaceNormals();
+                _session.Rebuild();
+                _session.Execute(new MoveVerticesCommand(_dragStartPositions, after, $"Move {_dragStartPositions.Count} vertices"));
             }
             _draggingVertex = false;
-            _dragVertexId = null;
-            _shipRenderer.InvalidateSemanticHull(_session.HullDefinition.HullTypeId);
+            _dragStartPositions = new Dictionary<string, DVec3>();
+            _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
             RefreshUiText();
+        }
+
+        if (_rectangleSelecting && input.LeftReleased)
+        {
+            Rectangle selection = NormalizedRectangle(_selectionStartMouse, input.MousePosition);
+            IEnumerable<string> selected = _session.HullDefinition.VisualGeometry!.Vertices
+                .Where(vertex => selection.Contains(_projection.Project(vertex.Position, viewport).ToPoint()))
+                .Select(vertex => vertex.Id);
+            _session.SelectVertices(selected, replace: false);
+            _rectangleSelecting = false;
+            RefreshUiText();
+        }
+    }
+
+    private void HandlePerspectiveInput(InputState input)
+    {
+        Control? hit = _ui.FindAt(input.MousePosition);
+        if (hit is not null && !ReferenceEquals(hit, _perspectiveSurface))
+            return;
+        if (!PerspectiveViewport.Contains(input.MousePosition))
+            return;
+
+        Point delta = input.MouseDelta;
+        if (input.LeftHeld && delta != Point.Zero)
+        {
+            _yaw -= delta.X * 0.01f;
+            _pitch = MathHelper.Clamp(_pitch - delta.Y * 0.01f, -1.35f, 1.35f);
+        }
+        else if (input.MiddleHeld && delta != Point.Zero)
+        {
+            _previewTarget += new Vector3(-delta.X * 0.025f, delta.Y * 0.025f, 0f);
+        }
+        else if (input.RightHeld && delta != Point.Zero)
+        {
+            Vector3 light = SceneLighting.SunDirection;
+            Matrix rotate = Matrix.CreateRotationY(-delta.X * 0.01f) * Matrix.CreateRotationX(-delta.Y * 0.01f);
+            SceneLighting.SunDirection = Vector3.Normalize(Vector3.TransformNormal(light, rotate));
         }
     }
 
@@ -297,45 +413,104 @@ public sealed class ObjectDesignerGame : Game
     private void BuildUi()
     {
         _ui.Clear();
-        int width = GraphicsDevice.Viewport.Width;
-        int rightX = width - 330;
-        var toolbar = new Panel(new Rectangle(0, 0, width, 42)) { ContentPadding = 6 };
-        _ui.Add(toolbar);
-        AddButton(toolbar, "Save", 0, TrySave);
-        AddButton(toolbar, "Reload", 74, () => { _session.Reload(); _shipRenderer.InvalidateSemanticHull(_session.HullDefinition.HullTypeId); RefreshUiText(); });
-        AddButton(toolbar, "Undo", 160, () => { _session.Undo(); _shipRenderer.InvalidateSemanticHull(_session.HullDefinition.HullTypeId); RefreshUiText(); });
-        AddButton(toolbar, "Redo", 232, () => { _session.Redo(); _shipRenderer.InvalidateSemanticHull(_session.HullDefinition.HullTypeId); RefreshUiText(); });
-        AddButton(toolbar, "Role", 304, () => _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
-        AddButton(toolbar, "Top", 376, () => _projection.Kind = ProjectionKind.Top);
-        AddButton(toolbar, "Side", 432, () => _projection.Kind = ProjectionKind.Side);
-        AddButton(toolbar, "Front", 496, () => _projection.Kind = ProjectionKind.Front);
+        _rootLayout = new GridPanel
+        {
+            Bounds = new Rectangle(0, 0, GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height),
+            ContentPadding = 6,
+            DrawBackground = true,
+            Overflow = OverflowMode.Clip,
+        };
+        _rootLayout.Columns.Add(GridLength.Star());
+        _rootLayout.Columns.Add(GridLength.Fixed(360));
+        _rootLayout.Rows.Add(GridLength.Fixed(36));
+        _rootLayout.Rows.Add(GridLength.Star());
+        _rootLayout.Rows.Add(GridLength.Fixed(30));
+        _ui.Add(_rootLayout);
 
-        _rightPanel = new Panel(new Rectangle(rightX, 42, 330, GraphicsDevice.Viewport.Height - 42)) { ContentPadding = 10 };
-        _ui.Add(_rightPanel);
-        _titleLabel = new Label("", new Rectangle(0, 0, 300, 24));
-        _selectionLabel = new Label("", new Rectangle(0, 72, 300, 42)) { FontScale = 0.78f };
-        _validationLabel = new Label("", new Rectangle(0, 250, 300, 430)) { FontScale = 0.72f };
-        _rightPanel.Add(_titleLabel);
-        _rightPanel.Add(new Label("Hierarchy", new Rectangle(0, 34, 300, 22)) { TextColor = new Color(170, 196, 204) });
-        _rightPanel.Add(new Label("Beren / semantic vertices", new Rectangle(0, 54, 300, 20)) { FontScale = 0.75f });
-        _rightPanel.Add(_selectionLabel);
-        _rightPanel.Add(new Label("X", new Rectangle(0, 125, 20, 26)));
-        _rightPanel.Add(new Label("Y", new Rectangle(0, 158, 20, 26)));
-        _rightPanel.Add(new Label("Z", new Rectangle(0, 191, 20, 26)));
-        _xBox = CoordinateBox(24, 122);
-        _yBox = CoordinateBox(24, 155);
-        _zBox = CoordinateBox(24, 188);
-        _rightPanel.Add(_xBox);
-        _rightPanel.Add(_yBox);
-        _rightPanel.Add(_zBox);
-        _rightPanel.Add(new Label("Validation", new Rectangle(0, 225, 300, 24)) { TextColor = new Color(170, 196, 204) });
-        _rightPanel.Add(_validationLabel);
+        var toolbar = new StackPanel
+        {
+            Orientation = StackOrientation.Horizontal,
+            Spacing = 6,
+            DrawBackground = true,
+            ContentPadding = 3,
+        };
+        _rootLayout.Add(toolbar, 0, 0, 2, 1);
+        var menu = new MenuBar { Bounds = new Rectangle(0, 0, 190, 30) };
+        MenuButton fileMenu = menu.AddMenu("File");
+        fileMenu.AddItem("Save", TrySave);
+        fileMenu.AddItem("Reload", () => { _session.Reload(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
+        MenuButton viewMenu = menu.AddMenu("View");
+        viewMenu.AddItem("Fit 2D", FitOrthographicView);
+        viewMenu.AddItem("Reset 3D", () => { _previewTarget = Vector3.Zero; _distance = 42f; _yaw = -0.6f; _pitch = -0.25f; });
+        toolbar.Add(menu);
+        AddButton(toolbar, "Save", TrySave);
+        AddButton(toolbar, "Reload", () => { _session.Reload(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
+        AddButton(toolbar, "Undo", () => { _session.Undo(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
+        AddButton(toolbar, "Redo", () => { _session.Redo(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
+        AddButton(toolbar, "Roles", () => _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
+        AddButton(toolbar, "Top", () => _projection.Kind = ProjectionKind.Top);
+        AddButton(toolbar, "Side", () => _projection.Kind = ProjectionKind.Side);
+        AddButton(toolbar, "Front", () => _projection.Kind = ProjectionKind.Front);
+        AddButton(toolbar, "View", () => _constraintMode = EditingConstraintMode.ViewPlane);
+        AddButton(toolbar, "X", () => _constraintMode = EditingConstraintMode.AxisX);
+        AddButton(toolbar, "Y", () => _constraintMode = EditingConstraintMode.AxisY);
+        AddButton(toolbar, "Z", () => _constraintMode = EditingConstraintMode.AxisZ);
+        AddButton(toolbar, "Face", () => _constraintMode = EditingConstraintMode.ActiveFacePlane);
+
+        _orthoSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Orthographic, "2D editor")
+        {
+            Margin = new Thickness(0, 6, 6, 6),
+        };
+        _rootLayout.Add(_orthoSurface, 0, 1);
+
+        var rightGrid = new GridPanel
+        {
+            Margin = new Thickness(0, 6, 0, 6),
+            Overflow = OverflowMode.Clip,
+        };
+        rightGrid.Rows.Add(GridLength.Star());
+        rightGrid.Rows.Add(GridLength.Fixed(310));
+        rightGrid.Columns.Add(GridLength.Star());
+        _rootLayout.Add(rightGrid, 1, 1);
+
+        _perspectiveSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Perspective, "3D preview");
+        rightGrid.Add(_perspectiveSurface, 0, 0);
+
+        var properties = new CollapsiblePanel
+        {
+            Header = "Properties",
+            Margin = new Thickness(0, 6, 0, 0),
+            IsExpanded = true,
+        };
+        rightGrid.Add(properties, 0, 1);
+        _propertiesPanel = new Panel { Bounds = new Rectangle(0, 0, 330, 270), ContentPadding = 8 };
+        properties.Add(_propertiesPanel);
+
+        _titleLabel = new Label("", new Rectangle(0, 0, 320, 24));
+        _selectionLabel = new Label("", new Rectangle(0, 30, 320, 82)) { FontScale = 0.72f };
+        _propertiesPanel.Add(_titleLabel);
+        _propertiesPanel.Add(_selectionLabel);
+        _propertiesPanel.Add(new Label("X", new Rectangle(0, 118, 20, 26)));
+        _propertiesPanel.Add(new Label("Y", new Rectangle(0, 151, 20, 26)));
+        _propertiesPanel.Add(new Label("Z", new Rectangle(0, 184, 20, 26)));
+        _xBox = CoordinateBox(24, 115);
+        _yBox = CoordinateBox(24, 148);
+        _zBox = CoordinateBox(24, 181);
+        _propertiesPanel.Add(_xBox);
+        _propertiesPanel.Add(_yBox);
+        _propertiesPanel.Add(_zBox);
+        _propertiesPanel.Add(new Label("Diagnostics", new Rectangle(0, 214, 320, 24)) { TextColor = new Color(170, 196, 204) });
+        _validationBlock = new TextBlock { Bounds = new Rectangle(0, 239, 320, 57), FontScale = 0.68f, Padding = 2 };
+        _propertiesPanel.Add(_validationBlock);
+
+        _statusLabel = new Label("", new Rectangle(0, 0, 1000, 24)) { FontScale = 0.78f };
+        _rootLayout.Add(_statusLabel, 0, 2, 2, 1);
         RefreshUiText();
     }
 
-    private void AddButton(Panel parent, string text, int x, Action action)
+    private void AddButton(StackPanel parent, string text, Action action)
     {
-        var button = new Button(text, new Rectangle(x, 0, 64, 30));
+        var button = new Button(text, new Rectangle(0, 0, Math.Max(58, text.Length * 10), 28));
         button.Clicked += _ => action();
         parent.Add(button);
     }
@@ -354,7 +529,7 @@ public sealed class ObjectDesignerGame : Game
 
     private void TryApplyNumericEdit()
     {
-        if (_updatingTextBoxes || _session.SelectedVertexId is null)
+        if (_updatingTextBoxes || _session.ActiveVertexId is null)
             return;
         if (!double.TryParse(_xBox.Text, out double x)
             || !double.TryParse(_yBox.Text, out double y)
@@ -364,24 +539,18 @@ public sealed class ObjectDesignerGame : Game
             return;
         }
 
-        DVec3 before = _session.GetVertexPosition(_session.SelectedVertexId);
+        DVec3 before = _session.GetVertexPosition(_session.ActiveVertexId);
         DVec3 after = new(x, y, z);
-        _session.Execute(new MoveVertexCommand(_session.SelectedVertexId, before, after, $"Edit {_session.SelectedVertexId}"));
-        _shipRenderer.InvalidateSemanticHull(_session.HullDefinition.HullTypeId);
+        _session.Execute(new MoveVertexCommand(_session.ActiveVertexId, before, after, $"Edit {_session.ActiveVertexId}"));
+        _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
         RefreshUiText();
     }
 
     private void TrySave()
     {
-        try
-        {
-            _session.Save();
-            _status = "Saved.";
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-        }
+        _status = _session.Save()
+            ? "Saved."
+            : "Save blocked: resolve authoring errors first.";
         RefreshUiText();
     }
 
@@ -390,9 +559,9 @@ public sealed class ObjectDesignerGame : Game
         if (_xBox is null)
             return;
         _updatingTextBoxes = true;
-        if (_session.SelectedVertexId is not null)
+        if (_session.ActiveVertexId is not null)
         {
-            DVec3 p = _session.GetVertexPosition(_session.SelectedVertexId);
+            DVec3 p = _session.GetVertexPosition(_session.ActiveVertexId);
             _xBox.Text = p.X.ToString("0.###");
             _yBox.Text = p.Y.ToString("0.###");
             _zBox.Text = p.Z.ToString("0.###");
@@ -411,24 +580,31 @@ public sealed class ObjectDesignerGame : Game
     {
         string dirty = _session.IsDirty ? "*" : "";
         _titleLabel.Text = $"{_session.HullDefinition.DisplayName}{dirty} ({_session.HullDefinition.HullTypeId})";
-        _selectionLabel.Text = _session.SelectedVertexId is null
+        _selectionLabel.Text = _session.ActiveVertexId is null
             ? "No vertex selected"
-            : $"Selected vertex:\n{_session.SelectedVertexId}";
+            : $"Selected {_session.SelectedVertexIds.Count} vertex/vertices:\n{_session.ActiveVertexId}\nConstraint: {_constraintMode}\nFaces: {IncidentFaceText()}";
         IEnumerable<AuthoringDiagnostic> diagnostics = _session.Diagnostics.Take(12);
         string validation = _session.Diagnostics.Count == 0
             ? "No validation errors."
-            : string.Join("\n", diagnostics.Select(d => $"{d.Severity}: {d.Message}"));
-        _validationLabel.Text = string.IsNullOrWhiteSpace(_status) ? validation : $"{_status}\n{validation}";
+            : string.Join("\n", diagnostics.Select(d => $"{d.Severity} [{d.Code}]: {d.Summary}"));
+        _validationBlock.Text = validation;
+        _statusLabel.Text = string.IsNullOrWhiteSpace(_status)
+            ? (_session.IsPreviewStale ? "Preview is showing the last valid hull." : "Ready.")
+            : _status;
     }
 
-    private Rectangle PerspectiveViewport => new(0, 42, GraphicsDevice.Viewport.Width - 330, (GraphicsDevice.Viewport.Height - 42) * 2 / 3);
-    private Rectangle OrthoViewport
+    private Rectangle PerspectiveViewport => _perspectiveSurface.ContentBounds;
+    private Rectangle OrthoViewport => _orthoSurface.ContentBounds;
+
+    private string IncidentFaceText()
     {
-        get
-        {
-            Rectangle p = PerspectiveViewport;
-            return new Rectangle(0, p.Bottom, p.Width, GraphicsDevice.Viewport.Height - p.Bottom);
-        }
+        if (_session.ActiveVertexId is null)
+            return "";
+        string[] faces = _session.GetIncidentFaces(_session.ActiveVertexId)
+            .Select(face => face.Id)
+            .Take(3)
+            .ToArray();
+        return faces.Length == 0 ? "none" : string.Join(", ", faces);
     }
 
     private void AddGrid(List<VertexPositionColor> lines, Rectangle vp)
@@ -482,11 +658,50 @@ public sealed class ObjectDesignerGame : Game
         foreach (SemanticHullVertex vertex in _session.HullDefinition.VisualGeometry!.Vertices)
         {
             Vector2 p = _projection.Project(vertex.Position, vp);
-            bool selected = string.Equals(vertex.Id, _session.SelectedVertexId, StringComparison.Ordinal);
+            bool selected = _session.SelectedVertexIds.Contains(vertex.Id, StringComparer.Ordinal);
             int size = selected ? 8 : 5;
             Color colour = selected ? Color.Yellow : new Color(215, 230, 230);
             _spriteBatch.Draw(pixel, new Rectangle((int)p.X - size / 2, (int)p.Y - size / 2, size, size), colour);
         }
+    }
+
+    private void DrawSelectionRectangle()
+    {
+        Rectangle selection = NormalizedRectangle(_selectionStartMouse, Mouse.GetState().Position);
+        Texture2D pixel = TexturePixel;
+        _spriteBatch.Draw(pixel, new Rectangle(selection.Left, selection.Top, selection.Width, 1), Color.Yellow);
+        _spriteBatch.Draw(pixel, new Rectangle(selection.Left, selection.Bottom, selection.Width, 1), Color.Yellow);
+        _spriteBatch.Draw(pixel, new Rectangle(selection.Left, selection.Top, 1, selection.Height), Color.Yellow);
+        _spriteBatch.Draw(pixel, new Rectangle(selection.Right, selection.Top, 1, selection.Height), Color.Yellow);
+    }
+
+    private static Rectangle NormalizedRectangle(Point a, Point b)
+    {
+        int left = Math.Min(a.X, b.X);
+        int top = Math.Min(a.Y, b.Y);
+        return new Rectangle(left, top, Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+    }
+
+    private void FitOrthographicView()
+    {
+        Rectangle viewport = OrthoViewport;
+        IReadOnlyList<SemanticHullVertex> vertices = _session.HullDefinition.VisualGeometry!.Vertices;
+        if (vertices.Count == 0 || viewport.Width <= 0 || viewport.Height <= 0)
+            return;
+        Vector2 min = new(float.PositiveInfinity, float.PositiveInfinity);
+        Vector2 max = new(float.NegativeInfinity, float.NegativeInfinity);
+        foreach (SemanticHullVertex vertex in vertices)
+        {
+            Vector2 axes = _projection.ToProjectionAxes(vertex.Position);
+            min = Vector2.Min(min, axes);
+            max = Vector2.Max(max, axes);
+        }
+        Vector2 span = Vector2.Max(max - min, new Vector2(1f, 1f));
+        float scaleX = (viewport.Width - 48) / Math.Max(0.1f, span.X);
+        float scaleY = (viewport.Height - 48) / Math.Max(0.1f, span.Y);
+        _projection.PixelsPerMeter = MathHelper.Clamp(Math.Min(scaleX, scaleY), 4f, 120f);
+        Vector2 center = (min + max) * 0.5f;
+        _projection.PanPixels = new Vector2(-center.X * _projection.PixelsPerMeter, center.Y * _projection.PixelsPerMeter);
     }
 
     private Texture2D? _pixel;
@@ -508,10 +723,35 @@ public sealed class ObjectDesignerGame : Game
         lines.Add(new VertexPositionColor(new Vector3(b, 0), color));
     }
 
+    private DVec3 ApplyConstraint(DVec3 before, DVec3 unconstrained)
+    {
+        DVec3 delta = unconstrained - before;
+        return _constraintMode switch
+        {
+            EditingConstraintMode.AxisX => new DVec3(before.X + delta.X, before.Y, before.Z),
+            EditingConstraintMode.AxisY => new DVec3(before.X, before.Y + delta.Y, before.Z),
+            EditingConstraintMode.AxisZ => new DVec3(before.X, before.Y, before.Z + delta.Z),
+            EditingConstraintMode.ActiveFacePlane => before + ProjectDeltaOntoActiveFace(delta),
+            _ => unconstrained,
+        };
+    }
+
+    private DVec3 ProjectDeltaOntoActiveFace(DVec3 delta)
+    {
+        SemanticHullFaceDto? face = _session.GetActiveIncidentFace();
+        if (face is null)
+            return delta;
+        DVec3 normal = face.OutwardNormal.ToDVec3();
+        if (normal.LengthSquared <= 1e-12)
+            return delta;
+        DVec3 unit = normal.Normalized();
+        return delta - unit * DVec3.Dot(delta, unit);
+    }
+
     private void DrawCargoPreview(Matrix view, Matrix projection)
     {
         // The first slice only needs a wire/translucent design-volume preview; semantic hull remains authoritative.
-        CargoArrangementDefinition? cargo = _session.HullDefinition.CargoArrangement;
+        CargoArrangementDefinition? cargo = _session.PreviewHullDefinition.CargoArrangement;
         if (cargo is null)
             return;
         var lines = new List<VertexPositionColor>();

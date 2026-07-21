@@ -14,7 +14,15 @@ public enum AuthoringDiagnosticSeverity
 public sealed record AuthoringDiagnostic(
     AuthoringDiagnosticSeverity Severity,
     string Message,
-    string? EntityId = null);
+    string? EntityId = null)
+{
+    public string Code { get; init; } = "AUTHORING_VALIDATION";
+    public string Summary { get; init; } = Message;
+    public string? Details { get; init; }
+    public double? MeasuredValue { get; init; }
+    public double? Tolerance { get; init; }
+    public IReadOnlyList<string> RelatedEntityIds { get; init; } = [];
+}
 
 public sealed class ShipAuthoringLoadResult
 {
@@ -143,7 +151,7 @@ public static class ShipAuthoringValidator
         ValidateEngineReferences(hull, diagnostics);
 
         foreach (string error in hull.Validate())
-            diagnostics.Add(new AuthoringDiagnostic(AuthoringDiagnosticSeverity.Error, error, ExtractQuotedId(error)));
+            diagnostics.Add(CreateHullDiagnostic(error));
 
         return diagnostics;
     }
@@ -265,5 +273,41 @@ public static class ShipAuthoringValidator
             return null;
         int end = message.IndexOf('\'', start + 1);
         return end <= start ? null : message[(start + 1)..end];
+    }
+
+    private static AuthoringDiagnostic CreateHullDiagnostic(string message)
+    {
+        string? entityId = ExtractQuotedId(message);
+        string code =
+            message.Contains("non-planar", StringComparison.OrdinalIgnoreCase) ? "HULL_FACE_NON_PLANAR" :
+            message.Contains("fewer than three", StringComparison.OrdinalIgnoreCase) ? "HULL_FACE_TOO_FEW_VERTICES" :
+            message.Contains("unknown vertex", StringComparison.OrdinalIgnoreCase) ? "HULL_FACE_UNKNOWN_VERTEX" :
+            message.Contains("zero-area", StringComparison.OrdinalIgnoreCase) ? "HULL_FACE_ZERO_AREA" :
+            message.Contains("winding", StringComparison.OrdinalIgnoreCase) ? "HULL_FACE_WINDING_MISMATCH" :
+            "HULL_VALIDATION";
+
+        return new AuthoringDiagnostic(AuthoringDiagnosticSeverity.Error, message, entityId)
+        {
+            Code = code,
+            Summary = message,
+            Details = "Generated from semantic hull validation.",
+            MeasuredValue = TryExtractMetric(message, "distance="),
+            Tolerance = TryExtractMetric(message, "tolerance="),
+            RelatedEntityIds = entityId is null ? [] : [entityId],
+        };
+    }
+
+    private static double? TryExtractMetric(string message, string marker)
+    {
+        int markerIndex = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+            return null;
+        int start = markerIndex + marker.Length;
+        int end = start;
+        while (end < message.Length && (char.IsDigit(message[end]) || message[end] is '.' or '-' or '+' or 'e' or 'E'))
+            end++;
+        return double.TryParse(message[start..end], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double value)
+            ? value
+            : null;
     }
 }

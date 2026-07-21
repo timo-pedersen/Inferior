@@ -11,7 +11,7 @@ public sealed class OrthographicProjection
 
     public Vector2 Project(DVec3 point, Rectangle viewport)
     {
-        Vector2 axes = ToAxes(point);
+        Vector2 axes = ToProjectionAxes(point);
         return new Vector2(
             viewport.X + viewport.Width * 0.5f + PanPixels.X + axes.X * PixelsPerMeter,
             viewport.Y + viewport.Height * 0.5f + PanPixels.Y - axes.Y * PixelsPerMeter);
@@ -46,7 +46,7 @@ public sealed class OrthographicProjection
         _ => "",
     };
 
-    private Vector2 ToAxes(DVec3 point) => Kind switch
+    public Vector2 ToProjectionAxes(DVec3 point) => Kind switch
     {
         ProjectionKind.Top => new Vector2((float)point.X, (float)point.Z),
         ProjectionKind.Side => new Vector2((float)point.Z, (float)point.Y),

@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,8 +14,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Inferior.Game\Inferior.Game.csproj" />
-    <ProjectReference Include="..\Inferior.Persistence\Inferior.Persistence.csproj" />
+    <ProjectReference Include="..\Inferior.Gameplay\Inferior.Gameplay.csproj" />
+    <ProjectReference Include="..\Inferior.Rendering\Inferior.Rendering.csproj" />
   </ItemGroup>
 
 </Project>

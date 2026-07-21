@@ -4,7 +4,7 @@ using Inferior.Gameplay.Hull.Authoring;
 using Inferior.Rendering;
 using Xunit;
 
-namespace Inferior.Game.Test;
+namespace Inferior.Gameplay.Test;
 
 public sealed class BerenAuthoringJsonTests
 {
@@ -60,6 +60,21 @@ public sealed class BerenAuthoringJsonTests
             ShipAuthoringJson.LoadHullFromPath(path));
         Assert.Contains(faceId, ex.Message);
         Assert.Contains("missing.vertex", ex.Message);
+    }
+
+    [Fact]
+    public void Validation_diagnostics_include_stable_codes_and_entity_ids()
+    {
+        ShipAuthoringDocument doc = LoadDocumentCopy();
+        doc.Hull.VisualGeometry.Faces[0].VertexIds[0] = "missing.vertex";
+        HullDefinition hull = ShipAuthoringConverter.ToHullDefinition(doc);
+
+        AuthoringDiagnostic diagnostic = Assert.Single(
+            ShipAuthoringValidator.Validate(doc, hull),
+            diagnostic => diagnostic.Code == "HULL_FACE_UNKNOWN_VERTEX");
+
+        Assert.Equal(doc.Hull.VisualGeometry.Faces[0].Id, diagnostic.EntityId);
+        Assert.Contains("missing.vertex", diagnostic.Summary);
     }
 
     [Fact]

@@ -58,8 +58,6 @@ public sealed class Panel : Control
             if (DrawBorder)     renderer.DrawRect(sb, AbsoluteBounds, border, bw);
         }
 
-        // Draw children
-        foreach (var child in Children)
-            child.Draw(sb, renderer, theme);
+        DrawChildren(sb, renderer, theme);
     }
 }

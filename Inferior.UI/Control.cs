@@ -26,6 +26,8 @@ public abstract class Control
     // ── Identity ──────────────────────────────────────────────────────────────
     public string Name     { get; set; } = "";
     public int    TabIndex { get; set; } = 0;  // 0 = not focusable via Tab
+    public Thickness Margin { get; set; } = Thickness.Zero;
+    public OverflowMode Overflow { get; set; } = OverflowMode.Visible;
 
     // ── Layout ────────────────────────────────────────────────────────────────
 
@@ -59,6 +61,30 @@ public abstract class Control
     /// Containers override to account for borders, title bars, padding.
     /// </summary>
     public virtual Rectangle ContentBounds => AbsoluteBounds;
+
+    public virtual Point DesiredSize => Bounds.Size;
+
+    public Rectangle EffectiveClipBounds
+    {
+        get
+        {
+            Rectangle clip = new(0, 0, int.MaxValue / 4, int.MaxValue / 4);
+            bool hasClip = false;
+            Control? current = this;
+            while (current is not null)
+            {
+                if (current.Overflow == OverflowMode.Clip)
+                {
+                    clip = hasClip
+                        ? Rectangle.Intersect(clip, current.AbsoluteBounds)
+                        : current.AbsoluteBounds;
+                    hasClip = true;
+                }
+                current = current.Parent;
+            }
+            return hasClip ? clip : new Rectangle(0, 0, int.MaxValue / 4, int.MaxValue / 4);
+        }
+    }
 
     // ── State ─────────────────────────────────────────────────────────────────
     public bool Visible   { get; set; } = true;
@@ -141,6 +167,24 @@ public abstract class Control
     public virtual void Draw(SpriteBatch sb, UIRenderer renderer, Theme theme)
     {
         if (!Visible) return;
+        DrawChildren(sb, renderer, theme);
+    }
+
+    protected void DrawChildren(SpriteBatch sb, UIRenderer renderer, Theme theme)
+    {
+        if (Overflow == OverflowMode.Clip)
+        {
+            Rectangle clip = EffectiveClipBounds;
+            if (clip.Width <= 0 || clip.Height <= 0)
+                return;
+            renderer.DrawWithClip(sb, clip, () =>
+            {
+                foreach (var child in _children)
+                    child.Draw(sb, renderer, theme);
+            });
+            return;
+        }
+
         foreach (var child in _children)
             child.Draw(sb, renderer, theme);
     }
@@ -155,7 +199,12 @@ public abstract class Control
 
     /// <summary>Hit test against absolute screen position.</summary>
     public virtual bool HitTest(Point screenPos)
-        => Visible && AbsoluteBounds.Contains(screenPos);
+    {
+        if (!Visible || !AbsoluteBounds.Contains(screenPos))
+            return false;
+        Rectangle clip = EffectiveClipBounds;
+        return clip.Width > int.MaxValue / 8 || clip.Contains(screenPos);
+    }
 
     /// <summary>
     /// Find the topmost visible control (or self) at screen position.
