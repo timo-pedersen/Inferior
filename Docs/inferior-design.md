@@ -14,7 +14,7 @@
 | Language | C# / .NET 10 |
 | Platform | Windows (for now) |
 | Units | Metres, 0.01 m precision |
-| Galaxy | 2048 stars, fixed seed, deterministic per-star seed from coords |
+| Galaxy | 20480 stars, fixed seed, deterministic per-star seed from coords |
 | Visual style | Low-poly flat-shaded 3D, original Elite aesthetic |
 
 ---

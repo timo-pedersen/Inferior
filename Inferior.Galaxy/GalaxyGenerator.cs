@@ -4,7 +4,7 @@ using Inferior.Core.Random;
 namespace Inferior.Galaxy;
 
 /// <summary>
-/// Generates the fixed galaxy of 2048 stars.
+/// Generates the fixed galaxy of 20480 stars.
 /// Called once at startup or first run; result can be serialised to disk.
 ///
 /// Galaxy layout:

@@ -11,7 +11,7 @@ using Inferior.UI.Controls.Cockpit;
 namespace Inferior.Game.States;
 
 /// <summary>
-/// Galaxy map — top level view of all 2048 stars.
+/// Galaxy map — top level view of all 20480 stars.
 /// Left-click        — select star / show info
 /// Double-click      — enter system view
 /// Right-click       — set jump target

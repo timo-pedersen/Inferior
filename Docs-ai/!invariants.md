@@ -110,6 +110,7 @@ Also confirmed:
 - Heat management should remain much simpler than the power-distribution system.
 - Internal temperature is represented in kelvin.
 - Heat transfer must conserve energy.
+- No passive cooling
 
 Not yet an invariant:
 
@@ -117,7 +118,6 @@ Not yet an invariant:
 - Exact damage curve
 - Exact sink saturation/reset behaviour
 - Exact baseline temperature model
-- Exact passive-cooling rules
 
 Do not treat current thermal formulas as permanent architecture. When implementing transfer, the joules removed from one store must equal the joules added to another, limited by available energy and destination capacity/state.
 
