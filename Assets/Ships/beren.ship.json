@@ -1,0 +1,3358 @@
+{
+  "schemaVersion": 1,
+  "assetId": "beren",
+  "objectKind": "ship",
+  "hull": {
+    "displayName": "Beren",
+    "sizeClass": "medium",
+    "hullMass": 180000,
+    "dimensions": {
+      "lengthMeters": 27,
+      "widthMeters": 20,
+      "heightMeters": 6.2,
+      "structuralHullWidthMeters": 19,
+      "structuralHullHeightMeters": 2.5
+    },
+    "primaryDesignBias": "Medium freight",
+    "secondaryDesignBias": "Underslung modular utility",
+    "aerodynamicLift": 0.52,
+    "aerodynamicBrakeFront": 1.2,
+    "aerodynamicBrakeLateral": 3.1,
+    "cockpitOffset": {
+      "x": 0,
+      "y": -2.8,
+      "z": -11.5
+    },
+    "cockpitPose": {
+      "position": {
+        "x": 0,
+        "y": -2.8,
+        "z": -11.5
+      },
+      "orientation": {
+        "x": -0.08715574,
+        "y": 0,
+        "z": 0,
+        "w": 0.9961947
+      }
+    },
+    "cockpitMounts": [
+      {
+        "mountId": "beren.cockpit.underslung.01",
+        "mountClass": "c2",
+        "shipLocalPosition": {
+          "x": 0,
+          "y": -1.25,
+          "z": -10.9
+        },
+        "shipLocalOrientation": {
+          "x": 0,
+          "y": 0,
+          "z": 1,
+          "w": -4.371139E-08
+        },
+        "socketSizeMeters": {
+          "x": 1.5,
+          "y": 1.5,
+          "z": 1
+        },
+        "facing": "down",
+        "allowedRotations": [
+          "deg0",
+          "deg90",
+          "deg180",
+          "deg270"
+        ],
+        "defaultCockpitDefinitionId": "beren-underslung-cockpit"
+      }
+    ],
+    "slots": [
+      {
+        "slotId": "reactor",
+        "label": "Power Reactor",
+        "category": "powerReactor",
+        "maxComponentClass": 4,
+        "required": true
+      },
+      {
+        "slotId": "power_bus",
+        "label": "Power Bus",
+        "category": "powerBus",
+        "maxComponentClass": 4,
+        "required": true
+      },
+      {
+        "slotId": "engine.port.upper.01",
+        "label": "Port Upper Engine",
+        "category": "engine",
+        "maxComponentClass": 4,
+        "required": true,
+        "defaultComponentDefinitionId": "needle.h2"
+      },
+      {
+        "slotId": "engine.port.lower.01",
+        "label": "Port Lower Engine",
+        "category": "engine",
+        "maxComponentClass": 4,
+        "required": true,
+        "defaultComponentDefinitionId": "needle.h2"
+      },
+      {
+        "slotId": "engine.starboard.upper.01",
+        "label": "Starboard Upper Engine",
+        "category": "engine",
+        "maxComponentClass": 4,
+        "required": true,
+        "defaultComponentDefinitionId": "needle.h2"
+      },
+      {
+        "slotId": "engine.starboard.lower.01",
+        "label": "Starboard Lower Engine",
+        "category": "engine",
+        "maxComponentClass": 4,
+        "required": true,
+        "defaultComponentDefinitionId": "needle.h2"
+      },
+      {
+        "slotId": "shield_top",
+        "label": "Top Shield",
+        "category": "shield",
+        "maxComponentClass": 4,
+        "required": false
+      },
+      {
+        "slotId": "shield_bottom",
+        "label": "Bottom Shield",
+        "category": "shield",
+        "maxComponentClass": 4,
+        "required": false
+      },
+      {
+        "slotId": "heat_sink",
+        "label": "Hyperspace Heat Sink",
+        "category": "heatSink",
+        "maxComponentClass": 4,
+        "required": true
+      },
+      {
+        "slotId": "coolant",
+        "label": "Coolant System",
+        "category": "coolantSystem",
+        "maxComponentClass": 4,
+        "required": false
+      },
+      {
+        "slotId": "life_support",
+        "label": "Life Support",
+        "category": "lifeSupport",
+        "maxComponentClass": 3,
+        "required": true
+      },
+      {
+        "slotId": "sensor",
+        "label": "Navigation Sensors",
+        "category": "sensor",
+        "maxComponentClass": 3,
+        "required": false
+      },
+      {
+        "slotId": "exhaust",
+        "label": "Exhaust System",
+        "category": "exhaust",
+        "maxComponentClass": 4,
+        "required": true
+      },
+      {
+        "slotId": "cargo",
+        "label": "Nine-Container Cargo Bay",
+        "category": "cargo",
+        "maxComponentClass": 4,
+        "required": true
+      },
+      {
+        "slotId": "internal_lights",
+        "label": "Internal Lighting",
+        "category": "internalLights",
+        "maxComponentClass": 3,
+        "required": false
+      },
+      {
+        "slotId": "external_lights",
+        "label": "External Lighting",
+        "category": "externalLights",
+        "maxComponentClass": 3,
+        "required": false
+      },
+      {
+        "slotId": "flyability_mon",
+        "label": "Flyability Monitor",
+        "category": "flyabilityMonitor",
+        "maxComponentClass": 4,
+        "required": true
+      }
+    ],
+    "cargoArrangement": {
+      "containerCapacity": 9,
+      "arrangement": "three across by three fore/aft by one layer",
+      "stackBoundsMeters": {
+        "x": 7.5,
+        "y": 2.5,
+        "z": 18
+      },
+      "designVolumeCenterMeters": {
+        "x": 0,
+        "y": -2.8,
+        "z": 0
+      },
+      "designVolumeBoundsMeters": {
+        "x": 7.9,
+        "y": 2.9,
+        "z": 18.4
+      },
+      "cargoDoorAssemblyId": "beren.aft.cargo-door.01",
+      "rearOpeningBoundsMeters": {
+        "x": 7.4,
+        "y": 2.8,
+        "z": 0
+      },
+      "transferAxis": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "containerPlacements": [
+        {
+          "placementId": "beren.cargo.01",
+          "centerMeters": {
+            "x": -2.5,
+            "y": -2.8,
+            "z": -6
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": -3.75,
+              "y": -4.05,
+              "z": -9
+            },
+            "max": {
+              "x": -1.25,
+              "y": -1.5499999999999998,
+              "z": -3
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.02",
+          "centerMeters": {
+            "x": 0,
+            "y": -2.8,
+            "z": -6
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": -1.25,
+              "y": -4.05,
+              "z": -9
+            },
+            "max": {
+              "x": 1.25,
+              "y": -1.5499999999999998,
+              "z": -3
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.03",
+          "centerMeters": {
+            "x": 2.5,
+            "y": -2.8,
+            "z": -6
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": 1.25,
+              "y": -4.05,
+              "z": -9
+            },
+            "max": {
+              "x": 3.75,
+              "y": -1.5499999999999998,
+              "z": -3
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.04",
+          "centerMeters": {
+            "x": -2.5,
+            "y": -2.8,
+            "z": 0
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": -3.75,
+              "y": -4.05,
+              "z": -3
+            },
+            "max": {
+              "x": -1.25,
+              "y": -1.5499999999999998,
+              "z": 3
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.05",
+          "centerMeters": {
+            "x": 0,
+            "y": -2.8,
+            "z": 0
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": -1.25,
+              "y": -4.05,
+              "z": -3
+            },
+            "max": {
+              "x": 1.25,
+              "y": -1.5499999999999998,
+              "z": 3
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.06",
+          "centerMeters": {
+            "x": 2.5,
+            "y": -2.8,
+            "z": 0
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": 1.25,
+              "y": -4.05,
+              "z": -3
+            },
+            "max": {
+              "x": 3.75,
+              "y": -1.5499999999999998,
+              "z": 3
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.07",
+          "centerMeters": {
+            "x": -2.5,
+            "y": -2.8,
+            "z": 6
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": -3.75,
+              "y": -4.05,
+              "z": 3
+            },
+            "max": {
+              "x": -1.25,
+              "y": -1.5499999999999998,
+              "z": 9
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.08",
+          "centerMeters": {
+            "x": 0,
+            "y": -2.8,
+            "z": 6
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": -1.25,
+              "y": -4.05,
+              "z": 3
+            },
+            "max": {
+              "x": 1.25,
+              "y": -1.5499999999999998,
+              "z": 9
+            }
+          }
+        },
+        {
+          "placementId": "beren.cargo.09",
+          "centerMeters": {
+            "x": 2.5,
+            "y": -2.8,
+            "z": 6
+          },
+          "boundsMeters": {
+            "x": 2.5,
+            "y": 2.5,
+            "z": 6
+          },
+          "occupiedBoundsMeters": {
+            "min": {
+              "x": 1.25,
+              "y": -4.05,
+              "z": 3
+            },
+            "max": {
+              "x": 3.75,
+              "y": -1.5499999999999998,
+              "z": 9
+            }
+          }
+        }
+      ],
+      "loadingClearanceBoundsMeters": {
+        "min": {
+          "x": -3.75,
+          "y": -4.05,
+          "z": -9
+        },
+        "max": {
+          "x": 3.75,
+          "y": -1.55,
+          "z": 13.6
+        }
+      }
+    },
+    "visualGeometry": {
+      "requireClosedHull": true,
+      "vertices": [
+        {
+          "id": "beren.platform.top.01",
+          "position": {
+            "x": 0,
+            "y": 1.25,
+            "z": -13.5
+          }
+        },
+        {
+          "id": "beren.platform.bottom.01",
+          "position": {
+            "x": 0,
+            "y": -1.25,
+            "z": -13.5
+          }
+        },
+        {
+          "id": "beren.platform.top.02",
+          "position": {
+            "x": 6.8,
+            "y": 1.25,
+            "z": -10.8
+          }
+        },
+        {
+          "id": "beren.platform.bottom.02",
+          "position": {
+            "x": 6.8,
+            "y": -1.25,
+            "z": -10.8
+          }
+        },
+        {
+          "id": "beren.platform.top.03",
+          "position": {
+            "x": 9.5,
+            "y": 1.25,
+            "z": -3
+          }
+        },
+        {
+          "id": "beren.platform.bottom.03",
+          "position": {
+            "x": 9.5,
+            "y": -1.25,
+            "z": -3
+          }
+        },
+        {
+          "id": "beren.platform.top.04",
+          "position": {
+            "x": 8.5,
+            "y": 1.25,
+            "z": 7.5
+          }
+        },
+        {
+          "id": "beren.platform.bottom.04",
+          "position": {
+            "x": 8.5,
+            "y": -1.25,
+            "z": 7.5
+          }
+        },
+        {
+          "id": "beren.platform.top.05",
+          "position": {
+            "x": 5.8,
+            "y": 1.25,
+            "z": 13.5
+          }
+        },
+        {
+          "id": "beren.platform.bottom.05",
+          "position": {
+            "x": 5.8,
+            "y": -1.25,
+            "z": 13.5
+          }
+        },
+        {
+          "id": "beren.platform.top.06",
+          "position": {
+            "x": -5.8,
+            "y": 1.25,
+            "z": 13.5
+          }
+        },
+        {
+          "id": "beren.platform.bottom.06",
+          "position": {
+            "x": -5.8,
+            "y": -1.25,
+            "z": 13.5
+          }
+        },
+        {
+          "id": "beren.platform.top.07",
+          "position": {
+            "x": -8.5,
+            "y": 1.25,
+            "z": 7.5
+          }
+        },
+        {
+          "id": "beren.platform.bottom.07",
+          "position": {
+            "x": -8.5,
+            "y": -1.25,
+            "z": 7.5
+          }
+        },
+        {
+          "id": "beren.platform.top.08",
+          "position": {
+            "x": -9.5,
+            "y": 1.25,
+            "z": -3
+          }
+        },
+        {
+          "id": "beren.platform.bottom.08",
+          "position": {
+            "x": -9.5,
+            "y": -1.25,
+            "z": -3
+          }
+        },
+        {
+          "id": "beren.platform.top.09",
+          "position": {
+            "x": -6.8,
+            "y": 1.25,
+            "z": -10.8
+          }
+        },
+        {
+          "id": "beren.platform.bottom.09",
+          "position": {
+            "x": -6.8,
+            "y": -1.25,
+            "z": -10.8
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.01",
+          "position": {
+            "x": -4.1,
+            "y": -4.35,
+            "z": -9.35
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.02",
+          "position": {
+            "x": 4.1,
+            "y": -4.35,
+            "z": -9.35
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.03",
+          "position": {
+            "x": 4.1,
+            "y": -1.1,
+            "z": -9.35
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.04",
+          "position": {
+            "x": -4.1,
+            "y": -1.1,
+            "z": -9.35
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.05",
+          "position": {
+            "x": -4.1,
+            "y": -4.35,
+            "z": 13.15
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.06",
+          "position": {
+            "x": 4.1,
+            "y": -4.35,
+            "z": 13.15
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.07",
+          "position": {
+            "x": 4.1,
+            "y": -1.1,
+            "z": 13.15
+          }
+        },
+        {
+          "id": "beren.underside.cargo-bay.vertex.08",
+          "position": {
+            "x": -4.1,
+            "y": -1.1,
+            "z": 13.15
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.01",
+          "position": {
+            "x": -4.48,
+            "y": -4.48,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.02",
+          "position": {
+            "x": -4.02,
+            "y": -4.48,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.03",
+          "position": {
+            "x": -4.02,
+            "y": -0.95,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.04",
+          "position": {
+            "x": -4.48,
+            "y": -0.95,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.05",
+          "position": {
+            "x": -4.48,
+            "y": -4.48,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.06",
+          "position": {
+            "x": -4.02,
+            "y": -4.48,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.07",
+          "position": {
+            "x": -4.02,
+            "y": -0.95,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.port-bay-beam.vertex.08",
+          "position": {
+            "x": -4.48,
+            "y": -0.95,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.01",
+          "position": {
+            "x": 4.02,
+            "y": -4.48,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.02",
+          "position": {
+            "x": 4.48,
+            "y": -4.48,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.03",
+          "position": {
+            "x": 4.48,
+            "y": -0.95,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.04",
+          "position": {
+            "x": 4.02,
+            "y": -0.95,
+            "z": -9.55
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.05",
+          "position": {
+            "x": 4.02,
+            "y": -4.48,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.06",
+          "position": {
+            "x": 4.48,
+            "y": -4.48,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.07",
+          "position": {
+            "x": 4.48,
+            "y": -0.95,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.vertex.08",
+          "position": {
+            "x": 4.02,
+            "y": -0.95,
+            "z": 12.75
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.01",
+          "position": {
+            "x": -1.05,
+            "y": -1.62,
+            "z": -11.85
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.02",
+          "position": {
+            "x": 1.05,
+            "y": -1.62,
+            "z": -11.85
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.03",
+          "position": {
+            "x": 1.05,
+            "y": -0.92,
+            "z": -11.85
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.04",
+          "position": {
+            "x": -1.05,
+            "y": -0.92,
+            "z": -11.85
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.05",
+          "position": {
+            "x": -1.05,
+            "y": -1.62,
+            "z": -9.65
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.06",
+          "position": {
+            "x": 1.05,
+            "y": -1.62,
+            "z": -9.65
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.07",
+          "position": {
+            "x": 1.05,
+            "y": -0.92,
+            "z": -9.65
+          }
+        },
+        {
+          "id": "beren.underside.cockpit-collar.vertex.08",
+          "position": {
+            "x": -1.05,
+            "y": -0.92,
+            "z": -9.65
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.01",
+          "position": {
+            "x": -6.2,
+            "y": -3.25,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.02",
+          "position": {
+            "x": -4.45,
+            "y": -3.25,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.03",
+          "position": {
+            "x": -4.45,
+            "y": -1.05,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.04",
+          "position": {
+            "x": -6.2,
+            "y": -1.05,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.05",
+          "position": {
+            "x": -6.2,
+            "y": -3.25,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.06",
+          "position": {
+            "x": -4.45,
+            "y": -3.25,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.07",
+          "position": {
+            "x": -4.45,
+            "y": -1.05,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.port-service.vertex.08",
+          "position": {
+            "x": -6.2,
+            "y": -1.05,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.01",
+          "position": {
+            "x": 4.45,
+            "y": -3.25,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.02",
+          "position": {
+            "x": 6.2,
+            "y": -3.25,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.03",
+          "position": {
+            "x": 6.2,
+            "y": -1.05,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.04",
+          "position": {
+            "x": 4.45,
+            "y": -1.05,
+            "z": -7.6
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.05",
+          "position": {
+            "x": 4.45,
+            "y": -3.25,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.06",
+          "position": {
+            "x": 6.2,
+            "y": -3.25,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.07",
+          "position": {
+            "x": 6.2,
+            "y": -1.05,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.underside.starboard-service.vertex.08",
+          "position": {
+            "x": 4.45,
+            "y": -1.05,
+            "z": -1.1
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.corner.01",
+          "position": {
+            "x": -3.7,
+            "y": -4.1,
+            "z": 13.2
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.corner.02",
+          "position": {
+            "x": 3.7,
+            "y": -4.1,
+            "z": 13.2
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.corner.03",
+          "position": {
+            "x": 3.7,
+            "y": -1.35,
+            "z": 13.2
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.corner.04",
+          "position": {
+            "x": -3.7,
+            "y": -1.35,
+            "z": 13.2
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.top.corner.01",
+          "position": {
+            "x": -3.92,
+            "y": -1.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.top.corner.02",
+          "position": {
+            "x": 3.92,
+            "y": -1.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.top.corner.03",
+          "position": {
+            "x": 3.92,
+            "y": -1.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.top.corner.04",
+          "position": {
+            "x": -3.92,
+            "y": -1.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.bottom.corner.01",
+          "position": {
+            "x": -3.92,
+            "y": -4.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.bottom.corner.02",
+          "position": {
+            "x": 3.92,
+            "y": -4.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.bottom.corner.03",
+          "position": {
+            "x": 3.92,
+            "y": -4.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.bottom.corner.04",
+          "position": {
+            "x": -3.92,
+            "y": -4.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.port.corner.01",
+          "position": {
+            "x": -3.94,
+            "y": -4.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.port.corner.02",
+          "position": {
+            "x": -3.72,
+            "y": -4.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.port.corner.03",
+          "position": {
+            "x": -3.72,
+            "y": -1.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.port.corner.04",
+          "position": {
+            "x": -3.94,
+            "y": -1.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.starboard.corner.01",
+          "position": {
+            "x": 3.72,
+            "y": -4.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.starboard.corner.02",
+          "position": {
+            "x": 3.94,
+            "y": -4.12,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.starboard.corner.03",
+          "position": {
+            "x": 3.94,
+            "y": -1.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.starboard.corner.04",
+          "position": {
+            "x": 3.72,
+            "y": -1.34,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.lock-spine.corner.01",
+          "position": {
+            "x": -0.1,
+            "y": -3.9,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.lock-spine.corner.02",
+          "position": {
+            "x": 0.1,
+            "y": -3.9,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.lock-spine.corner.03",
+          "position": {
+            "x": 0.1,
+            "y": -1.55,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.aft.cargo-door.01.lock-spine.corner.04",
+          "position": {
+            "x": -0.1,
+            "y": -1.55,
+            "z": 13.235
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.01",
+          "position": {
+            "x": -8.25,
+            "y": -3.45,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.02",
+          "position": {
+            "x": -7.72,
+            "y": -3.45,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.03",
+          "position": {
+            "x": -7.72,
+            "y": 0.35,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.04",
+          "position": {
+            "x": -8.25,
+            "y": 0.35,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.05",
+          "position": {
+            "x": -8.25,
+            "y": -3.45,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.06",
+          "position": {
+            "x": -7.72,
+            "y": -3.45,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.07",
+          "position": {
+            "x": -7.72,
+            "y": 0.35,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.port.engine-pod-spine.vertex.08",
+          "position": {
+            "x": -8.25,
+            "y": 0.35,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.01",
+          "position": {
+            "x": -8.43,
+            "y": -1.07,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.02",
+          "position": {
+            "x": -7.72,
+            "y": -1.07,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.03",
+          "position": {
+            "x": -7.72,
+            "y": 0.16999999999999998,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.04",
+          "position": {
+            "x": -8.43,
+            "y": 0.16999999999999998,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.05",
+          "position": {
+            "x": -8.43,
+            "y": -1.07,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.06",
+          "position": {
+            "x": -7.72,
+            "y": -1.07,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.07",
+          "position": {
+            "x": -7.72,
+            "y": 0.16999999999999998,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.upper.engine-collar.vertex.08",
+          "position": {
+            "x": -8.43,
+            "y": 0.16999999999999998,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.01",
+          "position": {
+            "x": -8.43,
+            "y": -3.27,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.02",
+          "position": {
+            "x": -7.72,
+            "y": -3.27,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.03",
+          "position": {
+            "x": -7.72,
+            "y": -2.03,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.04",
+          "position": {
+            "x": -8.43,
+            "y": -2.03,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.05",
+          "position": {
+            "x": -8.43,
+            "y": -3.27,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.06",
+          "position": {
+            "x": -7.72,
+            "y": -3.27,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.07",
+          "position": {
+            "x": -7.72,
+            "y": -2.03,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.port.lower.engine-collar.vertex.08",
+          "position": {
+            "x": -8.43,
+            "y": -2.03,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.01",
+          "position": {
+            "x": 7.72,
+            "y": -3.45,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.02",
+          "position": {
+            "x": 8.25,
+            "y": -3.45,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.03",
+          "position": {
+            "x": 8.25,
+            "y": 0.35,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.04",
+          "position": {
+            "x": 7.72,
+            "y": 0.35,
+            "z": 4.45
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.05",
+          "position": {
+            "x": 7.72,
+            "y": -3.45,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.06",
+          "position": {
+            "x": 8.25,
+            "y": -3.45,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.07",
+          "position": {
+            "x": 8.25,
+            "y": 0.35,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.vertex.08",
+          "position": {
+            "x": 7.72,
+            "y": 0.35,
+            "z": 10.35
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.01",
+          "position": {
+            "x": 7.72,
+            "y": -1.07,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.02",
+          "position": {
+            "x": 8.43,
+            "y": -1.07,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.03",
+          "position": {
+            "x": 8.43,
+            "y": 0.16999999999999998,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.04",
+          "position": {
+            "x": 7.72,
+            "y": 0.16999999999999998,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.05",
+          "position": {
+            "x": 7.72,
+            "y": -1.07,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.06",
+          "position": {
+            "x": 8.43,
+            "y": -1.07,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.07",
+          "position": {
+            "x": 8.43,
+            "y": 0.16999999999999998,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.vertex.08",
+          "position": {
+            "x": 7.72,
+            "y": 0.16999999999999998,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.01",
+          "position": {
+            "x": 7.72,
+            "y": -3.27,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.02",
+          "position": {
+            "x": 8.43,
+            "y": -3.27,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.03",
+          "position": {
+            "x": 8.43,
+            "y": -2.03,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.04",
+          "position": {
+            "x": 7.72,
+            "y": -2.03,
+            "z": 6.35
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.05",
+          "position": {
+            "x": 7.72,
+            "y": -3.27,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.06",
+          "position": {
+            "x": 8.43,
+            "y": -3.27,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.07",
+          "position": {
+            "x": 8.43,
+            "y": -2.03,
+            "z": 8.65
+          }
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.vertex.08",
+          "position": {
+            "x": 7.72,
+            "y": -2.03,
+            "z": 8.65
+          }
+        }
+      ],
+      "faces": [
+        {
+          "id": "beren.top.platform.01",
+          "vertexIds": [
+            "beren.platform.top.09",
+            "beren.platform.top.08",
+            "beren.platform.top.07",
+            "beren.platform.top.06",
+            "beren.platform.top.05",
+            "beren.platform.top.04",
+            "beren.platform.top.03",
+            "beren.platform.top.02",
+            "beren.platform.top.01"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "panelSlotId": "beren.top.platform.01",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.underside.platform.01",
+          "vertexIds": [
+            "beren.platform.bottom.01",
+            "beren.platform.bottom.02",
+            "beren.platform.bottom.03",
+            "beren.platform.bottom.04",
+            "beren.platform.bottom.05",
+            "beren.platform.bottom.06",
+            "beren.platform.bottom.07",
+            "beren.platform.bottom.08",
+            "beren.platform.bottom.09"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "panelSlotId": "beren.underside.platform.01",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.01",
+          "vertexIds": [
+            "beren.platform.top.02",
+            "beren.platform.bottom.02",
+            "beren.platform.bottom.01",
+            "beren.platform.top.01"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0.36903294791234026,
+            "y": 0,
+            "z": -0.9294163132607088
+          },
+          "panelSlotId": "beren.edge.platform.01",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.02",
+          "vertexIds": [
+            "beren.platform.top.03",
+            "beren.platform.bottom.03",
+            "beren.platform.bottom.02",
+            "beren.platform.top.02"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0.9449860734402581,
+            "y": 0,
+            "z": -0.3271105638831663
+          },
+          "panelSlotId": "beren.edge.platform.02",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.03",
+          "vertexIds": [
+            "beren.platform.top.04",
+            "beren.platform.bottom.04",
+            "beren.platform.bottom.03",
+            "beren.platform.top.03"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0.9954954725939521,
+            "y": 0,
+            "z": 0.09480909262799544
+          },
+          "panelSlotId": "beren.edge.platform.03",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.04",
+          "vertexIds": [
+            "beren.platform.top.05",
+            "beren.platform.bottom.05",
+            "beren.platform.bottom.04",
+            "beren.platform.top.04"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0.9119215051751065,
+            "y": 0,
+            "z": 0.41036467732879794
+          },
+          "panelSlotId": "beren.edge.platform.04",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.05",
+          "vertexIds": [
+            "beren.platform.top.06",
+            "beren.platform.bottom.06",
+            "beren.platform.bottom.05",
+            "beren.platform.top.05"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "panelSlotId": "beren.edge.platform.05",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.06",
+          "vertexIds": [
+            "beren.platform.top.07",
+            "beren.platform.bottom.07",
+            "beren.platform.bottom.06",
+            "beren.platform.top.06"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": -0.9119215051751065,
+            "y": 0,
+            "z": 0.41036467732879794
+          },
+          "panelSlotId": "beren.edge.platform.06",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.07",
+          "vertexIds": [
+            "beren.platform.top.08",
+            "beren.platform.bottom.08",
+            "beren.platform.bottom.07",
+            "beren.platform.top.07"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": -0.9954954725939521,
+            "y": 0,
+            "z": 0.09480909262799544
+          },
+          "panelSlotId": "beren.edge.platform.07",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.08",
+          "vertexIds": [
+            "beren.platform.top.09",
+            "beren.platform.bottom.09",
+            "beren.platform.bottom.08",
+            "beren.platform.top.08"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": -0.9449860734402581,
+            "y": 0,
+            "z": -0.3271105638831663
+          },
+          "panelSlotId": "beren.edge.platform.08",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.edge.platform.09",
+          "vertexIds": [
+            "beren.platform.top.01",
+            "beren.platform.bottom.01",
+            "beren.platform.bottom.09",
+            "beren.platform.top.09"
+          ],
+          "role": "panelSeat",
+          "materialGroup": "panel-exterior",
+          "outwardNormal": {
+            "x": -0.36903294791234026,
+            "y": 0,
+            "z": -0.9294163132607088
+          },
+          "panelSlotId": "beren.edge.platform.09",
+          "contributesToClosedHull": true
+        },
+        {
+          "id": "beren.underside.cargo-bay.front",
+          "vertexIds": [
+            "beren.underside.cargo-bay.vertex.01",
+            "beren.underside.cargo-bay.vertex.04",
+            "beren.underside.cargo-bay.vertex.03",
+            "beren.underside.cargo-bay.vertex.02"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cargo-bay.rear",
+          "vertexIds": [
+            "beren.underside.cargo-bay.vertex.05",
+            "beren.underside.cargo-bay.vertex.06",
+            "beren.underside.cargo-bay.vertex.07",
+            "beren.underside.cargo-bay.vertex.08"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cargo-bay.port",
+          "vertexIds": [
+            "beren.underside.cargo-bay.vertex.01",
+            "beren.underside.cargo-bay.vertex.05",
+            "beren.underside.cargo-bay.vertex.08",
+            "beren.underside.cargo-bay.vertex.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cargo-bay.starboard",
+          "vertexIds": [
+            "beren.underside.cargo-bay.vertex.02",
+            "beren.underside.cargo-bay.vertex.03",
+            "beren.underside.cargo-bay.vertex.07",
+            "beren.underside.cargo-bay.vertex.06"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cargo-bay.bottom",
+          "vertexIds": [
+            "beren.underside.cargo-bay.vertex.01",
+            "beren.underside.cargo-bay.vertex.02",
+            "beren.underside.cargo-bay.vertex.06",
+            "beren.underside.cargo-bay.vertex.05"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cargo-bay.top",
+          "vertexIds": [
+            "beren.underside.cargo-bay.vertex.04",
+            "beren.underside.cargo-bay.vertex.08",
+            "beren.underside.cargo-bay.vertex.07",
+            "beren.underside.cargo-bay.vertex.03"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-bay-beam.front",
+          "vertexIds": [
+            "beren.underside.port-bay-beam.vertex.01",
+            "beren.underside.port-bay-beam.vertex.04",
+            "beren.underside.port-bay-beam.vertex.03",
+            "beren.underside.port-bay-beam.vertex.02"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-bay-beam.rear",
+          "vertexIds": [
+            "beren.underside.port-bay-beam.vertex.05",
+            "beren.underside.port-bay-beam.vertex.06",
+            "beren.underside.port-bay-beam.vertex.07",
+            "beren.underside.port-bay-beam.vertex.08"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-bay-beam.port",
+          "vertexIds": [
+            "beren.underside.port-bay-beam.vertex.01",
+            "beren.underside.port-bay-beam.vertex.05",
+            "beren.underside.port-bay-beam.vertex.08",
+            "beren.underside.port-bay-beam.vertex.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-bay-beam.starboard",
+          "vertexIds": [
+            "beren.underside.port-bay-beam.vertex.02",
+            "beren.underside.port-bay-beam.vertex.03",
+            "beren.underside.port-bay-beam.vertex.07",
+            "beren.underside.port-bay-beam.vertex.06"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-bay-beam.bottom",
+          "vertexIds": [
+            "beren.underside.port-bay-beam.vertex.01",
+            "beren.underside.port-bay-beam.vertex.02",
+            "beren.underside.port-bay-beam.vertex.06",
+            "beren.underside.port-bay-beam.vertex.05"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-bay-beam.top",
+          "vertexIds": [
+            "beren.underside.port-bay-beam.vertex.04",
+            "beren.underside.port-bay-beam.vertex.08",
+            "beren.underside.port-bay-beam.vertex.07",
+            "beren.underside.port-bay-beam.vertex.03"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.front",
+          "vertexIds": [
+            "beren.underside.starboard-bay-beam.vertex.01",
+            "beren.underside.starboard-bay-beam.vertex.04",
+            "beren.underside.starboard-bay-beam.vertex.03",
+            "beren.underside.starboard-bay-beam.vertex.02"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.rear",
+          "vertexIds": [
+            "beren.underside.starboard-bay-beam.vertex.05",
+            "beren.underside.starboard-bay-beam.vertex.06",
+            "beren.underside.starboard-bay-beam.vertex.07",
+            "beren.underside.starboard-bay-beam.vertex.08"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.port",
+          "vertexIds": [
+            "beren.underside.starboard-bay-beam.vertex.01",
+            "beren.underside.starboard-bay-beam.vertex.05",
+            "beren.underside.starboard-bay-beam.vertex.08",
+            "beren.underside.starboard-bay-beam.vertex.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.starboard",
+          "vertexIds": [
+            "beren.underside.starboard-bay-beam.vertex.02",
+            "beren.underside.starboard-bay-beam.vertex.03",
+            "beren.underside.starboard-bay-beam.vertex.07",
+            "beren.underside.starboard-bay-beam.vertex.06"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.bottom",
+          "vertexIds": [
+            "beren.underside.starboard-bay-beam.vertex.01",
+            "beren.underside.starboard-bay-beam.vertex.02",
+            "beren.underside.starboard-bay-beam.vertex.06",
+            "beren.underside.starboard-bay-beam.vertex.05"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-bay-beam.top",
+          "vertexIds": [
+            "beren.underside.starboard-bay-beam.vertex.04",
+            "beren.underside.starboard-bay-beam.vertex.08",
+            "beren.underside.starboard-bay-beam.vertex.07",
+            "beren.underside.starboard-bay-beam.vertex.03"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cockpit-collar.front",
+          "vertexIds": [
+            "beren.underside.cockpit-collar.vertex.01",
+            "beren.underside.cockpit-collar.vertex.04",
+            "beren.underside.cockpit-collar.vertex.03",
+            "beren.underside.cockpit-collar.vertex.02"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cockpit-collar.rear",
+          "vertexIds": [
+            "beren.underside.cockpit-collar.vertex.05",
+            "beren.underside.cockpit-collar.vertex.06",
+            "beren.underside.cockpit-collar.vertex.07",
+            "beren.underside.cockpit-collar.vertex.08"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cockpit-collar.port",
+          "vertexIds": [
+            "beren.underside.cockpit-collar.vertex.01",
+            "beren.underside.cockpit-collar.vertex.05",
+            "beren.underside.cockpit-collar.vertex.08",
+            "beren.underside.cockpit-collar.vertex.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cockpit-collar.starboard",
+          "vertexIds": [
+            "beren.underside.cockpit-collar.vertex.02",
+            "beren.underside.cockpit-collar.vertex.03",
+            "beren.underside.cockpit-collar.vertex.07",
+            "beren.underside.cockpit-collar.vertex.06"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cockpit-collar.bottom",
+          "vertexIds": [
+            "beren.underside.cockpit-collar.vertex.01",
+            "beren.underside.cockpit-collar.vertex.02",
+            "beren.underside.cockpit-collar.vertex.06",
+            "beren.underside.cockpit-collar.vertex.05"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.cockpit-collar.top",
+          "vertexIds": [
+            "beren.underside.cockpit-collar.vertex.04",
+            "beren.underside.cockpit-collar.vertex.08",
+            "beren.underside.cockpit-collar.vertex.07",
+            "beren.underside.cockpit-collar.vertex.03"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-service.front",
+          "vertexIds": [
+            "beren.underside.port-service.vertex.01",
+            "beren.underside.port-service.vertex.04",
+            "beren.underside.port-service.vertex.03",
+            "beren.underside.port-service.vertex.02"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-service.rear",
+          "vertexIds": [
+            "beren.underside.port-service.vertex.05",
+            "beren.underside.port-service.vertex.06",
+            "beren.underside.port-service.vertex.07",
+            "beren.underside.port-service.vertex.08"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-service.port",
+          "vertexIds": [
+            "beren.underside.port-service.vertex.01",
+            "beren.underside.port-service.vertex.05",
+            "beren.underside.port-service.vertex.08",
+            "beren.underside.port-service.vertex.04"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-service.starboard",
+          "vertexIds": [
+            "beren.underside.port-service.vertex.02",
+            "beren.underside.port-service.vertex.03",
+            "beren.underside.port-service.vertex.07",
+            "beren.underside.port-service.vertex.06"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-service.bottom",
+          "vertexIds": [
+            "beren.underside.port-service.vertex.01",
+            "beren.underside.port-service.vertex.02",
+            "beren.underside.port-service.vertex.06",
+            "beren.underside.port-service.vertex.05"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.port-service.top",
+          "vertexIds": [
+            "beren.underside.port-service.vertex.04",
+            "beren.underside.port-service.vertex.08",
+            "beren.underside.port-service.vertex.07",
+            "beren.underside.port-service.vertex.03"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-service.front",
+          "vertexIds": [
+            "beren.underside.starboard-service.vertex.01",
+            "beren.underside.starboard-service.vertex.04",
+            "beren.underside.starboard-service.vertex.03",
+            "beren.underside.starboard-service.vertex.02"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-service.rear",
+          "vertexIds": [
+            "beren.underside.starboard-service.vertex.05",
+            "beren.underside.starboard-service.vertex.06",
+            "beren.underside.starboard-service.vertex.07",
+            "beren.underside.starboard-service.vertex.08"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-service.port",
+          "vertexIds": [
+            "beren.underside.starboard-service.vertex.01",
+            "beren.underside.starboard-service.vertex.05",
+            "beren.underside.starboard-service.vertex.08",
+            "beren.underside.starboard-service.vertex.04"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-service.starboard",
+          "vertexIds": [
+            "beren.underside.starboard-service.vertex.02",
+            "beren.underside.starboard-service.vertex.03",
+            "beren.underside.starboard-service.vertex.07",
+            "beren.underside.starboard-service.vertex.06"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-service.bottom",
+          "vertexIds": [
+            "beren.underside.starboard-service.vertex.01",
+            "beren.underside.starboard-service.vertex.02",
+            "beren.underside.starboard-service.vertex.06",
+            "beren.underside.starboard-service.vertex.05"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.underside.starboard-service.top",
+          "vertexIds": [
+            "beren.underside.starboard-service.vertex.04",
+            "beren.underside.starboard-service.vertex.08",
+            "beren.underside.starboard-service.vertex.07",
+            "beren.underside.starboard-service.vertex.03"
+          ],
+          "role": "serviceSurface",
+          "materialGroup": "structural-hull",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.aft.cargo-door.01",
+          "vertexIds": [
+            "beren.aft.cargo-door.01.corner.01",
+            "beren.aft.cargo-door.01.corner.02",
+            "beren.aft.cargo-door.01.corner.03",
+            "beren.aft.cargo-door.01.corner.04"
+          ],
+          "role": "cargoDoor",
+          "materialGroup": "cargo-door-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "assemblyId": "beren.aft.cargo-door.01",
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.top",
+          "vertexIds": [
+            "beren.aft.cargo-door.01.frame.top.corner.01",
+            "beren.aft.cargo-door.01.frame.top.corner.02",
+            "beren.aft.cargo-door.01.frame.top.corner.03",
+            "beren.aft.cargo-door.01.frame.top.corner.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "cargo-door-frame",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "assemblyId": "beren.aft.cargo-door.01",
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.bottom",
+          "vertexIds": [
+            "beren.aft.cargo-door.01.frame.bottom.corner.01",
+            "beren.aft.cargo-door.01.frame.bottom.corner.02",
+            "beren.aft.cargo-door.01.frame.bottom.corner.03",
+            "beren.aft.cargo-door.01.frame.bottom.corner.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "cargo-door-frame",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "assemblyId": "beren.aft.cargo-door.01",
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.port",
+          "vertexIds": [
+            "beren.aft.cargo-door.01.frame.port.corner.01",
+            "beren.aft.cargo-door.01.frame.port.corner.02",
+            "beren.aft.cargo-door.01.frame.port.corner.03",
+            "beren.aft.cargo-door.01.frame.port.corner.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "cargo-door-frame",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "assemblyId": "beren.aft.cargo-door.01",
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.aft.cargo-door.01.frame.starboard",
+          "vertexIds": [
+            "beren.aft.cargo-door.01.frame.starboard.corner.01",
+            "beren.aft.cargo-door.01.frame.starboard.corner.02",
+            "beren.aft.cargo-door.01.frame.starboard.corner.03",
+            "beren.aft.cargo-door.01.frame.starboard.corner.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "cargo-door-frame",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "assemblyId": "beren.aft.cargo-door.01",
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.aft.cargo-door.01.lock-spine",
+          "vertexIds": [
+            "beren.aft.cargo-door.01.lock-spine.corner.01",
+            "beren.aft.cargo-door.01.lock-spine.corner.02",
+            "beren.aft.cargo-door.01.lock-spine.corner.03",
+            "beren.aft.cargo-door.01.lock-spine.corner.04"
+          ],
+          "role": "exposedStructure",
+          "materialGroup": "cargo-door-frame",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "assemblyId": "beren.aft.cargo-door.01",
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.engine-pod-spine.front",
+          "vertexIds": [
+            "beren.port.engine-pod-spine.vertex.01",
+            "beren.port.engine-pod-spine.vertex.04",
+            "beren.port.engine-pod-spine.vertex.03",
+            "beren.port.engine-pod-spine.vertex.02"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.engine-pod-spine.rear",
+          "vertexIds": [
+            "beren.port.engine-pod-spine.vertex.05",
+            "beren.port.engine-pod-spine.vertex.06",
+            "beren.port.engine-pod-spine.vertex.07",
+            "beren.port.engine-pod-spine.vertex.08"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.engine-pod-spine.port",
+          "vertexIds": [
+            "beren.port.engine-pod-spine.vertex.01",
+            "beren.port.engine-pod-spine.vertex.05",
+            "beren.port.engine-pod-spine.vertex.08",
+            "beren.port.engine-pod-spine.vertex.04"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.engine-pod-spine.starboard",
+          "vertexIds": [
+            "beren.port.engine-pod-spine.vertex.02",
+            "beren.port.engine-pod-spine.vertex.03",
+            "beren.port.engine-pod-spine.vertex.07",
+            "beren.port.engine-pod-spine.vertex.06"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.engine-pod-spine.bottom",
+          "vertexIds": [
+            "beren.port.engine-pod-spine.vertex.01",
+            "beren.port.engine-pod-spine.vertex.02",
+            "beren.port.engine-pod-spine.vertex.06",
+            "beren.port.engine-pod-spine.vertex.05"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.engine-pod-spine.top",
+          "vertexIds": [
+            "beren.port.engine-pod-spine.vertex.04",
+            "beren.port.engine-pod-spine.vertex.08",
+            "beren.port.engine-pod-spine.vertex.07",
+            "beren.port.engine-pod-spine.vertex.03"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.upper.engine-collar.front",
+          "vertexIds": [
+            "beren.port.upper.engine-collar.vertex.01",
+            "beren.port.upper.engine-collar.vertex.04",
+            "beren.port.upper.engine-collar.vertex.03",
+            "beren.port.upper.engine-collar.vertex.02"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.upper.engine-collar.rear",
+          "vertexIds": [
+            "beren.port.upper.engine-collar.vertex.05",
+            "beren.port.upper.engine-collar.vertex.06",
+            "beren.port.upper.engine-collar.vertex.07",
+            "beren.port.upper.engine-collar.vertex.08"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.upper.engine-collar.port",
+          "vertexIds": [
+            "beren.port.upper.engine-collar.vertex.01",
+            "beren.port.upper.engine-collar.vertex.05",
+            "beren.port.upper.engine-collar.vertex.08",
+            "beren.port.upper.engine-collar.vertex.04"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.upper.engine-collar.starboard",
+          "vertexIds": [
+            "beren.port.upper.engine-collar.vertex.02",
+            "beren.port.upper.engine-collar.vertex.03",
+            "beren.port.upper.engine-collar.vertex.07",
+            "beren.port.upper.engine-collar.vertex.06"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.upper.engine-collar.bottom",
+          "vertexIds": [
+            "beren.port.upper.engine-collar.vertex.01",
+            "beren.port.upper.engine-collar.vertex.02",
+            "beren.port.upper.engine-collar.vertex.06",
+            "beren.port.upper.engine-collar.vertex.05"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.upper.engine-collar.top",
+          "vertexIds": [
+            "beren.port.upper.engine-collar.vertex.04",
+            "beren.port.upper.engine-collar.vertex.08",
+            "beren.port.upper.engine-collar.vertex.07",
+            "beren.port.upper.engine-collar.vertex.03"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.lower.engine-collar.front",
+          "vertexIds": [
+            "beren.port.lower.engine-collar.vertex.01",
+            "beren.port.lower.engine-collar.vertex.04",
+            "beren.port.lower.engine-collar.vertex.03",
+            "beren.port.lower.engine-collar.vertex.02"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.lower.engine-collar.rear",
+          "vertexIds": [
+            "beren.port.lower.engine-collar.vertex.05",
+            "beren.port.lower.engine-collar.vertex.06",
+            "beren.port.lower.engine-collar.vertex.07",
+            "beren.port.lower.engine-collar.vertex.08"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.lower.engine-collar.port",
+          "vertexIds": [
+            "beren.port.lower.engine-collar.vertex.01",
+            "beren.port.lower.engine-collar.vertex.05",
+            "beren.port.lower.engine-collar.vertex.08",
+            "beren.port.lower.engine-collar.vertex.04"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.lower.engine-collar.starboard",
+          "vertexIds": [
+            "beren.port.lower.engine-collar.vertex.02",
+            "beren.port.lower.engine-collar.vertex.03",
+            "beren.port.lower.engine-collar.vertex.07",
+            "beren.port.lower.engine-collar.vertex.06"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.lower.engine-collar.bottom",
+          "vertexIds": [
+            "beren.port.lower.engine-collar.vertex.01",
+            "beren.port.lower.engine-collar.vertex.02",
+            "beren.port.lower.engine-collar.vertex.06",
+            "beren.port.lower.engine-collar.vertex.05"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.port.lower.engine-collar.top",
+          "vertexIds": [
+            "beren.port.lower.engine-collar.vertex.04",
+            "beren.port.lower.engine-collar.vertex.08",
+            "beren.port.lower.engine-collar.vertex.07",
+            "beren.port.lower.engine-collar.vertex.03"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.front",
+          "vertexIds": [
+            "beren.starboard.engine-pod-spine.vertex.01",
+            "beren.starboard.engine-pod-spine.vertex.04",
+            "beren.starboard.engine-pod-spine.vertex.03",
+            "beren.starboard.engine-pod-spine.vertex.02"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.rear",
+          "vertexIds": [
+            "beren.starboard.engine-pod-spine.vertex.05",
+            "beren.starboard.engine-pod-spine.vertex.06",
+            "beren.starboard.engine-pod-spine.vertex.07",
+            "beren.starboard.engine-pod-spine.vertex.08"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.port",
+          "vertexIds": [
+            "beren.starboard.engine-pod-spine.vertex.01",
+            "beren.starboard.engine-pod-spine.vertex.05",
+            "beren.starboard.engine-pod-spine.vertex.08",
+            "beren.starboard.engine-pod-spine.vertex.04"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.starboard",
+          "vertexIds": [
+            "beren.starboard.engine-pod-spine.vertex.02",
+            "beren.starboard.engine-pod-spine.vertex.03",
+            "beren.starboard.engine-pod-spine.vertex.07",
+            "beren.starboard.engine-pod-spine.vertex.06"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.bottom",
+          "vertexIds": [
+            "beren.starboard.engine-pod-spine.vertex.01",
+            "beren.starboard.engine-pod-spine.vertex.02",
+            "beren.starboard.engine-pod-spine.vertex.06",
+            "beren.starboard.engine-pod-spine.vertex.05"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.engine-pod-spine.top",
+          "vertexIds": [
+            "beren.starboard.engine-pod-spine.vertex.04",
+            "beren.starboard.engine-pod-spine.vertex.08",
+            "beren.starboard.engine-pod-spine.vertex.07",
+            "beren.starboard.engine-pod-spine.vertex.03"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.front",
+          "vertexIds": [
+            "beren.starboard.upper.engine-collar.vertex.01",
+            "beren.starboard.upper.engine-collar.vertex.04",
+            "beren.starboard.upper.engine-collar.vertex.03",
+            "beren.starboard.upper.engine-collar.vertex.02"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.rear",
+          "vertexIds": [
+            "beren.starboard.upper.engine-collar.vertex.05",
+            "beren.starboard.upper.engine-collar.vertex.06",
+            "beren.starboard.upper.engine-collar.vertex.07",
+            "beren.starboard.upper.engine-collar.vertex.08"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.port",
+          "vertexIds": [
+            "beren.starboard.upper.engine-collar.vertex.01",
+            "beren.starboard.upper.engine-collar.vertex.05",
+            "beren.starboard.upper.engine-collar.vertex.08",
+            "beren.starboard.upper.engine-collar.vertex.04"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.starboard",
+          "vertexIds": [
+            "beren.starboard.upper.engine-collar.vertex.02",
+            "beren.starboard.upper.engine-collar.vertex.03",
+            "beren.starboard.upper.engine-collar.vertex.07",
+            "beren.starboard.upper.engine-collar.vertex.06"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.bottom",
+          "vertexIds": [
+            "beren.starboard.upper.engine-collar.vertex.01",
+            "beren.starboard.upper.engine-collar.vertex.02",
+            "beren.starboard.upper.engine-collar.vertex.06",
+            "beren.starboard.upper.engine-collar.vertex.05"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.upper.engine-collar.top",
+          "vertexIds": [
+            "beren.starboard.upper.engine-collar.vertex.04",
+            "beren.starboard.upper.engine-collar.vertex.08",
+            "beren.starboard.upper.engine-collar.vertex.07",
+            "beren.starboard.upper.engine-collar.vertex.03"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.front",
+          "vertexIds": [
+            "beren.starboard.lower.engine-collar.vertex.01",
+            "beren.starboard.lower.engine-collar.vertex.04",
+            "beren.starboard.lower.engine-collar.vertex.03",
+            "beren.starboard.lower.engine-collar.vertex.02"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": -1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.rear",
+          "vertexIds": [
+            "beren.starboard.lower.engine-collar.vertex.05",
+            "beren.starboard.lower.engine-collar.vertex.06",
+            "beren.starboard.lower.engine-collar.vertex.07",
+            "beren.starboard.lower.engine-collar.vertex.08"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 0,
+            "z": 1
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.port",
+          "vertexIds": [
+            "beren.starboard.lower.engine-collar.vertex.01",
+            "beren.starboard.lower.engine-collar.vertex.05",
+            "beren.starboard.lower.engine-collar.vertex.08",
+            "beren.starboard.lower.engine-collar.vertex.04"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": -1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.starboard",
+          "vertexIds": [
+            "beren.starboard.lower.engine-collar.vertex.02",
+            "beren.starboard.lower.engine-collar.vertex.03",
+            "beren.starboard.lower.engine-collar.vertex.07",
+            "beren.starboard.lower.engine-collar.vertex.06"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.bottom",
+          "vertexIds": [
+            "beren.starboard.lower.engine-collar.vertex.01",
+            "beren.starboard.lower.engine-collar.vertex.02",
+            "beren.starboard.lower.engine-collar.vertex.06",
+            "beren.starboard.lower.engine-collar.vertex.05"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": -1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        },
+        {
+          "id": "beren.starboard.lower.engine-collar.top",
+          "vertexIds": [
+            "beren.starboard.lower.engine-collar.vertex.04",
+            "beren.starboard.lower.engine-collar.vertex.08",
+            "beren.starboard.lower.engine-collar.vertex.07",
+            "beren.starboard.lower.engine-collar.vertex.03"
+          ],
+          "role": "engineMount",
+          "materialGroup": "engine-mount-structure",
+          "outwardNormal": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "contributesToClosedHull": false
+        }
+      ],
+      "assemblies": [
+        {
+          "assemblyId": "beren.aft.cargo-door.01",
+          "kind": "CargoDoor",
+          "faceId": "beren.aft.cargo-door.01",
+          "closedPose": "Closed",
+          "openingPolygonVertexIds": [
+            "beren.aft.cargo-door.01.corner.01",
+            "beren.aft.cargo-door.01.corner.02",
+            "beren.aft.cargo-door.01.corner.03",
+            "beren.aft.cargo-door.01.corner.04"
+          ],
+          "movementConcept": "Future split door retracting laterally",
+          "movementAxes": [
+            {
+              "x": -1,
+              "y": -0,
+              "z": -0
+            },
+            {
+              "x": 1,
+              "y": 0,
+              "z": 0
+            }
+          ],
+          "movementClearanceVolumes": [
+            {
+              "min": {
+                "x": -7.2,
+                "y": -4.25,
+                "z": 12.95
+              },
+              "max": {
+                "x": -3.65,
+                "y": -1.25,
+                "z": 13.55
+              }
+            },
+            {
+              "min": {
+                "x": 3.65,
+                "y": -4.25,
+                "z": 12.95
+              },
+              "max": {
+                "x": 7.2,
+                "y": -1.25,
+                "z": 13.55
+              }
+            }
+          ]
+        }
+      ],
+      "attachmentPorts": [
+        {
+          "portId": "beren.port.upper.engine-root.01",
+          "position": {
+            "x": -9,
+            "y": -0.45,
+            "z": 7.5
+          },
+          "normal": {
+            "x": -1,
+            "y": -0,
+            "z": -0
+          },
+          "capabilities": "engine",
+          "up": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "componentSlotId": "engine.port.upper.01",
+          "engineMountStandardId": "H2",
+          "engineMountSide": "port",
+          "mountRootPosition": {
+            "x": -7.8,
+            "y": -0.45,
+            "z": 7.5
+          },
+          "attachmentInterfacePosition": {
+            "x": -8.2,
+            "y": -0.45,
+            "z": 7.5
+          },
+          "footprintMeters": {
+            "x": 1.25,
+            "y": 2.3,
+            "z": 0
+          },
+          "clearanceMinMeters": {
+            "x": -9.85,
+            "y": -1.3,
+            "z": 4.2
+          },
+          "clearanceMaxMeters": {
+            "x": -8.15,
+            "y": 0.39999999999999997,
+            "z": 11.25
+          }
+        },
+        {
+          "portId": "beren.port.lower.engine-root.01",
+          "position": {
+            "x": -9,
+            "y": -2.65,
+            "z": 7.5
+          },
+          "normal": {
+            "x": -1,
+            "y": -0,
+            "z": -0
+          },
+          "capabilities": "engine",
+          "up": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "componentSlotId": "engine.port.lower.01",
+          "engineMountStandardId": "H2",
+          "engineMountSide": "port",
+          "mountRootPosition": {
+            "x": -7.8,
+            "y": -2.65,
+            "z": 7.5
+          },
+          "attachmentInterfacePosition": {
+            "x": -8.2,
+            "y": -2.65,
+            "z": 7.5
+          },
+          "footprintMeters": {
+            "x": 1.25,
+            "y": 2.3,
+            "z": 0
+          },
+          "clearanceMinMeters": {
+            "x": -9.85,
+            "y": -3.5,
+            "z": 4.2
+          },
+          "clearanceMaxMeters": {
+            "x": -8.15,
+            "y": -1.7999999999999998,
+            "z": 11.25
+          }
+        },
+        {
+          "portId": "beren.starboard.upper.engine-root.01",
+          "position": {
+            "x": 9,
+            "y": -0.45,
+            "z": 7.5
+          },
+          "normal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "capabilities": "engine",
+          "up": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "componentSlotId": "engine.starboard.upper.01",
+          "engineMountStandardId": "H2",
+          "engineMountSide": "starboard",
+          "mountRootPosition": {
+            "x": 7.8,
+            "y": -0.45,
+            "z": 7.5
+          },
+          "attachmentInterfacePosition": {
+            "x": 8.2,
+            "y": -0.45,
+            "z": 7.5
+          },
+          "footprintMeters": {
+            "x": 1.25,
+            "y": 2.3,
+            "z": 0
+          },
+          "clearanceMinMeters": {
+            "x": 8.15,
+            "y": -1.3,
+            "z": 4.2
+          },
+          "clearanceMaxMeters": {
+            "x": 9.85,
+            "y": 0.39999999999999997,
+            "z": 11.25
+          }
+        },
+        {
+          "portId": "beren.starboard.lower.engine-root.01",
+          "position": {
+            "x": 9,
+            "y": -2.65,
+            "z": 7.5
+          },
+          "normal": {
+            "x": 1,
+            "y": 0,
+            "z": 0
+          },
+          "capabilities": "engine",
+          "up": {
+            "x": 0,
+            "y": 1,
+            "z": 0
+          },
+          "componentSlotId": "engine.starboard.lower.01",
+          "engineMountStandardId": "H2",
+          "engineMountSide": "starboard",
+          "mountRootPosition": {
+            "x": 7.8,
+            "y": -2.65,
+            "z": 7.5
+          },
+          "attachmentInterfacePosition": {
+            "x": 8.2,
+            "y": -2.65,
+            "z": 7.5
+          },
+          "footprintMeters": {
+            "x": 1.25,
+            "y": 2.3,
+            "z": 0
+          },
+          "clearanceMinMeters": {
+            "x": 8.15,
+            "y": -3.5,
+            "z": 4.2
+          },
+          "clearanceMaxMeters": {
+            "x": 9.85,
+            "y": -1.7999999999999998,
+            "z": 11.25
+          }
+        }
+      ]
+    }
+  }
+}

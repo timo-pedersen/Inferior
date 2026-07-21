@@ -9,6 +9,7 @@ public static class PlayerShipCycleCatalog
         AriesHullDefinitionFactory.HullId,
         AsteriskHullDefinitionFactory.HullId,
         BerenHullDefinitionFactory.HullId,
+        AntegaHullDefinitionFactory.HullId,
     ];
 
     public static string GetNext(string currentHullTypeId)

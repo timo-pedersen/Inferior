@@ -34,8 +34,11 @@ public sealed partial class SystemSpaceState
 
     private void UpdateThirdPersonCamera(SpaceSimulation.ShipSnapshot snap)
     {
+        DVec3 localTarget = snap.PresentationBounds?.Center ?? DVec3.Zero;
+        DVec3 worldTarget =
+            snap.Position + ChaseCameraState.Transform(localTarget, snap.Orientation);
         DVec3 worldOffset = _chaseCamera.ResolveWorldOffset(snap.Orientation);
-        DVec3 cameraPosition = snap.Position + worldOffset;
+        DVec3 cameraPosition = worldTarget + worldOffset;
 
         // Use ship's own up axis so the camera rolls with the ship — eliminates the
         // singularity that occurs when the ship points near vertical and world-up is
@@ -47,6 +50,7 @@ public sealed partial class SystemSpaceState
 
     private void UpdateShipFollowingCamera(SpaceSimulation.ShipSnapshot snap)
     {
+        _chaseCamera.ApplyPresentationBounds(snap.PresentationBounds);
         if (_chaseCamera.IsActive)
             UpdateThirdPersonCamera(snap);
         else
@@ -171,6 +175,7 @@ public sealed partial class SystemSpaceState
             ThrustForward = 0.0,
             ThrustLateral = 0.0,
             ThrustVertical = 0.0,
+            UseLiftChannel = false,
             RollInput = 0.0,
             PitchInput = 0.0,
             YawInput = 0.0,

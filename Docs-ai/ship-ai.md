@@ -97,6 +97,12 @@ The drive always provides baseline rotational authority. A gyro component enhanc
 
 **Turn rate is asymmetric:** up-pitch can be faster than down-pitch and yaw, because most engines allow additional downward thrust (same vector used for planetary landing). Implement as a getter from day one even when stubbed — avoids refactoring later.
 
+Current implementation: the retained asymmetric values are assisted target-rate limits,
+not direct rotation. Installed operational engine torque divided by three configured-box
+scalar inertias determines how quickly ship-local pitch, yaw, and roll angular velocity
+approach or brake toward those targets. Full flight-assist-OFF torque control and optional
+gyro contribution remain deferred.
+
 ---
 
 ## Cockpit placement
@@ -117,6 +123,7 @@ they are not authoritative for Aries, Asterisk, or future cockpit-enabled hulls.
 | Aries (`type-1`) | Small two-container utility hauler with paired Mule engines and a port-offset roof C2 cockpit. |
 | Asterisk (`asterisk`) | Minimum-cost 8.6 m one-container hauler. A closed front cargo door feeds one canonical 2.5 × 2.5 × 6.0 m longitudinal container bay. The C2 command blister protrudes from starboard, one Mule occupies the opposite port side, and the camera looks forward plus 30° outward toward starboard. The cargo door is visual and non-animated. |
 | Beren (`beren`) | Medium 27 m by 20 m cargo platform built around a 3 by 3 arrangement of canonical containers. It has a closed visual aft cargo door, four independently installed Needle engines in vertical port/starboard pairs, and a forward underslung C2 cockpit whose camera looks 10 degrees down from ship-forward. |
+| Antega (`antega`) | Massive 99 m civilian container hauler with a 120-container design capacity arranged 12 fore/aft × 5 across × 2 high. It has a segmented closed front cargo hatch, four independently installed Atlas H10 engines on substantial external supports, and a dorsal far-aft C5 civilian bridge whose camera looks 5 degrees down. |
 
 ---
 

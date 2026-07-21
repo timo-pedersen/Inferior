@@ -32,10 +32,20 @@ public sealed class Ship
     public DVec3      Position    { get; set; }
     public DVec3      Velocity    { get; set; }
     public Quaternion Orientation { get; private set; } = Quaternion.Identity;
+    public DVec3 AngularVelocityLocalRadPerSec { get; private set; }
 
-    // TODO: angular velocity for proper tumble physics (needed by slipstream exit tumble)
-    // When implemented, ApplyAngularImpulse should add to it and ApplyRotation should integrate it.
-    public void ApplyAngularImpulse(DVec3 axisRadPerSec2) { /* stub */ }
+    public void SetAngularVelocityLocal(DVec3 value)
+    {
+        if (!IsFinite(value))
+            throw new ArgumentOutOfRangeException(nameof(value));
+        AngularVelocityLocalRadPerSec = value;
+    }
+
+    public void ResetAngularVelocity()
+        => AngularVelocityLocalRadPerSec = DVec3.Zero;
+
+    public void ApplyAngularImpulse(DVec3 deltaRadPerSec)
+        => SetAngularVelocityLocal(AngularVelocityLocalRadPerSec + deltaRadPerSec);
 
     // ── Components ────────────────────────────────────────────────────────────
     private readonly List<ShipComponent> _components = new();
@@ -82,7 +92,10 @@ public sealed class Ship
     // ── Mass ──────────────────────────────────────────────────────────────────
     public double HullMass      { get; init; } = 50_000.0;  // kg, hull only
     public double ComponentMass { get; set;  } = 0.0;       // kg, updated as components change
-    public double Mass          => HullMass + ComponentMass;
+    public double InstalledEngineMass => _engineMounts.Sum(
+        mount => mount.InstalledEngine?.Variant.Engine.DryMassKg ?? 0.0);
+    public double Mass          => HullMass + ComponentMass + InstalledEngineMass;
+    public DesignedSingleEngineEfficiency? SingleEngineEfficiency { get; init; }
 
     // ── Cockpit ───────────────────────────────────────────────────────────────
     public InstalledCockpit? Cockpit { get; init; }
@@ -133,6 +146,12 @@ public sealed class Ship
         }
     }
 
+    public DVec3 CockpitRootShipLocalPosition =>
+        ResolveCockpitShipLocalRootPose().Position;
+
+    public Quaternion CockpitRootShipLocalOrientation =>
+        ResolveCockpitShipLocalRootPose().Orientation;
+
     public bool ApplyCockpitCommand(ComponentCommand command)
     {
         if (Cockpit is null)
@@ -147,28 +166,19 @@ public sealed class Ship
     public DVec3 Right   { get; private set; } = new(1, 0, 0);
     public DVec3 Up      { get; private set; } = new(0, 1, 0);
 
-    // ── Turn rates (calculated — stubbed until engine + gyro system exists) ────
-    // Asymmetric by design: up-pitch is faster because the engine can vector thrust
-    // upward; this also assists planetary landing. Replace getter bodies with
-    // real calculations once engine/mass data is available.
-    public double TurnRatePitchUp   => TurnRateBase * 1.4;  // rad/s
-    public double TurnRatePitchDown => TurnRateBase;
-    public double TurnRateYaw       => TurnRateBase;
-    public double TurnRateRoll      => TurnRateBase * 1.5;
-
-    private const double TurnRateBase = 1.0;  // rad/s — derive from engine + gyro + mass later
+    // Assisted target-rate limits. Torque and box inertia determine time to reach them.
+    public double TurnRatePitchUp => FlightConstants.MaximumAssistedPitchUpRateRadPerSec;
+    public double TurnRatePitchDown => FlightConstants.MaximumAssistedPitchDownRateRadPerSec;
+    public double TurnRateYaw => FlightConstants.MaximumAssistedYawRateRadPerSec;
+    public double TurnRateRoll => FlightConstants.MaximumAssistedRollRateRadPerSec;
 
     // ── Drive ─────────────────────────────────────────────────────────────────
     // Velocity-target model: ship snaps to MoveSpeedMs in the thrust direction.
     // Used by debug camera proximity scaling; Newtonian flight does not read MoveSpeedMs.
     public double MoveSpeedMs { get; set; } = 5e9;  // m/s
 
-    // Number of engine nodes — governs gear table depth and Slipstream harmonic count.
+    // Transitional slipstream node count. Newtonian harmony comes from installed engines.
     public int NodeCount { get; init; } = FlightConstants.DefaultNodeCount;
-
-    // Newtonian gear speed ceilings — bottom NodeCount entries from the global table.
-    public double[] NewtonianGears =>
-        FlightConstants.NewtonianGearSpeeds.Take(NodeCount).ToArray();
 
     // Slipstream harmonic speeds — NodeCount entries, log-scaled from min to max.
     public double[] SlipstreamHarmonics
@@ -205,19 +215,19 @@ public sealed class Ship
         RefreshAxes();
     }
 
-    /// <summary>
-    /// Apply a rotation this tick. pitchDelta/yawDelta are raw angle deltas in radians
-    /// (from mouse input). rollRate is -1..1 and is scaled by TurnRateRoll × dt.
-    /// </summary>
-    public void ApplyRotation(double pitchDelta, double yawDelta, double rollRate, double dt)
+    public void IntegrateAngularVelocity(double dt)
     {
-        double rollDelta = rollRate * TurnRateRoll * dt;
-        if (pitchDelta == 0.0 && yawDelta == 0.0 && rollDelta == 0.0) return;
+        if (!double.IsFinite(dt) || dt < 0.0)
+            throw new ArgumentOutOfRangeException(nameof(dt));
 
-        var pitchQ = Quaternion.CreateFromAxisAngle(RightF,   (float)pitchDelta);
-        var yawQ   = Quaternion.CreateFromAxisAngle(UpF,      (float)yawDelta);
-        var rollQ  = Quaternion.CreateFromAxisAngle(ForwardF, (float)rollDelta);
-        SetOrientation(Quaternion.Normalize(pitchQ * yawQ * rollQ * Orientation));
+        double speed = AngularVelocityLocalRadPerSec.Length;
+        double angle = speed * dt;
+        if (angle < 1e-12)
+            return;
+
+        DVec3 axis = AngularVelocityLocalRadPerSec / speed;
+        Quaternion delta = Quaternion.CreateFromAxisAngle(axis.ToVector3(), (float)angle);
+        SetOrientation(Quaternion.Normalize(Orientation * delta));
     }
 
     /// <summary>
@@ -241,11 +251,12 @@ public sealed class Ship
         Up      = Vec3(Vector3.Normalize(Vector3.Transform( Vector3.UnitY, rot)));
     }
 
-    private Vector3 ForwardF => new((float)Forward.X, (float)Forward.Y, (float)Forward.Z);
-    private Vector3 RightF   => new((float)Right.X,   (float)Right.Y,   (float)Right.Z);
-    private Vector3 UpF      => new((float)Up.X,      (float)Up.Y,      (float)Up.Z);
-
     private static DVec3 Vec3(Vector3 v) => new(v.X, v.Y, v.Z);
+
+    private static bool IsFinite(DVec3 value)
+        => double.IsFinite(value.X)
+        && double.IsFinite(value.Y)
+        && double.IsFinite(value.Z);
 
     private (DVec3 Position, Quaternion Orientation) ResolveCockpitShipLocalPose()
     {

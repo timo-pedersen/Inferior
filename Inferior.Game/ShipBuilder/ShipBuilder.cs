@@ -98,6 +98,7 @@ public sealed class ShipBuilder
             SizeClass   = hull.SizeClass,
             MoveSpeedMs = 5e9,                    // same default SpawnShip used
             HullMass    = hull.HullMass,
+            SingleEngineEfficiency = hull.SingleEngineEfficiency,
             Cockpit = cockpit,
             CockpitOffset = hull.CockpitOffset,
             CockpitPose = hull.CockpitPose,

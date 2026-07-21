@@ -8,6 +8,7 @@ public static class CockpitDefinitionLibrary
     public const string AriesCivilianCanopyId = "aries-civilian-canopy-cockpit";
     public const string AsteriskStarboardCockpitId = "asterisk-starboard-cockpit";
     public const string BerenUnderslungCockpitId = "beren-underslung-cockpit";
+    public const string AntegaCivilianBridgeId = "antega-civilian-bridge";
 
     private static readonly Dictionary<string, CockpitModuleDefinition> Definitions =
         new(StringComparer.OrdinalIgnoreCase);
@@ -62,6 +63,22 @@ public static class CockpitDefinitionLibrary
             HasCockpitLights = true,
             VisualGeometry = BerenUnderslungCockpitGeometryFactory.Create(),
         });
+        Register(new CockpitModuleDefinition
+        {
+            DefinitionId = AntegaCivilianBridgeId,
+            DisplayName = "Antega Civilian Bridge",
+            RequiredMountClass = CockpitMountClass.C5,
+            PilotLocalPosition = new DVec3(0.0, 2.55, -3.20),
+            PilotLocalOrientation = Quaternion.Identity,
+            CameraLocalPosition = new DVec3(0.0, 3.15, -3.95),
+            CameraLocalOrientation = CreateForwardPitchOrientation(5.0f),
+            CanopyLocalPosition = new DVec3(0.0, 3.30, -3.65),
+            CanopyLocalOrientation = Quaternion.Identity,
+            PreferredFacing = MountFacing.Up,
+            HasCanopyLights = true,
+            HasCockpitLights = true,
+            VisualGeometry = AntegaCivilianBridgeGeometryFactory.Create(),
+        });
     }
 
     public static CockpitModuleDefinition Get(string definitionId)
@@ -98,6 +115,13 @@ public static class CockpitDefinitionLibrary
         float angle = MathHelper.ToRadians(10.0f);
         var forward = new Vector3(0.0f, MathF.Sin(angle), -MathF.Cos(angle));
         return CreateLookOrientation(forward, -Vector3.UnitY);
+    }
+
+    private static Quaternion CreateForwardPitchOrientation(float downDegrees)
+    {
+        float angle = MathHelper.ToRadians(downDegrees);
+        var forward = new Vector3(0.0f, -MathF.Sin(angle), -MathF.Cos(angle));
+        return CreateLookOrientation(forward, Vector3.UnitY);
     }
 
     private static Quaternion CreateLookOrientation(Vector3 forward, Vector3 up)

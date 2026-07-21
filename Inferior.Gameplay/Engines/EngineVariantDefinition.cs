@@ -4,6 +4,7 @@ public static class EngineMountStandardIds
 {
     public const string Eriksson = "Eriksson";
     public const string H2 = "H2";
+    public const string H10 = "H10";
 }
 
 /// <summary>A manufactured engine family adapted to one physical mount standard.</summary>

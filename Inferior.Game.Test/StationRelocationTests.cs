@@ -5,6 +5,7 @@ using Inferior.Galaxy;
 using Inferior.Game;
 using Inferior.Game.States;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
@@ -155,7 +156,11 @@ public sealed class StationRelocationTests
     [Fact]
     public void MatchShipVelocityToReferenceIsSharedOperation()
     {
-        var ship = new Ship { Velocity = new DVec3(1, 2, 3) };
+        var ship = new Ship
+        {
+            HullTypeId = AriesHullDefinitionFactory.HullId,
+            Velocity = new DVec3(1, 2, 3),
+        };
         var referenceVelocity = new DVec3(-4, 5, -6);
 
         SpaceSimulation.MatchShipVelocityToReference(ship, referenceVelocity);
@@ -304,6 +309,7 @@ public sealed class StationRelocationTests
         var simulation = new SpaceSimulation();
         var ship = new Ship
         {
+            HullTypeId = AriesHullDefinitionFactory.HullId,
             Position = oldShipPosition,
             Velocity = new DVec3(123.0, -456.0, 789.0),
         };

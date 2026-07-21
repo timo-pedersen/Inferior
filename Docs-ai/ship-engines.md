@@ -521,9 +521,63 @@ Runtime default construction is mount-count agnostic: `ShipBuilder` resolves eac
 hull-authored engine slot and installs one independent engine instance through
 `EngineInstallationGenerator`. Aries currently supplies two Mule defaults; Asterisk
 supplies one port-side Mule; Beren supplies four Needle defaults arranged as vertical
-port and starboard pairs. Pair-specific generation remains available where mirrored pair
-validation is itself required. Debug pair cycling applies only to ships with exactly one
-port and one starboard engine, avoiding ambiguous replacement on multi-engine hulls.
+port and starboard pairs; Antega supplies four Atlas Civilian Drive defaults on H10 mounts,
+also arranged as vertical port and starboard pairs. Atlas is a definition-owned 58.4 m
+industrial engine with a substantial forward mount section, segmented main body, service
+details, and an aft exhaust aperture. Pair-specific generation remains available where
+mirrored pair validation is itself required. Debug pair cycling applies only to ships with
+exactly one port and one starboard engine, avoiding ambiguous replacement on multi-engine
+hulls.
+
+Engine definitions own simulation-authoritative numeric values in SI units:
+
+- `DryMassKg`;
+- `MaximumForwardThrustN`;
+- reverse, lateral, and lift fractions relative to maximum forward thrust;
+- `RotationalTorqueNm`.
+- harmony count, minimum thrust fraction, and minimum/maximum speed ceilings.
+
+`EngineDefinition` validates all fractions in `[0, 1]`, harmony count at two or more,
+minimum thrust in `(0, 1]`, positive minimum speed, and maximum speed at or above the
+minimum. Qualitative `EngineDesignIntent` metadata remains descriptive only.
+
+Provisional active tuning:
+
+| Family | Dry mass | Max forward | Rev / lat / lift | Max torque | Harmonies | Min thrust | Speed endpoints |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Mule | 2,400 kg | 156,000 N | 1.00 / 0.50 / 0.75 | 600,000 N m | 8 | 0.10 | 50 / 25,600 m/s |
+| Needle | 1,650 kg | 187,800 N | 1.00 / 0.50 / 0.75 | 1,050,000 N m | 16 | 0.10 | 50 / 25,600 m/s |
+| Atlas Civilian Drive | 96,000 kg | 3,585,200 N | 1.00 / 0.25 / 0.50 | 90,000,000 N m | 10 | 0.10 | 50 / 25,600 m/s |
+
+Each `EngineInstance` owns `SelectedHarmony` in `1..HarmonyCount`. Pilot scroll input
+changes all active-ship instances through the simulation authority, while retaining the
+state per instance for future mixed or independent controls. For harmony `h`:
+
+```text
+x = (h - 1) / (HarmonyCount - 1)
+curve = x^2
+thrust multiplier = minimum thrust + (1 - minimum thrust) * curve
+speed ceiling = minimum speed + (maximum speed - minimum speed) * curve
+```
+
+Harmony count controls step granularity, not peak capability. Coarse-harmony military
+engines are to be authored with fewer steps and suitable endpoints; no military flag or
+special formula exists. Fuel compatibility and consumption remain deferred.
+
+These are initial handling calibration values, not final economy, power, or balance data.
+Installed engines contribute mass individually. Each operational engine resolves its own
+harmony-scaled directional maxima and torque, transforms its force through installation
+orientation, and contributes to `ShipPropulsion`. Runtime operational filtering uses
+`1 - EngineInstance.DamageFraction`; wear is not yet a propulsion modifier. Rotational
+torque scales positively with harmony and remains outside the translational envelope.
+
+Asterisk is explicitly authored as a designed single-engine layout. Its hull-owned
+efficiencies are 0.75 forward, 0.75 maneuvering, and 0.60 rotation. The efficiencies do
+not belong to Mule and do not activate when a normal multi-engine ship loses engines.
+
+The Stage-1 torque values were retuned when rotation became active. Initial calculated
+times were impractical, especially Antega at roughly 106 seconds to full assisted pitch.
+The values above are provisional handling calibration, not final engine balance.
 
 Gameplay systems such as:
 - damage;

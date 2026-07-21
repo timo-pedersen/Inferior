@@ -38,7 +38,11 @@
   <Project Path="Inferior.Game.Test/Inferior.Game.Test.csproj" />
   <Project Path="Inferior.Game/Inferior.Game.csproj" />
   <Project Path="Inferior.Gameplay/Inferior.Gameplay.csproj" />
+  <Project Path="Inferior.Gameplay.Test/Inferior.Gameplay.Test.csproj" />
+  <Project Path="Inferior.ObjectDesigner/Inferior.ObjectDesigner.csproj" />
+  <Project Path="Inferior.ObjectDesigner.Test/Inferior.ObjectDesigner.Test.csproj" />
   <Project Path="Inferior.Persistence/Inferior.Persistence.csproj" />
   <Project Path="Inferior.Rendering/Inferior.Rendering.csproj" />
+  <Project Path="Inferior.UI.Test/Inferior.UI.Test.csproj" />
   <Project Path="Inferior.UI/Inferior.UI.csproj" />
 </Solution>

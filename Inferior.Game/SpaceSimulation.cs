@@ -24,9 +24,6 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
-    private const double LegacyEngineDownThrustN = 300_000.0;
-    private const double LegacyEngineForwardThrustN = LegacyEngineDownThrustN * 3.0;
-
     public sealed record StationProximityTickDiagnostic(
         long TickSequence,
         double EnvironmentSimTime,
@@ -122,8 +119,8 @@ public sealed class SpaceSimulation : Simulation
         FlightMode FlightMode        = FlightMode.SystemNewtonian,
         bool       FlightAssistOn    = true,
         // Newtonian / LKM
-        int        NewtonianGear     = 0,   // 0-based gear index
-        int        NewtonianGearCount= 10,  // total gears available
+        int        NewtonianGear     = 0,   // 0-based selected harmony index
+        int        NewtonianGearCount= 1,   // maximum installed-engine harmony count
         int        LkmMaxGear        = int.MaxValue,  // 0-based; int.MaxValue = no limit
         int        LkmZone           = 0,   // 0=none, 1/2/3
         double     LkmComplianceTimer= 0,
@@ -131,6 +128,7 @@ public sealed class SpaceSimulation : Simulation
         bool       AfterburnerActive = false,   // blocks the H hyperspace trigger on the main thread
         // Slipstream
         int        SlipstreamHarmonicIndex = 0,
+        int        SlipstreamHarmonicCount = 10,
         double     ClunkPhase        = -1.0,   // -1 = inactive, 0→1 = animating
         DVec3      ReferenceVelocity = default,
         string     ReferenceName     = "",
@@ -145,9 +143,14 @@ public sealed class SpaceSimulation : Simulation
         // thread has resolved the request.
         int        RelocationSequence = 0,
         IReadOnlyList<EngineMountPresentationSnapshot>? EngineMounts = null,
-        CockpitPresentationSnapshot? Cockpit = null);
+        CockpitPresentationSnapshot? Cockpit = null,
+        ShipPresentationBounds? PresentationBounds = null,
+        ShipPropulsionSnapshot? Propulsion = null,
+        ShipRotationSnapshot? Rotation = null);
 
     private volatile ShipSnapshot? _shipSnapshot;
+    private ShipPropulsionApplication _lastPropulsionApplication;
+    private DVec3 _lastTargetAngularVelocityLocalRadPerSec;
 
     public ShipSnapshot? ShipState => _shipSnapshot;
 
@@ -381,6 +384,8 @@ public sealed class SpaceSimulation : Simulation
         _lastDt = dt;
         Ship? ship = _ship;
         if (ship == null) return;
+        _lastPropulsionApplication = default;
+        _lastTargetAngularVelocityLocalRadPerSec = DVec3.Zero;
         EngineVisualState engineVisualState = EngineVisualState.Idle;
 
         int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
@@ -419,6 +424,7 @@ public sealed class SpaceSimulation : Simulation
         {
             ship.Position = teleport.Position;
             ship.Velocity = DVec3.Zero;
+            ship.ResetAngularVelocity();
             ship.SetOrientation(teleport.Orientation);
             _teleportRequest = null;
         }
@@ -459,18 +465,23 @@ public sealed class SpaceSimulation : Simulation
         }
 
         // ── Rotation ─────────────────────────────────────────────────────
-        // While the afterburner burns, add a small random pitch/yaw jitter on top of mouse-look —
-        // a Brownian-ish shake that also nudges the ship's real forward vector (and so its actual
-        // travel direction) slightly, rather than a purely cosmetic camera overlay. Roll is
-        // untouched either way.
+        // Afterburner jitter perturbs the assisted target command and remains torque-limited.
         double pitchInput = input.PitchInput;
         double yawInput   = input.YawInput;
         if (_afterburnerActive)
         {
-            pitchInput += (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0) * FlightConstants.AfterburnerShakeRadians;
-            yawInput   += (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0) * FlightConstants.AfterburnerShakeRadians;
+            double pitchJitter =
+                (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0)
+                * FlightConstants.AfterburnerShakeRadians;
+            double yawJitter =
+                (_afterburnerShakeRng.NextDouble() * 2.0 - 1.0)
+                * FlightConstants.AfterburnerShakeRadians;
+            double pitchMaximum = pitchJitter >= 0.0
+                ? ship.TurnRatePitchUp
+                : ship.TurnRatePitchDown;
+            pitchInput += ShipRotation.NormalizeLegacyMouseInput(pitchJitter, pitchMaximum);
+            yawInput += ShipRotation.NormalizeLegacyMouseInput(yawJitter, ship.TurnRateYaw);
         }
-        ship.ApplyRotation(pitchInput, yawInput, input.RollInput, dt);
 
         // ── Flight Assist toggle (atmospheric only, rising edge) ──────────
         if (input.FlightAssistToggle && !_prevFlightAssistToggle)
@@ -516,18 +527,28 @@ public sealed class SpaceSimulation : Simulation
 
         if (_currentFlightMode == FlightMode.SystemNewtonian)
         {
-            double[] gears  = ship.NewtonianGears;
-            int      topIdx = gears.Length - 1;
-            int      prev   = _newtonianGear;
-            if (input.GearUp   && _newtonianGear < topIdx)  _newtonianGear++;
-            if (input.GearDown && _newtonianGear > 0)        _newtonianGear--;
-            if (_newtonianGear != prev) TriggerClunk(ship.ClunkDurationMs);
+            int topIdx = GetMaximumHarmonyCount(ship) - 1;
+            int previous = _newtonianGear;
+            if (gearChangeSteps != 0)
+            {
+                _newtonianGear = Math.Clamp(
+                    _newtonianGear + gearChangeSteps,
+                    0,
+                    topIdx);
+            }
+            if (_newtonianGear != previous)
+            {
+                SetSharedEngineHarmony(ship, _newtonianGear + 1);
+                TriggerClunk(ship.ClunkDurationMs);
+            }
         }
         else if (_currentFlightMode == FlightMode.SystemSlipstream)
         {
             if (gearChangeSteps != 0)
                 ShiftSlipstreamHarmonic(ship, gearChangeSteps);
         }
+
+        TickAssistedRotation(ship, pitchInput, yawInput, input.RollInput, dt);
 
         // ── FlightMode transition (Space ↔ Atmosphere) ───────────────────
         var   nearBody = _nearAtmBody;
@@ -636,6 +657,8 @@ public sealed class SpaceSimulation : Simulation
         DVec3 shipMovementDuringTick = ship.Position - _nearestStationShipPosition;
         var postPhysicsProximity = ComputeNearestStationProximity(ship.Position, GameClock.SimTime);
         var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
+        ShipPresentationBounds? configuredBounds =
+            ShipPresentationBoundsCalculator.TryCalculate(ship);
 
         _shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId,
@@ -646,13 +669,14 @@ public sealed class SpaceSimulation : Simulation
             snapMode,
             _flightAssistEnabled,
             _newtonianGear,
-            ship.NewtonianGears.Length,
+            GetMaximumHarmonyCount(ship),
             postPhysicsLkm.MaxGear,
             postPhysicsLkm.Zone,
             _lkmComplianceTimer,
             _xStopActive,
             _afterburnerActive,
             _slipstreamHarmonicIndex,
+            ship.SlipstreamHarmonics.Length,
             clunkPhase,
             _referenceVelocity,
             _referenceName,
@@ -662,7 +686,10 @@ public sealed class SpaceSimulation : Simulation
             snapAccel,
             _relocationSequence,
             BuildEngineMountSnapshots(ship),
-            BuildCockpitSnapshot(ship));
+            BuildCockpitSnapshot(ship),
+            configuredBounds,
+            BuildPropulsionSnapshot(ship),
+            BuildRotationSnapshot(ship, configuredBounds));
 
         _lastStationProximityTickDiagnostic = new StationProximityTickDiagnostic(
             snapTickSequence,
@@ -717,6 +744,104 @@ public sealed class SpaceSimulation : Simulation
             })
             .ToArray();
         return Array.AsReadOnly(snapshots);
+    }
+
+    private ShipPropulsionSnapshot BuildPropulsionSnapshot(Ship ship)
+    {
+        ShipPropulsionCapability capability = ShipPropulsion.Resolve(ship);
+        IReadOnlyList<EngineHarmonySnapshot> engines = Array.AsReadOnly(
+            capability.Engines
+                .Select(engine => new EngineHarmonySnapshot(
+                    engine.InstanceId,
+                    engine.FamilyId,
+                    engine.Harmony.SelectedHarmony,
+                    engine.Harmony.HarmonyCount,
+                    engine.Harmony.NormalizedPosition,
+                    engine.Harmony.Curve,
+                    engine.Harmony.ThrustMultiplier,
+                    engine.Harmony.SpeedCeilingMps,
+                    engine.Harmony.MaximumForwardThrustN
+                        * engine.OperationalFactor * engine.ForwardEfficiency,
+                    engine.Harmony.MaximumReverseThrustN
+                        * engine.OperationalFactor * engine.ForwardEfficiency,
+                    engine.Harmony.MaximumLateralThrustN
+                        * engine.OperationalFactor * engine.ManeuveringEfficiency,
+                    engine.Harmony.MaximumLiftThrustN
+                        * engine.OperationalFactor * engine.ManeuveringEfficiency,
+                    engine.Harmony.MaximumRotationalTorqueNm * engine.OperationalFactor))
+                .ToArray());
+        double liftAcceleration = capability.CurrentMassKg > 0.0
+            ? capability.AvailableLiftThrustN / capability.CurrentMassKg
+            : 0.0;
+        double hoverGravity = liftAcceleration / ShipPropulsion.StandardGravityMps2;
+        return new ShipPropulsionSnapshot(
+            capability.CurrentMassKg,
+            capability.HullMassKg,
+            capability.ComponentMassKg,
+            capability.InstalledEngineCount,
+            capability.OperationalEngineCount,
+            capability.InstalledEngineMassKg,
+            capability.AvailableForwardForceShipLocalN,
+            capability.AvailableReverseThrustN,
+            capability.AvailableLateralThrustN,
+            capability.AvailableLiftThrustN,
+            capability.AvailableRotationalTorqueNm,
+            capability.SpeedCeilingMps,
+            engines,
+            _lastPropulsionApplication.TranslationAllocation,
+            _lastPropulsionApplication.AppliedForceShipLocalN,
+            _lastPropulsionApplication.ResultingAccelerationShipLocalMps2,
+            liftAcceleration,
+            hoverGravity,
+            hoverGravity / ShipPropulsion.LandingReserveFactor);
+    }
+
+    private ShipRotationSnapshot? BuildRotationSnapshot(
+        Ship ship,
+        ShipPresentationBounds? configuredBounds)
+    {
+        if (configuredBounds is not { } bounds)
+            return null;
+
+        ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+        ShipRotationCapability rotation = ShipRotation.Resolve(
+            propulsion.CurrentMassKg,
+            bounds,
+            propulsion.AvailableRotationalTorqueNm);
+        return new ShipRotationSnapshot(
+            rotation.ConfiguredDimensionsMeters,
+            rotation.AxisInertiaKgM2,
+            rotation.AvailableRotationalTorqueNm,
+            rotation.AvailableAngularAccelerationRadPerSec2,
+            ship.AngularVelocityLocalRadPerSec,
+            _lastTargetAngularVelocityLocalRadPerSec,
+            FlightAssistOn: true);
+    }
+
+    private void TickAssistedRotation(
+        Ship ship,
+        double pitchInput,
+        double yawInput,
+        double rollInput,
+        double dt)
+    {
+        ShipPresentationBounds bounds =
+            ShipPresentationBoundsCalculator.GetConfiguredBounds(ship);
+        ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+        ShipRotationCapability rotation = ShipRotation.Resolve(
+            propulsion.CurrentMassKg,
+            bounds,
+            propulsion.AvailableRotationalTorqueNm);
+        RotationCommand command = RotationCommand.Clamp(pitchInput, yawInput, rollInput);
+        DVec3 target = ShipRotation.ResolveTargetAngularVelocity(ship, command);
+        DVec3 next = ShipRotation.MoveTowardsTarget(
+            ship.AngularVelocityLocalRadPerSec,
+            target,
+            rotation.AvailableAngularAccelerationRadPerSec2,
+            dt);
+        _lastTargetAngularVelocityLocalRadPerSec = target;
+        ship.SetAngularVelocityLocal(next);
+        ship.IntegrateAngularVelocity(dt);
     }
 
     private static CockpitPresentationSnapshot? BuildCockpitSnapshot(Ship ship)
@@ -778,6 +903,7 @@ public sealed class SpaceSimulation : Simulation
                 port,
                 starboard);
         }
+        SetSharedEngineHarmony(ship, _newtonianGear + 1);
 
         DataBus.System.Publish(
             Topics.System.All,
@@ -793,6 +919,8 @@ public sealed class SpaceSimulation : Simulation
             .WithDefaultStartingComponents()
             .Build();
         replacement.Velocity = current.Velocity;
+        replacement.SetAngularVelocityLocal(current.AngularVelocityLocalRadPerSec);
+        SetSharedEngineHarmony(replacement, _newtonianGear + 1);
         SetShip(replacement);
 
         HullDefinition hull = HullDefinitionLibrary.Get(nextHullTypeId);
@@ -844,17 +972,19 @@ public sealed class SpaceSimulation : Simulation
 
     private void TickNewtonianPhysics(Ship ship, PlayerInput input, double dt)
     {
-        double[] gears  = ship.NewtonianGears;
-        int      maxIdx = System.Math.Min(
-            _lkmMaxGear == int.MaxValue ? gears.Length - 1 : _lkmMaxGear,
-            gears.Length - 1);
-        if (_newtonianGear > maxIdx) _newtonianGear = maxIdx;
+        int maximumHarmonyIndex = GetMaximumHarmonyCount(ship) - 1;
+        int maxIdx = System.Math.Min(
+            _lkmMaxGear == int.MaxValue ? maximumHarmonyIndex : _lkmMaxGear,
+            maximumHarmonyIndex);
+        if (_newtonianGear > maxIdx)
+        {
+            _newtonianGear = maxIdx;
+            SetSharedEngineHarmony(ship, _newtonianGear + 1);
+        }
 
-        double gearCeiling    = gears[_newtonianGear];
+        ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+        double gearCeiling = propulsion.SpeedCeilingMps;
         double reverseCeiling = gearCeiling * FlightConstants.ReverseSpeedRatio;
-        double accel          = _newtonianGear == 0
-            ? FlightConstants.Gear1AccelerationMs2
-            : LegacyEngineForwardThrustN / ship.Mass;
 
         DVec3  refVel = GetRefVelocity();
         string refId  = GetRefSourceId();
@@ -876,13 +1006,15 @@ public sealed class SpaceSimulation : Simulation
         _prevRefVel      = refVel;
         _prevRefSourceId = refId;
 
-        // Afterburner — constant forward accel at AfterburnerAccelMultiplier × the current
-        // full-throttle accel above, applied automatically for the whole burn. Not
+        // Afterburner applies an untapered multiplier to installed forward force for the
+        // whole burn. It is not
         // player-steerable: WASD and X-Stop are entirely skipped while active (their toggles
         // are also gated in TickPhysics so they can't be engaged/cancelled mid-burn either).
         if (_afterburnerActive)
         {
-            ship.Velocity += ship.Forward * (accel * FlightConstants.AfterburnerAccelMultiplier * dt);
+            DVec3 forceLocal = propulsion.AvailableForwardForceShipLocalN
+                * FlightConstants.AfterburnerAccelMultiplier;
+            ApplyPropulsionForce(ship, propulsion, forceLocal, dt);
             ship.Position += ship.Velocity * dt;
             return;
         }
@@ -918,36 +1050,51 @@ public sealed class SpaceSimulation : Simulation
             }
             else
             {
-                ship.Velocity += relVel.Normalized() * (-accel * FlightConstants.XStopBrakeFactor * dt);
+                DVec3 brakeWorld = -relVel.Normalized()
+                    * (propulsion.AvailableForwardForceShipLocalN.Length
+                        * FlightConstants.XStopBrakeFactor);
+                ApplyPropulsionForce(
+                    ship,
+                    propulsion,
+                    WorldToShipLocal(ship, brakeWorld),
+                    dt);
             }
             ship.Position += ship.Velocity * dt;
             return;
         }
 
         // Forward thrust — tapered as speed approaches gear ceiling
-        if (input.ThrustForward > 0)
+        EngineTranslationAllocation allocation = ShipPropulsion.AllocateTranslation(
+            EngineTranslationCommand.Clamp(
+                input.ThrustForward,
+                input.ThrustLateral,
+                input.ThrustVertical,
+                input.UseLiftChannel));
+        double forwardScale = 1.0;
+
+        if (allocation.Longitudinal > 0 && gearCeiling > 0.0)
         {
             double speedAlongFwd = DVec3.Dot(relVel, fwdDir);
             double fraction      = System.Math.Clamp(speedAlongFwd / gearCeiling, 0, 1);
-            double thrustFactor  = System.Math.Max(0,
+            forwardScale = System.Math.Max(0,
                 1.0 - System.Math.Pow(fraction, FlightConstants.ThrustTaperExponent));
-            ship.Velocity += fwdDir * (accel * thrustFactor * input.ThrustForward * dt);
         }
 
         // Reverse thrust — separate ceiling
-        if (input.ThrustForward < 0)
+        if (allocation.Longitudinal < 0 && reverseCeiling > 0.0)
         {
             double speedAgainstFwd = DVec3.Dot(relVel, -fwdDir);
             double fraction        = System.Math.Clamp(speedAgainstFwd / reverseCeiling, 0, 1);
-            double thrustFactor    = System.Math.Max(0,
+            forwardScale = System.Math.Max(0,
                 1.0 - System.Math.Pow(fraction, FlightConstants.ThrustTaperExponent));
-            ship.Velocity += (-fwdDir) * (accel * thrustFactor * System.Math.Abs(input.ThrustForward) * dt);
         }
 
-        // Strafe and vertical (uncapped — small inputs, no separate ceiling defined)
-        double strafeAccel = accel * 0.5;
-        if (input.ThrustLateral  != 0) ship.Velocity += ship.Right * (strafeAccel * input.ThrustLateral  * dt);
-        if (input.ThrustVertical != 0) ship.Velocity += ship.Up    * (strafeAccel * input.ThrustVertical * dt);
+        // Forward, lateral, and vertical share one normalized translation command.
+        DVec3 appliedForceLocal = ShipPropulsion.ResolveAppliedForce(
+            propulsion,
+            allocation,
+            forwardScale);
+        ApplyPropulsionForce(ship, propulsion, appliedForceLocal, dt, allocation);
 
         ship.Position += ship.Velocity * dt;
     }
@@ -1082,15 +1229,27 @@ public sealed class SpaceSimulation : Simulation
                     totalForce += ship.Up * (ship.AerodynamicLift * density * vFwd * System.Math.Abs(vFwd));
             }
 
-            totalForce += ship.Forward * (input.ThrustForward  * LegacyEngineForwardThrustN);
-            totalForce += ship.Right   * (input.ThrustLateral   * LegacyEngineDownThrustN * 0.5);
-            totalForce += ship.Up      * (input.ThrustVertical   * LegacyEngineDownThrustN);
+            ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
+            EngineTranslationAllocation allocation = ShipPropulsion.AllocateTranslation(
+                EngineTranslationCommand.Clamp(
+                    input.ThrustForward,
+                    input.ThrustLateral,
+                    input.ThrustVertical,
+                    input.UseLiftChannel));
+            DVec3 appliedForceLocal = ShipPropulsion.ResolveAppliedForce(propulsion, allocation);
 
             if (_flightAssistEnabled && density >= AtmoSlipstreamMinDensity)
             {
-                double faN = System.Math.Min(LegacyEngineDownThrustN, gMag * ship.Mass);
-                totalForce += ship.Up * faN;
+                double faN = System.Math.Min(
+                    propulsion.AvailableLateralThrustN,
+                    gMag * ship.Mass);
+                appliedForceLocal += DVec3.UnitY * faN;
             }
+
+            ShipPropulsionApplication application =
+                ShipPropulsion.Apply(propulsion, appliedForceLocal, allocation);
+            _lastPropulsionApplication = application;
+            totalForce += ShipLocalToWorld(ship, application.AppliedForceShipLocalN);
         }
 
         ship.Velocity += totalForce / ship.Mass * dt;
@@ -1146,6 +1305,7 @@ public sealed class SpaceSimulation : Simulation
             DVec3 surfaceNormal = (ship.Position - bodyPos) / distAfter;
             ship.Position = bodyPos + surfaceNormal * minDist;
             ship.Velocity = DVec3.Zero;
+            ship.ResetAngularVelocity();
 
             if (!_surfaceContact)
             {
@@ -1171,7 +1331,7 @@ public sealed class SpaceSimulation : Simulation
         // Zone entry: message + start compliance window
         if (activeZone > _currentLkmZone)
         {
-            double maxSpeed = FlightConstants.NewtonianGearSpeeds[System.Math.Min(newMax, FlightConstants.NewtonianGearSpeeds.Length - 1)];
+            double maxSpeed = GetSpeedCeilingAtHarmonyIndex(ship, newMax);
             DataBus.System.Publish(Topics.System.All,
                 new SystemMessage($"LKM: Zone {activeZone} — max speed {maxSpeed:N0} m/s. " +
                     $"Comply within {FlightConstants.LkmComplianceWindow:N0}s."));
@@ -1200,7 +1360,7 @@ public sealed class SpaceSimulation : Simulation
             _lkmComplianceTimer -= dt;
             DVec3  refVel  = GetRefVelocity();
             double curSpd  = (ship.Velocity - refVel).Length;
-            double limSpd  = FlightConstants.NewtonianGearSpeeds[System.Math.Min(newMax, FlightConstants.NewtonianGearSpeeds.Length - 1)];
+            double limSpd  = GetSpeedCeilingAtHarmonyIndex(ship, newMax);
 
             if (curSpd <= limSpd * 1.05)
             {
@@ -1308,19 +1468,24 @@ public sealed class SpaceSimulation : Simulation
         {
             DVec3  relVel = ship.Velocity - refVel;
             double relSpd = relVel.Length;
-            double maxSpd = FlightConstants.NewtonianGearSpeeds[3];  // 400 m/s — inner LKM zone limit
+            double maxSpd = GetSpeedCeilingAtHarmonyIndex(ship, 3);
             if (relSpd > maxSpd && relSpd > 0)
                 ship.Velocity = refVel + relVel * (maxSpd / relSpd);
         }
 
-        // Auto-select gear matching exit speed
+        // Auto-select the lowest engine harmony whose ceiling contains the exit speed.
         double speed  = System.Math.Max(0, DVec3.Dot(ship.Velocity - refVel, ship.Forward));
-        double[] gears = ship.NewtonianGears;
-        _newtonianGear = gears.Length - 1;
-        for (int i = 0; i < gears.Length; i++)
+        int harmonyCount = GetMaximumHarmonyCount(ship);
+        _newtonianGear = harmonyCount - 1;
+        for (int i = 0; i < harmonyCount; i++)
         {
-            if (gears[i] >= speed) { _newtonianGear = i; break; }
+            if (GetSpeedCeilingAtHarmonyIndex(ship, i) >= speed)
+            {
+                _newtonianGear = i;
+                break;
+            }
         }
+        SetSharedEngineHarmony(ship, _newtonianGear + 1);
     }
 
     private void ShiftSlipstreamHarmonic(Ship ship, int direction)
@@ -1355,6 +1520,68 @@ public sealed class SpaceSimulation : Simulation
         _lastConsumedXStopToggleSequence = input.XStopToggleSequence;
         return input.XStopToggle;
     }
+
+    private void ApplyPropulsionForce(
+        Ship ship,
+        ShipPropulsionCapability capability,
+        DVec3 forceShipLocalN,
+        double dt,
+        EngineTranslationAllocation translationAllocation = default)
+    {
+        ShipPropulsionApplication application = ShipPropulsion.Apply(
+            capability,
+            forceShipLocalN,
+            translationAllocation);
+        _lastPropulsionApplication = application;
+        ship.Velocity += ShipLocalToWorld(ship, application.ResultingAccelerationShipLocalMps2) * dt;
+    }
+
+    private static int GetMaximumHarmonyCount(Ship ship)
+    {
+        int count = ship.EngineMounts
+            .Select(mount => mount.InstalledEngine?.Variant.Engine.HarmonyCount ?? 0)
+            .DefaultIfEmpty(0)
+            .Max();
+        return Math.Max(count, 1);
+    }
+
+    private static void SetSharedEngineHarmony(Ship ship, int selectedHarmony)
+    {
+        foreach (EngineInstance engine in ship.EngineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EngineInstance>())
+        {
+            engine.SetSelectedHarmony(Math.Min(
+                selectedHarmony,
+                engine.Variant.Engine.HarmonyCount));
+        }
+    }
+
+    private static double GetSpeedCeilingAtHarmonyIndex(Ship ship, int harmonyIndex)
+    {
+        double speedCeiling = double.PositiveInfinity;
+        foreach (EngineInstance engine in ship.EngineMounts
+            .Select(mount => mount.InstalledEngine)
+            .OfType<EngineInstance>()
+            .Where(engine => engine.DamageFraction < 1.0))
+        {
+            EngineDefinition definition = engine.Variant.Engine;
+            int selected = Math.Clamp(harmonyIndex + 1, 1, definition.HarmonyCount);
+            speedCeiling = Math.Min(
+                speedCeiling,
+                definition.ResolveHarmony(selected).SpeedCeilingMps);
+        }
+        return double.IsPositiveInfinity(speedCeiling) ? 0.0 : speedCeiling;
+    }
+
+    private static DVec3 ShipLocalToWorld(Ship ship, DVec3 local)
+        => ship.Right * local.X + ship.Up * local.Y - ship.Forward * local.Z;
+
+    private static DVec3 WorldToShipLocal(Ship ship, DVec3 world)
+        => new(
+            DVec3.Dot(world, ship.Right),
+            DVec3.Dot(world, ship.Up),
+            -DVec3.Dot(world, ship.Forward));
 
     internal void DebugTickPhysics(PlayerInput input, double dt) => TickPhysics(input, dt);
 
@@ -1540,6 +1767,7 @@ public sealed class SpaceSimulation : Simulation
 
         ship.Position = relocatedPosition;
         ship.SetOrientation(orientation);
+        ship.ResetAngularVelocity();
 
         UpdateReferenceFrame(ship);
         MatchShipVelocityToReference(ship, GetRefVelocity());
@@ -2044,13 +2272,12 @@ public sealed class SpaceSimulation : Simulation
             DataBus.Instruments.Publish(Topics.Flight.Mode,            (double)snap.FlightMode);
             DataBus.Instruments.Publish(Topics.Flight.Gear,            (double)(snap.NewtonianGear + 1));
             DataBus.Instruments.Publish(Topics.Flight.GearCount,       (double)snap.NewtonianGearCount);
-            double gearCeil = snap.NewtonianGear < FlightConstants.NewtonianGearSpeeds.Length
-                ? FlightConstants.NewtonianGearSpeeds[snap.NewtonianGear] : 0.0;
+            double gearCeil = snap.Propulsion?.SpeedCeilingMps ?? 0.0;
             DataBus.Instruments.Publish(Topics.Flight.GearCeilingMs,   gearCeil);
             DataBus.Instruments.Publish(Topics.Flight.MaxGear,
                 snap.LkmMaxGear == int.MaxValue ? -1.0 : (double)(snap.LkmMaxGear + 1));
             DataBus.Instruments.Publish(Topics.Flight.HarmonicIndex,   (double)(snap.SlipstreamHarmonicIndex + 1));
-            DataBus.Instruments.Publish(Topics.Flight.HarmonicCount,   (double)snap.NewtonianGearCount);
+            DataBus.Instruments.Publish(Topics.Flight.HarmonicCount,   (double)snap.SlipstreamHarmonicCount);
             DataBus.Instruments.Publish(Topics.Flight.LkmZone,         (double)snap.LkmZone);
             DataBus.Instruments.Publish(Topics.Flight.LkmCompliance,   snap.LkmComplianceTimer);
             DataBus.Instruments.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);

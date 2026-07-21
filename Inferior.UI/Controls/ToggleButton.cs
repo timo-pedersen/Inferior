@@ -156,3 +156,48 @@ public sealed class ToggleButton : Control
         IsConfirmed = confirmed;
     }
 }
+
+public sealed class ExclusiveButtonGroup
+{
+    private readonly List<ToggleButton> _buttons = [];
+    private bool _updating;
+
+    public ToggleButton? Selected { get; private set; }
+    public event Action<ToggleButton>? SelectionChanged;
+
+    public void Add(ToggleButton button, bool selected = false)
+    {
+        if (_buttons.Contains(button))
+            return;
+        _buttons.Add(button);
+        button.Toggled += OnButtonToggled;
+        if (selected || Selected is null)
+            Select(button, notify: false);
+        else
+            button.SetState(false, false);
+    }
+
+    public void Select(ToggleButton button, bool notify = true)
+    {
+        if (!_buttons.Contains(button))
+            Add(button);
+        if (ReferenceEquals(Selected, button))
+            return;
+
+        _updating = true;
+        foreach (ToggleButton candidate in _buttons)
+            candidate.SetState(ReferenceEquals(candidate, button), ReferenceEquals(candidate, button));
+        _updating = false;
+
+        Selected = button;
+        if (notify)
+            SelectionChanged?.Invoke(button);
+    }
+
+    private void OnButtonToggled(ToggleButton button, bool isOn)
+    {
+        if (_updating)
+            return;
+        Select(button);
+    }
+}

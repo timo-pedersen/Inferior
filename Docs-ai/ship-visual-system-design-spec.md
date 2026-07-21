@@ -1225,9 +1225,37 @@ the generic projected ship-forward reticle above screen centre. Own-ship geometr
 hidden in first-person.
 
 The cockpit CTRL rail includes a `NEXT SHIP` button. It requests the stable cycle
-Aries -> Asterisk -> Beren -> Aries. `SpaceSimulation` performs the replacement and
+Aries -> Asterisk -> Beren -> Antega -> Aries. `SpaceSimulation` performs the replacement and
 preserves the current position, velocity, orientation, and flight state; rendering and
 UI do not retain a second mutable ship authority.
+
+### 28.4 Antega Phase 1 checkpoint
+
+Antega (`antega`) is an accepted 99 m massive civilian container hauler. Its physical
+design basis is 120 canonical containers arranged 12 fore/aft × 5 across × 2 high,
+producing a 12.5 m × 5.0 m × 72.0 m stack volume inside the long faceted cargo body.
+The blunt forward end carries a heavily framed ten-segment closed cargo hatch; loading,
+container rendering, and hatch animation remain deferred.
+
+Four distinct Atlas Civilian Drive engines are installed through ordinary H10 mounts:
+upper and lower units on port and starboard. Each definition-owned engine is 58.4 m long
+and remains visibly separated from the cargo hull by substantial forward and aft supports
+plus a longitudinal torque beam. All four publish independent presentation transforms and
+aft exhaust anchors. The dorsal far-aft command module is a keyed C5 Antega civilian bridge
+with `Deg0` as its only allowed installation rotation. Its physical camera looks 5 degrees
+down through the forward glazing, so the generic projected ship-forward reticle appears
+slightly above screen centre.
+
+Snapshot-published `ShipPresentationBounds` combine authored hull vertices with transformed
+installed cockpit and engine geometry. Chase/orbital view targets the composite centre and
+derives its minimum radius from the composite bounding sphere; this is generic framing, not
+an Antega-specific camera path. Antega, the bridge, four Atlas engines, exhaust glows, scale,
+and camera framing were visually accepted by Timo on 2026-07-20.
+
+Propulsion is now instance-aggregated. Atlas owns provisional numeric dry mass, forward
+thrust, maneuvering thrust, and active rotational torque; all four installed instances
+contribute independently through `ShipPropulsion`. See
+`Docs-ai/ship-mass-and-propulsion.md` for current values and deferred work.
 
 The current size-class code must be corrected to:
 

@@ -20,6 +20,7 @@ public sealed class UIManager : IDisposable
     private readonly SpriteBatch     _sb;
     private readonly UIRenderer      _renderer;
     private readonly List<Control>   _roots    = [];
+    private readonly List<Control>   _overlays = [];
 
     // Focus and hover tracking
     private Control? _focused;
@@ -27,6 +28,7 @@ public sealed class UIManager : IDisposable
 
     public Theme      Theme    { get; set; }
     public UIRenderer Renderer => _renderer;
+    public Rectangle ScreenBounds => new(0, 0, _gd.Viewport.Width, _gd.Viewport.Height);
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
@@ -44,13 +46,32 @@ public sealed class UIManager : IDisposable
     public void Add(Control control)
     {
         control.Parent = null;
+        control.SetManagerRecursive(this);
         _roots.Add(control);
+    }
+
+    public void AddOverlay(Control control)
+    {
+        control.Parent = null;
+        control.SetManagerRecursive(this);
+        _overlays.Add(control);
+    }
+
+    public void RemoveOverlay(Control control)
+    {
+        if (_overlays.Remove(control))
+            control.SetManagerRecursive(null);
+        if (_focused == control || IsDescendant(_focused, control))
+            SetFocus(null);
+        if (_hovered == control || IsDescendant(_hovered, control))
+            _hovered = null;
     }
 
     /// <summary>Remove a top-level control.</summary>
     public void Remove(Control control)
     {
         _roots.Remove(control);
+        control.SetManagerRecursive(null);
         if (_focused == control || IsDescendant(_focused, control))
             SetFocus(null);
         if (_hovered == control || IsDescendant(_hovered, control))
@@ -62,6 +83,11 @@ public sealed class UIManager : IDisposable
     {
         SetFocus(null);
         _hovered = null;
+        foreach (var overlay in _overlays)
+            overlay.SetManagerRecursive(null);
+        _overlays.Clear();
+        foreach (var root in _roots)
+            root.SetManagerRecursive(null);
         _roots.Clear();
     }
 
@@ -75,6 +101,8 @@ public sealed class UIManager : IDisposable
     {
         foreach (var root in _roots)
             root.Update(dt);
+        foreach (var overlay in _overlays)
+            overlay.Update(dt);
     }
 
     /// <summary>
@@ -87,6 +115,11 @@ public sealed class UIManager : IDisposable
 
         // Route mouse input — roots in reverse (topmost first)
         bool mouseConsumed = false;
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            if (!mouseConsumed && _overlays[i].HandleInput(input))
+                mouseConsumed = true;
+        }
         for (int i = _roots.Count - 1; i >= 0; i--)
         {
             if (!mouseConsumed && _roots[i].HandleInput(input))
@@ -148,9 +181,23 @@ public sealed class UIManager : IDisposable
     /// <summary>Draw all controls. Starts and ends its own SpriteBatch.</summary>
     public void Draw()
     {
+        DrawRoots();
+        DrawOverlays();
+    }
+
+    public void DrawRoots()
+    {
         _sb.Begin(blendState: BlendState.AlphaBlend);
         foreach (var root in _roots)
             root.Draw(_sb, _renderer, Theme);
+        _sb.End();
+    }
+
+    public void DrawOverlays()
+    {
+        _sb.Begin(blendState: BlendState.AlphaBlend);
+        foreach (var overlay in _overlays)
+            overlay.Draw(_sb, _renderer, Theme);
         _sb.End();
     }
 
@@ -211,11 +258,15 @@ public sealed class UIManager : IDisposable
 
     public Control? FindAt(Point screenPos)
     {
-        // Search in reverse — topmost (last) first
+        for (int i = _overlays.Count - 1; i >= 0; i--)
+        {
+            var overlayHit = _overlays[i].FindAt(screenPos);
+            if (overlayHit != null) return overlayHit;
+        }
         for (int i = _roots.Count - 1; i >= 0; i--)
         {
-            var hit = _roots[i].FindAt(screenPos);
-            if (hit != null) return hit;
+            var rootHit = _roots[i].FindAt(screenPos);
+            if (rootHit != null) return rootHit;
         }
         return null;
     }

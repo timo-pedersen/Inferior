@@ -192,10 +192,10 @@ public static class Topics
     public static class Flight
     {
         public const string Mode            = "Flight.Mode";            // double cast of FlightMode enum
-        public const string Gear            = "Flight.Gear";            // double, 1-based
-        public const string GearCount       = "Flight.GearCount";       // double, total gear count
-        public const string GearCeilingMs   = "Flight.GearCeiling";     // double, m/s ceiling for current gear
-        public const string MaxGear         = "Flight.MaxGear";         // double, 1-based (LKM cap; -1 = none)
+        public const string Gear            = "Flight.Gear";            // double, 1-based Newtonian harmony
+        public const string GearCount       = "Flight.GearCount";       // double, engine harmony count
+        public const string GearCeilingMs   = "Flight.GearCeiling";     // double, current harmony ceiling in m/s
+        public const string MaxGear         = "Flight.MaxGear";         // double, 1-based LKM harmony cap; -1 = none
         public const string HarmonicIndex   = "Flight.HarmonicIndex";   // double, 1-based
         public const string HarmonicCount   = "Flight.HarmonicCount";   // double, total harmonic count
         public const string LkmZone         = "Flight.LkmZone";         // double (0=none, 1/2/3)

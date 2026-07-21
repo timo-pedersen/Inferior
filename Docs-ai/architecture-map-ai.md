@@ -7,6 +7,16 @@
 
 ---
 
+## Assets
+
+Loose source assets, separate from MonoGame compiled Content.
+
+**Ships/**
+
+- `beren.ship.json` — versioned authoring source for the Beren hull; loaded by both the game and `Inferior.ObjectDesigner`.
+
+---
+
 ## Inferior.Core
 
 Foundation layer — no dependencies on any other Inferior project.
@@ -102,31 +112,42 @@ Simulation domain model. Depends on Core, Galaxy.
 
 **Hull/**
 
-- `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics.
+- `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics, and optional designed-single-engine propulsion efficiencies.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
-- `BerenHullDefinitionFactory.cs` — medium 3-by-3-container cargo platform, aft cargo-door assembly, downward C2 cockpit mount, and four independent Needle H2 engine mounts.
+- `BerenHullDefinitionFactory.cs` — thin loader-backed adapter for `Assets/Ships/beren.ship.json`.
+- `AntegaHullDefinitionFactory.cs` — 99 m, 120-container civilian hauler with segmented forward hatch, dorsal aft C5 bridge mount, and four external Atlas H10 engine mounts.
 - `HullSlot.cs` — single component-install location with category restriction and max-class soft cap.
 - `SlotCategory.cs` — enum restricting component types per slot (Reactor, Engine, Shield, Sensor, etc.).
+
+**Hull/Authoring/**
+
+- `HullAuthoringDtos.cs` — schema-versioned loose JSON DTOs for ship/hull authoring assets, including semantic geometry, cargo, mounts, and slots.
+- `ShipAuthoringConverter.cs` — converts between authoring DTOs and runtime `HullDefinition` / semantic hull records.
+- `ShipAuthoringJson.cs` — deterministic JSON options, asset path probing, load/save, and authoring validation diagnostics.
 
 **Engines/**
 
 - `EngineInstallationGenerator.cs` — installs one engine instance on one authored mount, including handed geometry and physical interface validation; default construction loops this operation for any mount count.
 - `EnginePairGenerator.cs` — mirrored-pair validation/generation retained for workflows that specifically require a paired installation.
-- `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2 and Needle H2.
+- `EngineDefinitionLibrary.cs` — stable registry for manufactured engine variants, currently Mule H2, Needle H2, and Atlas Civilian Drive H10.
+- `AtlasEngineDefinitionFactory.cs` — 58.4 m large civilian H10 drive geometry, design intent, lights, and aft exhaust metadata.
 - `EngineMount.cs` — live hull-owned engine socket and its installed engine instance.
+- `EngineDefinition.cs` — immutable engine-family data including validated SI mass, maximum forward thrust, directional fractions, rotational torque, harmony count/endpoints, and quadratic harmony resolution.
+- `EngineInstance.cs` — unique installed engine condition and simulation-owned selected harmony state.
 
 **Cockpit/**
 
 - `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
-- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, and Beren underslung command pod.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, Beren underslung command pod, and Antega C5 civilian bridge.
 - `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
 - `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
 - `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
 - `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
 - `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
 - `BerenUnderslungCockpitGeometryFactory.cs` — full downward-mounted C2 command pod with collar, housing, faceted canopy, frame, backing, and independent light geometry.
+- `AntegaCivilianBridgeGeometryFactory.cs` — broad keyed C5 bridge plug, armoured base and housing, framed forward/side glazing, backing, and restrained light geometry.
 - `CockpitPresentationSnapshot.cs` — immutable installed-cockpit root pose and light state published for rendering.
 
 **Physics/**
@@ -156,16 +177,19 @@ Simulation domain model. Depends on Core, Galaxy.
 
 **Ship/**
 
-- `Ship.cs` — the unique physical object in the universe: position, velocity, orientation, components, config.
+- `Ship.cs` — the unique physical object in the universe: position, velocity, normalized orientation, simulation-owned ship-local angular velocity, components, and configuration.
+- `ShipPropulsion.cs` — per-engine harmony/directional resolution, shared translational-envelope allocation, installation-oriented force aggregation, hull efficiency, lowest-engine speed ceiling, applied acceleration, snapshots, and diagnostic hover estimates.
+- `ShipRotation.cs` — validated box-derived pitch/yaw/roll inertias, torque/inertia angular acceleration, assisted target-rate resolution, and bounded angular-velocity stepping.
+- `ShipPresentationBounds.cs` — gameplay-owned composite ship-local bounds from authored hull vertices plus transformed installed engine and cockpit geometry; cached by configuration revision for simulation inertia and presentation framing.
 - `SizeClass.cs` — hull class ratings: Small, Medium, Large, Capital.
 
 **Root**
 
 - `FlatHyperspaceConstants.cs` — tunable 2D hyperspace travel: speed, disturbance field, dropout, alignment.
-- `FlightConstants.cs` — tunable Newtonian/slipstream physics: gear speeds, thrust taper, station zones, X-stop.
+- `FlightConstants.cs` — shared Newtonian/slipstream physics constants: thrust taper, reverse ceiling ratio, station zones, X-stop, and assisted-rate limits; Newtonian harmony endpoints are engine-owned.
 - `FlightMode.cs` — enum: Docked, SystemNewtonian, SystemSlipstream, AtmosphericNewtonian, AtmosphericSlipstream, EnteringFlatHyperspace, FlatHyperspace.
 - `HyperspacePlane.cs` — 2D hyperspace plane defined by ship up-vector + position; projects stars onto the plane.
-- `PlayerInput.cs` — immutable input snapshot (thrust, rotation, toggles), read once per sim tick.
+- `PlayerInput.cs` — immutable input snapshot (translation, lift-channel selection, normalized assisted rotation commands, toggles), read once per sim tick.
 - `Simulation.cs` — 60 Hz background sim loop: clock, environment, physics, power, damage, radar, publish.
 
 ---
@@ -181,7 +205,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
-- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry.
+- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override and invalidate the semantic mesh cache after edits.
 - `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
 - `Type1HullFactory.cs` — builds the Type-1 ship hull/nacelle/pylon meshes.
@@ -196,27 +220,37 @@ Self-contained UI framework. Depends on Core only.
 
 - `Alignment.cs` — horizontal/vertical text alignment enums.
 - `BlinkClock.cs` — global timer driving synchronized LED blink phases across all `LedIndicator`s.
-- `Control.cs` — base class for all UI controls: hierarchy, layout, input routing, theme support.
+- `Control.cs` — base class for all UI controls: hierarchy, layout, overflow-aware clipping/hit testing, input routing, theme support.
 - `FontHelper.cs` — safe font wrappers, sanitizing text before measuring/drawing to prevent crashes.
 - `InputState.cs` — immutable per-frame input snapshot (mouse, keyboard, typed chars) with edge detection.
+- `OverflowMode.cs` — overflow behavior enum for visible vs clipped control contents.
 - `SpritePrimitives.cs` — shared static `DrawText`/`DrawRect`/`DrawRectBorder` helpers.
 - `TextFilters.cs` — profanity filter, case-preserving.
+- `Thickness.cs` — immutable four-sided layout spacing value.
 - `Theme.cs` — visual style config (colours, fonts, geometry); `InferiorDark`/`Light` presets.
-- `UIManager.cs` — root UI system: top-level controls, focus, hover, input routing, draw order.
-- `UIRenderer.cs` — centralized drawing backend: primitives, buttons, windows, textboxes, clipping.
+- `UIManager.cs` — root UI system: top-level controls, overlay controls/popups, focus, hover, input routing, draw order.
+- `UIRenderer.cs` — centralized drawing backend: primitives, buttons, windows, textboxes, clipping, and custom-content SpriteBatch suspension/restoration.
+- `UiCustomDrawContext.cs` — graphics-device and clip payload passed to custom UI surface render callbacks.
 
 **Controls/**
 
 - `AnalogueNeedle.cs` — 180° sweep gauge, self-subscribes to DataBus via `Topic`.
 - `Button.cs` — clickable button, Space/Enter activation, `Clicked` event.
+- `ChoiceGroup.cs` — authoritative mutually-exclusive selection group backed by toggle buttons.
+- `CollapsiblePanel.cs` — titled panel that can hide/show arranged child content.
 - `EdgePanelHost.cs` — sliding edge-mounted panel with tab strip (left/right/top/bottom).
+- `GridPanel.cs` — fixed/auto/star row-column layout container.
 - `InstrumentMeter.cs` — horizontal bar meter, animated smoothing, self-subscribes via `Topic`.
 - `Label.cs` — non-interactive text label, left/centre/right alignment.
 - `LedIndicator.cs` — standalone LED lamp: colour ranges, blinking, easing brightness transitions.
+- `MenuControls.cs` — simple menu bar, menu buttons, popup menus, and menu items.
 - `Panel.cs` — simple container with optional background/border and content padding.
+- `ScrollPanel.cs` — clipped vertical scrolling container.
+- `StackPanel.cs` — horizontal/vertical stack layout container.
 - `SystemConsole.cs` — scrolling message log, priority-coloured, word-wrap/clip line-break modes.
+- `TextBlock.cs` — wrapped multiline read-only text control.
 - `TextBox.cs` — full text input: selection, multiline, clipboard, scrolling, swear filtering.
-- `ToggleButton.cs` — two-state button with pending/confirmed indicator for async feedback.
+- `ToggleButton.cs` — two-state button with pending/confirmed indicator for async feedback; includes `ExclusiveButtonGroup`.
 - `Window.cs` — draggable titled window with close button.
 
 **Controls.Cockpit/**
@@ -228,6 +262,42 @@ Self-contained UI framework. Depends on Core only.
 - `LandingRadarPanel.cs` — top-down approach radar, relative ship position vs. landing pad.
 - `RadarDisplay.cs` — tactical radar: range scales, log mode, exclusion zones, LED status.
 - `SpectrumGraph.cs` — smoothed filled-area graph for solar/stellar spectrum (Catmull-Rom interpolation).
+
+---
+
+## Inferior.ObjectDesigner
+
+Standalone MonoGame engineering tool for versioned loose object/ship authoring. Depends on Core, Gameplay, Rendering, UI. Copies the game-built Content output and the loose Beren JSON asset into its output directory.
+
+- `Program.cs` — entry point, runs `ObjectDesignerGame`.
+- `DesignerSurfaceControl.cs` — UI-owned 2D/3D editor surface bounds and clipping container.
+- `ObjectDesignerGame.cs` — Beren editor shell: menu/toolbar, draw-order-separated 3D render-target preview, active orthographic projection, mutually-exclusive projection/constraint choices, multi-select vertex pick/drag/marquee/pan/zoom, numeric coordinate edits, save/reload, diagnostics/status panels, and reuse of `ShipMeshRenderer`.
+- `Content/Content.mgcb` — reference content manifest retained for source clarity; the project currently copies built game content instead of invoking a second content build.
+
+**Editing/**
+
+- `ProjectionKind.cs` — top/side/front orthographic projection enum.
+- `OrthographicProjection.cs` — screen/model projection math, projection axes, and axis labels.
+- `EditCommands.cs` — `IEditCommand`, single/multi-vertex move commands, and undo/redo clean-state tracking.
+- `ObjectDesignerSession.cs` — loaded document/session owner: multi-selection, last-valid preview hull, rebuild, validation, save/reload, incident-face lookup, and stable-ID vertex mutation.
+
+## Inferior.UI.Test
+
+- `BasicControlInteractionTests.cs` — xUnit coverage for command buttons, toggle buttons, topmost text-box hit regions, disabled controls, and clipped input.
+- `ClippingHitTestingTests.cs` — xUnit coverage for single/nested clipping, empty intersections, drawing/input clip agreement, and `OverflowMode.Visible` hit policy.
+- `InstrumentedCompositionTests.cs` — fake render-context ordering tests for custom-content suspension/resume, following sibling draw calls, nested clip balance, custom failure cleanup, empty custom clips, and overlay ordering.
+- `LayoutControlTests.cs` — xUnit coverage for stack/grid arrangement, Object Designer-like region allocation, resize minima, collapsed panel input behavior, and exclusive choice groups.
+- `PanelTraversalTests.cs` — xUnit coverage for visible/hidden/empty sibling traversal and nested depth-first draw order.
+- `ZOrderHitTestingTests.cs` — xUnit coverage for overlapping sibling/root z-order, hidden/disabled top controls, and deterministic hit order.
+- `InstrumentedCompositionTests.cs` — fake render-context ordering tests for custom-content suspension/resume, following sibling draw calls, nested clip balance, and overlay ordering.
+
+## Inferior.ObjectDesigner.Test
+
+- `DesignerSurfaceControlTests.cs` / `ObjectDesignerCompositionFixtureTests.cs` / `ObjectDesignerEditingTests.cs` — xUnit coverage for designer surface layout/clipping invariants, Object Designer-like composition, command history, multi-selection, save blocking, stable IDs, and projection math.
+
+## Inferior.Gameplay.Test
+
+- `BerenAuthoringJsonTests.cs` — xUnit coverage for Beren authoring JSON load/rejection/round-trip, structured diagnostics, and semantic triangulation.
 
 ---
 
@@ -264,8 +334,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); publishes `ShipSnapshot` to DataBus each tick. Owns canonical station relocation and player-hull cycling. `RequestCycleShipHull()` replaces the live ship on the simulation thread while preserving position, velocity, orientation, and flight state.
-- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Aries order used by the simulation-owned cockpit control.
+- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); owns shared pilot harmony changes, applies per-engine allocated force/current-mass translation and harmony-scaled torque/box-inertia assisted rotation, and publishes immutable propulsion/rotation diagnostics. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
+- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
@@ -275,7 +345,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `SystemSpaceState.CelestialBodies.cs` — nearly empty; one Stations-owned texture helper left (`CreateNavGlowTexture`).
 - `SystemSpaceState.Containers.cs` — station-placed shipping containers: real `ShippingContainerFactory` geometry, standard rendering path, rails kinematics (`SpawnContainers`/`PlacedContainer`/`DrawContainers`).
 - `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
-- `SystemSpaceState.Ship.cs` — spawn/input mapping, third-person camera math, cockpit-layout capture.
+- `SystemSpaceState.Ship.cs` — spawn/input mapping, bounds-centred third-person camera math, cockpit-layout capture.
+- `ChaseCameraState.cs` — persistent chase/orbital direction, radius, and roll; enforces a generic minimum framing radius from snapshot-published composite ship bounds.
 - `SystemSpaceState.Shadows.cs` — station shadow-map owner: 2048² StationMap render target, CullNone caster pass, fitted station-local light camera, F6/F7/F8/F9 diagnostics. Phase C: separate `_decoCasterMeshes` per module (one extra draw, hull caster unchanged) composed from `StationModuleMesh.DecorClassRanges` filtered by the current `CasterStage`; Ctrl+F6 cycles `CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }`, defaulting to whatever `StationDecorator.DecorCastingPolicy` already has landed. `FitStationShadowLight` fits from `_shadowCasterHullBounds` ∪ `_shadowCasterDecoBounds` (module-local AABBs precomputed once at caster-build time from real caster vertex data via `StationModuleMesh.ComputeFaceRangeBounds`/`ComputeIndexRangeBounds`), not `Definition.BoundingBox`. `TryGetMeshFactoryHullFaceRange` (internal, pure, no GraphicsDevice) is the single decision for which face range a MeshFactory module's hull caster uses — generalized off any category special-case after a bug where non-docking-bay MeshFactory modules (octagonal blocks) got no hull caster while their decoration still cast (floating shadows); a post-composition safety net warns via SystemMessage if any module ends up with no hull caster at all.
 - `SystemSpaceState.Skybox.cs` — star hover/click hyperspace-target selection (rendering itself lives in `SkyboxRenderer`).
 - `SystemSpaceState.Stations.cs` — station mesh/glow/dot drawing (next extraction candidate — see current-state doc).
@@ -309,7 +380,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `CockpitUI.Hud.cs` — 2D HUD drawing (`DrawHud`, atmo panel, projected ship-forward reticle, UI-tree/alert draw).
 - `ShipForwardReticleProjector.cs` — pure camera-originated ship-forward ray projection with viewport-edge clamping; independent of velocity and ship-centre convergence.
 - `CockpitUI.Targeting.cs` — targeting HUD drawing, radar/landing-radar/targeting-dirball updates.
-- `DriveInstrumentPanel.cs` — right cockpit-rail wing: drive mode, gear/harmonic, speed readouts.
+- `DriveInstrumentPanel.cs` — right cockpit-rail wing: drive mode, Newtonian engine harmony or slipstream harmonic, and speed readouts.
 
 **ShipBuilder/**
 

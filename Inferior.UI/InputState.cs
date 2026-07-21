@@ -41,6 +41,7 @@ public sealed class InputState
 
     // ── Mouse position ────────────────────────────────────────────────────────
     public Point MousePosition => _mouse.Position;
+    public Point MouseDelta => _mouse.Position - _prevMouse.Position;
 
     // ── Scroll ────────────────────────────────────────────────────────────────
     public int ScrollDelta => _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
@@ -64,6 +65,7 @@ public sealed class InputState
                                && _prevMouse.MiddleButton == ButtonState.Released;
     public bool MiddleReleased => _mouse.MiddleButton == ButtonState.Released
                                && _prevMouse.MiddleButton == ButtonState.Pressed;
+    public bool MiddleHeld     => _mouse.MiddleButton == ButtonState.Pressed;
 
     // ── Keyboard ──────────────────────────────────────────────────────────────
     public bool IsKeyPressed(Keys key)  =>  _keys.IsKeyDown(key) && !_prevKeys.IsKeyDown(key);

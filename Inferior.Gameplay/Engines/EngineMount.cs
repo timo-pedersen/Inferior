@@ -72,6 +72,14 @@ public sealed record EngineGeometryTransform(
         Vector3 transformed = Vector3.Transform(corrected.ToVector3(), LocalToHull);
         return new DVec3(transformed.X, transformed.Y, transformed.Z);
     }
+
+    public DVec3 TransformDirection(DVec3 direction)
+    {
+        Vector3 transformed = Vector3.Transform(
+            direction.ToVector3(),
+            Matrix.CreateFromQuaternion(Orientation));
+        return new DVec3(transformed.X, transformed.Y, transformed.Z);
+    }
 }
 
 /// <summary>A physical installation location owned by one live ship instance.</summary>
@@ -114,6 +122,7 @@ public sealed class EngineMount
     public DVec3? HullRootPosition { get; }
     public DVec3? AttachmentInterfacePosition { get; }
     public EngineInstance? InstalledEngine { get; private set; }
+    public int ConfigurationRevision { get; private set; }
 
     public bool CanAccept(EngineVariantDefinition variant)
         => InstalledEngine is null
@@ -140,6 +149,7 @@ public sealed class EngineMount
 
         engine.Install(MountId, geometryTransform);
         InstalledEngine = engine;
+        ConfigurationRevision++;
         return true;
     }
 
@@ -151,6 +161,7 @@ public sealed class EngineMount
 
         InstalledEngine = null;
         engine.Uninstall();
+        ConfigurationRevision++;
         return engine;
     }
 

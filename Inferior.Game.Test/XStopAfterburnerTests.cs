@@ -3,6 +3,7 @@ using Inferior.Core.Math;
 using Inferior.Game;
 using Inferior.Game.Ships;
 using Inferior.Gameplay;
+using Inferior.Gameplay.Engines;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -251,7 +252,7 @@ public sealed class XStopAfterburnerTests
     public void AfterburnerDurationAndThrustRemainUnchanged()
     {
         var (sim, ship) = CreateNewtonianSim();
-        double expectedDelta = -FlightConstants.Gear1AccelerationMs2
+        double expectedDelta = -ConfiguredAriesForwardAcceleration()
             * FlightConstants.AfterburnerAccelMultiplier * Dt;
 
         sim.DebugTickPhysics(PlayerInput.Zero with { AfterburnerToggle = true }, Dt);
@@ -297,6 +298,14 @@ public sealed class XStopAfterburnerTests
         };
 
     private static double XStopAxisNoiseTolerance()
-        => 2.0 * FlightConstants.Gear1AccelerationMs2
+        => 2.0 * ConfiguredAriesForwardAcceleration()
             * FlightConstants.XStopBrakeFactor * Dt;
+
+    private static double ConfiguredAriesForwardAcceleration()
+    {
+        EngineDefinition mule = MuleEngineDefinitionFactory.CreateDefinition();
+        const double hullAndComponentMassKg = 72_000.0 + 1_200.0;
+        double currentMassKg = hullAndComponentMassKg + 2.0 * mule.DryMassKg;
+        return 2.0 * mule.MaximumForwardThrustN * mule.MinimumThrustFraction / currentMassKg;
+    }
 }

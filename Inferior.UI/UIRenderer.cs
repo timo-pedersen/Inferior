@@ -16,7 +16,7 @@ public sealed class UIRenderer : IDisposable
     private readonly Texture2D      _circle;
     private bool                    _disposed;
 
-    private static readonly RasterizerState _scissorState = new() { ScissorTestEnable = true };
+    private readonly RasterizerState _scissorState;
 
     /// <summary>GraphicsDevice — needed by controls that manage their own scissor clipping.</summary>
     public GraphicsDevice GraphicsDevice => _gd;
@@ -26,6 +26,7 @@ public sealed class UIRenderer : IDisposable
         _gd    = gd;
         _pixel = CreatePixel(gd);
         _circle = CreateCircle(gd, 64);
+        _scissorState = new RasterizerState { ScissorTestEnable = true };
     }
 
     // ── Primitives ────────────────────────────────────────────────────────────
@@ -70,11 +71,17 @@ public sealed class UIRenderer : IDisposable
 
     public void DrawText(SpriteBatch sb, string text, Vector2 pos,
         SpriteFont font, float scale, Color color)
-        => FontHelper.Draw(sb, font, text, pos, color, scale);
+    {
+        if (font is null || string.IsNullOrEmpty(text))
+            return;
+        FontHelper.Draw(sb, font, text, pos, color, scale);
+    }
 
     public void DrawTextCentred(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color)
     {
+        if (font is null || string.IsNullOrEmpty(text))
+            return;
         var safe = FontHelper.Sanitize(font, text);
         if (safe.Length == 0) return;
         var size = font.MeasureString(safe) * scale;
@@ -87,6 +94,8 @@ public sealed class UIRenderer : IDisposable
     public void DrawTextLeft(SpriteBatch sb, string text, Rectangle bounds,
         SpriteFont font, float scale, Color color, int padding = 0)
     {
+        if (font is null || string.IsNullOrEmpty(text))
+            return;
         var safe = FontHelper.Sanitize(font, text);
         if (safe.Length == 0) return;
         var size = font.MeasureString(safe) * scale;
@@ -97,7 +106,7 @@ public sealed class UIRenderer : IDisposable
     }
 
     public Vector2 MeasureText(string text, SpriteFont font, float scale)
-        => FontHelper.Measure(font, text, scale);
+        => font is null || string.IsNullOrEmpty(text) ? Vector2.Zero : FontHelper.Measure(font, text, scale);
 
     // ── Control drawing ───────────────────────────────────────────────────────
 
@@ -217,15 +226,72 @@ public sealed class UIRenderer : IDisposable
     public void DrawWithClip(SpriteBatch sb, Rectangle clip, Action draw)
     {
         var oldScissor = _gd.ScissorRectangle;
+        RasterizerState oldRasterizer = _gd.RasterizerState;
+        BlendState oldBlend = _gd.BlendState;
+        DepthStencilState oldDepth = _gd.DepthStencilState;
+        SamplerState oldSampler0 = _gd.SamplerStates[0];
         sb.End();
         _gd.ScissorRectangle = clip;
-        sb.Begin(blendState: BlendState.AlphaBlend,
-                 samplerState: SamplerState.PointClamp,
-                 rasterizerState: _scissorState);
-        draw();
+        bool clippedBatchActive = false;
+        try
+        {
+            sb.Begin(blendState: BlendState.AlphaBlend,
+                     samplerState: SamplerState.PointClamp,
+                     rasterizerState: _scissorState);
+            clippedBatchActive = true;
+            draw();
+            sb.End();
+            clippedBatchActive = false;
+        }
+        finally
+        {
+            if (clippedBatchActive)
+                sb.End();
+            _gd.ScissorRectangle = oldScissor;
+            _gd.RasterizerState = oldRasterizer;
+            _gd.BlendState = oldBlend;
+            _gd.DepthStencilState = oldDepth;
+            _gd.SamplerStates[0] = oldSampler0;
+            sb.Begin(blendState: oldBlend,
+                     samplerState: oldSampler0,
+                     depthStencilState: oldDepth,
+                     rasterizerState: oldRasterizer);
+        }
+    }
+
+    public void DrawCustomContent(SpriteBatch sb, Rectangle clip, Action<UiCustomDrawContext> draw)
+    {
+        if (clip.Width <= 0 || clip.Height <= 0)
+            return;
+
+        RenderTargetBinding[] oldTargets = _gd.GetRenderTargets();
+        Viewport oldViewport = _gd.Viewport;
+        Rectangle oldScissor = _gd.ScissorRectangle;
+        RasterizerState oldRasterizer = _gd.RasterizerState;
+        BlendState oldBlend = _gd.BlendState;
+        DepthStencilState oldDepth = _gd.DepthStencilState;
+        SamplerState oldSampler0 = _gd.SamplerStates[0];
+
         sb.End();
-        _gd.ScissorRectangle = oldScissor;
-        sb.Begin(blendState: BlendState.AlphaBlend);
+        try
+        {
+            _gd.ScissorRectangle = clip;
+            draw(new UiCustomDrawContext(_gd, clip, oldTargets, oldViewport));
+        }
+        finally
+        {
+            _gd.SetRenderTargets(oldTargets);
+            _gd.Viewport = oldViewport;
+            _gd.ScissorRectangle = oldScissor;
+            _gd.RasterizerState = oldRasterizer;
+            _gd.BlendState = oldBlend;
+            _gd.DepthStencilState = oldDepth;
+            _gd.SamplerStates[0] = oldSampler0;
+            sb.Begin(blendState: oldBlend,
+                     samplerState: oldSampler0,
+                     depthStencilState: oldDepth,
+                     rasterizerState: oldRasterizer);
+        }
     }
 
     // ── TextBox ───────────────────────────────────────────────────────────────
@@ -369,6 +435,7 @@ public sealed class UIRenderer : IDisposable
         if (_disposed) return;
         _pixel.Dispose();
         _circle.Dispose();
+        _scissorState.Dispose();
         _disposed = true;
     }
 }

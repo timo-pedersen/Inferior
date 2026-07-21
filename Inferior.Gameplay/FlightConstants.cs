@@ -6,31 +6,7 @@ namespace Inferior.Gameplay;
 /// </summary>
 public static class FlightConstants
 {
-    // ── NEWTONIAN GEAR TABLE ──────────────────────────────────────────────
-    // Forward speed ceilings (m/s) for each gear, index 0 = gear 1.
-    // Log-scaled ~×2 per step.
-    public static readonly double[] NewtonianGearSpeeds =
-    [
-          50,    // G1
-         100,    // G2
-         200,    // G3
-         400,    // G4
-         800,    // G5
-       1_600,    // G6
-       3_200,    // G7
-       6_400,    // G8
-      12_800,    // G9
-      25_600,    // G10
-    ];
-
-    public static int NewtonianGearCount => NewtonianGearSpeeds.Length;
-
-    // Gear 1 (index 0) uses a reduced acceleration instead of the current engine acceleration —
-    // makes close-quarters maneuvering (docking, flying around debris) controllable.
-    // All other gears use the ship's normal acceleration, unchanged.
-    public const double Gear1AccelerationMs2 = 4.0;
-
-    // Reverse speed ceiling as a fraction of the current gear's forward ceiling.
+    // Reverse Newtonian speed ceiling relative to the selected engine harmony ceiling.
     public const double ReverseSpeedRatio = 0.25;
 
     // Thrust taper exponent: at speed fraction f of ceiling,
@@ -40,8 +16,12 @@ public static class FlightConstants
 
     // ── ENGINE DEFAULT (placeholder until component system) ───────────────
     public const int    DefaultNodeCount = 10;
-    public const double DefaultShipMass  = 48_000.0;   // kg (~48 tonnes)
-    public const double DefaultMaxThrust = 980_000.0;  // N (~1 g at ship mass)
+
+    public const double MaximumAssistedPitchUpRateRadPerSec = 1.4;
+    public const double MaximumAssistedPitchDownRateRadPerSec = 1.0;
+    public const double MaximumAssistedYawRateRadPerSec = 1.0;
+    public const double MaximumAssistedRollRateRadPerSec = 1.5;
+    public const double RotationInputReferenceHz = 60.0;
 
     // ── X-STOP ───────────────────────────────────────────────────────────
     // Snap-to-reference threshold — below this, X-stop considers braking complete.
@@ -110,10 +90,6 @@ public static class FlightConstants
     // Constant forward accel while active = current full-throttle accel × this.
     public const double AfterburnerAccelMultiplier = 5.0;
 
-    // Random pitch/yaw jitter added on top of mouse-look each tick while active (radians).
-    // Deliberately affects the ship's real orientation (and so its actual forward vector and
-    // travel direction) rather than being a purely cosmetic camera overlay — a Brownian-ish
-    // wobble, not a perfectly straight boosted line. Roughly 1-2 mouse-look pixels' worth
-    // per tick (MouseSensitivity in SystemSpaceState.Ship.cs is 0.0012 rad/pixel).
+    // Legacy angle-scale jitter converted into a torque-limited assisted target perturbation.
     public const double AfterburnerShakeRadians = 0.0015;
 }

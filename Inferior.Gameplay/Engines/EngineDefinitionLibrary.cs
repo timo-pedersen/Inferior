@@ -7,6 +7,7 @@ public static class EngineDefinitionLibrary
         {
             [MuleEngineDefinitionFactory.H2VariantId] = MuleEngineDefinitionFactory.CreateH2Variant(),
             [NeedleEngineDefinitionFactory.H2VariantId] = NeedleEngineDefinitionFactory.CreateH2Variant(),
+            [AtlasEngineDefinitionFactory.H10VariantId] = AtlasEngineDefinitionFactory.CreateH10Variant(),
         };
 
     public static EngineVariantDefinition GetVariant(string variantId)

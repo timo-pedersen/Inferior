@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <TieredCompilation>false</TieredCompilation>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Inferior.Game\Inferior.Game.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Inferior.Core\Inferior.Core.csproj" />
+    <ProjectReference Include="..\Inferior.Gameplay\Inferior.Gameplay.csproj" />
+    <ProjectReference Include="..\Inferior.Rendering\Inferior.Rendering.csproj" />
+    <ProjectReference Include="..\Inferior.UI\Inferior.UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\Assets\Ships\beren.ship.json" Link="Assets\Ships\beren.ship.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="CopyGameContent" AfterTargets="Build">
+    <ItemGroup>
+      <GameContent Include="..\Inferior.Game\bin\$(Configuration)\net10.0\Content\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GameContent)" DestinationFiles="@(GameContent->'$(OutputPath)Content\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

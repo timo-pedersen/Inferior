@@ -37,4 +37,7 @@
   <ItemGroup>
     <Folder Include="States\" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Assets\Ships\beren.ship.json" Link="Assets\Ships\beren.ship.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
