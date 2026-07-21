@@ -17,10 +17,16 @@ public sealed class MenuBar : Control
         {
             CloseAll();
             _openMenu = menuButton.Menu;
+            Rectangle anchor = menuButton.AbsoluteBounds;
+            Point desired = _openMenu.DesiredSize;
+            Rectangle screen = Manager?.ScreenBounds ?? new Rectangle(0, 0, int.MaxValue / 4, int.MaxValue / 4);
+            int x = Math.Clamp(anchor.X, screen.Left, Math.Max(screen.Left, screen.Right - desired.X));
+            int y = Math.Clamp(anchor.Bottom, screen.Top, Math.Max(screen.Top, screen.Bottom - desired.Y));
+            _openMenu.Bounds = new Rectangle(x, y, Math.Min(desired.X, screen.Width), Math.Min(desired.Y, screen.Height));
             _openMenu.Visible = true;
+            Manager?.AddOverlay(_openMenu);
         };
         Add(button);
-        Add(button.Menu);
         ArrangeChildren();
         return button;
     }
@@ -29,8 +35,11 @@ public sealed class MenuBar : Control
     {
         foreach (Control child in Children.OfType<MenuButton>())
             child.Visible = true;
-        foreach (PopupMenu popup in Children.OfType<PopupMenu>())
-            popup.Visible = false;
+        if (_openMenu is not null)
+        {
+            _openMenu.Visible = false;
+            Manager?.RemoveOverlay(_openMenu);
+        }
         _openMenu = null;
     }
 
@@ -60,10 +69,8 @@ public sealed class MenuBar : Control
         if (!Visible)
             return;
         renderer.FillRect(sb, AbsoluteBounds, BackColor ?? theme.WindowTitleBar);
-        foreach (Control child in Children.Where(child => child is not PopupMenu))
+        foreach (Control child in Children)
             child.Draw(sb, renderer, theme);
-        foreach (PopupMenu popup in Children.OfType<PopupMenu>())
-            popup.Draw(sb, renderer, theme);
     }
 
     protected override void OnBoundsChanged() => ArrangeChildren();
@@ -74,7 +81,6 @@ public sealed class MenuBar : Control
         foreach (MenuButton button in Children.OfType<MenuButton>())
         {
             button.Bounds = new Rectangle(x, 0, ItemWidth, ItemHeight);
-            button.Menu.Bounds = new Rectangle(x, ItemHeight, Math.Max(ItemWidth + 70, button.Menu.DesiredSize.X), button.Menu.DesiredSize.Y);
             x += ItemWidth;
         }
     }
@@ -164,6 +170,12 @@ public sealed class PopupMenu : Control
         DrawChildren(sb, renderer, theme);
     }
 
+    public void Close()
+    {
+        Visible = false;
+        Manager?.RemoveOverlay(this);
+    }
+
     protected override void OnBoundsChanged() => ArrangeChildren();
 
     private void ArrangeChildren()
@@ -215,7 +227,7 @@ public sealed class MenuItem : Control
         {
             if (current is PopupMenu popup)
             {
-                popup.Visible = false;
+                popup.Close();
                 return;
             }
             current = current.Parent;

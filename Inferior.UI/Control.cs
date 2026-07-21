@@ -108,6 +108,7 @@ public abstract class Control
 
     // ── Hierarchy ─────────────────────────────────────────────────────────────
     public Control?            Parent   { get; internal set; }
+    internal UIManager? Manager { get; private set; }
     public IReadOnlyList<Control> Children => _children;
     protected readonly List<Control> _children = new();
 
@@ -116,19 +117,31 @@ public abstract class Control
         if (child.Parent != null)
             child.Parent.Remove(child);
         child.Parent = this;
+        child.SetManagerRecursive(Manager);
         _children.Add(child);
     }
 
     public void Remove(Control child)
     {
         if (_children.Remove(child))
+        {
             child.Parent = null;
+            child.SetManagerRecursive(null);
+        }
     }
 
     public void Clear()
     {
         foreach (var child in _children) child.Parent = null;
+        foreach (var child in _children) child.SetManagerRecursive(null);
         _children.Clear();
+    }
+
+    internal void SetManagerRecursive(UIManager? manager)
+    {
+        Manager = manager;
+        foreach (Control child in _children)
+            child.SetManagerRecursive(manager);
     }
 
     // ── Events ────────────────────────────────────────────────────────────────
@@ -200,7 +213,7 @@ public abstract class Control
     /// <summary>Hit test against absolute screen position.</summary>
     public virtual bool HitTest(Point screenPos)
     {
-        if (!Visible || !AbsoluteBounds.Contains(screenPos))
+        if (!Visible || !Enabled || !AbsoluteBounds.Contains(screenPos))
             return false;
         Rectangle clip = EffectiveClipBounds;
         return clip.Width > int.MaxValue / 8 || clip.Contains(screenPos);
@@ -212,7 +225,8 @@ public abstract class Control
     /// </summary>
     public virtual Control? FindAt(Point screenPos)
     {
-        if (!HitTest(screenPos)) return null;
+        if (!Visible || !EffectiveClipContains(screenPos))
+            return null;
 
         // Check children in reverse (last drawn = topmost)
         for (int i = _children.Count - 1; i >= 0; i--)
@@ -221,11 +235,17 @@ public abstract class Control
             if (hit != null) return hit;
         }
 
-        return this;
+        return HitTest(screenPos) ? this : null;
     }
 
     /// <summary>Called when Bounds property changes.</summary>
     protected virtual void OnBoundsChanged() { }
+
+    private bool EffectiveClipContains(Point screenPos)
+    {
+        Rectangle clip = EffectiveClipBounds;
+        return clip.Width > int.MaxValue / 8 || clip.Contains(screenPos);
+    }
 
     // ── Helpers for subclasses ────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@
 
 `Inferior.ObjectDesigner` is a standalone MonoGame executable for authoring physical object definitions used by Inferior. The first supported asset is the Beren ship hull.
 
-This is not a general CAD system. The current tool proves one end-to-end workflow:
+This is not a general CAD system. The current checkpoint is architecturally proven and visually functioning, but not yet usability-accepted. It proves one end-to-end workflow:
 
 ```text
 Assets/Ships/beren.ship.json
@@ -14,6 +14,7 @@ Assets/Ships/beren.ship.json
     -> runtime HullDefinition
     -> existing semantic hull renderer
     -> orthographic vertex edits
+    -> valid edits update the 3D preview
     -> command undo/redo
     -> deterministic save/reload
     -> game loads the same asset
@@ -106,7 +107,7 @@ Validation ownership:
 Current editable operations:
 
 - click-select or Shift-toggle semantic vertices in the active orthographic projection;
-- drag a single selected vertex or the current multi-selection;
+- drag a selected semantic vertex;
 - marquee-select vertices by dragging empty space;
 - clear selection with Escape;
 - edit exact X/Y/Z values for the active vertex through text boxes;
@@ -145,7 +146,7 @@ Current layout:
 - collapsible properties/diagnostics below the 3D preview;
 - full-width status bar.
 
-The editor panes are UI-owned `DesignerSurfaceControl`s. Drawing, hit testing, fit-to-view and clipping all use the arranged surface content bounds. The 3D preview renders into a pane-sized render target and is blitted into the UI surface instead of assigning a per-pane `GraphicsDevice.Viewport`.
+The editor panes are UI-owned `DesignerSurfaceControl`s. Drawing, hit testing, fit-to-view and clipping all use the arranged surface content bounds. The UI tree is the authoritative draw path for UI composition: each surface draws its panel background, optional content, then its own border/title foreground. The 2D editor still uses `UIRenderer.DrawCustomContent` to suspend the UI batch for direct primitive drawing inside `ContentBounds ∩ EffectiveClipBounds`. The 3D preview is prepared before the backbuffer clear/UI pass into a pane-sized render target, then the perspective surface samples that prepared texture through ordinary SpriteBatch UI drawing without switching render targets during UI composition. Popups/tooltips remain in the UI overlay layer and draw last.
 
 3D preview controls:
 
@@ -155,6 +156,8 @@ The editor panes are UI-owned `DesignerSurfaceControl`s. Drawing, hit testing, f
 - wheel zooms.
 
 The UI foundation now includes generic `OverflowMode`, `Thickness`, `GridPanel`, `StackPanel`, `CollapsiblePanel`, `ScrollPanel`, `TextBlock`, exclusive toggle grouping, and simple menu/popup controls.
+
+Menus use `UIManager`'s overlay layer, so popups are not clipped by ordinary controls and draw above editor surfaces. Projection and movement-constraint buttons use authoritative `ChoiceGroup<T>` values; buttons reflect the group value and cannot independently remain selected. `UIRenderer.DrawCustomContent` restores render targets, viewport, scissor rectangle, rasterizer, blend, depth/stencil and sampler state before resuming the UI SpriteBatch.
 
 Rendering reuses:
 
@@ -166,6 +169,16 @@ Rendering reuses:
 - installed cockpit rendering.
 
 `ShipMeshRenderer.Draw` accepts an optional in-memory `HullDefinition` override and optional local render scale for editor preview. The game path keeps the existing registry lookup and default universe render scale.
+
+## Checkpoint Usability State
+
+The Object Designer foundation is viable and visually working, but still rough and unsuitable for serious hull production. Known defects and review items deliberately preserved for the next refinement pass:
+
+- active-face-plane constraint behavior is unclear or incorrect;
+- selected-button border state is visually misleading despite the LED/group state;
+- dragging a multi-vertex selection currently moves only one vertex;
+- substantial editing-workflow refinement remains;
+- full functionality review is pending Timo's later workout.
 
 ## Deferred
 
@@ -181,4 +194,4 @@ Deferred by this slice:
 - multiple simultaneous documents;
 - final universal object schema.
 
-Visual equivalence and usability remain pending Timo's in-engine/manual confirmation.
+Architecture and rendering are proven at this checkpoint. Visual functioning has been confirmed by Timo, but usability acceptance and detailed workflow review remain pending.

@@ -220,7 +220,7 @@ Self-contained UI framework. Depends on Core only.
 
 - `Alignment.cs` — horizontal/vertical text alignment enums.
 - `BlinkClock.cs` — global timer driving synchronized LED blink phases across all `LedIndicator`s.
-- `Control.cs` — base class for all UI controls: hierarchy, layout, input routing, theme support.
+- `Control.cs` — base class for all UI controls: hierarchy, layout, overflow-aware clipping/hit testing, input routing, theme support.
 - `FontHelper.cs` — safe font wrappers, sanitizing text before measuring/drawing to prevent crashes.
 - `InputState.cs` — immutable per-frame input snapshot (mouse, keyboard, typed chars) with edge detection.
 - `OverflowMode.cs` — overflow behavior enum for visible vs clipped control contents.
@@ -228,13 +228,15 @@ Self-contained UI framework. Depends on Core only.
 - `TextFilters.cs` — profanity filter, case-preserving.
 - `Thickness.cs` — immutable four-sided layout spacing value.
 - `Theme.cs` — visual style config (colours, fonts, geometry); `InferiorDark`/`Light` presets.
-- `UIManager.cs` — root UI system: top-level controls, focus, hover, input routing, draw order.
-- `UIRenderer.cs` — centralized drawing backend: primitives, buttons, windows, textboxes, clipping.
+- `UIManager.cs` — root UI system: top-level controls, overlay controls/popups, focus, hover, input routing, draw order.
+- `UIRenderer.cs` — centralized drawing backend: primitives, buttons, windows, textboxes, clipping, and custom-content SpriteBatch suspension/restoration.
+- `UiCustomDrawContext.cs` — graphics-device and clip payload passed to custom UI surface render callbacks.
 
 **Controls/**
 
 - `AnalogueNeedle.cs` — 180° sweep gauge, self-subscribes to DataBus via `Topic`.
 - `Button.cs` — clickable button, Space/Enter activation, `Clicked` event.
+- `ChoiceGroup.cs` — authoritative mutually-exclusive selection group backed by toggle buttons.
 - `CollapsiblePanel.cs` — titled panel that can hide/show arranged child content.
 - `EdgePanelHost.cs` — sliding edge-mounted panel with tab strip (left/right/top/bottom).
 - `GridPanel.cs` — fixed/auto/star row-column layout container.
@@ -269,7 +271,7 @@ Standalone MonoGame engineering tool for versioned loose object/ship authoring. 
 
 - `Program.cs` — entry point, runs `ObjectDesignerGame`.
 - `DesignerSurfaceControl.cs` — UI-owned 2D/3D editor surface bounds and clipping container.
-- `ObjectDesignerGame.cs` — Beren editor shell: menu/toolbar, 3D render-target preview, active orthographic projection, multi-select vertex pick/drag/marquee/pan/zoom, numeric coordinate edits, save/reload, diagnostics/status panels, and reuse of `ShipMeshRenderer`.
+- `ObjectDesignerGame.cs` — Beren editor shell: menu/toolbar, draw-order-separated 3D render-target preview, active orthographic projection, mutually-exclusive projection/constraint choices, multi-select vertex pick/drag/marquee/pan/zoom, numeric coordinate edits, save/reload, diagnostics/status panels, and reuse of `ShipMeshRenderer`.
 - `Content/Content.mgcb` — reference content manifest retained for source clarity; the project currently copies built game content instead of invoking a second content build.
 
 **Editing/**
@@ -281,11 +283,17 @@ Standalone MonoGame engineering tool for versioned loose object/ship authoring. 
 
 ## Inferior.UI.Test
 
-- `LayoutControlTests.cs` — xUnit coverage for stack/grid arrangement, clipping hit tests, and collapsed panel input behavior.
+- `BasicControlInteractionTests.cs` — xUnit coverage for command buttons, toggle buttons, topmost text-box hit regions, disabled controls, and clipped input.
+- `ClippingHitTestingTests.cs` — xUnit coverage for single/nested clipping, empty intersections, drawing/input clip agreement, and `OverflowMode.Visible` hit policy.
+- `InstrumentedCompositionTests.cs` — fake render-context ordering tests for custom-content suspension/resume, following sibling draw calls, nested clip balance, custom failure cleanup, empty custom clips, and overlay ordering.
+- `LayoutControlTests.cs` — xUnit coverage for stack/grid arrangement, Object Designer-like region allocation, resize minima, collapsed panel input behavior, and exclusive choice groups.
+- `PanelTraversalTests.cs` — xUnit coverage for visible/hidden/empty sibling traversal and nested depth-first draw order.
+- `ZOrderHitTestingTests.cs` — xUnit coverage for overlapping sibling/root z-order, hidden/disabled top controls, and deterministic hit order.
+- `InstrumentedCompositionTests.cs` — fake render-context ordering tests for custom-content suspension/resume, following sibling draw calls, nested clip balance, and overlay ordering.
 
 ## Inferior.ObjectDesigner.Test
 
-- `ObjectDesignerEditingTests.cs` — xUnit coverage for designer command history, multi-selection, save blocking, stable IDs, and projection math.
+- `DesignerSurfaceControlTests.cs` / `ObjectDesignerCompositionFixtureTests.cs` / `ObjectDesignerEditingTests.cs` — xUnit coverage for designer surface layout/clipping invariants, Object Designer-like composition, command history, multi-selection, save blocking, stable IDs, and projection math.
 
 ## Inferior.Gameplay.Test
 

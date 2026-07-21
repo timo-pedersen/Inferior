@@ -62,6 +62,8 @@ public sealed class ObjectDesignerGame : Game
     private Label _titleLabel = null!;
     private Label _selectionLabel = null!;
     private Label _statusLabel = null!;
+    private ChoiceGroup<ProjectionKind> _projectionChoices = null!;
+    private ChoiceGroup<EditingConstraintMode> _constraintChoices = null!;
     private bool _updatingTextBoxes;
     private RenderTarget2D? _previewTargetTexture;
     private static readonly RasterizerState ScissorLineState = new() { ScissorTestEnable = true, CullMode = CullMode.None };
@@ -130,11 +132,11 @@ public sealed class ObjectDesignerGame : Game
         }
 
         if (input.IsKeyPressed(Keys.D1))
-            _projection.Kind = ProjectionKind.Top;
+            SetProjection(ProjectionKind.Top);
         if (input.IsKeyPressed(Keys.D2))
-            _projection.Kind = ProjectionKind.Side;
+            SetProjection(ProjectionKind.Side);
         if (input.IsKeyPressed(Keys.D3))
-            _projection.Kind = ProjectionKind.Front;
+            SetProjection(ProjectionKind.Front);
         if (input.IsKeyPressed(Keys.F4))
             _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal;
 
@@ -158,66 +160,97 @@ public sealed class ObjectDesignerGame : Game
 
     protected override void Draw(GameTime gameTime)
     {
+        RenderPerspectiveTarget();
         GraphicsDevice.Clear(new Color(8, 10, 11));
-        DrawPerspective();
-        DrawOrthographic();
         _ui.Draw();
         base.Draw(gameTime);
     }
 
-    private void DrawPerspective()
+    private void RenderPerspectiveTarget()
     {
+        if (_perspectiveSurface is null)
+            return;
+
         Rectangle viewport = PerspectiveViewport;
         if (viewport.Width <= 2 || viewport.Height <= 2)
             return;
+
+        Rectangle clip = Rectangle.Intersect(viewport, _perspectiveSurface.EffectiveClipBounds);
+        if (clip.Width <= 2 || clip.Height <= 2)
+            return;
+        ValidateSurfaceRect(_perspectiveSurface, clip);
+
         EnsurePreviewTarget(viewport.Width, viewport.Height);
         RenderTarget2D target = _previewTargetTexture!;
         RenderTargetBinding[] oldTargets = GraphicsDevice.GetRenderTargets();
+        Viewport oldViewport = GraphicsDevice.Viewport;
+        Rectangle oldScissor = GraphicsDevice.ScissorRectangle;
+        RasterizerState oldRasterizer = GraphicsDevice.RasterizerState;
+        BlendState oldBlend = GraphicsDevice.BlendState;
+        DepthStencilState oldDepth = GraphicsDevice.DepthStencilState;
+        SamplerState oldSampler0 = GraphicsDevice.SamplerStates[0];
+
         GraphicsDevice.SetRenderTarget(target);
-        GraphicsDevice.Clear(new Color(8, 10, 11));
-        Matrix rotation = Matrix.CreateRotationX(_pitch) * Matrix.CreateRotationY(_yaw);
-        Vector3 cameraPosition = _previewTarget + Vector3.Transform(new Vector3(0, 4, _distance), rotation);
-        Matrix view = Matrix.CreateLookAt(cameraPosition, _previewTarget, Vector3.UnitY);
-        Matrix projection = Matrix.CreatePerspectiveFieldOfView(
-            MathHelper.ToRadians(55f),
-            Math.Max(0.1f, viewport.Width / (float)viewport.Height),
-            0.05f,
-            400f);
-        var camera = new Camera3D(DVec3.Zero, 1f);
-        camera.SetPose(DVec3.Zero, Quaternion.Identity);
+        try
+        {
+            GraphicsDevice.Clear(ClearOptions.Target | ClearOptions.DepthBuffer, new Color(8, 10, 11), 1f, 0);
+            Matrix rotation = Matrix.CreateRotationX(_pitch) * Matrix.CreateRotationY(_yaw);
+            Vector3 cameraPosition = _previewTarget + Vector3.Transform(new Vector3(0, 4, _distance), rotation);
+            Matrix view = Matrix.CreateLookAt(cameraPosition, _previewTarget, Vector3.UnitY);
+            Matrix projection = Matrix.CreatePerspectiveFieldOfView(
+                MathHelper.ToRadians(55f),
+                Math.Max(0.1f, viewport.Width / (float)viewport.Height),
+                0.05f,
+                400f);
+            var camera = new Camera3D(DVec3.Zero, 1f);
+            camera.SetPose(DVec3.Zero, Quaternion.Identity);
 
-        HullDefinition previewHull = _session.PreviewHullDefinition;
-        IReadOnlyList<EngineMountPresentationSnapshot>? engines = _showEngines
-            ? BuildEngineMountSnapshots(previewHull)
-            : null;
-        CockpitPresentationSnapshot? cockpit = _showCockpit
-            ? BuildCockpitSnapshot(previewHull)
-            : null;
-        _shipRenderer.Draw(
-            camera,
-            view,
-            projection,
-            previewHull.HullTypeId,
-            DVec3.Zero,
-            Quaternion.Identity,
-            DetailLevel.Full,
-            _debugMode,
-            engines,
-            engineModuleDebug: false,
-            engineVisualTimeSeconds: _time,
-            cockpit,
-            previewHull,
-            renderScaleOverride: 1.0f);
+            HullDefinition previewHull = _session.PreviewHullDefinition;
+            IReadOnlyList<EngineMountPresentationSnapshot>? engines = _showEngines
+                ? BuildEngineMountSnapshots(previewHull)
+                : null;
+            CockpitPresentationSnapshot? cockpit = _showCockpit
+                ? BuildCockpitSnapshot(previewHull)
+                : null;
+            _shipRenderer.Draw(
+                camera,
+                view,
+                projection,
+                previewHull.HullTypeId,
+                DVec3.Zero,
+                Quaternion.Identity,
+                DetailLevel.Full,
+                _debugMode,
+                engines,
+                engineModuleDebug: false,
+                engineVisualTimeSeconds: _time,
+                cockpit,
+                previewHull,
+                renderScaleOverride: 1.0f);
 
-        if (_showCargo)
-            DrawCargoPreview(view, projection);
-        GraphicsDevice.SetRenderTargets(oldTargets);
+            if (_showCargo)
+                DrawCargoPreview(view, projection);
+        }
+        finally
+        {
+            GraphicsDevice.SetRenderTargets(oldTargets);
+            GraphicsDevice.Viewport = oldViewport;
+            GraphicsDevice.ScissorRectangle = oldScissor;
+            GraphicsDevice.RasterizerState = oldRasterizer;
+            GraphicsDevice.BlendState = oldBlend;
+            GraphicsDevice.DepthStencilState = oldDepth;
+            GraphicsDevice.SamplerStates[0] = oldSampler0;
+        }
+    }
 
-        _spriteBatch.Begin(blendState: BlendState.AlphaBlend, samplerState: SamplerState.PointClamp);
-        _spriteBatch.Draw(target, viewport, Color.White);
+    private void DrawPerspectiveTexture(SpriteBatch sb, UIRenderer renderer, Rectangle viewport)
+    {
+        if (_previewTargetTexture is null || viewport.Width <= 2 || viewport.Height <= 2)
+            return;
+        renderer.FillRect(sb, viewport, new Color(8, 10, 11));
+        sb.Draw(_previewTargetTexture, viewport, Color.White);
         if (_session.IsPreviewStale)
-            _spriteBatch.DrawString(_font, "Preview using last valid hull", new Vector2(viewport.X + 10, viewport.Y + 28), new Color(230, 190, 80), 0f, Vector2.Zero, 0.78f, SpriteEffects.None, 0f);
-        _spriteBatch.End();
+            renderer.DrawText(sb, "Preview using last valid hull", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(230, 190, 80));
     }
 
     private void EnsurePreviewTarget(int width, int height)
@@ -232,9 +265,10 @@ public sealed class ObjectDesignerGame : Game
         _previewTargetTexture = new RenderTarget2D(GraphicsDevice, width, height, false, SurfaceFormat.Color, DepthFormat.Depth24);
     }
 
-    private void DrawOrthographic()
+    private void DrawOrthographic(UiCustomDrawContext context)
     {
-        Rectangle vp = OrthoViewport;
+        Rectangle vp = context.ClipBounds;
+        ValidateSurfaceRect(_orthoSurface, vp);
         if (vp.Width <= 2 || vp.Height <= 2)
             return;
         var lines = new List<VertexPositionColor>();
@@ -253,8 +287,6 @@ public sealed class ObjectDesignerGame : Game
             0,
             0,
             1);
-        Rectangle oldScissor = GraphicsDevice.ScissorRectangle;
-        RasterizerState oldRasterizer = GraphicsDevice.RasterizerState;
         GraphicsDevice.ScissorRectangle = vp;
         GraphicsDevice.RasterizerState = ScissorLineState;
         foreach (EffectPass pass in _lineEffect.CurrentTechnique.Passes)
@@ -263,8 +295,6 @@ public sealed class ObjectDesignerGame : Game
             if (lines.Count > 0)
                 GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
         }
-        GraphicsDevice.ScissorRectangle = oldScissor;
-        GraphicsDevice.RasterizerState = oldRasterizer;
 
         _spriteBatch.Begin(blendState: BlendState.AlphaBlend);
         _spriteBatch.DrawString(_font, $"{_projection.Kind} | H: {_projection.HorizontalAxisLabel} | V: {_projection.VerticalAxisLabel}", new Vector2(vp.X + 8, vp.Y + 28), Color.White, 0, Vector2.Zero, 0.85f, SpriteEffects.None, 0);
@@ -448,18 +478,24 @@ public sealed class ObjectDesignerGame : Game
         AddButton(toolbar, "Undo", () => { _session.Undo(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
         AddButton(toolbar, "Redo", () => { _session.Redo(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
         AddButton(toolbar, "Roles", () => _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
-        AddButton(toolbar, "Top", () => _projection.Kind = ProjectionKind.Top);
-        AddButton(toolbar, "Side", () => _projection.Kind = ProjectionKind.Side);
-        AddButton(toolbar, "Front", () => _projection.Kind = ProjectionKind.Front);
-        AddButton(toolbar, "View", () => _constraintMode = EditingConstraintMode.ViewPlane);
-        AddButton(toolbar, "X", () => _constraintMode = EditingConstraintMode.AxisX);
-        AddButton(toolbar, "Y", () => _constraintMode = EditingConstraintMode.AxisY);
-        AddButton(toolbar, "Z", () => _constraintMode = EditingConstraintMode.AxisZ);
-        AddButton(toolbar, "Face", () => _constraintMode = EditingConstraintMode.ActiveFacePlane);
+        _projectionChoices = new ChoiceGroup<ProjectionKind>(_projection.Kind);
+        _projectionChoices.SelectionChanged += value => _projection.Kind = value;
+        AddChoice(toolbar, _projectionChoices, ProjectionKind.Top, "Top");
+        AddChoice(toolbar, _projectionChoices, ProjectionKind.Side, "Side");
+        AddChoice(toolbar, _projectionChoices, ProjectionKind.Front, "Front");
+
+        _constraintChoices = new ChoiceGroup<EditingConstraintMode>(_constraintMode);
+        _constraintChoices.SelectionChanged += value => _constraintMode = value;
+        AddChoice(toolbar, _constraintChoices, EditingConstraintMode.ViewPlane, "Plane");
+        AddChoice(toolbar, _constraintChoices, EditingConstraintMode.AxisX, "X");
+        AddChoice(toolbar, _constraintChoices, EditingConstraintMode.AxisY, "Y");
+        AddChoice(toolbar, _constraintChoices, EditingConstraintMode.AxisZ, "Z");
+        AddChoice(toolbar, _constraintChoices, EditingConstraintMode.ActiveFacePlane, "Face");
 
         _orthoSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Orthographic, "2D editor")
         {
             Margin = new Thickness(0, 6, 6, 6),
+            DrawCustomContent = DrawOrthographic,
         };
         _rootLayout.Add(_orthoSurface, 0, 1);
 
@@ -473,7 +509,10 @@ public sealed class ObjectDesignerGame : Game
         rightGrid.Columns.Add(GridLength.Star());
         _rootLayout.Add(rightGrid, 1, 1);
 
-        _perspectiveSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Perspective, "3D preview");
+        _perspectiveSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Perspective, "3D preview")
+        {
+            DrawContent = DrawPerspectiveTexture,
+        };
         rightGrid.Add(_perspectiveSurface, 0, 0);
 
         var properties = new CollapsiblePanel
@@ -512,6 +551,13 @@ public sealed class ObjectDesignerGame : Game
     {
         var button = new Button(text, new Rectangle(0, 0, Math.Max(58, text.Length * 10), 28));
         button.Clicked += _ => action();
+        parent.Add(button);
+    }
+
+    private static void AddChoice<T>(StackPanel parent, ChoiceGroup<T> group, T value, string text)
+        where T : notnull
+    {
+        ToggleButton button = group.AddChoice(value, text, new Rectangle(0, 0, Math.Max(58, text.Length * 10), 28));
         parent.Add(button);
     }
 
@@ -593,8 +639,24 @@ public sealed class ObjectDesignerGame : Game
             : _status;
     }
 
+    private void SetProjection(ProjectionKind kind)
+    {
+        _projection.Kind = kind;
+        if (_projectionChoices is not null)
+            _projectionChoices.SelectedValue = kind;
+    }
+
     private Rectangle PerspectiveViewport => _perspectiveSurface.ContentBounds;
     private Rectangle OrthoViewport => _orthoSurface.ContentBounds;
+
+    private static void ValidateSurfaceRect(DesignerSurfaceControl surface, Rectangle content)
+    {
+        Rectangle clip = surface.EffectiveClipBounds;
+        System.Diagnostics.Debug.Assert(surface.AbsoluteBounds.Width > 0 && surface.AbsoluteBounds.Height > 0, $"{surface.Kind} surface has empty arranged bounds.");
+        System.Diagnostics.Debug.Assert(content.Width > 0 && content.Height > 0, $"{surface.Kind} surface has empty content bounds.");
+        System.Diagnostics.Debug.Assert(clip.Width > 0 && clip.Height > 0, $"{surface.Kind} surface has empty effective clip.");
+        System.Diagnostics.Debug.Assert(Rectangle.Intersect(clip, content).Width > 0 && Rectangle.Intersect(clip, content).Height > 0, $"{surface.Kind} surface clip does not intersect content.");
+    }
 
     private string IncidentFaceText()
     {
