@@ -61,25 +61,29 @@ public static class StationTextureRegistry
     }
 
     /// <summary>
-    /// Builds this station's own N-texture variant set for one surface. Not cached or
-    /// shared — the caller owns the returned array and must dispose every element when
-    /// the station unloads (see SystemSpaceState's _stationPanelTextures dictionary,
-    /// disposed alongside _hullMeshes/_decoMeshes in OnEnter/OnExit). colourSpread bounds
-    /// how far each variant's seeded colour offset may wander from palette.BaseColour
-    /// (Brief S2b-2: StationEconomyVariance.Profiles, economy-keyed).
+    /// Builds this station's own N-texture variant set for one surface — each variant now
+    /// a (albedo, material) pair (Brief S2c-1: material is the RGBA gloss/height carrier,
+    /// same size as albedo, same UV). Not cached or shared — the caller owns every
+    /// returned texture (both elements of both pair) and must dispose them all when the
+    /// station unloads (see SystemSpaceState's _stationPanelTextures dictionary, disposed
+    /// alongside _hullMeshes/_decoMeshes in OnEnter/OnExit — material maps are folded
+    /// into that same disposal list, not a second dictionary, since disposal doesn't care
+    /// about the albedo/material distinction). colourSpread bounds how far each variant's
+    /// seeded colour offset may wander from palette.BaseColour (Brief S2b-2:
+    /// StationEconomyVariance.Profiles, economy-keyed).
     /// </summary>
-    public static Texture2D[] GenerateVariantSet(
+    public static (Texture2D Albedo, Texture2D Material)[] GenerateVariantSet(
         GraphicsDevice gd, SurfaceTexture surface, TexturePalette palette,
         string persistenceId, float colourSpread, int count = DefaultVariantCount)
     {
         var seeds = RollVariantSeeds(persistenceId, surface, count);
-        var textures = new Texture2D[count];
+        var variants = new (Texture2D, Texture2D)[count];
         for (int i = 0; i < count; i++)
         {
             var variantPalette = OffsetPaletteForVariant(palette, seeds[i], colourSpread);
-            textures[i] = Generate(gd, surface, variantPalette, seeds[i]);
+            variants[i] = Generate(gd, surface, variantPalette, seeds[i]);
         }
-        return textures;
+        return variants;
     }
 
     // Brief S2b-2 item 1: biases mod.Seed's variant pick so the dominant variant (index
@@ -114,6 +118,11 @@ public static class StationTextureRegistry
         float hueDeltaDegrees = ((float)rng.NextDouble() * 2f - 1f) * 180f * colourSpread;
         float saturationDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * colourSpread;
         float brightnessDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * colourSpread;
+        // Brief S2c-1: per-variant base gloss (fresh/glossy vs. duller), before wear —
+        // one more draw from this SAME seeded stream, not a new RNG convention. [0.4, 1.0)
+        // so "duller" still reads as a material, never flat-zero from the base roll alone
+        // (wear is what can actually drive a texel toward true matte).
+        float baseGloss = 0.4f + (float)rng.NextDouble() * 0.6f;
 
         return new TexturePalette
         {
@@ -125,6 +134,7 @@ public static class StationTextureRegistry
             GrimeStrength    = basePalette.GrimeStrength,
             NameFont         = basePalette.NameFont,
             TextColour       = basePalette.TextColour,
+            BaseGloss        = baseGloss,
         };
     }
 
@@ -180,7 +190,12 @@ public static class StationTextureRegistry
 
     private const int Size = 512;
 
-    private static Texture2D Generate(
+    // Brief S2c-1: R=height (reserved for S2c-2 — written neutral, 128, so the material
+    // map exists at full size now and S2c-2 only starts writing R, no format change
+    // between briefs), G=gloss (this brief), B/A reserved, written 0/255.
+    private const byte MaterialNeutralHeight = 128;
+
+    private static (Texture2D Albedo, Texture2D Material) Generate(
         GraphicsDevice gd,
         SurfaceTexture surface,
         TexturePalette palette,
@@ -188,6 +203,14 @@ public static class StationTextureRegistry
     {
         var pixels = new Color[Size * Size];
         var rng    = new System.Random(seed ^ HashPalette(palette, surface));
+
+        // Brief S2c-1: gloss starts at this variant's rolled base and is only ever
+        // reduced (never raised) by the GrimeStrength-driven wear passes below — same
+        // coordinates/weights those passes already compute for the albedo darkening they
+        // do, so "when a pass darkens albedo at a texel, it also lowers gloss there" is
+        // literal, not a second, possibly-diverging computation.
+        var gloss = new float[Size * Size];
+        Array.Fill(gloss, palette.BaseGloss);
 
         // Step 1 — base noise
         FillBaseNoise(pixels, palette, rng);
@@ -219,8 +242,10 @@ public static class StationTextureRegistry
                         int py = sy + dy;
                         if (px < 0 || px >= Size || py < 0 || py >= Size) continue;
                         float fade = 1f - (float)dy / length;
-                        pixels[py * Size + px] = BlendColor(
-                            pixels[py * Size + px], streakCol, alpha * fade);
+                        int   idx  = py * Size + px;
+                        float t    = alpha * fade;
+                        pixels[idx] = BlendColor(pixels[idx], streakCol, t);
+                        gloss[idx] *= 1f - t;
                     }
                 }
             }
@@ -246,20 +271,23 @@ public static class StationTextureRegistry
                     float dist = ddx * ddx + ddy * ddy;
                     if (dist > 1f) continue;
                     float fade = 1f - dist;
-                    pixels[y * Size + x] = BlendColor(
-                        pixels[y * Size + x], rustCol, alpha * fade);
+                    int   idx  = y * Size + x;
+                    float t    = alpha * fade;
+                    pixels[idx] = BlendColor(pixels[idx], rustCol, t);
+                    gloss[idx] *= 1f - t;
                 }
             }
         }
 
         // Step 4 — edge grime
-        ApplyEdgeGrime(pixels, gridX, gridY, palette);
+        ApplyEdgeGrime(pixels, gloss, gridX, gridY, palette);
 
         // Step 5a — scratch lines (high-wear surfaces only)
         if (palette.GrimeStrength > 0.25f)
-            AddScratchLines(pixels, palette, rng);
+            AddScratchLines(pixels, gloss, palette, rng);
 
-        // Step 5b — military stencil fragments (Military economy only)
+        // Step 5b — military stencil fragments (Military economy only) — text is a
+        // deliberate printed marking, not wear; doesn't touch gloss.
         if (palette.NameFont == FontStyle.Military)
         {
             string[] fragments   = ["A7", "R3", "SEC", "RESTRICTED", "ZN4", "06"];
@@ -275,9 +303,19 @@ public static class StationTextureRegistry
             }
         }
 
-        var tex = new Texture2D(gd, Size, Size);
-        tex.SetData(pixels);
-        return tex;
+        var albedoTex = new Texture2D(gd, Size, Size);
+        albedoTex.SetData(pixels);
+
+        var materialPixels = new Color[Size * Size];
+        for (int i = 0; i < materialPixels.Length; i++)
+        {
+            byte g = (byte)Math.Clamp(gloss[i] * 255f, 0f, 255f);
+            materialPixels[i] = new Color(MaterialNeutralHeight, g, (byte)0, (byte)255);
+        }
+        var materialTex = new Texture2D(gd, Size, Size);
+        materialTex.SetData(materialPixels);
+
+        return (albedoTex, materialTex);
     }
 
     // ── Pipeline steps ────────────────────────────────────────────────────────
@@ -385,6 +423,7 @@ public static class StationTextureRegistry
 
     private static void ApplyEdgeGrime(
         Color[]        pixels,
+        float[]        gloss,
         int[]          gridX,
         int[]          gridY,
         TexturePalette p)
@@ -403,7 +442,9 @@ public static class StationTextureRegistry
             float t       = 1f - (nearest / (float)falloff);         // 1 at seam, 0 at falloff
             t = t * t * p.GrimeStrength;
             if (t < 0.005f) continue;
-            pixels[y * Size + x] = BlendColor(pixels[y * Size + x], p.GrimeColour, t);
+            int idx = y * Size + x;
+            pixels[idx] = BlendColor(pixels[idx], p.GrimeColour, t);
+            gloss[idx] *= 1f - t;
         }
     }
 
@@ -421,10 +462,11 @@ public static class StationTextureRegistry
         return dist;
     }
 
-    private static void AddScratchLines(Color[] pixels, TexturePalette p, System.Random rng)
+    private static void AddScratchLines(Color[] pixels, float[] gloss, TexturePalette p, System.Random rng)
     {
         int count = (int)(p.GrimeStrength * 18f) + 4;
         Color scratchColor = TexturePalette.LerpColor(p.BaseColour, Color.White, 0.3f);
+        const float scratchWeight = 0.6f;
 
         for (int i = 0; i < count; i++)
         {
@@ -441,7 +483,11 @@ public static class StationTextureRegistry
                 int px = (int)(x0 + dx * s);
                 int py = (int)(y0 + dy * s);
                 if ((uint)px < Size && (uint)py < Size)
-                    pixels[py * Size + px] = BlendColor(pixels[py * Size + px], scratchColor, 0.6f);
+                {
+                    int idx = py * Size + px;
+                    pixels[idx] = BlendColor(pixels[idx], scratchColor, scratchWeight);
+                    gloss[idx] *= 1f - scratchWeight;
+                }
             }
         }
     }

@@ -106,6 +106,13 @@ public sealed class StationGenerator
     // (not just surface) is needed because a category-special module (science) can pull
     // in a second economy's variant set alongside the station's own, for the same
     // surface (TechPanel serves science/military/core alike).
+    //
+    // Brief S2c-1: each variant is now an (albedo, material) pair — mod.MaterialInstance
+    // is assigned alongside mod.TextureInstance, from the SAME variant index (so a
+    // module's gloss always matches its own albedo variant, never a different one's).
+    // Both textures of both pair elements go into `owned` for disposal — no separate
+    // material dictionary, since SystemSpaceState's disposal loop doesn't care about the
+    // albedo/material distinction, only that every Texture2D this pass created gets freed.
     private static IReadOnlyList<Texture2D> AssignTextures(
         List<PlacedModule> modules,
         GraphicsDevice     gd,
@@ -113,16 +120,20 @@ public sealed class StationGenerator
         StationProfile     profile,
         Galaxy.Station     station)
     {
-        var variantSets = new Dictionary<(SurfaceTexture surface, StationEconomy economy), Texture2D[]>();
+        var variantSets = new Dictionary<(SurfaceTexture surface, StationEconomy economy), (Texture2D Albedo, Texture2D Material)[]>();
         var owned       = new List<Texture2D>();
 
-        Texture2D[] VariantsFor(SurfaceTexture surface, StationEconomy economy, TexturePalette economyPalette, float colourSpread)
+        (Texture2D Albedo, Texture2D Material)[] VariantsFor(SurfaceTexture surface, StationEconomy economy, TexturePalette economyPalette, float colourSpread)
         {
             var key = (surface, economy);
             if (variantSets.TryGetValue(key, out var existing)) return existing;
             var set = StationTextureRegistry.GenerateVariantSet(gd, surface, economyPalette, station.PersistenceId!, colourSpread);
             variantSets[key] = set;
-            owned.AddRange(set);
+            foreach (var (albedo, material) in set)
+            {
+                owned.Add(albedo);
+                owned.Add(material);
+            }
             return set;
         }
 
@@ -142,12 +153,17 @@ public sealed class StationGenerator
 
             var variance = StationEconomyVariance.Profiles[economy];
             var variants = VariantsFor(surface, economy, economyPalette, variance.ColourSpread);
-            mod.TextureInstance = variants[StationTextureRegistry.SelectVariantIndex(mod.Seed, variants.Length, variance.BaseShareRatio)];
+            var selected = variants[StationTextureRegistry.SelectVariantIndex(mod.Seed, variants.Length, variance.BaseShareRatio)];
+            mod.TextureInstance  = selected.Albedo;
+            mod.MaterialInstance = selected.Material;
         }
 
         // Overlay the station name on the core module's face texture — a genuinely new
         // per-station texture (reads the core's assigned variant, draws over a copy), not
-        // a member of any variant set, so it must be tracked here too or it leaks.
+        // a member of any variant set, so it must be tracked here too or it leaks. Only
+        // the albedo changes — MaterialInstance (gloss) stays whatever the core's
+        // originally-assigned variant already set; the name overlay is a printed marking
+        // on the albedo, not a change to the physical material.
         if (modules.Count > 0)
         {
             var nameTex = GenerateNameFaceTexture(gd, modules[0].TextureInstance, station.Name, palette);

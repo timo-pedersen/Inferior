@@ -17,6 +17,11 @@ public sealed class MeshRenderer : IDisposable
     private readonly GraphicsDevice _gd;
     private readonly Effect         _litSurfaceEffect;
     private readonly Texture2D      _whiteTexture;   // 1x1 white — stand-in for "no real texture"
+    // Brief S2c-1: stand-in for "no real material map" (ships, containers, calibration
+    // cube — none of them have per-texel gloss). Height=128 (neutral, S2c-2's channel),
+    // gloss=255 (full) so SpecularHighlight's gloss multiply is a no-op — these callers'
+    // specular reproduces exactly pre-S2c-1 behaviour, untouched by this brief.
+    private readonly Texture2D      _neutralMaterialTexture;
 
     public MeshRenderer(GraphicsDevice gd, Effect litSurfaceEffect)
     {
@@ -24,6 +29,8 @@ public sealed class MeshRenderer : IDisposable
         _litSurfaceEffect = litSurfaceEffect;
         _whiteTexture     = new Texture2D(gd, 1, 1);
         _whiteTexture.SetData([Color.White]);
+        _neutralMaterialTexture = new Texture2D(gd, 1, 1);
+        _neutralMaterialTexture.SetData([new Color(128, 255, 0, 255)]);
 
         // LitSurface.fx declares EclipseFactor with a "= 1.0" HLSL initializer, but on
         // DesktopGL/MojoShader that initializer is not reliably applied — the parameter can
@@ -45,7 +52,7 @@ public sealed class MeshRenderer : IDisposable
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
-        Texture2D? texture = null)
+        Texture2D? texture = null, Texture2D? materialMap = null)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
@@ -57,7 +64,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        SetSpecularParameters(fx, specularStrength, specularShininess);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture);
         Draw(vb, ib, fx);
     }
 
@@ -67,7 +74,7 @@ public sealed class MeshRenderer : IDisposable
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
-        Texture2D? texture = null)
+        Texture2D? texture = null, Texture2D? materialMap = null)
     {
         if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
             throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
@@ -82,7 +89,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        SetSpecularParameters(fx, specularStrength, specularShininess);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture);
         Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
@@ -96,7 +103,8 @@ public sealed class MeshRenderer : IDisposable
         Vector2 shadowMinXY, Vector2 shadowInvSize,
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
         float shadowCorrectionLimit, float shadowBiasDepth,
-        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius)
+        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
+        Texture2D? materialMap = null)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
@@ -108,7 +116,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
-        SetSpecularParameters(fx, specularStrength, specularShininess);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
@@ -165,7 +173,11 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx);
     }
 
-    public void Dispose() => _whiteTexture.Dispose();
+    public void Dispose()
+    {
+        _whiteTexture.Dispose();
+        _neutralMaterialTexture.Dispose();
+    }
 
     // ── Private ───────────────────────────────────────────────────────────────
 
@@ -201,11 +213,15 @@ public sealed class MeshRenderer : IDisposable
     // second eye position for a caller to supply. It's still a real shader parameter
     // (not a hardcoded .fx constant) so this stays correct if that convention ever
     // changes; if it does, this is the one place to update, not every draw call site.
-    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess)
+    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess, Texture2D materialMap)
     {
         fx.Parameters["EyePositionWorld"].SetValue(Vector3.Zero);
         fx.Parameters["SpecularStrength"].SetValue(specularStrength);
         fx.Parameters["SpecularShininess"].SetValue(specularShininess);
+        // Brief S2c-1: bound every DynamicLit*/station-hull draw call, no exceptions —
+        // same "no .fx initializer" policy as the shadow parameters below (BakedColorLit*
+        // never reads MaterialMap at all, so this is never set there).
+        fx.Parameters["MaterialMap"].SetValue(materialMap);
     }
 
     private static void SetShadowParameters(

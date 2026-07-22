@@ -56,5 +56,11 @@ public sealed class PlacedModule
     public          StationModuleMesh?      Mesh            { get; set; }
     public          StationModuleMesh?      GlassMesh       { get; set; }
     public          Texture2D?             TextureInstance  { get; set; }
+    // Brief S2c-1: parallel material map (RGBA — R height, reserved for S2c-2, neutral
+    // for now; G gloss, this brief; B/A reserved, 0) for the SAME variant as
+    // TextureInstance. Assigned once per module in StationGenerator.AssignTextures and
+    // never touched again — unlike TextureInstance, the core module's name-overlay swap
+    // only replaces the albedo, so this must not be re-derived from TextureInstance.
+    public          Texture2D?             MaterialInstance { get; set; }
     public          List<StationLightInfo>  GlowLights      { get; } = [];
 }

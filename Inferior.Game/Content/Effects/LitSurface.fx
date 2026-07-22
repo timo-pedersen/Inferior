@@ -98,6 +98,25 @@ sampler  TextureSampler = sampler_state
     AddressV  = Wrap;
 };
 
+// Brief S2c-1: station-hull-panel material map (RGBA) — R height (reserved for S2c-2,
+// neutral for now), G gloss (this brief, modulates SpecularHighlight below), B/A
+// reserved. Same UV as Texture/TextureSampler (albedo), same filtering/wrap so gloss
+// transitions read as smoothly as the albedo they pair with. DynamicLit*/station-hulls
+// only (SpecularHighlight's only callers) — never sampled from BakedColorLit*.
+// MeshRenderer binds a neutral 1x1 (height=128, gloss=255) stand-in for every
+// DynamicLit* caller that has no real material map (ships, containers, calibration
+// cube) — full gloss reproduces pre-S2c-1 behaviour exactly, untouched by this brief.
+texture  MaterialMap;
+sampler  MaterialSampler = sampler_state
+{
+    Texture   = <MaterialMap>;
+    MinFilter = Linear;
+    MagFilter = Linear;
+    MipFilter = Linear;
+    AddressU  = Wrap;
+    AddressV  = Wrap;
+};
+
 struct VertexInput
 {
     float4 Position : POSITION0;
@@ -311,7 +330,14 @@ float4 PS_BakedColorLitShadowed(VertexOutput input) : COLOR0
 // top of it. Not tinted by albedo (a specular lobe is the light's colour, SunColour, not
 // the surface's) and not folded into EclipseFactor — S1's formula gates on sun-facing and
 // shadow only; revisit alongside Phase E if an eclipsed sun should kill the glint too.
-float3 SpecularHighlight(float3 worldNormal, float3 renderPos, float shadowTerm)
+// Brief S2c-1: gloss (MaterialSampler.g, sampled by the caller so BakedColorLit* never
+// touches MaterialMap) scales SpecularStrength only — matte texels (gloss~0) read as no
+// glint, glossy ones (gloss~1) as full strength. Not also mapping gloss to
+// SpecularShininess: strength alone already breaks up a uniform slab (the money test),
+// and one modulated parameter is simpler to read/tune than two moving together;
+// shininess-modulation is a plausible follow-up tweak if strength alone doesn't read
+// tactile enough, not added here.
+float3 SpecularHighlight(float3 worldNormal, float3 renderPos, float shadowTerm, float gloss)
 {
     float3 n = normalize(worldNormal);
     float3 l = SunDirection;
@@ -320,7 +346,7 @@ float3 SpecularHighlight(float3 worldNormal, float3 renderPos, float shadowTerm)
 
     float nl   = saturate(dot(n, l));
     float spec = pow(saturate(dot(n, h)), SpecularShininess) * nl * shadowTerm;
-    return SpecularStrength * spec * SunColour;
+    return SpecularStrength * gloss * spec * SunColour;
 }
 
 float4 PS_DynamicLit(VertexOutput input) : COLOR0
@@ -331,7 +357,8 @@ float4 PS_DynamicLit(VertexOutput input) : COLOR0
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
-    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, 1.0);
+    float  gloss = tex2D(MaterialSampler, input.TexCoord).g;
+    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, 1.0, gloss);
     return float4(rgb, 1.0);
 }
 
@@ -354,7 +381,8 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
-    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, shadow);
+    float  gloss = tex2D(MaterialSampler, input.TexCoord).g;
+    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, shadow, gloss);
     return float4(rgb, 1.0);
 }
 

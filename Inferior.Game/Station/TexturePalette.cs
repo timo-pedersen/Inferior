@@ -14,6 +14,12 @@ public sealed class TexturePalette
     public float     GrimeStrength    { get; init; }   // 0.0–1.0 edge darkening intensity
     public FontStyle NameFont         { get; init; }
     public Color     TextColour       { get; init; }
+    // Brief S2c-1: per-variant material-map starting gloss (0=matte, 1=full gloss)
+    // before wear reduces it — rolled per variant in OffsetPaletteForVariant, same seed
+    // stream as the colour offset (not a new RNG convention). Default 1.0 here is never
+    // actually read in the real variant path (OffsetPaletteForVariant always overrides
+    // it), only relevant to a bare TexturePalette.From() call with no variant roll.
+    public float     BaseGloss        { get; init; } = 1.0f;
 
     public static TexturePalette From(StationProfile profile) => profile.Economy switch
     {

@@ -107,14 +107,15 @@ public sealed partial class SystemSpaceState
                         new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
                         StationShadowCorrectionLimit, shadowBiasDepth,
                         _stationShadowBinaryView, _stationShadowDeltaView,
-                        ShadowKernelRadiusFor(_shadowKernelMode));
+                        ShadowKernelRadiusFor(_shadowKernelMode),
+                        mod.MaterialInstance);
                 }
                 else
                 {
                     _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                         specStrength, specShininess,
-                        mod.TextureInstance);
+                        mod.TextureInstance, mod.MaterialInstance);
                 }
             }
         }

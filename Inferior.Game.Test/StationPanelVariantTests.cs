@@ -273,4 +273,62 @@ public sealed class StationPanelVariantTests
     {
         Assert.Equal(StationEconomy.Agricultural, StationGenerator.EconomyForModule(category, StationEconomy.Agricultural));
     }
+
+    // Brief S2c-1: per-variant base gloss rides OffsetPaletteForVariant's existing seeded
+    // stream (not a new RNG convention) — same GraphicsDevice-free split as everything
+    // else here; the actual wear-reduces-gloss pixel logic lives inside the private
+    // Generate() (real Texture2D creation, needs a GPU) and isn't unit-testable directly,
+    // same pre-existing limitation as the albedo pixel passes.
+    [Fact]
+    public void OffsetPaletteForVariant_SameSeed_ProducesSameBaseGloss()
+    {
+        var basePalette = SamplePalette();
+
+        var a = StationTextureRegistry.OffsetPaletteForVariant(basePalette, seed: 777, TestSpread);
+        var b = StationTextureRegistry.OffsetPaletteForVariant(basePalette, seed: 777, TestSpread);
+
+        Assert.Equal(a.BaseGloss, b.BaseGloss);
+    }
+
+    [Fact]
+    public void OffsetPaletteForVariant_DifferentSeeds_ProduceVariedBaseGloss()
+    {
+        var basePalette = SamplePalette();
+        var seeds = StationTextureRegistry.RollVariantSeeds("Sol:star:Alpha Station", SurfaceTexture.IndustrialPanel, count: 20);
+
+        var distinctGloss = seeds
+            .Select(seed => StationTextureRegistry.OffsetPaletteForVariant(basePalette, seed, TestSpread).BaseGloss)
+            .Distinct()
+            .Count();
+
+        Assert.True(distinctGloss > 1,
+            $"Expected varied BaseGloss across {seeds.Length} variants (fresh/glossy vs. duller), got {distinctGloss} distinct value(s)");
+    }
+
+    [Fact]
+    public void OffsetPaletteForVariant_BaseGloss_StaysWithinDocumentedRange()
+    {
+        var basePalette = SamplePalette();
+        var seeds = StationTextureRegistry.RollVariantSeeds("Sol:star:Alpha Station", SurfaceTexture.IndustrialPanel, count: 100);
+
+        foreach (var seed in seeds)
+        {
+            float gloss = StationTextureRegistry.OffsetPaletteForVariant(basePalette, seed, TestSpread).BaseGloss;
+            Assert.InRange(gloss, 0.4f, 1.0f);
+        }
+    }
+
+    [Fact]
+    public void OffsetPaletteForVariant_BaseGloss_IsIndependentOfColourSpread()
+    {
+        // Base gloss and colour spread are two different draws from the same stream —
+        // changing colourSpread must not accidentally perturb which gloss value comes out
+        // (that would make gloss variance secretly depend on economy spread tuning).
+        var basePalette = SamplePalette();
+
+        var narrow = StationTextureRegistry.OffsetPaletteForVariant(basePalette, seed: 42, colourSpread: 0.08f);
+        var wide   = StationTextureRegistry.OffsetPaletteForVariant(basePalette, seed: 42, colourSpread: 0.90f);
+
+        Assert.Equal(narrow.BaseGloss, wide.BaseGloss);
+    }
 }
