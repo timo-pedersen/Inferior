@@ -220,6 +220,11 @@ public sealed class ObjectDesignerGame : Game
                 DVec3.Zero,
                 Quaternion.Identity,
                 DetailLevel.Full,
+                // Brief S1 specular is a SystemSpaceState-tuned aesthetic pass (K cycles
+                // presets); this preview tool has no such control wired in, so it stays
+                // Off (0 strength) rather than picking a value on its behalf.
+                specularStrength: 0f,
+                specularShininess: 32f,
                 _debugMode,
                 engines,
                 engineModuleDebug: false,

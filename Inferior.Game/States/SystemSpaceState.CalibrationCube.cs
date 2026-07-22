@@ -133,8 +133,10 @@ public sealed partial class SystemSpaceState
                      * Matrix.CreateFromQuaternion(orientation)
                      * Matrix.CreateTranslation(renderPos);
 
+        var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
         _meshRenderer.DrawDynamicLit(_calibrationCubeVb, _calibrationCubeIb, world, view, proj,
-            Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient);
+            Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient,
+            specStrength, specShininess);
 
         _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;

@@ -30,8 +30,10 @@
 // scalar. Shadow-map matrices/textures are deliberately NOT declared here: an
 // unreferenced texture/matrix parameter is stripped by the MonoGame effect compiler, so
 // declaring one now would give no real forward-compatibility guarantee — Phase B adds
-// them together with the sampling code that uses them. Specular/normal-map slots are
-// likewise deferred to their own phases (spec section 11).
+// them together with the sampling code that uses them. Normal-map slots are still
+// deferred to their own phase (spec section 11, Brief S2). Specular (Brief S1) is
+// implemented below, DynamicLit*/station-hulls only — BakedColorLit*/station decoration
+// is untouched until S2, which bundles it with bump since both need a perturbed normal.
 
 float4x4 World;
 float4x4 View;
@@ -43,6 +45,17 @@ float    Ambient;               // scalar floor, matches SceneLighting.Ambient
 float    EclipseFactor = 1.0;   // reserved for Phase E; 1.0 = no eclipse
 
 float3   MaterialColor = float3(1, 1, 1);   // DynamicLit only — flat per-draw tint
+
+// Brief S1: single-source Blinn-Halfway specular, DynamicLit*/station-hulls only. No HLSL
+// initializers — same policy as the shadow parameters below (project policy since the
+// EclipseFactor incident); MeshRenderer.cs sets all three explicitly every DynamicLit*
+// draw call. EyePositionWorld is always Vector3.Zero in practice (every World matrix in
+// this codebase places geometry relative to the same camera whose View looks from
+// Vector3.Zero — see MeshRenderer.cs), but it's still a real parameter, not a hardcoded
+// shader constant, in case that render-space convention ever changes.
+float3   EyePositionWorld;
+float    SpecularStrength;
+float    SpecularShininess;
 
 float4x4 ModuleToStationLocal;
 float4x4 StationLocalToLightView;
@@ -101,6 +114,10 @@ struct VertexOutput
     float2 TexCoord    : TEXCOORD1;
     float3 StationPos  : TEXCOORD2;
     float3 StationNorm : TEXCOORD3;
+    // Render-space position (World-transformed, pre-View) — Brief S1's view vector needs
+    // the surface position in the same space EyePositionWorld is defined in. Interpolated,
+    // so the PS re-derives V per-pixel rather than per-vertex (see SpecularHighlight).
+    float3 RenderPos   : TEXCOORD4;
 };
 
 VertexOutput VS(VertexInput input)
@@ -114,6 +131,7 @@ VertexOutput VS(VertexInput input)
     o.TexCoord    = input.TexCoord;
     o.StationPos  = mul(input.Position, ModuleToStationLocal).xyz;
     o.StationNorm = normalize(mul(input.Normal, (float3x3)ModuleToStationLocal));
+    o.RenderPos   = worldPos.xyz;
     return o;
 }
 
@@ -284,6 +302,27 @@ float4 PS_BakedColorLitShadowed(VertexOutput input) : COLOR0
     return float4(rgb, 1.0);
 }
 
+// Brief S1: single-source Blinn-Halfway specular. Per-pixel, not per-vertex — low-poly
+// hulls have few vertices, so a per-vertex specular would smear/wander across big flat
+// panels; re-normalizing the interpolated normal here matters more than for diffuse,
+// since pow() amplifies interpolation error. shadowTerm is 1.0 on the unshadowed
+// technique (no gate) and the real StationShadowTerm on the shadowed one, so a fragment
+// in station shadow gets no glint — the highlight lives inside the lit region, not on
+// top of it. Not tinted by albedo (a specular lobe is the light's colour, SunColour, not
+// the surface's) and not folded into EclipseFactor — S1's formula gates on sun-facing and
+// shadow only; revisit alongside Phase E if an eclipsed sun should kill the glint too.
+float3 SpecularHighlight(float3 worldNormal, float3 renderPos, float shadowTerm)
+{
+    float3 n = normalize(worldNormal);
+    float3 l = SunDirection;
+    float3 v = normalize(EyePositionWorld - renderPos);
+    float3 h = normalize(l + v);
+
+    float nl   = saturate(dot(n, l));
+    float spec = pow(saturate(dot(n, h)), SpecularShininess) * nl * shadowTerm;
+    return SpecularStrength * spec * SunColour;
+}
+
 float4 PS_DynamicLit(VertexOutput input) : COLOR0
 {
     float3 n   = normalize(input.WorldNormal);
@@ -292,6 +331,7 @@ float4 PS_DynamicLit(VertexOutput input) : COLOR0
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
+    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, 1.0);
     return float4(rgb, 1.0);
 }
 
@@ -314,6 +354,7 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
+    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, shadow);
     return float4(rgb, 1.0);
 }
 

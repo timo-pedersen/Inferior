@@ -41,6 +41,7 @@ public sealed partial class SystemSpaceState
         // that's only a representative mid-tier projection now that rendering uses three
         // independent per-pass projections. Same fix as ShipMeshRenderer.Draw needed.
         Matrix proj = _effect.Projection;
+        var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
 
         foreach (var pc in _containers)
         {
@@ -60,7 +61,8 @@ public sealed partial class SystemSpaceState
                          * Matrix.CreateTranslation(renderPos);
 
             _meshRenderer.DrawDynamicLit(pc.Vb, pc.Ib, world, view, proj,
-                Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient);
+                Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient,
+                specStrength, specShininess);
         }
 
         // Restore effect state expected by subsequent draw calls

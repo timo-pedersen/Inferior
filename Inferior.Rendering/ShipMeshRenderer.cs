@@ -82,6 +82,8 @@ public sealed class ShipMeshRenderer : IDisposable
         DVec3 shipPosition,
         Quaternion shipOrientation,
         DetailLevel level,
+        float specularStrength,
+        float specularShininess,
         SemanticHullDebugMode debugMode = SemanticHullDebugMode.Normal,
         IReadOnlyList<EngineMountPresentationSnapshot>? engineMounts = null,
         bool engineModuleDebug = false,
@@ -110,13 +112,15 @@ public sealed class ShipMeshRenderer : IDisposable
                 currentView,
                 currentProjection,
                 sunColour,
+                specularStrength,
+                specularShininess,
                 debugMode);
         }
         else
         {
             renderPath = ShipHullRenderPath.LegacyFallback;
             world = BuildLegacyWorldTransform(renderScale, renderPos, shipOrientation);
-            DrawLegacyFallback(world, currentView, currentProjection, sunColour);
+            DrawLegacyFallback(world, currentView, currentProjection, sunColour, specularStrength, specularShininess);
         }
 
         if (engineMounts is not null)
@@ -126,7 +130,9 @@ public sealed class ShipMeshRenderer : IDisposable
                 world,
                 currentView,
                 currentProjection,
-                sunColour);
+                sunColour,
+                specularStrength,
+                specularShininess);
             DrawEngineExhaustGlows(
                 engineMounts,
                 world,
@@ -139,7 +145,7 @@ public sealed class ShipMeshRenderer : IDisposable
         }
 
         if (cockpit is not null)
-            DrawInstalledCockpit(camera, cockpit, currentView, currentProjection, sunColour);
+            DrawInstalledCockpit(camera, cockpit, currentView, currentProjection, sunColour, specularStrength, specularShininess);
 
         _gd.RasterizerState = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
@@ -174,6 +180,8 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix currentView,
         Matrix projection,
         Color sunColour,
+        float specularStrength,
+        float specularShininess,
         SemanticHullDebugMode debugMode)
     {
         SemanticHullGpuMesh mesh = GetOrCreateSemanticMesh(hullDefinition);
@@ -195,7 +203,9 @@ public sealed class ShipMeshRenderer : IDisposable
                         DebugColourForRole(face.SurfaceRole),
                         SceneLighting.SunDirection,
                         sunColour,
-                        SceneLighting.Ambient);
+                        SceneLighting.Ambient,
+                        specularStrength,
+                        specularShininess);
                 }
             }
             else
@@ -209,7 +219,9 @@ public sealed class ShipMeshRenderer : IDisposable
                     part.MaterialColour,
                     SceneLighting.SunDirection,
                     sunColour,
-                    SceneLighting.Ambient);
+                    SceneLighting.Ambient,
+                    specularStrength,
+                    specularShininess);
             }
         }
 
@@ -382,7 +394,9 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix shipWorld,
         Matrix view,
         Matrix projection,
-        Color sunColour)
+        Color sunColour,
+        float specularStrength,
+        float specularShininess)
     {
         foreach (EnginePresentationSnapshot engine in engineMounts
             .Select(mount => mount.InstalledEngine)
@@ -404,7 +418,9 @@ public sealed class ShipMeshRenderer : IDisposable
                     EngineMaterialColour(part.Material, engine.DamageFraction),
                     SceneLighting.SunDirection,
                     sunColour,
-                    SceneLighting.Ambient);
+                    SceneLighting.Ambient,
+                    specularStrength,
+                    specularShininess);
             }
         }
     }
@@ -425,7 +441,9 @@ public sealed class ShipMeshRenderer : IDisposable
         CockpitPresentationSnapshot cockpit,
         Matrix view,
         Matrix projection,
-        Color sunColour)
+        Color sunColour,
+        float specularStrength,
+        float specularShininess)
     {
         if (!CockpitDefinitionLibrary.TryGet(
                 cockpit.DefinitionId,
@@ -449,6 +467,9 @@ public sealed class ShipMeshRenderer : IDisposable
                 CockpitVisualMaterial.InternalGlow => cockpit.CockpitLightsOn,
                 _ => false,
             };
+            // Emissive parts pass sunColour=Black, which zeroes SpecularHighlight's
+            // SunColour-scaled output too — no separate "skip specular for glow" branch
+            // needed, it falls out of the same emissive gating the diffuse term already uses.
             _meshRenderer.DrawDynamicLit(
                 part.VertexBuffer,
                 part.IndexBuffer,
@@ -461,7 +482,9 @@ public sealed class ShipMeshRenderer : IDisposable
                     cockpit.CockpitLightsOn),
                 SceneLighting.SunDirection,
                 emissive ? Color.Black : sunColour,
-                emissive ? 1.0f : SceneLighting.Ambient);
+                emissive ? 1.0f : SceneLighting.Ambient,
+                specularStrength,
+                specularShininess);
         }
     }
 
@@ -748,16 +771,21 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix world,
         Matrix currentView,
         Matrix projection,
-        Color sunColour)
+        Color sunColour,
+        float specularStrength,
+        float specularShininess)
     {
         LegacyFallbackMesh legacy = GetOrCreateLegacyFallback();
 
         _meshRenderer.DrawDynamicLit(legacy.HullVb, legacy.HullIb, world, currentView, projection,
-            Type1HullFactory.HullColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient);
+            Type1HullFactory.HullColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient,
+            specularStrength, specularShininess);
         _meshRenderer.DrawDynamicLit(legacy.NacelleVb, legacy.NacelleIb, world, currentView, projection,
-            Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient);
+            Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient,
+            specularStrength, specularShininess);
         _meshRenderer.DrawDynamicLit(legacy.PylonVb, legacy.PylonIb, world, currentView, projection,
-            Type1HullFactory.PylonColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient);
+            Type1HullFactory.PylonColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient,
+            specularStrength, specularShininess);
     }
 
     private LegacyFallbackMesh GetOrCreateLegacyFallback()

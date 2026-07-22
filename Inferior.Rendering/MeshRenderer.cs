@@ -44,6 +44,7 @@ public sealed class MeshRenderer : IDisposable
         VertexBuffer vb, IndexBuffer ib,
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        float specularStrength, float specularShininess,
         Texture2D? texture = null)
     {
         var fx = _litSurfaceEffect;
@@ -56,6 +57,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
+        SetSpecularParameters(fx, specularStrength, specularShininess);
         Draw(vb, ib, fx);
     }
 
@@ -64,6 +66,7 @@ public sealed class MeshRenderer : IDisposable
         int startIndex, int indexCount,
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        float specularStrength, float specularShininess,
         Texture2D? texture = null)
     {
         if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
@@ -79,6 +82,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
+        SetSpecularParameters(fx, specularStrength, specularShininess);
         Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
@@ -86,6 +90,7 @@ public sealed class MeshRenderer : IDisposable
         VertexBuffer vb, IndexBuffer ib,
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        float specularStrength, float specularShininess,
         Texture2D texture, Texture2D shadowMap,
         Matrix moduleToStationLocal, Matrix stationLocalToLightView,
         Vector2 shadowMinXY, Vector2 shadowInvSize,
@@ -103,6 +108,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
+        SetSpecularParameters(fx, specularStrength, specularShininess);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
@@ -185,6 +191,21 @@ public sealed class MeshRenderer : IDisposable
                 startIndex,
                 primitiveCount ?? ib.IndexCount / 3);
         }
+    }
+
+    // Brief S1: DynamicLit*/station-hulls only (BakedColorLit*/station decoration is out
+    // of scope until S2 — no caller here). EyePositionWorld is not a parameter to this
+    // method: every World matrix in this codebase already places geometry relative to the
+    // same camera whose View matrix looks from Vector3.Zero (Camera3D.ToRenderSpace /
+    // Camera3D.ViewMatrix), so the render-space eye is always the origin — there is no
+    // second eye position for a caller to supply. It's still a real shader parameter
+    // (not a hardcoded .fx constant) so this stays correct if that convention ever
+    // changes; if it does, this is the one place to update, not every draw call site.
+    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess)
+    {
+        fx.Parameters["EyePositionWorld"].SetValue(Vector3.Zero);
+        fx.Parameters["SpecularStrength"].SetValue(specularStrength);
+        fx.Parameters["SpecularShininess"].SetValue(specularShininess);
     }
 
     private static void SetShadowParameters(

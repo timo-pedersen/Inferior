@@ -46,10 +46,14 @@ public sealed partial class SystemSpaceState
         Matrix view = _effect.View;
         Matrix proj = _effect.Projection;
         var    sunCol = new Color(SceneLighting.SunColour);
+        var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
 
         // Hull pass — real-time LitSurface.fx DynamicLit (ambient + saturate(N.L)) with
         // procedural texture; MaterialColor left White (matches the old
         // BasicEffect.DiffuseColor = Vector3.One) so all tint comes from the texture.
+        // Brief S1: station hulls share DynamicLit with ships/containers/the calibration
+        // cube, so they pick up the same specular term (station decoration below stays
+        // BakedColorLit* and untouched until S2 — a deliberate scope call, not a gap).
         foreach (var (station, universePos) in _stationPositions)
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
@@ -96,6 +100,7 @@ public sealed partial class SystemSpaceState
                     float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
                     _meshRenderer.DrawDynamicLitShadowed(hull.vb, hull.ib, world, view, proj,
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                        specStrength, specShininess,
                         mod.TextureInstance, _stationShadowMap!, mod.Transform,
                         ctx.StationLocalToLightView, ctx.MinXY, ctx.InvSize, ctx.Near,
                         ctx.DepthSpan,
@@ -108,6 +113,7 @@ public sealed partial class SystemSpaceState
                 {
                     _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                        specStrength, specShininess,
                         mod.TextureInstance);
                 }
             }

@@ -797,6 +797,7 @@ public sealed partial class SystemSpaceState : GameState
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);
+        UpdateSpecularInput(keys);
 
         // Animations always run, regardless of input mode
         _cockpitUI.Tick(dt);
@@ -1179,9 +1180,11 @@ public sealed partial class SystemSpaceState : GameState
         DrawShipPositionMarker();
         if (_chaseCamera.IsActive && _frameShipSnap != null)
         {
+            var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
             ShipRenderTransformDiagnostic diagnostic = _shipMeshRenderer.Draw(
                 _camera, _effect.View, _effect.Projection,
                 _frameShipSnap.HullTypeId, _frameShipSnap.Position, _frameShipSnap.Orientation, level,
+                specStrength, specShininess,
                 _semanticHullDebug ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal,
                 _frameShipSnap.EngineMounts,
                 _engineModuleDebug,
