@@ -101,6 +101,13 @@ public sealed partial class SystemSpaceState : GameState
     // ── Station rendering ─────────────────────────────────────────────────────
     // Per-station placed module list — generated once per system entry from name seed.
     private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
+    // Brief S2b-1: per-station panel-texture variant sets, owned here (NOT the old
+    // shared static StationTextureRegistry cache) — disposed and rebuilt alongside
+    // _hullMeshes/_decoMeshes in OnEnter/OnExit, same lifecycle as _stationGeometry.
+    // Every PlacedModule.TextureInstance in _stationGeometry[station] points at one of
+    // these; this dictionary exists purely so the owner can dispose them, not to be
+    // indexed into directly.
+    private readonly Dictionary<Galaxy.Station, IReadOnlyList<Texture2D>>                    _stationPanelTextures = [];
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
     // Shipping containers placed around each station — ordinary world objects (real
     // ShippingContainerFactory geometry, real rendering path); placement policy (near
@@ -388,16 +395,12 @@ public sealed partial class SystemSpaceState : GameState
 
         StationTextureRegistry.Initialize(_gd);
 
-        StationTextureRegistry.SetTexture(SurfaceTexture.CleanPanel,
-            _content.Load<Texture2D>("Textures/cleanpanel"));
-        StationTextureRegistry.SetTexture(SurfaceTexture.TechPanel,
-            _content.Load<Texture2D>("Textures/techpanel"));
-        StationTextureRegistry.SetTexture(SurfaceTexture.IndustrialPanel,
-            _content.Load<Texture2D>("Textures/industrialpanel"));
-        StationTextureRegistry.SetTexture(SurfaceTexture.CargoPanel,
-            _content.Load<Texture2D>("Textures/cargopanel"));
-        StationTextureRegistry.SetTexture(SurfaceTexture.WornPanel,
-            _content.Load<Texture2D>("Textures/wornpanel"));
+        // Brief S2b-1: the five loaded panel .png files (Gimp seed textures) and their
+        // SetTexture registration are removed here — Report S2a §5 confirmed they were
+        // unreachable (AssignTextures unconditionally assigns a procedural
+        // TextureInstance to every module, so the PNG-backed fallback could never fire).
+        // Panel textures are now generated per-station (StationGenerator.AssignTextures /
+        // StationTextureRegistry.GenerateVariantSet) below.
 
         // Station module layouts — generated once from name-derived seed.
         // StationGenerator.Generate also runs StationDecorator internally.
@@ -417,12 +420,21 @@ public sealed partial class SystemSpaceState : GameState
         _decoMeshesFlat.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
+        // Brief S2b-1: dispose the previous entry's per-station panel-texture variant
+        // sets before regenerating — the CelestialBodyRenderer per-planet-buffer leak
+        // class (_current-state.md) this mirrors was exactly "rebuilt without disposing
+        // the old GPU resource first."
+        foreach (var textures in _stationPanelTextures.Values)
+            foreach (var tex in textures) tex.Dispose();
+        _stationPanelTextures.Clear();
         foreach (var v in _shadowCasterMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _shadowCasterMeshes.Clear();
         foreach (var station in _system.Stations)
         {
-            var modules = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
+            var result  = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
+            var modules = result.Modules;
             _stationGeometry[station] = modules;
+            _stationPanelTextures[station] = result.PanelTextures;
 
             // Flat (ungraded) snapshot — captured before ambient occlusion darkens
             // faces below — used for Medium/Minimal DetailLevel. Same generator,
@@ -548,6 +560,12 @@ public sealed partial class SystemSpaceState : GameState
         _decoMeshesFlat.Clear();
         _glassMeshes.Clear();
         _hullMeshes.Clear();
+        // Brief S2b-1: same disposal as OnEnter's rebuild — this is the "leaving
+        // SystemSpaceState entirely" seam, the other one the per-station variant sets
+        // must not survive past.
+        foreach (var textures in _stationPanelTextures.Values)
+            foreach (var tex in textures) tex.Dispose();
+        _stationPanelTextures.Clear();
         foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
         _containers.Clear();
         _calibrationCubeVb?.Dispose();

@@ -157,7 +157,13 @@ public sealed partial class SystemSpaceState
                 Matrix world = mod.Transform * Matrix.CreateScale(rs) * stationRot
                              * Matrix.CreateTranslation(renderPos);
 
-                Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.Get(mod.Mesh!.Texture);
+                // StationTextureRegistry.Get(SurfaceTexture) fallback removed (Brief S2b-1,
+                // Report S2a §5): AssignTextures unconditionally assigns TextureInstance to
+                // every module, so this branch was provably dead. Kept a defensive null
+                // fallback (not a crash) in case a future module kind ever skips
+                // AssignTextures — White reads as a flat unlit panel, not a missing-texture
+                // artifact.
+                Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.White;
 
                 if (useShadow)
                 {

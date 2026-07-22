@@ -7,6 +7,15 @@ using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
 
+// Brief S2b-1: Generate()'s panel textures are now per-station-owned (see AssignTextures),
+// not the old shared static cache — PanelTextures is every distinct Texture2D this
+// generation pass created, for the caller to dispose when the station unloads
+// (SystemSpaceState's _stationPanelTextures, alongside _hullMeshes/_decoMeshes). Modules
+// is unchanged; PanelTextures is purely a disposal manifest, not something callers need
+// to index — every module's own PlacedModule.TextureInstance already points at the right
+// element.
+public sealed record StationGenerationResult(List<PlacedModule> Modules, IReadOnlyList<Texture2D> PanelTextures);
+
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
 /// computing exact 3D alignment for each connection and rejecting overlaps.
@@ -38,7 +47,7 @@ public sealed class StationGenerator
     // used for its N.L bake, which is gone now that the sun term is computed per frame in
     // LitSurface.fx (Docs/station-lighting-pipeline-spec.md Phase A). Kept on the signature
     // rather than touching this public entry point's call site for a lighting-only brief.
-    public static List<PlacedModule> Generate(Galaxy.Station station, GraphicsDevice gd,
+    public static StationGenerationResult Generate(Galaxy.Station station, GraphicsDevice gd,
                                                double gameTime = 0.0)
     {
         int seed = NameHash(station.Name);
@@ -58,31 +67,59 @@ public sealed class StationGenerator
 
         var profile = StationProfile.Generate(seed, scale);
         var palette = TexturePalette.From(profile);
-        AssignTextures(modules, gd, palette, station.Name);
+        var panelTextures = AssignTextures(modules, gd, palette, station);
 
         StationDecorator.Decorate(modules);
         BakeLighting(modules);
         // ApplyAmbientOcclusion intentionally NOT called here — the caller (SystemSpaceState)
         // builds a flat GPU snapshot first, then calls it, then builds the graded snapshot,
         // so both DetailLevel variants exist from one generation pass.
-        return modules;
+        return new StationGenerationResult(modules, panelTextures);
     }
 
-    private static void AssignTextures(
+    // Brief S2b-1: each station owns its own N-texture variant set per surface it
+    // actually uses (StationTextureRegistry.GenerateVariantSet — NOT the old shared
+    // static cache), generated lazily so a station only pays for the surfaces its
+    // modules actually reach. mod.Seed (already unique per module, already threaded
+    // through the old API and previously ignored by the cache key) now genuinely
+    // selects which variant a module gets — crude uniform-over-N, per the brief; the
+    // intelligent distribution (base-share ratio, category specials) is S2b-2.
+    private static IReadOnlyList<Texture2D> AssignTextures(
         List<PlacedModule> modules,
         GraphicsDevice     gd,
         TexturePalette     palette,
-        string             stationName)
+        Galaxy.Station     station)
     {
-        foreach (var mod in modules)
+        var variantSets = new Dictionary<SurfaceTexture, Texture2D[]>();
+        var owned       = new List<Texture2D>();
+
+        Texture2D[] VariantsFor(SurfaceTexture surface)
         {
-            var surface = SurfaceFor(mod.Definition.Category);
-            mod.TextureInstance = StationTextureRegistry.GetOrCreate(gd, surface, palette, mod.Seed);
+            if (variantSets.TryGetValue(surface, out var existing)) return existing;
+            var set = StationTextureRegistry.GenerateVariantSet(gd, surface, palette, station.PersistenceId!);
+            variantSets[surface] = set;
+            owned.AddRange(set);
+            return set;
         }
 
-        // Overlay the station name on the core module's face texture.
+        foreach (var mod in modules)
+        {
+            var surface  = SurfaceFor(mod.Definition.Category);
+            var variants = VariantsFor(surface);
+            mod.TextureInstance = variants[mod.Seed % variants.Length];
+        }
+
+        // Overlay the station name on the core module's face texture — a genuinely new
+        // per-station texture (reads the core's assigned variant, draws over a copy), not
+        // a member of any variant set, so it must be tracked here too or it leaks.
         if (modules.Count > 0)
-            modules[0].TextureInstance = GenerateNameFaceTexture(gd, modules[0].TextureInstance, stationName, palette);
+        {
+            var nameTex = GenerateNameFaceTexture(gd, modules[0].TextureInstance, station.Name, palette);
+            modules[0].TextureInstance = nameTex;
+            owned.Add(nameTex);
+        }
+
+        return owned;
     }
 
     private static Texture2D GenerateNameFaceTexture(
@@ -122,7 +159,9 @@ public sealed class StationGenerator
         return tex;
     }
 
-    private static SurfaceTexture SurfaceFor(string category) => category switch
+    // internal, not private: GenerateModulesForDiagnostics-based tests need this to group
+    // modules by surface the same way AssignTextures does.
+    internal static SurfaceTexture SurfaceFor(string category) => category switch
     {
         "hab" or "luxury"                    => SurfaceTexture.CleanPanel,
         "science" or "military" or "core"    => SurfaceTexture.TechPanel,
@@ -227,6 +266,20 @@ public sealed class StationGenerator
         var modules = gen.Run(station);
         ValidatePlacement(modules);
         return modules.FirstOrDefault(m => m.Definition.Category == "docking-bay")?.Definition;
+    }
+
+    // Diagnostic-only, no GraphicsDevice: exposes the growth loop's real PlacedModule
+    // list (with real per-module Seed values) so tests can inspect variant-index
+    // distribution (Brief S2b-1 gate diagnosis) without needing AssignTextures' actual
+    // texture creation. Same GD-free split as FindDockingBay, one step further.
+    internal static List<PlacedModule> GenerateModulesForDiagnostics(Galaxy.Station station)
+    {
+        int seed = NameHash(station.Name);
+        var gen  = new StationGenerator(seed);
+        var modules = gen.Run(station);
+        ValidatePlacement(modules);
+        PopulateLandingPads(station, modules);
+        return modules;
     }
 
     // Asserts that every module except the core (index 0) has a non-null AttachmentPort.

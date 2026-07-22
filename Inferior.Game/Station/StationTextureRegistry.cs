@@ -1,17 +1,12 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Inferior.Core.Random;
 
 namespace Inferior.Game.StationGen;
 
 public static class StationTextureRegistry
 {
-    // Type-level fallback registry (flat 1×1 placeholders, overridable via SetTexture).
-    private static readonly Dictionary<SurfaceTexture, Texture2D> _textures = [];
-    private static readonly Dictionary<SurfaceTexture, Vector3>   _colors   = [];
     private static bool _initialized;
-
-    // Procedural texture cache: (surface type, palette hash) → generated 512×512.
-    private static readonly Dictionary<(SurfaceTexture, int), Texture2D> _cache = [];
 
     public static Texture2D White { get; private set; } = null!;
 
@@ -23,44 +18,155 @@ public static class StationTextureRegistry
         _initialized = true;
 
         White = MakeFlat(gd, Color.White);
-
-        // Flat placeholders — color values used for the base box DiffuseColor pass.
-        Register(gd, SurfaceTexture.CleanPanel,      new Color(200, 195, 185));
-        Register(gd, SurfaceTexture.TechPanel,       new Color(155, 165, 175));
-        Register(gd, SurfaceTexture.IndustrialPanel, new Color(120, 115, 108));
-        Register(gd, SurfaceTexture.CargoPanel,      new Color(148, 132, 108));
-        Register(gd, SurfaceTexture.WornPanel,       new Color(130, 125, 118));
-        _textures[SurfaceTexture.Glass] = White;
-        _colors  [SurfaceTexture.Glass] = Vector3.One;
     }
 
-    // ── Type-level accessors (fallback / base-box pass) ───────────────────────
+    // ── Per-station panel variant sets (Brief S2b-1) ──────────────────────────
+    // Replaces the old process-lifetime GetOrCreate/_cache (Report S2a §1/§6: shared
+    // across every module of a (surface, economy) pair, galaxy-wide, ~24 textures total,
+    // ever — mod.Seed threaded in and ignored by the cache key). Each station now owns
+    // its own N-texture variant set per surface it actually uses; the caller
+    // (StationGenerator.AssignTextures) is responsible for disposal (see
+    // SystemSpaceState's _stationPanelTextures) — these are NOT cached here.
+    //
+    // Gate-fix history: the first cut of this method passed the SAME TexturePalette to
+    // every Generate() call — all N variants converged to the same mean colour, only
+    // per-pixel noise/seam/streak *positions* differed (confirmed via the S2b-1 gate:
+    // "no visible per-module difference"; ruled out mod.Seed % N degeneracy via
+    // StationPanelVariantIndexDistributionTests — the index spread was fine, the colour
+    // wasn't varying at all). OffsetPaletteForVariant below is the minimal fix: each
+    // variant gets its own hue/brightness/saturation-jittered palette, bounded by ONE
+    // fixed spread constant (VariantColourSpread), same for every station — no economy
+    // input, no per-station spread, no palette regions, no category specials, no
+    // Age-driven wear. Intelligent variance (Brief S2b-2) replaces VariantColourSpread
+    // with a profile-derived expression and adds palette-region centres — that swap is
+    // the only thing S2b-2 needs to change in this file.
+    public const int DefaultVariantCount = 20;
 
-    public static Texture2D Get(SurfaceTexture t)      => _textures[t];
-    public static Vector3   GetColor(SurfaceTexture t) => _colors[t];
+    // Independent salt from ContainerSeedRoot and any other per-station stream.
+    private const int VariantSeedRoot = 0x50414E4C; // "PANL"
 
-    internal static void SetTexture(SurfaceTexture st, Texture2D texture)
+    /// <summary>
+    /// Pure, GraphicsDevice-free: which seeds a station rolls for its N variants of one
+    /// surface. Deterministic per station identity (PersistenceId, not station name —
+    /// string.GetHashCode() is process-randomized in .NET, forbidden by
+    /// !invariants.md §6; SeededRandom.Derive uses a stable string hash instead). Same
+    /// station ⇒ same seeds, every load. Exposed separately from GenerateVariantSet so
+    /// determinism is testable without a live GraphicsDevice.
+    /// </summary>
+    public static int[] RollVariantSeeds(string persistenceId, SurfaceTexture surface, int count = DefaultVariantCount)
     {
-        _textures[st] = texture;
+        var rng = new SeededRandom(VariantSeedRoot).Derive(persistenceId).Derive(surface.ToString());
+        var seeds = new int[count];
+        for (int i = 0; i < count; i++)
+            seeds[i] = rng.NextInt(0, int.MaxValue - 1);
+        return seeds;
     }
 
-    // ── Procedural per-module texture ─────────────────────────────────────────
-
-    /// Returns a cached 512×512 procedural texture for (surface, palette).
-    /// Thread-safe only if called from the main thread (Texture2D creation requires GL context).
-    public static Texture2D GetOrCreate(
-        GraphicsDevice gd,
-        SurfaceTexture surface,
-        TexturePalette palette,
-        int            seed)
+    /// <summary>
+    /// Builds this station's own N-texture variant set for one surface. Not cached or
+    /// shared — the caller owns the returned array and must dispose every element when
+    /// the station unloads (see SystemSpaceState's _stationPanelTextures dictionary,
+    /// disposed alongside _hullMeshes/_decoMeshes in OnEnter/OnExit).
+    /// </summary>
+    public static Texture2D[] GenerateVariantSet(
+        GraphicsDevice gd, SurfaceTexture surface, TexturePalette palette,
+        string persistenceId, int count = DefaultVariantCount)
     {
-        int hash = HashPalette(palette, surface);
-        if (_cache.TryGetValue((surface, hash), out var cached))
-            return cached;
+        var seeds = RollVariantSeeds(persistenceId, surface, count);
+        var textures = new Texture2D[count];
+        for (int i = 0; i < count; i++)
+        {
+            var variantPalette = OffsetPaletteForVariant(palette, seeds[i]);
+            textures[i] = Generate(gd, surface, variantPalette, seeds[i]);
+        }
+        return textures;
+    }
 
-        var tex = Generate(gd, surface, palette, seed);
-        _cache[(surface, hash)] = tex;
-        return tex;
+    // Bounds the hue rotation (± this fraction of the full 360° wheel, halved — see
+    // usage) and the brightness/saturation jitter (± this fraction of a 0-1 range) for
+    // every variant of every station alike. 0 = no variance, 1 = full range. The single
+    // named seam S2b-2 swaps for a profile-derived value (e.g. military stations narrow,
+    // hippie/independent stations wide) — nothing else about OffsetPaletteForVariant
+    // should need to change for that swap.
+    private const float VariantColourSpread = 0.35f;
+
+    // Builds a per-variant TexturePalette whose BaseColour/GrimeColour are hue-rotated
+    // and brightness/saturation-jittered from the station's own palette — the SAME
+    // rotation applied to both, so grime still reads as "dirt relative to this variant's
+    // base" instead of a mismatched leftover hue. AccentColour/TextColour/the numeric
+    // wear knobs are untouched: AccentColour has no reader inside Generate() at all
+    // (Report S2a), and TextColour only tints the small military stencil fragments —
+    // leaving both alone keeps this fix to exactly "colour must move per variant."
+    // Independent RNG stream from Generate()'s own pixel-drawing rng (different salt),
+    // so this offset is deterministic per variant seed without perturbing pixel layout.
+    // internal, not private: StationPanelVariantTests asserts variants actually differ in
+    // colour, not just position — the exact regression this fix addresses.
+    internal static TexturePalette OffsetPaletteForVariant(TexturePalette basePalette, int seed)
+    {
+        var rng = new System.Random(seed ^ 0x484F4655); // "HOFU" — colour-offset salt
+        float hueDeltaDegrees = ((float)rng.NextDouble() * 2f - 1f) * 180f * VariantColourSpread;
+        float saturationDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * VariantColourSpread;
+        float brightnessDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * VariantColourSpread;
+
+        return new TexturePalette
+        {
+            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
+            AccentColour     = basePalette.AccentColour,
+            GrimeColour      = ApplyHsvOffset(basePalette.GrimeColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
+            NoiseStrength    = basePalette.NoiseStrength,
+            SubPanelContrast = basePalette.SubPanelContrast,
+            GrimeStrength    = basePalette.GrimeStrength,
+            NameFont         = basePalette.NameFont,
+            TextColour       = basePalette.TextColour,
+        };
+    }
+
+    private static Color ApplyHsvOffset(Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta)
+    {
+        RgbToHsv(c, out float h, out float s, out float v);
+        h = (h + hueDeltaDegrees + 360f) % 360f;
+        s = Math.Clamp(s + saturationDelta, 0f, 1f);
+        v = Math.Clamp(v + brightnessDelta, 0f, 1f);
+        return HsvToRgb(h, s, v);
+    }
+
+    private static void RgbToHsv(Color c, out float h, out float s, out float v)
+    {
+        float r = c.R / 255f, g = c.G / 255f, b = c.B / 255f;
+        float max = Math.Max(r, Math.Max(g, b));
+        float min = Math.Min(r, Math.Min(g, b));
+        float delta = max - min;
+
+        v = max;
+        s = max <= 0f ? 0f : delta / max;
+
+        if (delta < 1e-6f) { h = 0f; return; }
+        if (max == r)      h = 60f * (((g - b) / delta) % 6f);
+        else if (max == g) h = 60f * (((b - r) / delta) + 2f);
+        else               h = 60f * (((r - g) / delta) + 4f);
+        if (h < 0f) h += 360f;
+    }
+
+    private static Color HsvToRgb(float h, float s, float v)
+    {
+        float chroma = v * s;
+        float x = chroma * (1f - Math.Abs((h / 60f) % 2f - 1f));
+        float m = v - chroma;
+
+        (float r, float g, float b) = h switch
+        {
+            < 60f  => (chroma, x, 0f),
+            < 120f => (x, chroma, 0f),
+            < 180f => (0f, chroma, x),
+            < 240f => (0f, x, chroma),
+            < 300f => (x, 0f, chroma),
+            _      => (chroma, 0f, x),
+        };
+
+        return new Color(
+            (byte)Math.Clamp((r + m) * 255f, 0f, 255f),
+            (byte)Math.Clamp((g + m) * 255f, 0f, 255f),
+            (byte)Math.Clamp((b + m) * 255f, 0f, 255f));
     }
 
     // ── Texture generation pipeline ───────────────────────────────────────────
@@ -352,8 +458,10 @@ public static class StationTextureRegistry
             (int)(a.B + (b.B - a.B) * t));
     }
 
-    // ── Cache helpers ─────────────────────────────────────────────────────────
-
+    // ── RNG seed mixing ───────────────────────────────────────────────────────
+    // No longer a cache key (the shared static cache is gone, Brief S2b-1) — still used
+    // by Generate() to mix a rolled variant seed with the station-wide palette so two
+    // different surfaces/palettes never collide onto the same RNG stream.
     private static int HashPalette(TexturePalette p, SurfaceTexture surface)
     {
         int h = 17;
@@ -368,12 +476,6 @@ public static class StationTextureRegistry
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
-
-    private static void Register(GraphicsDevice gd, SurfaceTexture t, Color c)
-    {
-        _textures[t] = MakeFlat(gd, c);
-        _colors[t]   = new Vector3(c.R / 255f, c.G / 255f, c.B / 255f);
-    }
 
     private static Texture2D MakeFlat(GraphicsDevice gd, Color c)
     {
