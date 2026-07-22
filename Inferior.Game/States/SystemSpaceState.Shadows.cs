@@ -18,13 +18,15 @@ public sealed partial class SystemSpaceState
     // the normalized depth units LitSurface.fx's ShadowBiasDepth compares in.
     private const float StationShadowBiasMetres = 0.005f;
 
+    // Mega stations - TODO: Tune! <--- =======================================================
+
     // Per-station shadow-map resolution (Docs/station-lighting-pipeline-spec.md Brief E1
     // Step 1). The map is fit per-station (FitStationShadowLight), so texel density is
     // (map extent / resolution) — holding resolution constant across the catalogue and
     // stepping up only for the mega class keeps near-dock density roughly uniform. Only
     // one station's map is ever live at a time (SelectShadowedStation picks the nearest),
     // so worst case GPU residency is the mega size, and only while actually near a mega.
-    private const float StationShadowMegaBreakpointMetres = 1500f;
+    private const float StationShadowMegaBreakpointMetres = 1500f; 
     private const int StationShadowMapSizeStandard = 8192;
     private const int StationShadowMapSizeMega = 16384;
 
