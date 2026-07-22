@@ -33,13 +33,11 @@ public static class StationTextureRegistry
     // per-pixel noise/seam/streak *positions* differed (confirmed via the S2b-1 gate:
     // "no visible per-module difference"; ruled out mod.Seed % N degeneracy via
     // StationPanelVariantIndexDistributionTests — the index spread was fine, the colour
-    // wasn't varying at all). OffsetPaletteForVariant below is the minimal fix: each
-    // variant gets its own hue/brightness/saturation-jittered palette, bounded by ONE
-    // fixed spread constant (VariantColourSpread), same for every station — no economy
-    // input, no per-station spread, no palette regions, no category specials, no
-    // Age-driven wear. Intelligent variance (Brief S2b-2) replaces VariantColourSpread
-    // with a profile-derived expression and adds palette-region centres — that swap is
-    // the only thing S2b-2 needs to change in this file.
+    // wasn't varying at all). OffsetPaletteForVariant below is the fix: each variant gets
+    // its own hue/brightness/saturation-jittered palette, bounded by a colourSpread the
+    // caller supplies (Brief S2b-2: StationEconomyVariance.Profiles, economy-keyed —
+    // military tight, hippie/independent wide) instead of S2b-1's single fixed constant
+    // for every station alike.
     public const int DefaultVariantCount = 20;
 
     // Independent salt from ContainerSeedRoot and any other per-station stream.
@@ -66,29 +64,38 @@ public static class StationTextureRegistry
     /// Builds this station's own N-texture variant set for one surface. Not cached or
     /// shared — the caller owns the returned array and must dispose every element when
     /// the station unloads (see SystemSpaceState's _stationPanelTextures dictionary,
-    /// disposed alongside _hullMeshes/_decoMeshes in OnEnter/OnExit).
+    /// disposed alongside _hullMeshes/_decoMeshes in OnEnter/OnExit). colourSpread bounds
+    /// how far each variant's seeded colour offset may wander from palette.BaseColour
+    /// (Brief S2b-2: StationEconomyVariance.Profiles, economy-keyed).
     /// </summary>
     public static Texture2D[] GenerateVariantSet(
         GraphicsDevice gd, SurfaceTexture surface, TexturePalette palette,
-        string persistenceId, int count = DefaultVariantCount)
+        string persistenceId, float colourSpread, int count = DefaultVariantCount)
     {
         var seeds = RollVariantSeeds(persistenceId, surface, count);
         var textures = new Texture2D[count];
         for (int i = 0; i < count; i++)
         {
-            var variantPalette = OffsetPaletteForVariant(palette, seeds[i]);
+            var variantPalette = OffsetPaletteForVariant(palette, seeds[i], colourSpread);
             textures[i] = Generate(gd, surface, variantPalette, seeds[i]);
         }
         return textures;
     }
 
-    // Bounds the hue rotation (± this fraction of the full 360° wheel, halved — see
-    // usage) and the brightness/saturation jitter (± this fraction of a 0-1 range) for
-    // every variant of every station alike. 0 = no variance, 1 = full range. The single
-    // named seam S2b-2 swaps for a profile-derived value (e.g. military stations narrow,
-    // hippie/independent stations wide) — nothing else about OffsetPaletteForVariant
-    // should need to change for that swap.
-    private const float VariantColourSpread = 0.35f;
+    // Brief S2b-2 item 1: biases mod.Seed's variant pick so the dominant variant (index
+    // 0) claims baseShareRatio of modules — cohesive stations (military/corporate) mostly
+    // render one dominant variant with occasional outliers; individualistic ones
+    // (hippie/independent) spread thin across many variants. Two independent seeded
+    // draws from the same seed (different salts): the dominant/non-dominant decision
+    // must not correlate with which non-dominant index gets picked, same salt discipline
+    // as OffsetPaletteForVariant. Deterministic — same seed, same pick, every load.
+    internal static int SelectVariantIndex(int seed, int variantCount, float baseShareRatio)
+    {
+        if (variantCount <= 1) return 0;
+        var dominantRoll = new System.Random(seed ^ 0x424D5348); // "BMSH" — base-share roll salt
+        if (dominantRoll.NextDouble() < baseShareRatio) return 0;
+        return 1 + (seed % (variantCount - 1));
+    }
 
     // Builds a per-variant TexturePalette whose BaseColour/GrimeColour are hue-rotated
     // and brightness/saturation-jittered from the station's own palette — the SAME
@@ -96,17 +103,17 @@ public static class StationTextureRegistry
     // base" instead of a mismatched leftover hue. AccentColour/TextColour/the numeric
     // wear knobs are untouched: AccentColour has no reader inside Generate() at all
     // (Report S2a), and TextColour only tints the small military stencil fragments —
-    // leaving both alone keeps this fix to exactly "colour must move per variant."
+    // leaving both alone keeps this to exactly "colour must move per variant."
     // Independent RNG stream from Generate()'s own pixel-drawing rng (different salt),
     // so this offset is deterministic per variant seed without perturbing pixel layout.
     // internal, not private: StationPanelVariantTests asserts variants actually differ in
-    // colour, not just position — the exact regression this fix addresses.
-    internal static TexturePalette OffsetPaletteForVariant(TexturePalette basePalette, int seed)
+    // colour, not just position — the exact regression the S2b-1 gate-fix addressed.
+    internal static TexturePalette OffsetPaletteForVariant(TexturePalette basePalette, int seed, float colourSpread)
     {
         var rng = new System.Random(seed ^ 0x484F4655); // "HOFU" — colour-offset salt
-        float hueDeltaDegrees = ((float)rng.NextDouble() * 2f - 1f) * 180f * VariantColourSpread;
-        float saturationDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * VariantColourSpread;
-        float brightnessDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * VariantColourSpread;
+        float hueDeltaDegrees = ((float)rng.NextDouble() * 2f - 1f) * 180f * colourSpread;
+        float saturationDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * colourSpread;
+        float brightnessDelta = ((float)rng.NextDouble() * 2f - 1f) * 0.5f * colourSpread;
 
         return new TexturePalette
         {

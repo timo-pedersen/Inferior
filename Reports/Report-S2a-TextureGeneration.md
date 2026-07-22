@@ -27,9 +27,10 @@ not loaded content, and not per-face or per-station.**
   _cache[(surface, hash)] = tex;
   ```
   `TexturePalette.From(StationProfile profile)` (`TexturePalette.cs:18-97`) is a pure
-  function of `profile.Economy` alone (7 possible values, see §5) — it does not vary by
-  seed, station name, or age. So the cache key collapses to `(SurfaceTexture, Economy)`:
-  **at most ~24 distinct textures (4 reachable surfaces × 6 reachable economies, see §5)
+  function of `profile.Economy` alone (7 possible values, all reachable — see the §5
+  correction) — it does not vary by seed, station name, or age. So the cache key
+  collapses to `(SurfaceTexture, Economy)`:
+  **at most ~28 distinct textures (4 reachable surfaces × 7 economies, see §5)
   exist for the entire galaxy, for the whole process lifetime.** The very first module of
   a given (surface, economy) combination to call `GetOrCreate` bakes the pattern (using
   its own seed for the RNG stream); every other module of that combination — on that
@@ -273,13 +274,19 @@ appearance. Named for disambiguation only; not a candidate for anything in S2b.
    `TechPanel`, `IndustrialPanel`, or `CargoPanel` — `WornPanel` is never returned, despite
    having its own registry entry, colour, and loaded `.png`. Ironically, the one surface
    named for the wear system is the one no module ever gets assigned.
-4. **`StationEconomy.Independent` (the 7th enum value) is unreachable.**
+4. **Correction (added during Brief S2b-2): the claim below was wrong.**
+   ~~`StationEconomy.Independent` (the 7th enum value) is unreachable.~~
    `StationProfile.Generate` (`StationProfile.cs:23-38`) picks
-   `(StationEconomy)rng.NextInt(0, economyCount - 1)` — with `economyCount = 7`, this is
-   `NextInt(0, 6)`, excluding index 6 (`Independent`). Tangential to texture generation
-   directly, but it further shrinks the "small fixed set of reused materials" from §1: in
-   practice at most **6** economies × up to **4** reachable surfaces = **≤24** distinct
-   station-panel textures exist for the whole galaxy, not 7×5.
+   `(StationEconomy)rng.NextInt(0, economyCount - 1)` — this report assumed
+   `NextInt(min, max)` was exclusive on the upper bound, matching bare
+   `System.Random.Next(min, max)`. It isn't: `SeededRandom.NextInt(int min, int max)` is
+   documented and implemented as **[min, max] inclusive** (`_rng.Next(min, max + 1)`,
+   `Inferior.Core/Random/SeededRandom.cs:82-84`). With `economyCount = 7`,
+   `NextInt(0, 6)` = `_rng.Next(0, 7)`, reaching every index 0..6 — `Independent` included.
+   There is no off-by-one bug; all 7 economies are reachable. §1's "~24 distinct textures"
+   figure (4 reachable surfaces × 6 reachable economies) should read **≤28** (4×7) —
+   moot now regardless, since Brief S2b-1 replaced the shared static cache this figure
+   described with per-station ownership.
 5. **`StationProfile.Age`/`Wealth`/`Population` are generated and never read** (§4) —
    dead data that looks load-bearing (it's *right there* next to `Economy`, which *is*
    read) but isn't.

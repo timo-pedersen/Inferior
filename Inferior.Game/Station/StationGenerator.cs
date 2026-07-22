@@ -67,7 +67,7 @@ public sealed class StationGenerator
 
         var profile = StationProfile.Generate(seed, scale);
         var palette = TexturePalette.From(profile);
-        var panelTextures = AssignTextures(modules, gd, palette, station);
+        var panelTextures = AssignTextures(modules, gd, palette, profile, station);
 
         StationDecorator.Decorate(modules);
         BakeLighting(modules);
@@ -77,36 +77,72 @@ public sealed class StationGenerator
         return new StationGenerationResult(modules, panelTextures);
     }
 
-    // Brief S2b-1: each station owns its own N-texture variant set per surface it
-    // actually uses (StationTextureRegistry.GenerateVariantSet — NOT the old shared
-    // static cache), generated lazily so a station only pays for the surfaces its
-    // modules actually reach. mod.Seed (already unique per module, already threaded
-    // through the old API and previously ignored by the cache key) now genuinely
-    // selects which variant a module gets — crude uniform-over-N, per the brief; the
-    // intelligent distribution (base-share ratio, category specials) is S2b-2.
+    // Brief S2b-2 item 5: certain module categories get a fixed, economy-independent
+    // look instead of the hosting station's own economy roll — riding on the SAME
+    // GenerateVariantSet/OffsetPaletteForVariant pipeline (still per-station-owned,
+    // seeded from the same PersistenceId, disposed the same way — NOT a second global
+    // cache, that would revive exactly the shared-across-stations problem S2b-1 fixed),
+    // just sourced from a different economy's profile/variance so "sciency" reads
+    // consistently regardless of which economy actually generated the station. Only
+    // "science" is wired — Brief S2b-2 also named a "designated metallic module," but no
+    // such category, module Id, or SurfaceTexture exists anywhere in
+    // StationModuleRegistry/SurfaceTexture today; confirmed with Timo not to invent one,
+    // left unbuilt. Add further entries here if/when a matching category exists.
+    // internal, not private: tests confirm the override resolves regardless of the
+    // hosting station's own economy, without needing a GraphicsDevice.
+    internal static readonly Dictionary<string, StationEconomy> CategorySpecialEconomy = new()
+    {
+        ["science"] = StationEconomy.Scientific,
+    };
+
+    // internal, not private: directly testable without a GraphicsDevice — confirms the
+    // override resolves regardless of the hosting station's own economy.
+    internal static StationEconomy EconomyForModule(string category, StationEconomy stationEconomy) =>
+        CategorySpecialEconomy.TryGetValue(category, out var special) ? special : stationEconomy;
+
+    // Brief S2b-1 established per-station ownership; S2b-2 makes the variant generation
+    // and per-module assignment profile-driven instead of uniform. Each (surface,
+    // economy) pair used by this station gets its own variant set — the compound key
+    // (not just surface) is needed because a category-special module (science) can pull
+    // in a second economy's variant set alongside the station's own, for the same
+    // surface (TechPanel serves science/military/core alike).
     private static IReadOnlyList<Texture2D> AssignTextures(
         List<PlacedModule> modules,
         GraphicsDevice     gd,
         TexturePalette     palette,
+        StationProfile     profile,
         Galaxy.Station     station)
     {
-        var variantSets = new Dictionary<SurfaceTexture, Texture2D[]>();
+        var variantSets = new Dictionary<(SurfaceTexture surface, StationEconomy economy), Texture2D[]>();
         var owned       = new List<Texture2D>();
 
-        Texture2D[] VariantsFor(SurfaceTexture surface)
+        Texture2D[] VariantsFor(SurfaceTexture surface, StationEconomy economy, TexturePalette economyPalette, float colourSpread)
         {
-            if (variantSets.TryGetValue(surface, out var existing)) return existing;
-            var set = StationTextureRegistry.GenerateVariantSet(gd, surface, palette, station.PersistenceId!);
-            variantSets[surface] = set;
+            var key = (surface, economy);
+            if (variantSets.TryGetValue(key, out var existing)) return existing;
+            var set = StationTextureRegistry.GenerateVariantSet(gd, surface, economyPalette, station.PersistenceId!, colourSpread);
+            variantSets[key] = set;
             owned.AddRange(set);
             return set;
         }
 
         foreach (var mod in modules)
         {
-            var surface  = SurfaceFor(mod.Definition.Category);
-            var variants = VariantsFor(surface);
-            mod.TextureInstance = variants[mod.Seed % variants.Length];
+            var surface = SurfaceFor(mod.Definition.Category);
+            var economy = EconomyForModule(mod.Definition.Category, profile.Economy);
+
+            // Age still comes from the real hosting station — wear is a property of the
+            // physical module, not of whichever colour family it's rendered in.
+            TexturePalette economyPalette = economy == profile.Economy
+                ? palette
+                : TexturePalette.From(new StationProfile
+                  {
+                      Economy = economy, Age = profile.Age, Wealth = profile.Wealth, Population = profile.Population,
+                  });
+
+            var variance = StationEconomyVariance.Profiles[economy];
+            var variants = VariantsFor(surface, economy, economyPalette, variance.ColourSpread);
+            mod.TextureInstance = variants[StationTextureRegistry.SelectVariantIndex(mod.Seed, variants.Length, variance.BaseShareRatio)];
         }
 
         // Overlay the station name on the core module's face texture — a genuinely new
