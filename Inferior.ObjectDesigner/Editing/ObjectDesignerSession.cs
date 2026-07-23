@@ -136,6 +136,27 @@ public sealed class ObjectDesignerSession
         ActiveVertexId = vertexId;
     }
 
+    public bool BeginVertexDragSelection(string vertexId, bool shift)
+    {
+        if (FindVertex(vertexId) is null)
+            throw new KeyNotFoundException($"No semantic vertex '{vertexId}'.");
+
+        if (shift)
+        {
+            ToggleVertexSelection(vertexId);
+            return _selectedVertexIds.Count > 0;
+        }
+
+        if (_selectedVertexIds.Contains(vertexId, StringComparer.Ordinal))
+        {
+            ActiveVertexId = vertexId;
+            return true;
+        }
+
+        SelectVertex(vertexId, extend: false);
+        return true;
+    }
+
     public void SelectVertices(IEnumerable<string> vertexIds, bool replace)
     {
         if (replace)

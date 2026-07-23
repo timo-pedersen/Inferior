@@ -107,7 +107,7 @@ Validation ownership:
 Current editable operations:
 
 - click-select or Shift-toggle semantic vertices in the active orthographic projection;
-- drag a selected semantic vertex;
+- drag a selected semantic vertex or selected vertex group by one shared constrained displacement;
 - marquee-select vertices by dragging empty space;
 - clear selection with Escape;
 - edit exact X/Y/Z values for the active vertex through text boxes;
@@ -128,7 +128,8 @@ Projection mapping:
 Command history:
 
 - `IEditCommand` with `Execute`, `Undo`, and `Description`;
-- vertex drag commits one `MoveVertexCommand` or `MoveVerticesCommand` on mouse release;
+- vertex drag commits one `MoveVerticesCommand` on mouse release;
+- grouped vertex drag snapshots selected stable IDs, original positions and the active constraint at drag start; undo/redo owns the captured positions and does not depend on later selection state;
 - numeric coordinate entry also uses `MoveVertexCommand`;
 - redo is cleared by a new command after undo;
 - save marks the current command position clean;
@@ -180,7 +181,6 @@ The Object Designer foundation is viable and visually working, but still rough a
 
 - active-face-plane constraint behavior is unclear or incorrect;
 - selected-button border state is visually misleading despite the LED/group state;
-- dragging a multi-vertex selection currently moves only one vertex;
 - substantial editing-workflow refinement remains;
 - full functionality review is pending Timo's later workout.
 

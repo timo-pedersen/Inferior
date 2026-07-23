@@ -279,6 +279,7 @@ Standalone MonoGame engineering tool for versioned loose object/ship authoring. 
 - `ProjectionKind.cs` — top/side/front orthographic projection enum.
 - `OrthographicProjection.cs` — screen/model projection math, projection axes, and axis labels.
 - `EditCommands.cs` — `IEditCommand`, single/multi-vertex move commands, and undo/redo clean-state tracking.
+- `VertexDragOperation.cs` — immutable drag-start snapshot for grouped vertex translation: selected stable IDs, original positions, active vertex, constraint mode/reference data, and mouse start.
 - `ObjectDesignerSession.cs` — loaded document/session owner: multi-selection, last-valid preview hull, rebuild, validation, save/reload, incident-face lookup, and stable-ID vertex mutation.
 
 ## Inferior.UI.Test

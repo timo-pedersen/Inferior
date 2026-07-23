@@ -44,9 +44,7 @@ public sealed class ObjectDesignerGame : Game
     private double _time;
     private string _status = "";
 
-    private bool _draggingVertex;
-    private IReadOnlyDictionary<string, DVec3> _dragStartPositions = new Dictionary<string, DVec3>();
-    private Point _dragStartMouse;
+    private VertexDragOperation? _vertexDrag;
     private bool _panningOrtho;
     private Point _selectionStartMouse;
     private bool _rectangleSelecting;
@@ -317,6 +315,14 @@ public sealed class ObjectDesignerGame : Game
         Rectangle viewport = OrthoViewport;
         if (input.IsKeyPressed(Keys.Escape))
         {
+            if (_vertexDrag is not null)
+            {
+                _vertexDrag.Restore(_session);
+                _vertexDrag = null;
+                _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
+                RefreshUiText();
+                return;
+            }
             _session.ClearSelection();
             RefreshUiText();
             return;
@@ -341,13 +347,10 @@ public sealed class ObjectDesignerGame : Game
             string? vertexId = PickVertex(input.MousePosition, viewport);
             if (vertexId is not null)
             {
-                if (input.Shift)
-                    _session.ToggleVertexSelection(vertexId);
-                else
-                    _session.SelectVertex(vertexId, extend: false);
-                _draggingVertex = true;
-                _dragStartPositions = _session.SelectedVertexIds.ToDictionary(id => id, id => _session.GetVertexPosition(id), StringComparer.Ordinal);
-                _dragStartMouse = input.MousePosition;
+                bool hasDragSelection = _session.BeginVertexDragSelection(vertexId, input.Shift);
+                _vertexDrag = hasDragSelection
+                    ? VertexDragOperation.Capture(_session, _constraintMode, input.MousePosition)
+                    : null;
                 RefreshUiText();
             }
             else
@@ -360,30 +363,23 @@ public sealed class ObjectDesignerGame : Game
             }
         }
 
-        if (_draggingVertex && input.LeftHeld && _dragStartPositions.Count > 0)
+        if (_vertexDrag is not null && input.LeftHeld && _vertexDrag.OriginalPositions.Count > 0)
         {
-            Vector2 delta = (input.MousePosition - _dragStartMouse).ToVector2();
-            foreach ((string vertexId, DVec3 before) in _dragStartPositions)
-                _session.SetVertexPosition(vertexId, ApplyConstraint(before, _projection.ApplyScreenDelta(before, delta)), rebuild: false);
-            _session.RecomputeFaceNormals();
-            _session.Rebuild();
+            _vertexDrag.Apply(_session, _projection, input.MousePosition);
             _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
             RefreshUiText();
         }
 
-        if (_draggingVertex && input.LeftReleased && _dragStartPositions.Count > 0)
+        if (_vertexDrag is not null && input.LeftReleased && _vertexDrag.OriginalPositions.Count > 0)
         {
-            Dictionary<string, DVec3> after = _dragStartPositions.Keys.ToDictionary(id => id, id => _session.GetVertexPosition(id), StringComparer.Ordinal);
-            if (after.Any(pair => (pair.Value - _dragStartPositions[pair.Key]).Length > 1e-9))
+            IReadOnlyDictionary<string, DVec3> before = _vertexDrag.OriginalPositions;
+            Dictionary<string, DVec3> after = before.Keys.ToDictionary(id => id, id => _session.GetVertexPosition(id), StringComparer.Ordinal);
+            if (after.Any(pair => (pair.Value - before[pair.Key]).Length > 1e-9))
             {
-                foreach ((string vertexId, DVec3 before) in _dragStartPositions)
-                    _session.SetVertexPosition(vertexId, before, rebuild: false);
-                _session.RecomputeFaceNormals();
-                _session.Rebuild();
-                _session.Execute(new MoveVerticesCommand(_dragStartPositions, after, $"Move {_dragStartPositions.Count} vertices"));
+                _vertexDrag.Restore(_session);
+                _session.Execute(new MoveVerticesCommand(before, after, $"Move {before.Count} vertices"));
             }
-            _draggingVertex = false;
-            _dragStartPositions = new Dictionary<string, DVec3>();
+            _vertexDrag = null;
             _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
             RefreshUiText();
         }
@@ -787,31 +783,6 @@ public sealed class ObjectDesignerGame : Game
     {
         lines.Add(new VertexPositionColor(new Vector3(a, 0), color));
         lines.Add(new VertexPositionColor(new Vector3(b, 0), color));
-    }
-
-    private DVec3 ApplyConstraint(DVec3 before, DVec3 unconstrained)
-    {
-        DVec3 delta = unconstrained - before;
-        return _constraintMode switch
-        {
-            EditingConstraintMode.AxisX => new DVec3(before.X + delta.X, before.Y, before.Z),
-            EditingConstraintMode.AxisY => new DVec3(before.X, before.Y + delta.Y, before.Z),
-            EditingConstraintMode.AxisZ => new DVec3(before.X, before.Y, before.Z + delta.Z),
-            EditingConstraintMode.ActiveFacePlane => before + ProjectDeltaOntoActiveFace(delta),
-            _ => unconstrained,
-        };
-    }
-
-    private DVec3 ProjectDeltaOntoActiveFace(DVec3 delta)
-    {
-        SemanticHullFaceDto? face = _session.GetActiveIncidentFace();
-        if (face is null)
-            return delta;
-        DVec3 normal = face.OutwardNormal.ToDVec3();
-        if (normal.LengthSquared <= 1e-12)
-            return delta;
-        DVec3 unit = normal.Normalized();
-        return delta - unit * DVec3.Dot(delta, unit);
     }
 
     private void DrawCargoPreview(Matrix view, Matrix projection)
