@@ -168,7 +168,11 @@ Rendering reuses:
 - installed engine rendering;
 - installed cockpit rendering.
 
-`ShipMeshRenderer.Draw` accepts an optional in-memory `HullDefinition` override and optional local render scale for editor preview. The game path keeps the existing registry lookup and default universe render scale.
+`ShipMeshRenderer.Draw` is the authoritative shared ship-rendering entry point for both the main game and the Object Designer preview. It accepts an optional in-memory `HullDefinition` override and optional local render scale for editor preview. The game path keeps the existing registry lookup and default universe render scale.
+
+The editor owns preview-specific scene inputs only: camera pose, pane-sized render target, background, debug mode, and the movable preview light direction via `SceneLighting`. Ship material interpretation remains in `Inferior.Rendering`: the preview uses the same `DynamicLitMaterialSettings.Tight` specular preset as the in-game default ship path, and passes its local preview camera as the DynamicLit eye position because its offscreen view matrix is not the normal origin-shifted `Camera3D.ViewMatrix`.
+
+Current material scope: ship hulls, installed engines, installed cockpits, containers, calibration cube and station hulls all use `MeshRenderer.DrawDynamicLit*` over `LitSurface.fx` and can receive the shared specular parameters. Per-texel gloss and derivative bump are station-hull material-map features today. Ship rendering still uses the neutral 1x1 material map and `BumpStrength = 0`; do not describe ship bump mapping or ship per-texel gloss as implemented.
 
 ## Checkpoint Usability State
 

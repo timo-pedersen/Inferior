@@ -1,6 +1,10 @@
+using Inferior.Core.Math;
+using Inferior.Gameplay.Hull;
+using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Xunit;
 
@@ -50,6 +54,20 @@ public sealed class ObjectDesignerRenderedSmokeTests
         frame.AssertPixel(new Point(650, 535), Diagnostics, "diagnostics");
         frame.AssertPixel(new Point(400, 585), Status, "status");
         frame.AssertPixel(new Point(90, 50), Popup, "popup over editor chrome");
+    }
+
+    [Fact]
+    public void ObjectDesigner_preview_ship_renderer_uses_preview_eye_for_specular()
+    {
+        Vector3 previewEye = new(0f, 4f, 26f);
+
+        ShipPreviewFrame tightMaterial = RenderShipPreview(previewEye, DynamicLitMaterialSettings.Tight);
+
+        Assert.Equal(previewEye, tightMaterial.EyePositionWorld);
+        Assert.Equal(DynamicLitMaterialSettings.Tight.SpecularStrength, tightMaterial.SpecularStrength);
+        Assert.Equal(DynamicLitMaterialSettings.Tight.SpecularShininess, tightMaterial.SpecularShininess);
+        int nonBackgroundPixels = CountNonBackgroundPixels(tightMaterial.Frame, new Color(8, 10, 11));
+        Assert.True(nonBackgroundPixels > 100, $"The real preview ship render produced too few non-background pixels: {nonBackgroundPixels}.");
     }
 
     private static GridPanel BuildDesignerLikeTree(Func<Texture2D?> previewTexture)
@@ -239,6 +257,98 @@ public sealed class ObjectDesignerRenderedSmokeTests
         return texture;
     }
 
+    private static ShipPreviewFrame RenderShipPreview(Vector3 eyePositionWorld, DynamicLitMaterialSettings material)
+    {
+        RenderedFrame? frame = null;
+        Vector3 parameterValue = default;
+        float specularStrength = float.NaN;
+        float specularShininess = float.NaN;
+        frame = RenderHarness.Render(256, 256, gd =>
+        {
+            using var content = new ContentManager(new GraphicsDeviceServiceProvider(gd), FindContentRoot());
+            using Effect litSurface = content.Load<Effect>("Effects/LitSurface");
+            using Effect engineGlow = content.Load<Effect>("Effects/EngineExhaustGlow");
+            using var meshRenderer = new MeshRenderer(gd, litSurface);
+            using var shipRenderer = new ShipMeshRenderer(gd, meshRenderer, engineGlow);
+
+            Vector3 cameraPosition = new(0f, 4f, 26f);
+            Matrix view = Matrix.CreateLookAt(cameraPosition, Vector3.Zero, Vector3.UnitY);
+            Matrix projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(55f), 1f, 0.05f, 400f);
+            var camera = new Camera3D(DVec3.Zero, 1f);
+            camera.SetPose(DVec3.Zero, Quaternion.Identity);
+            HullDefinition hull = HullDefinitionLibrary.Get(BerenHullDefinitionFactory.HullId);
+
+            Vector3 oldSunDirection = SceneLighting.SunDirection;
+            float oldAmbient = SceneLighting.Ambient;
+            Vector3 oldSunColour = SceneLighting.SunColour;
+            try
+            {
+                SceneLighting.SunDirection = Vector3.Normalize(new Vector3(0.15f, 0.75f, 0.65f));
+                SceneLighting.Ambient = 0.09f;
+                SceneLighting.SunColour = new Vector3(1.0f, 0.97f, 0.88f);
+
+                gd.Clear(new Color(8, 10, 11));
+                gd.BlendState = BlendState.Opaque;
+                gd.DepthStencilState = DepthStencilState.Default;
+
+                shipRenderer.Draw(
+                    camera,
+                    view,
+                    projection,
+                    hull.HullTypeId,
+                    DVec3.Zero,
+                    Quaternion.Identity,
+                    DetailLevel.Full,
+                    material.SpecularStrength,
+                    material.SpecularShininess,
+                    hullOverride: hull,
+                    renderScaleOverride: 1.0f,
+                    eyePositionWorld: eyePositionWorld);
+
+                parameterValue = litSurface.Parameters["EyePositionWorld"].GetValueVector3();
+                specularStrength = litSurface.Parameters["SpecularStrength"].GetValueSingle();
+                specularShininess = litSurface.Parameters["SpecularShininess"].GetValueSingle();
+            }
+            finally
+            {
+                SceneLighting.SunDirection = oldSunDirection;
+                SceneLighting.Ambient = oldAmbient;
+                SceneLighting.SunColour = oldSunColour;
+            }
+        });
+
+        return new ShipPreviewFrame(frame, parameterValue, specularStrength, specularShininess);
+    }
+
+    private static int CountNonBackgroundPixels(RenderedFrame frame, Color background)
+    {
+        int count = 0;
+        foreach (Color pixel in frame.Pixels)
+        {
+            int delta = Math.Abs(pixel.R - background.R) + Math.Abs(pixel.G - background.G) + Math.Abs(pixel.B - background.B);
+            if (delta > 4)
+                count++;
+        }
+        return count;
+    }
+
+    private static string FindContentRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            string candidate = Path.Combine(directory.FullName, "Inferior.ObjectDesigner", "bin", "Debug", "net10.0", "Content");
+            if (File.Exists(Path.Combine(candidate, "Effects", "LitSurface.xnb"))
+                && File.Exists(Path.Combine(candidate, "Effects", "EngineExhaustGlow.xnb")))
+            {
+                return candidate;
+            }
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not find compiled Object Designer content.");
+    }
+
     private sealed record RenderedFrame(int Width, int Height, Color[] Pixels)
     {
         public void AssertPixel(Point point, Color expected, string label)
@@ -246,6 +356,21 @@ public sealed class ObjectDesignerRenderedSmokeTests
             Color actual = Pixels[point.Y * Width + point.X];
             Assert.True(actual == expected, $"{label} at {point}: expected {expected}, actual {actual}");
         }
+    }
+
+    private sealed record ShipPreviewFrame(RenderedFrame Frame, Vector3 EyePositionWorld, float SpecularStrength, float SpecularShininess);
+
+    private sealed class GraphicsDeviceServiceProvider(GraphicsDevice graphicsDevice) : IServiceProvider, IGraphicsDeviceService
+    {
+        public GraphicsDevice GraphicsDevice { get; } = graphicsDevice;
+
+        event EventHandler<EventArgs>? IGraphicsDeviceService.DeviceCreated { add { } remove { } }
+        event EventHandler<EventArgs>? IGraphicsDeviceService.DeviceDisposing { add { } remove { } }
+        event EventHandler<EventArgs>? IGraphicsDeviceService.DeviceReset { add { } remove { } }
+        event EventHandler<EventArgs>? IGraphicsDeviceService.DeviceResetting { add { } remove { } }
+
+        public object? GetService(Type serviceType)
+            => serviceType == typeof(IGraphicsDeviceService) ? this : null;
     }
 
     private static class RenderHarness

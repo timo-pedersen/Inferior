@@ -202,10 +202,10 @@ Simulation domain model. Depends on Core, Galaxy.
 - `CelestialBodyRenderer.cs` — star/planet body+glow+atmosphere drawing, orbit rings, planet-sphere GPU meshes.
 - `GeometryBuilder.cs` — face/winding helpers (`AddConvexFace`/`AddFace`), `BuildDynamic` (VertexPositionNormalColorTexture, White baked, ship hull/nacelle/pylon), `BuildBaked` (VertexPositionColor, currently no callers).
 - `MeshFactory.cs` — sphere/ring mesh generation.
-- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`).
+- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`). DynamicLit callers share explicit specular/shininess, material-map, bump-strength and render-space eye-position binding; the default eye remains `Vector3.Zero` for origin-shifted `Camera3D` passes.
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
-- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules; cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override and invalidate the semantic mesh cache after edits.
+- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules through the same DynamicLit material/effect path. Cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override, local render scale and preview eye position, then invalidate the semantic mesh cache after edits.
 - `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
 - `Type1HullFactory.cs` — builds the Type-1 ship hull/nacelle/pylon meshes.

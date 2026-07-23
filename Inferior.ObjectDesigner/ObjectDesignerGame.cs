@@ -204,6 +204,7 @@ public sealed class ObjectDesignerGame : Game
                 400f);
             var camera = new Camera3D(DVec3.Zero, 1f);
             camera.SetPose(DVec3.Zero, Quaternion.Identity);
+            DynamicLitMaterialSettings material = DynamicLitMaterialSettings.Tight;
 
             HullDefinition previewHull = _session.PreviewHullDefinition;
             IReadOnlyList<EngineMountPresentationSnapshot>? engines = _showEngines
@@ -220,18 +221,16 @@ public sealed class ObjectDesignerGame : Game
                 DVec3.Zero,
                 Quaternion.Identity,
                 DetailLevel.Full,
-                // Brief S1 specular is a SystemSpaceState-tuned aesthetic pass (K cycles
-                // presets); this preview tool has no such control wired in, so it stays
-                // Off (0 strength) rather than picking a value on its behalf.
-                specularStrength: 0f,
-                specularShininess: 32f,
+                specularStrength: material.SpecularStrength,
+                specularShininess: material.SpecularShininess,
                 _debugMode,
                 engines,
                 engineModuleDebug: false,
                 engineVisualTimeSeconds: _time,
                 cockpit,
                 previewHull,
-                renderScaleOverride: 1.0f);
+                renderScaleOverride: 1.0f,
+                eyePositionWorld: cameraPosition);
 
             if (_showCargo)
                 DrawCargoPreview(view, projection);
