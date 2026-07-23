@@ -216,16 +216,31 @@ public static partial class StationDecorator
         System.Random windowRng, System.Random hatchRng, System.Random antennaRng, System.Random dishRng,
         System.Random ventRng, System.Random greebleRng, System.Random tankRng, System.Random containerRng)
     {
-        mesh.CurrentDecorClass = DecorClass.Antennas;
-        GenerateAntennas(mod, zone, antennaRng, mesh, mod.GlowLights, occupancy, greeblePlacements);
-        mesh.CurrentDecorClass = DecorClass.Dishes;
-        GenerateDishes(mod, zone, dishRng, mesh, occupancy, greeblePlacements);
+        // Brief F1 Fix 3: excluded from Structural and Signage specifically — Structural's
+        // whole purpose is a genuinely blank band breaking up the field, and an antenna or
+        // dish sprinkled into it partly undoes that; Signage is reserved area a future
+        // sign/placard needs to be able to claim cleanly. Every other type (including the
+        // still-unassigned-in-Z1 CommsArray/PipeCorridor) keeps them as a background pass —
+        // this was a gap in Z1's own zone-type table, not an error, and Z2 gives
+        // antennas/dishes a proper home in CommsArray instead of this blanket allow-list.
+        if (type != ZoneType.Structural && type != ZoneType.Signage)
+        {
+            mesh.CurrentDecorClass = DecorClass.Antennas;
+            GenerateAntennas(mod, zone, antennaRng, mesh, mod.GlowLights, occupancy, greeblePlacements);
+            mesh.CurrentDecorClass = DecorClass.Dishes;
+            GenerateDishes(mod, zone, dishRng, mesh, occupancy, greeblePlacements);
+        }
 
         switch (type)
         {
             case ZoneType.Windows:
                 mesh.CurrentDecorClass = DecorClass.Windows;
-                GenerateWindows(mod, zone, windowRng, mesh, glassMesh, occupancy);
+                // guaranteed: true — this zone was already allocated as Windows by the
+                // count mechanism (AssignZoneTypes); skip GenerateWindows' own
+                // WindowProbability/blank-face gate so the allocation is honoured (Brief
+                // F1 Fix 4). Only reached for multi-zone faces — RunZonePasses is never
+                // called from the single-zone/unzoned path.
+                GenerateWindows(mod, zone, windowRng, mesh, glassMesh, occupancy, guaranteed: true);
                 break;
 
             case ZoneType.Machinery:

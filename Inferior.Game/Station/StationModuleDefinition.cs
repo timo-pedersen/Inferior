@@ -18,7 +18,11 @@ public sealed class StationModuleDefinition
     // door dimensions without generating any geometry (e.g. the system map's station stats).
     public          Vector2                      DoorOpening  { get; init; } = Vector2.Zero;
     // If set, called once per station to create the hull mesh for this module.
-    // The factory receives the module's seed and returns a StationModuleMesh
-    // with BaseFaceCount already set to the hull face count.
+    // The factory receives the module's seed and returns a StationModuleMesh with
+    // BaseFaceCount already set to the hull face count. StationDecorator.Decorate captures
+    // that value into HullFaceCount immediately (Brief F1) before advancing BaseFaceCount
+    // further to also cover seam decoration — HullFaceCount is what stays fixed at "the
+    // factory's own hull faces" for the rest of the module's lifetime (draw-technique
+    // split, AO exclusion); BaseFaceCount is not, once Decorate has run.
     public          Func<int, StationModuleMesh>? MeshFactory { get; init; }
 }

@@ -172,23 +172,86 @@ public sealed partial class SystemSpaceState
                 // artifact.
                 Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.White;
 
+                // Brief F1: MeshFactory modules (docking-bay, the octagonal blocks) bake
+                // their whole hull into this same mesh instead of getting a separate
+                // _hullMeshes entry (see the hull pass above), so this single VB/IB now
+                // holds two different kinds of geometry — load-bearing hull, then
+                // decoration. Split the draw by index range: the hull range draws
+                // DynamicLit(Shadowed), same technique/materialColor/material-map/specular
+                // as every other dynamic surface (previously it drew BakedColorLit like
+                // decoration — vertex-colour x AO with no specular/gloss/bump at all, and
+                // AO baked straight into load-bearing hull vertices; see the D-Dark
+                // measurement report). Box modules have no hull faces in this mesh at all
+                // (HullFaceCount defaults to 0), so hullIndexCount is 0 and they fall
+                // through to the single whole-mesh BakedColorLit draw, unchanged.
+                int hullIndexCount = mod.Mesh != null
+                    ? mod.Mesh.IndexCountForFirstFaces(mod.Mesh.HullFaceCount)
+                    : 0;
+
                 if (useShadow)
                 {
                     var ctx = _stationShadowContext!;
                     float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
-                    _meshRenderer.DrawBakedColorLitShadowed(deco.vb, deco.ib, world, view, proj,
-                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
-                        _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
-                        ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
-                        new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
-                        StationShadowCorrectionLimit, shadowBiasDepth,
-                        _stationShadowBinaryView, _stationShadowDeltaView,
-                        ShadowKernelRadiusFor(_shadowKernelMode));
+
+                    if (hullIndexCount > 0)
+                    {
+                        _meshRenderer.DrawDynamicLitShadowedRange(deco.vb, deco.ib, 0, hullIndexCount,
+                            world, view, proj,
+                            Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                            specStrength, specShininess,
+                            tex, _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
+                            ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
+                            new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
+                            StationShadowCorrectionLimit, shadowBiasDepth,
+                            _stationShadowBinaryView, _stationShadowDeltaView,
+                            ShadowKernelRadiusFor(_shadowKernelMode),
+                            mod.MaterialInstance, StationBumpStrength);
+
+                        int decoIndexCount = deco.ib.IndexCount - hullIndexCount;
+                        if (decoIndexCount > 0)
+                            _meshRenderer.DrawBakedColorLitShadowedRange(deco.vb, deco.ib, hullIndexCount, decoIndexCount,
+                                world, view, proj,
+                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
+                                _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
+                                ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
+                                new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
+                                StationShadowCorrectionLimit, shadowBiasDepth,
+                                _stationShadowBinaryView, _stationShadowDeltaView,
+                                ShadowKernelRadiusFor(_shadowKernelMode));
+                    }
+                    else
+                    {
+                        _meshRenderer.DrawBakedColorLitShadowed(deco.vb, deco.ib, world, view, proj,
+                            SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
+                            _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
+                            ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
+                            new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
+                            StationShadowCorrectionLimit, shadowBiasDepth,
+                            _stationShadowBinaryView, _stationShadowDeltaView,
+                            ShadowKernelRadiusFor(_shadowKernelMode));
+                    }
                 }
                 else
                 {
-                    _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
-                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
+                    if (hullIndexCount > 0)
+                    {
+                        _meshRenderer.DrawDynamicLitRange(deco.vb, deco.ib, 0, hullIndexCount,
+                            world, view, proj,
+                            Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                            specStrength, specShininess,
+                            tex, mod.MaterialInstance, StationBumpStrength);
+
+                        int decoIndexCount = deco.ib.IndexCount - hullIndexCount;
+                        if (decoIndexCount > 0)
+                            _meshRenderer.DrawBakedColorLitRange(deco.vb, deco.ib, hullIndexCount, decoIndexCount,
+                                world, view, proj,
+                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
+                    }
+                    else
+                    {
+                        _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
+                            SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
+                    }
                 }
             }
         }

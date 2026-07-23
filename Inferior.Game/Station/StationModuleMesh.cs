@@ -105,8 +105,21 @@ public sealed class StationModuleMesh
     }
 
     // Set after base/seam geometry is added and before raised decoration (greebles, pipes).
-    // ApplyAmbientOcclusion only processes faces 0..BaseFaceCount-1.
+    // ApplyAmbientOcclusion processes faces HullFaceCount..BaseFaceCount-1 (see below).
     public int BaseFaceCount { get; set; } = 0;
+
+    // Brief F1: for MeshFactory modules, the factory's own load-bearing hull face count —
+    // captured once, right after the factory returns, before Pass 0 (panel seams) and
+    // everything after it advances BaseFaceCount to also cover decoration. Default 0 for
+    // box modules, which never put hull geometry in this mesh at all (SystemSpaceState's
+    // BuildHullMesh builds their hull separately, always flat Color.White, never AO'd —
+    // "0" correctly means "no hull faces to exclude" for them, not "hull starts at face 0").
+    // Used to (a) exclude the true hull range from ApplyAmbientOcclusion (AO is a
+    // decoration-only concept; baking it into load-bearing hull vertices left MeshFactory
+    // hulls reading dark regardless of lighting — see the D-Dark measurement report), and
+    // (b) split the draw call between DynamicLit (hull, [0, HullFaceCount)) and
+    // BakedColorLit (decoration, [HullFaceCount, FaceCount)) in SystemSpaceState.Stations.cs.
+    public int HullFaceCount { get; set; } = 0;
 
     // Optional sub-range of faces wanting a richer ambient treatment than the rest of the mesh
     // during lighting bake — e.g. a hollow module's interior walls, which the sun rarely reaches
@@ -379,6 +392,21 @@ public sealed class StationModuleMesh
     }
 
     public int FaceCount => _faces.Count;
+
+    // Brief F1: index count contributed by the first faceCount faces (always counted from
+    // face 0). Faces append their indices to _idx immediately and in order as they're
+    // added, so "the first N faces' indices" are always the first contiguous block of the
+    // shared index buffer — this is what lets a single combined VB/IB (from Build()) be
+    // split into a hull index-range and a decoration index-range by DrawDynamicLitRange/
+    // DrawBakedColorLitRange, instead of needing two separate GPU buffers.
+    public int IndexCountForFirstFaces(int faceCount)
+    {
+        int count = 0;
+        int last  = Math.Min(_faces.Count, faceCount);
+        for (int f = 0; f < last; f++)
+            count += _faces[f].count == 3 ? 3 : 6;
+        return count;
+    }
 
     public (VertexBuffer vb, IndexBuffer ib, int triCount)? BuildFaceRange(
         GraphicsDevice gd, int firstFace, int faceCount)

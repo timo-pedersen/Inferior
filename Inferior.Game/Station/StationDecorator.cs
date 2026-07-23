@@ -35,6 +35,13 @@ public static partial class StationDecorator
             if (mod.Definition.MeshFactory != null)
             {
                 mesh        = mod.Definition.MeshFactory(mod.Seed);
+                // Brief F1: capture the factory's own hull face count BEFORE anything
+                // below advances BaseFaceCount to also cover decoration — HullFaceCount
+                // stays fixed at "just the load-bearing hull" from here on, used to keep
+                // the hull out of AO (Fix 2) and to split the draw call (Fix 1). Box
+                // modules never touch this (default 0) since their hull isn't in this mesh
+                // at all — SystemSpaceState.BuildHullMesh builds it separately.
+                mesh.HullFaceCount = mesh.BaseFaceCount;
                 mesh.Texture = TextureFor(mod.Definition.Category);
                 mod.Mesh    = mesh;   // expose early for ComputeFaces
             }
@@ -51,10 +58,14 @@ public static partial class StationDecorator
             mesh.CurrentDecorClass = DecorClass.PanelSeams;
             foreach (var face in faces)
                 GeneratePanelSeams(mod, face, seamRng, mesh);
-            // For box modules: advance BaseFaceCount to include panel seams (AO target).
-            // For custom-mesh modules: leave BaseFaceCount = hull face count set by factory.
-            if (mod.Definition.MeshFactory == null)
-                mesh.BaseFaceCount = mesh.FaceCount;
+            // Brief F1: advance BaseFaceCount to include panel seams for BOTH module kinds
+            // now — previously box-only, leaving custom-mesh modules' BaseFaceCount frozen
+            // at the factory's hull count, which meant AO applied to load-bearing hull
+            // vertices instead of decoration (see the D-Dark measurement report). Now that
+            // AO excludes [0, HullFaceCount) explicitly (see ApplyAmbientOcclusion), it's
+            // correct to advance BaseFaceCount here unconditionally — seam decoration on
+            // custom-mesh modules gets AO'd just like box modules' seams do.
+            mesh.BaseFaceCount = mesh.FaceCount;
 
             // Pass 1-N: raised decoration (not included in AO range).
             var tankRng      = new System.Random(baseRng.Next());
@@ -255,6 +266,11 @@ public static partial class StationDecorator
     // of its 4 adjacent face normals are blocked (internal/connected).
     // Only processes BaseFaceCount faces — not raised decoration geometry.
     // Call after BakeLighting so lighting colours are already baked in.
+    // Brief F1 Fix 2: starts at HullFaceCount, not 0 — AO is a decoration concept and must
+    // never touch load-bearing hull vertices. 0 for box modules (default, unaffected —
+    // their hull isn't in this mesh at all), the factory's hull count for MeshFactory
+    // modules, so their hull draws flat (DynamicLit, Fix 1) while seam decoration past it
+    // still gets AO'd exactly like a box module's seams do.
     public static void ApplyAmbientOcclusion(IReadOnlyList<PlacedModule> modules)
     {
         foreach (var mod in modules)
@@ -262,9 +278,10 @@ public static partial class StationDecorator
             if (mod.Mesh == null) continue;
 
             var internalNormals = BuildInternalNormalSet(mod);
+            int start = mod.Mesh.HullFaceCount;
             int limit = mod.Mesh.BaseFaceCount;
 
-            for (int faceIdx = 0; faceIdx < limit; faceIdx++)
+            for (int faceIdx = start; faceIdx < limit; faceIdx++)
             {
                 Vector3 faceNormal = mod.Mesh.LocalFaceNormal(faceIdx);
                 if (internalNormals.Contains(faceNormal)) continue;

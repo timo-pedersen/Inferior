@@ -186,7 +186,7 @@ public sealed partial class SystemSpaceState
 
     // Pure decision logic, no GraphicsDevice — any MeshFactory module (docking-bay,
     // hab-block-octagonal, science-block-octagonal, any future one) casts its base hull
-    // faces [0, BaseFaceCount) once StationDecorator.Decorate has built its Mesh. This is
+    // faces [0, HullFaceCount) once StationDecorator.Decorate has built its Mesh. This is
     // NOT specific to docking-bay: docking-bay just happened to be the first MeshFactory
     // module to get a caster, and an earlier fix wrongly encoded that as a category check
     // instead of the general MeshFactory condition, silently leaving every other
@@ -195,12 +195,16 @@ public sealed partial class SystemSpaceState
     // regression test (Inferior.Game.Test) can assert this directly without a live
     // GraphicsDevice. Box modules (MeshFactory == null) are handled separately, below, via
     // BuildHullMesh — always unconditional, never this path.
-    internal static bool TryGetMeshFactoryHullFaceRange(PlacedModule mod, out int baseFaceCount)
+    // Brief F1: reads HullFaceCount, not BaseFaceCount — BaseFaceCount now also advances to
+    // cover seam decoration (Fix 2), so it no longer means "just the hull" for MeshFactory
+    // modules. Using HullFaceCount here keeps this caster range exactly what it always was
+    // (the factory's true hull faces only), unchanged by that split.
+    internal static bool TryGetMeshFactoryHullFaceRange(PlacedModule mod, out int hullFaceCount)
     {
-        baseFaceCount = 0;
+        hullFaceCount = 0;
         if (mod.Definition.MeshFactory == null || mod.Mesh == null) return false;
-        baseFaceCount = mod.Mesh.BaseFaceCount;
-        return baseFaceCount > 0;
+        hullFaceCount = mod.Mesh.HullFaceCount;
+        return hullFaceCount > 0;
     }
 
     private void BuildStationShadowCasterMeshes(IEnumerable<PlacedModule> modules)
@@ -219,19 +223,19 @@ public sealed partial class SystemSpaceState
                 var h = mod.Definition.BoundingBox * 0.5f;
                 _shadowCasterHullBounds[mod] = (-h, h);
             }
-            else if (TryGetMeshFactoryHullFaceRange(mod, out int baseFaceCount))
+            else if (TryGetMeshFactoryHullFaceRange(mod, out int hullFaceCount))
             {
                 // Generalized MeshFactory hull caster — docking-bay is one example of this,
                 // not a special case of it. Decoration appended separately (below) now
                 // casts too, per the enabled DecorClass set.
-                var hull = mod.Mesh!.BuildFaceRange(_gd, 0, baseFaceCount);
+                var hull = mod.Mesh!.BuildFaceRange(_gd, 0, hullFaceCount);
                 if (hull.HasValue)
                     _shadowCasterMeshes[mod] = hull.Value;
 
                 // Real vertex bounds, not the definition's approximate envelope box — a
                 // MeshFactory hull's true extent doesn't always exactly match the nominal
                 // envelope used to size it (e.g. docking-bay's wall thickness/door frame).
-                var bounds = mod.Mesh.ComputeFaceRangeBounds(0, baseFaceCount);
+                var bounds = mod.Mesh.ComputeFaceRangeBounds(0, hullFaceCount);
                 if (bounds.HasValue)
                     _shadowCasterHullBounds[mod] = bounds.Value;
             }
