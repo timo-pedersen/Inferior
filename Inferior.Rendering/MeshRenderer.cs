@@ -52,7 +52,7 @@ public sealed class MeshRenderer : IDisposable
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
-        Texture2D? texture = null, Texture2D? materialMap = null)
+        Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
@@ -64,7 +64,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
         Draw(vb, ib, fx);
     }
 
@@ -74,7 +74,7 @@ public sealed class MeshRenderer : IDisposable
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
-        Texture2D? texture = null, Texture2D? materialMap = null)
+        Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f)
     {
         if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
             throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
@@ -89,7 +89,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
         Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
@@ -104,7 +104,7 @@ public sealed class MeshRenderer : IDisposable
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
         float shadowCorrectionLimit, float shadowBiasDepth,
         bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
-        Texture2D? materialMap = null)
+        Texture2D? materialMap = null, float bumpStrength = 0f)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
@@ -116,7 +116,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
@@ -213,7 +213,7 @@ public sealed class MeshRenderer : IDisposable
     // second eye position for a caller to supply. It's still a real shader parameter
     // (not a hardcoded .fx constant) so this stays correct if that convention ever
     // changes; if it does, this is the one place to update, not every draw call site.
-    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess, Texture2D materialMap)
+    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess, Texture2D materialMap, float bumpStrength)
     {
         fx.Parameters["EyePositionWorld"].SetValue(Vector3.Zero);
         fx.Parameters["SpecularStrength"].SetValue(specularStrength);
@@ -222,6 +222,11 @@ public sealed class MeshRenderer : IDisposable
         // same "no .fx initializer" policy as the shadow parameters below (BakedColorLit*
         // never reads MaterialMap at all, so this is never set there).
         fx.Parameters["MaterialMap"].SetValue(materialMap);
+        // Brief S2c-2: same policy — bound on every DynamicLit*/station-hull draw call.
+        // Non-station callers pass 0 by default (see the three Draw* overloads above) and
+        // are structurally immune to any value anyway (their MaterialMap is a flat 1x1
+        // texture — see LitSurface.fx's PerturbNormalFromHeight comment).
+        fx.Parameters["BumpStrength"].SetValue(bumpStrength);
     }
 
     private static void SetShadowParameters(

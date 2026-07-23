@@ -190,10 +190,20 @@ public static class StationTextureRegistry
 
     private const int Size = 512;
 
-    // Brief S2c-1: R=height (reserved for S2c-2 — written neutral, 128, so the material
-    // map exists at full size now and S2c-2 only starts writing R, no format change
-    // between briefs), G=gloss (this brief), B/A reserved, written 0/255.
+    // Brief S2c-1/S2c-2: R=height (mid-value = flat reference plane; below = recessed,
+    // above = raised — S2c-2), G=gloss (S2c-1), B/A reserved, written 0/255.
     private const byte MaterialNeutralHeight = 128;
+
+    // Brief S2c-2 relief depths — eye-tuned starting points, not derived: structural
+    // (seams/panels) reads as manufacturing joins, wear (scratches/oxidation) rides on
+    // top of it. Streaks/edge-grime stay gloss-only (S2c-1's existing effect) — they're
+    // surface residue, not relief, and adding height there didn't seem to earn its keep;
+    // revisit if the in-engine gate wants more depth cues.
+    private const float SeamGrooveDepth      = 0.15f;
+    private const float SubPanelHeightRange  = 0.03f;
+    private const float ScratchIncisionDepth = 0.08f;
+    private const float OxidationRaiseAmount = 0.06f;
+    private const float OxidationNoiseAmount = 0.03f;
 
     private static (Texture2D Albedo, Texture2D Material) Generate(
         GraphicsDevice gd,
@@ -212,14 +222,20 @@ public static class StationTextureRegistry
         var gloss = new float[Size * Size];
         Array.Fill(gloss, palette.BaseGloss);
 
+        // Brief S2c-2: height starts at the flat reference plane (same numeric neutral as
+        // the old constant fill, so an untouched texel packs identically to before) and is
+        // only ever displaced by the structural/wear passes below.
+        var height = new float[Size * Size];
+        Array.Fill(height, MaterialNeutralHeight / 255f);
+
         // Step 1 — base noise
         FillBaseNoise(pixels, palette, rng);
 
         // Step 2 + 3 — sub-panel grid with seam lines
         int[] gridX = BuildGrid(rng, Size, surface);
         int[] gridY = BuildGrid(rng, Size, surface);
-        ApplySubPanels(pixels, gridX, gridY, palette, rng);
-        ApplySeamLines(pixels, gridX, gridY, palette);
+        ApplySubPanels(pixels, height, gridX, gridY, palette, rng);
+        ApplySeamLines(pixels, height, gridX, gridY, palette);
 
         // Step 4b — weathering streaks (before edge grime)
         if (palette.GrimeStrength > 0.15f)
@@ -275,6 +291,13 @@ public static class StationTextureRegistry
                     float t    = alpha * fade;
                     pixels[idx] = BlendColor(pixels[idx], rustCol, t);
                     gloss[idx] *= 1f - t;
+                    // Irregular roughness: a coordinate hash, not another rng draw — an
+                    // extra per-pixel System.Random consumption here would shift every
+                    // subsequent draw's stream position (edge grime, scratches, stencil
+                    // text), silently changing their output. PixelNoise01 is a stable
+                    // function of (x, y) alone, so it costs nothing downstream.
+                    float noise = (PixelNoise01(x, y) * 2f - 1f) * OxidationNoiseAmount;
+                    height[idx] += (OxidationRaiseAmount + noise) * fade;
                 }
             }
         }
@@ -284,7 +307,7 @@ public static class StationTextureRegistry
 
         // Step 5a — scratch lines (high-wear surfaces only)
         if (palette.GrimeStrength > 0.25f)
-            AddScratchLines(pixels, gloss, palette, rng);
+            AddScratchLines(pixels, gloss, height, palette, rng);
 
         // Step 5b — military stencil fragments (Military economy only) — text is a
         // deliberate printed marking, not wear; doesn't touch gloss.
@@ -306,11 +329,22 @@ public static class StationTextureRegistry
         var albedoTex = new Texture2D(gd, Size, Size);
         albedoTex.SetData(pixels);
 
+        // Gate-fix (aliased/pixelated bump lines): every height pass above wrote a hard
+        // 1-2px edge (seam grooves, sub-panel steps, scratch incisions) — a near-
+        // discontinuous height step differentiates to a near-discontinuous gradient,
+        // which the shader's derivative-bump amplifies straight into visible aliasing.
+        // Blurring only height (not albedo/gloss — their own hard edges are a colour/
+        // reflectance cue, not a relief one) ramps every edge over a few texels so
+        // ddx/ddy sees a smooth slope instead of a step. Wrap-around, matching
+        // MaterialSampler's own Wrap addressing.
+        height = BlurHeight(height, radius: 2);
+
         var materialPixels = new Color[Size * Size];
         for (int i = 0; i < materialPixels.Length; i++)
         {
-            byte g = (byte)Math.Clamp(gloss[i] * 255f, 0f, 255f);
-            materialPixels[i] = new Color(MaterialNeutralHeight, g, (byte)0, (byte)255);
+            byte h = (byte)Math.Clamp(MathF.Round(height[i] * 255f), 0f, 255f);
+            byte g = (byte)Math.Clamp(MathF.Round(gloss[i] * 255f), 0f, 255f);
+            materialPixels[i] = new Color(h, g, (byte)0, (byte)255);
         }
         var materialTex = new Texture2D(gd, Size, Size);
         materialTex.SetData(materialPixels);
@@ -361,6 +395,7 @@ public static class StationTextureRegistry
 
     private static void ApplySubPanels(
         Color[]        pixels,
+        float[]        height,
         int[]          gridX,
         int[]          gridY,
         TexturePalette p,
@@ -377,9 +412,22 @@ public static class StationTextureRegistry
             foreach (var (y0, y1) in yBounds)
             {
                 float shift = (float)(rng.NextDouble() * 2.0 - 1.0) * contrast;
+                // Brief S2c-2: reuses this SAME draw (normalized back to [-1,1]) for a
+                // per-panel height step instead of a fresh rng.NextDouble() call — an
+                // extra draw here would shift the rng stream position for every pass that
+                // runs after this one (seams, streaks, oxidation, scratches, stencil
+                // text), changing their output even though none of their own logic
+                // changed. Correlating height with the brightness roll is also a
+                // reasonable reading: the same per-panel manufacturing variance plausibly
+                // drives both.
+                float heightOffset = contrast > 0.01f ? (shift / contrast) * SubPanelHeightRange : 0f;
                 for (int y = y0; y < y1; y++)
                 for (int x = x0; x < x1; x++)
-                    pixels[y * Size + x] = ShiftLuminance(pixels[y * Size + x], shift);
+                {
+                    int idx = y * Size + x;
+                    pixels[idx] = ShiftLuminance(pixels[idx], shift);
+                    height[idx] += heightOffset;
+                }
             }
         }
     }
@@ -400,6 +448,7 @@ public static class StationTextureRegistry
 
     private static void ApplySeamLines(
         Color[]        pixels,
+        float[]        height,
         int[]          gridX,
         int[]          gridY,
         TexturePalette p)
@@ -409,15 +458,15 @@ public static class StationTextureRegistry
         foreach (int lx in gridX)
             for (int y = 0; y < Size; y++)
             {
-                if (lx     < Size) pixels[y * Size + lx    ] = seamColor;
-                if (lx + 1 < Size) pixels[y * Size + lx + 1] = BlendColor(pixels[y * Size + lx + 1], seamColor, 0.5f);
+                if (lx     < Size) { pixels[y * Size + lx    ] = seamColor; height[y * Size + lx    ] -= SeamGrooveDepth; }
+                if (lx + 1 < Size) { pixels[y * Size + lx + 1] = BlendColor(pixels[y * Size + lx + 1], seamColor, 0.5f); height[y * Size + lx + 1] -= SeamGrooveDepth * 0.5f; }
             }
 
         foreach (int ly in gridY)
             for (int x = 0; x < Size; x++)
             {
-                if (ly     < Size) pixels[ly       * Size + x] = seamColor;
-                if (ly + 1 < Size) pixels[(ly + 1) * Size + x] = BlendColor(pixels[(ly + 1) * Size + x], seamColor, 0.5f);
+                if (ly     < Size) { pixels[ly       * Size + x] = seamColor; height[ly       * Size + x] -= SeamGrooveDepth; }
+                if (ly + 1 < Size) { pixels[(ly + 1) * Size + x] = BlendColor(pixels[(ly + 1) * Size + x], seamColor, 0.5f); height[(ly + 1) * Size + x] -= SeamGrooveDepth * 0.5f; }
             }
     }
 
@@ -462,7 +511,7 @@ public static class StationTextureRegistry
         return dist;
     }
 
-    private static void AddScratchLines(Color[] pixels, float[] gloss, TexturePalette p, System.Random rng)
+    private static void AddScratchLines(Color[] pixels, float[] gloss, float[] height, TexturePalette p, System.Random rng)
     {
         int count = (int)(p.GrimeStrength * 18f) + 4;
         Color scratchColor = TexturePalette.LerpColor(p.BaseColour, Color.White, 0.3f);
@@ -487,9 +536,55 @@ public static class StationTextureRegistry
                     int idx = py * Size + px;
                     pixels[idx] = BlendColor(pixels[idx], scratchColor, scratchWeight);
                     gloss[idx] *= 1f - scratchWeight;
+                    height[idx] -= ScratchIncisionDepth;
                 }
             }
         }
+    }
+
+    // Brief S2c-2: a stable, seed-free integer hash for per-pixel "irregular roughness"
+    // noise — !invariants.md §6 forbids HashCode.Combine/GetHashCode for procedural
+    // generation (process-randomized for strings), but this is a plain arithmetic
+    // function of two ints, not an object hash, so it's exempt and always reproducible.
+    internal static float PixelNoise01(int x, int y)
+    {
+        unchecked
+        {
+            int h = x * 374761393 + y * 668265263;
+            h = (h ^ (h >> 13)) * 1274126177;
+            h ^= h >> 16;
+            return (h & 0xFFFFFF) / (float)0xFFFFFF;
+        }
+    }
+
+    // Separable box blur, wrap-around (matches MaterialSampler's Wrap addressing — a
+    // clamped blur would visibly seam at the UV wrap boundary). Flat regions (the vast
+    // majority of the buffer) are unchanged by a box blur; only the structural/wear edges
+    // this brief writes get smoothed.
+    private static float[] BlurHeight(float[] height, int radius)
+    {
+        int windowSize = radius * 2 + 1;
+
+        var horizontal = new float[height.Length];
+        for (int y = 0; y < Size; y++)
+        for (int x = 0; x < Size; x++)
+        {
+            float sum = 0f;
+            for (int d = -radius; d <= radius; d++)
+                sum += height[y * Size + (((x + d) % Size + Size) % Size)];
+            horizontal[y * Size + x] = sum / windowSize;
+        }
+
+        var blurred = new float[height.Length];
+        for (int y = 0; y < Size; y++)
+        for (int x = 0; x < Size; x++)
+        {
+            float sum = 0f;
+            for (int d = -radius; d <= radius; d++)
+                sum += horizontal[(((y + d) % Size + Size) % Size) * Size + x];
+            blurred[y * Size + x] = sum / windowSize;
+        }
+        return blurred;
     }
 
     // ── Colour helpers ────────────────────────────────────────────────────────

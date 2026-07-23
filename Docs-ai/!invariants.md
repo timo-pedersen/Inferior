@@ -219,6 +219,8 @@ Lighting-pipeline constraints (design agreed, implementation phased — see `Doc
 - Receiver bias must never visibly move a contact shadow; large receiver normal offsets are forbidden as an acne workaround.
 - Planetary/moon shadowing is an analytic eclipse term, never geometry in a shadow map.
 
+Render-scale and shader derivatives. All geometry reaches the shader in render space (Camera3D.RenderScale = 1e-9, camera at origin). Any shader math that takes screen-space derivatives of a position (ddx/ddy of RenderPos), or multiplies two position-derived quantities (areas, determinants, cross products), silently eats one power of that scale per factor and collapses toward zero. Un-scale first (RenderScaleReciprocal = 1e9) before any such math. Symptom when missed: the intended term vanishes next to whatever survives with fewer powers of scale — in S2c-2's derivative bump, the det term went to ~1e-18 and the perturbed normal degenerated to pure height-gradient direction with no geometric-normal floor, producing flicker, black patches, and dead strength controls.
+
 ---
 
 ## 12. Event, state, and telemetry semantics

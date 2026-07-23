@@ -30,6 +30,12 @@ public sealed partial class SystemSpaceState
 
     // ── Station drawing ───────────────────────────────────────────────────────
 
+    // Brief S2c-2: derivative bump strength, locked after Timo's in-engine A/B — Whisper
+    // (0.3) confirmed as the right amount ("looking swell now... the others are too
+    // strong"); Off/Subtle/Default/Strong presets and the J-key runtime cycle are removed
+    // now that the value is settled, not deferred as future tuning.
+    private const float StationBumpStrength = 0.3f;
+
     private static float StationPhysicalRadius(Galaxy.Station s) => s.Size switch
     {
         Galaxy.StationSize.Small  =>  250f,
@@ -108,14 +114,14 @@ public sealed partial class SystemSpaceState
                         StationShadowCorrectionLimit, shadowBiasDepth,
                         _stationShadowBinaryView, _stationShadowDeltaView,
                         ShadowKernelRadiusFor(_shadowKernelMode),
-                        mod.MaterialInstance);
+                        mod.MaterialInstance, StationBumpStrength);
                 }
                 else
                 {
                     _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                         specStrength, specShininess,
-                        mod.TextureInstance, mod.MaterialInstance);
+                        mod.TextureInstance, mod.MaterialInstance, StationBumpStrength);
                 }
             }
         }

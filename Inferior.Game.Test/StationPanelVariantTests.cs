@@ -331,4 +331,45 @@ public sealed class StationPanelVariantTests
 
         Assert.Equal(narrow.BaseGloss, wide.BaseGloss);
     }
+
+    // Brief S2c-2: per-texel height (material map R channel) is computed inside the
+    // private Generate() — same GraphicsDevice-free-testing limitation already accepted
+    // for gloss above (real Texture2D creation needs a GPU, not available in this test
+    // project). PixelNoise01 is the one new source of per-pixel variation S2c-2 adds
+    // (the "irregular roughness" on oxidation patches) and the only piece of the new
+    // height math that's a pure function testable in isolation — every other
+    // height-writing pass either uses no RNG at all (seam grooves, a pure function of
+    // grid line position) or rides an already-deterministic existing draw (sub-panel
+    // height reuses ApplySubPanels' brightness-shift roll), so PixelNoise01's own
+    // determinism is what closes the loop: same PersistenceId -> same variant seeds
+    // (already covered by RollVariantSeeds' tests) -> same (x, y) noise lookups -> same
+    // height, with no new nondeterministic input anywhere in the chain.
+    [Fact]
+    public void PixelNoise01_SameCoordinates_ProducesSameValue()
+    {
+        float a = StationTextureRegistry.PixelNoise01(137, 402);
+        float b = StationTextureRegistry.PixelNoise01(137, 402);
+
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
+    public void PixelNoise01_DifferentCoordinates_ProduceVariedValues()
+    {
+        var distinct = new HashSet<float>();
+        for (int y = 0; y < 32; y++)
+        for (int x = 0; x < 32; x++)
+            distinct.Add(StationTextureRegistry.PixelNoise01(x, y));
+
+        Assert.True(distinct.Count > 100,
+            $"Expected varied noise across a 32x32 coordinate grid, got {distinct.Count} distinct value(s)");
+    }
+
+    [Fact]
+    public void PixelNoise01_StaysWithinUnitRange()
+    {
+        for (int y = 0; y < 64; y += 7)
+        for (int x = 0; x < 64; x += 7)
+            Assert.InRange(StationTextureRegistry.PixelNoise01(x, y), 0f, 1f);
+    }
 }

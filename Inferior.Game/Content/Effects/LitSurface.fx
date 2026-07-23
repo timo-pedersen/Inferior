@@ -57,6 +57,17 @@ float3   EyePositionWorld;
 float    SpecularStrength;
 float    SpecularShininess;
 
+// Brief S2c-2: derivative-bump strength. 0 = off — and mathematically exact, not just
+// visually close: PerturbNormalFromHeight scales baseNormal by abs(det) before
+// normalizing, which never changes its direction, so a zeroed gradient term reproduces
+// the unperturbed normal exactly (same "off is exact" pattern as SpecularStrength/
+// ShadowKernelRadius). No HLSL initializer, same policy as the other tunables above; set
+// explicitly every DynamicLit* draw call (non-station callers — ships/containers/the
+// calibration cube — pass 0, and are additionally structurally immune regardless: their
+// neutral MaterialMap is a flat 1x1 texture, so ddx/ddy of its sampled height is always
+// exactly zero no matter what BumpStrength is).
+float    BumpStrength;
+
 float4x4 ModuleToStationLocal;
 float4x4 StationLocalToLightView;
 float2   ShadowMinXY;
@@ -321,6 +332,49 @@ float4 PS_BakedColorLitShadowed(VertexOutput input) : COLOR0
     return float4(rgb, 1.0);
 }
 
+// Brief S2c-2: perturb a geometric normal using only screen-space derivatives (no
+// precomputed tangent vertex channel) — Mikkelsen's "bump mapping unparametrized
+// surfaces" method. sigmaX/sigmaY are the screen-space derivatives of render-space
+// position; r1/r2 form a per-pixel basis orthogonal to the geometric normal; dHdx/dHdy
+// are the screen-space derivative of the SAMPLED height value, which already carries the
+// texcoord-to-screen mapping through the chain rule, so no separate ddx/ddy(TexCoord)
+// decomposition is needed. sign(det) compensates for arbitrary UV winding/handedness;
+// abs(det) scales the base normal without ever flipping its direction, which is exactly
+// why bumpStrength == 0 collapses this to normalize(baseNormal) — mathematically exact,
+// not an approximation. height is the material map's R channel: a byte around
+// MaterialNeutralHeight is the flat reference plane, only its LOCAL VARIATION matters
+// here (a constant offset has zero screen-space derivative, so the neutral-fill 1x1
+// MaterialMap used by ships/containers/the calibration cube is structurally immune to
+// this regardless of bumpStrength).
+//
+// Gate-fix (blinking/near-black patches, no gradation between presets): renderPos is
+// world metres * Camera3D.RenderScale (1e-9, Camera3D.cs) — its screen-space derivative
+// is ~1e-9x smaller than a metre-scale one, and det (built from TWO factors carrying
+// that tiny scale) collapsed to ~1e-18, utterly negligible next to bumpStrength*surfGrad
+// (which only carries ONE power of it). The result was really just
+// normalize(-surfGrad): direction decided almost entirely by height derivatives that
+// spike at seams/panel edges, with no floor from the true geometric normal — hence dark
+// flicker exactly at those edges, and every non-zero bumpStrength looking identical
+// (surfGrad dominates regardless of its own scale, and normalize() removes overall
+// scale). RenderScaleReciprocal undoes the shrink before the derivatives are taken, so
+// det and surfGrad land back in a comparable, sane range.
+static const float RenderScaleReciprocal = 1e9; // 1 / Camera3D.RenderScale
+
+float3 PerturbNormalFromHeight(float3 baseNormal, float3 renderPos, float height, float bumpStrength)
+{
+    float3 sigmaX = ddx(renderPos) * RenderScaleReciprocal;
+    float3 sigmaY = ddy(renderPos) * RenderScaleReciprocal;
+    float3 r1     = cross(sigmaY, baseNormal);
+    float3 r2     = cross(baseNormal, sigmaX);
+    float  det    = dot(sigmaX, r1);
+
+    float dHdx = ddx(height);
+    float dHdy = ddy(height);
+    float3 surfGrad = sign(det) * (dHdx * r1 + dHdy * r2);
+
+    return normalize(abs(det) * baseNormal - bumpStrength * surfGrad);
+}
+
 // Brief S1: single-source Blinn-Halfway specular. Per-pixel, not per-vertex — low-poly
 // hulls have few vertices, so a per-vertex specular would smear/wander across big flat
 // panels; re-normalizing the interpolated normal here matters more than for diffuse,
@@ -351,14 +405,20 @@ float3 SpecularHighlight(float3 worldNormal, float3 renderPos, float shadowTerm,
 
 float4 PS_DynamicLit(VertexOutput input) : COLOR0
 {
-    float3 n   = normalize(input.WorldNormal);
+    float4 material = tex2D(MaterialSampler, input.TexCoord);
+    float  gloss     = material.g;
+
+    // Brief S2c-2: perturb once, feed both the diffuse N.L and SpecularHighlight — never
+    // recompute per-use, and never let shadow sampling see this (it stays on the
+    // unperturbed StationNorm, below).
+    float3 n = PerturbNormalFromHeight(normalize(input.WorldNormal), input.RenderPos, material.r, BumpStrength);
+
     float  nl  = saturate(dot(n, SunDirection));
     float3 lit = Ambient + SunColour * nl * EclipseFactor;
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
-    float  gloss = tex2D(MaterialSampler, input.TexCoord).g;
-    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, 1.0, gloss);
+    rgb += SpecularHighlight(n, input.RenderPos, 1.0, gloss);
     return float4(rgb, 1.0);
 }
 
@@ -371,7 +431,12 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
         return ShadowDeltaColour(delta, inMap);
     }
 
-    float3 n      = normalize(input.WorldNormal);
+    float4 material = tex2D(MaterialSampler, input.TexCoord);
+    float  gloss     = material.g;
+
+    // Shadow sampling deliberately keeps using the GEOMETRIC input.StationNorm, never
+    // this perturbed normal — bump is a shading-only effect, not a shadow-casting one.
+    float3 n      = PerturbNormalFromHeight(normalize(input.WorldNormal), input.RenderPos, material.r, BumpStrength);
     float  nl     = saturate(dot(n, SunDirection));
     float  shadow = StationShadowTerm(input.StationPos, input.StationNorm);
     if (ShadowBinaryView > 0.5)
@@ -381,8 +446,7 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
-    float  gloss = tex2D(MaterialSampler, input.TexCoord).g;
-    rgb += SpecularHighlight(input.WorldNormal, input.RenderPos, shadow, gloss);
+    rgb += SpecularHighlight(n, input.RenderPos, shadow, gloss);
     return float4(rgb, 1.0);
 }
 
