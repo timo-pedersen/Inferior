@@ -8,7 +8,10 @@ public static partial class StationDecorator
 {
     // ── Face analysis ─────────────────────────────────────────────────────────
 
-    readonly struct FaceInfo(
+    // internal, not private: Brief Z1's ComputeZones/AssignZoneTypes are internal test
+    // hooks (StationWindowGridTests-style pure-helper testing) and need to expose this
+    // type in their signatures.
+    internal readonly struct FaceInfo(
         Vector3 localNormal,
         Vector3 localCenter,
         Vector3 localRight,

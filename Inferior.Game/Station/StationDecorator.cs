@@ -61,43 +61,95 @@ public static partial class StationDecorator
             var dishRng      = new System.Random(baseRng.Next());
             var containerRng = new System.Random(baseRng.Next());
 
+            // Brief Z1: independent from the baseRng chain above by construction (XORed
+            // into mod.Seed directly, never drawn via baseRng.Next()) — inserting zoning
+            // must not shift any existing per-pass RNG stream or re-roll every station in
+            // the galaxy. Capped per-module across every face below, not just one.
+            var zoneRng = new System.Random(mod.Seed ^ ZoneRngSalt);
+            int moduleWindowZoneBudget = MaxWindowZonesPerModule;
+
             foreach (var face in faces)
             {
                 // Landing pad faces must be clear — markings and lights are added by
                 // GenerateLandingPads. Skip all decoration passes so nothing lands on them.
                 if (IsDockingPadFace(mod, face)) continue;
 
-                var occupancy         = new FaceOccupancy();
-                var greeblePlacements = new List<PlacedGreebleInfo>();
-                mesh.CurrentDecorClass = DecorClass.Windows;
-                GenerateWindows     (mod, face, windowRng,      mesh, glassMesh, occupancy);
-                mesh.CurrentDecorClass = DecorClass.Hatches;
-                GenerateHatches     (mod, face, hatchRng,       mesh, occupancy);
-                mesh.CurrentDecorClass = DecorClass.Antennas;
-                GenerateAntennas    (mod, face, antennaRng,     mesh, mod.GlowLights, occupancy, greeblePlacements);
-                mesh.CurrentDecorClass = DecorClass.Dishes;
-                GenerateDishes      (mod, face, dishRng,        mesh, occupancy, greeblePlacements);
-                mesh.CurrentDecorClass = DecorClass.Chimneys;
-                GenerateChimneys    (mod, face, chimneyRng,     mesh, mod.GlowLights, mod);
-                mesh.CurrentDecorClass = DecorClass.SurfacePipes;
-                GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
-                mesh.CurrentDecorClass = DecorClass.VentGrilles;
-                GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
-                mesh.CurrentDecorClass = DecorClass.Greebles;
-                GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy, greeblePlacements);
-                mesh.CurrentDecorClass = DecorClass.Tanks;
-                GenerateTanks       (mod, face, mesh, occupancy, new System.Random(tankRng.Next()));
-                mesh.CurrentDecorClass = DecorClass.Containers;
-                GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()));
+                var (zones, isUnzoned) = ComputeZones(face, zoneRng);
 
-                if (face.IsExposed && greeblePlacements.Count >= 2 && face.Width * face.Height >= 4f)
+                if (isUnzoned)
                 {
-                    mesh.CurrentDecorClass = DecorClass.Cables;
-                    StationCableGenerator.GenerateFaceCables(
-                        face.LocalNormal, face.LocalRight, face.LocalUp,
-                        face.Width, face.Height, face.LocalCenter,
-                        greeblePlacements, mesh,
-                        new System.Random(cableRng.Next()));
+                    // Brief Z1's critical no-op property: a face below the zoning
+                    // threshold is bit-identical to pre-Z1 behaviour — every pass below
+                    // runs unconditionally, in the exact original order, with no zone-type
+                    // filtering at all. Do not "clean this up" into a 1-zone call through
+                    // RunZonePasses; that would run a type-filtered SUBSET of these passes
+                    // instead of all of them, breaking the no-op guarantee.
+                    var occupancy         = new FaceOccupancy();
+                    var greeblePlacements = new List<PlacedGreebleInfo>();
+                    mesh.CurrentDecorClass = DecorClass.Windows;
+                    GenerateWindows     (mod, face, windowRng,      mesh, glassMesh, occupancy);
+                    mesh.CurrentDecorClass = DecorClass.Hatches;
+                    GenerateHatches     (mod, face, hatchRng,       mesh, occupancy);
+                    mesh.CurrentDecorClass = DecorClass.Antennas;
+                    GenerateAntennas    (mod, face, antennaRng,     mesh, mod.GlowLights, occupancy, greeblePlacements);
+                    mesh.CurrentDecorClass = DecorClass.Dishes;
+                    GenerateDishes      (mod, face, dishRng,        mesh, occupancy, greeblePlacements);
+                    mesh.CurrentDecorClass = DecorClass.Chimneys;
+                    GenerateChimneys    (mod, face, chimneyRng,     mesh, mod.GlowLights, mod);
+                    mesh.CurrentDecorClass = DecorClass.SurfacePipes;
+                    GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
+                    mesh.CurrentDecorClass = DecorClass.VentGrilles;
+                    GenerateVentGrilles (mod, face, ventRng,        mesh, occupancy);
+                    mesh.CurrentDecorClass = DecorClass.Greebles;
+                    GenerateGreebles    (mod, face, greebleRng,     mesh, occupancy, greeblePlacements);
+                    mesh.CurrentDecorClass = DecorClass.Tanks;
+                    GenerateTanks       (mod, face, mesh, occupancy, new System.Random(tankRng.Next()));
+                    mesh.CurrentDecorClass = DecorClass.Containers;
+                    GenerateContainers  (mod, face, mesh, occupancy, new System.Random(containerRng.Next()));
+
+                    if (face.IsExposed && greeblePlacements.Count >= 2 && face.Width * face.Height >= 4f)
+                    {
+                        mesh.CurrentDecorClass = DecorClass.Cables;
+                        StationCableGenerator.GenerateFaceCables(
+                            face.LocalNormal, face.LocalRight, face.LocalUp,
+                            face.Width, face.Height, face.LocalCenter,
+                            greeblePlacements, mesh,
+                            new System.Random(cableRng.Next()));
+                    }
+                }
+                else
+                {
+                    // Chimneys/surface pipes take no occupancy today and place blind
+                    // (brief: "leave that as-is; note it, don't fix it") — they can't
+                    // respect zone boundaries, so they still run once per FACE, not per
+                    // zone, same call as the unzoned path above.
+                    mesh.CurrentDecorClass = DecorClass.Chimneys;
+                    GenerateChimneys    (mod, face, chimneyRng,     mesh, mod.GlowLights, mod);
+                    mesh.CurrentDecorClass = DecorClass.SurfacePipes;
+                    GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
+
+                    var greeblePlacements = new List<PlacedGreebleInfo>();
+                    var zoneTypes = AssignZoneTypes(mod.Definition.Category, zones, zoneRng, ref moduleWindowZoneBudget);
+
+                    for (int i = 0; i < zones.Length; i++)
+                    {
+                        var occupancy = new FaceOccupancy(); // zones don't overlap, so no cross-zone conflicts by construction
+                        RunZonePasses(mod, zones[i], zoneTypes[i], mesh, glassMesh, occupancy, greeblePlacements,
+                            windowRng, hatchRng, antennaRng, dishRng, ventRng, greebleRng, tankRng, containerRng);
+                    }
+
+                    // Cables still run per-face, collecting placements from every zone on
+                    // that face, so cables can still span between zones (brief: "Do not
+                    // move them inside the zone loop").
+                    if (face.IsExposed && greeblePlacements.Count >= 2 && face.Width * face.Height >= 4f)
+                    {
+                        mesh.CurrentDecorClass = DecorClass.Cables;
+                        StationCableGenerator.GenerateFaceCables(
+                            face.LocalNormal, face.LocalRight, face.LocalUp,
+                            face.Width, face.Height, face.LocalCenter,
+                            greeblePlacements, mesh,
+                            new System.Random(cableRng.Next()));
+                    }
                 }
             }
 
