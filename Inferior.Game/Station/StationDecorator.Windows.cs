@@ -63,6 +63,67 @@ public static partial class StationDecorator
         };
     }
 
+    // Brief "Absolute Window Sizing": spacing gets a ceiling alongside the existing floor,
+    // so window SIZE stops scaling with face size — count scales with area instead (cols/
+    // rows already derive from face.Width/gridW, so bounding gridW/gridH is the whole fix).
+    // Below ~22m face width neither ceiling binds, so ordinary modules are unaffected by
+    // construction — no mega-module branch needed, the rule is just true everywhere.
+    // Values are an eye-tuned starting point (project convention: Code picks sensible
+    // starts, Timo adjusts by eye), not derived:
+    private const float MinWindowSpacing       = 2f;    // the pre-existing floor, now named
+    private const float MaxWindowSpacingDense  = 4.5f;  // -> ~1.6-2.5m windows across the 3 sizeScale tiers
+    private const float MaxWindowSpacingSparse = 7.5f;  // separate ceiling: a single shared one would
+                                                         // clamp ordinary sparse faces too (e.g. a 24m
+                                                         // cargo face: 8m -> 4.5m spacing) and erase the
+                                                         // deliberate fewer-larger-windows sparse look.
+    private const float MaxWindowSize          = 4.25f; // direct clamp on winW/winH — redundant with the
+                                                         // spacing ceiling in normal cases (the sparse
+                                                         // ceiling's own worst case is 7.5 * 0.55 sizeScale
+                                                         // = 4.125m, so 4.25 never double-clips an ordinary
+                                                         // module — measured, not assumed: an earlier 3.5m
+                                                         // draft DID clip core/industrial/cargo's sparse,
+                                                         // largest-tier windows a further 5-20%, exactly the
+                                                         // "small module visibly changes size" case the brief
+                                                         // says to fix by raising the constant, not
+                                                         // special-casing) but still makes the absolute-size
+                                                         // guarantee explicit rather than emergent, so a future
+                                                         // sizeScale change can't silently reintroduce giant
+                                                         // windows, and still clips mega faces hard (their
+                                                         // cap-widened spacing routinely exceeds 13m).
+    private const int   MaxWindowCountPerFace  = 300;   // safety cap against runaway geometry on very large
+                                                         // faces; binds by widening spacing evenly (see
+                                                         // below), never by truncating mid-grid.
+
+    // Pure grid-sizing math, no rng/mesh side effects — split out so cols/rows/window size
+    // can be measured directly in a test instead of estimated (same GraphicsDevice-free
+    // testable-helper pattern as OffsetPaletteForVariant/SelectVariantIndex/etc. in
+    // StationTextureRegistry). Called once from GenerateWindows, same as before extraction.
+    internal static (float gridW, float gridH, int cols, int rows, float winW, float winH) ComputeWindowGrid(
+        float faceWidth, float faceHeight, bool sparse, float sizeScale)
+    {
+        float gridW = Math.Clamp(faceWidth  / (sparse ? 3f : 5f), MinWindowSpacing, sparse ? MaxWindowSpacingSparse : MaxWindowSpacingDense);
+        float gridH = Math.Clamp(faceHeight / (sparse ? 3f : 4f), MinWindowSpacing, sparse ? MaxWindowSpacingSparse : MaxWindowSpacingDense);
+
+        int cols = Math.Max(1, (int)(faceWidth  / gridW));
+        int rows = Math.Max(1, (int)(faceHeight / gridH));
+
+        // Safety cap: widen spacing evenly (both axes, same factor) rather than truncating
+        // the grid mid-populate, so a capped face still reads as an even distribution.
+        if (cols * rows > MaxWindowCountPerFace)
+        {
+            float widen = MathF.Sqrt((cols * rows) / (float)MaxWindowCountPerFace);
+            gridW *= widen;
+            gridH *= widen;
+            cols   = Math.Max(1, (int)(faceWidth  / gridW));
+            rows   = Math.Max(1, (int)(faceHeight / gridH));
+        }
+
+        float winW = MathF.Min(gridW * sizeScale, MaxWindowSize);
+        float winH = MathF.Min(gridH * sizeScale, MaxWindowSize);
+
+        return (gridW, gridH, cols, rows, winW, winH);
+    }
+
     private static void GenerateWindows(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, StationModuleMesh glassMesh,
         FaceOccupancy occupancy)
@@ -74,15 +135,10 @@ public static partial class StationDecorator
         if (rng.NextDouble() < 0.20) return;  // 20% blank face
 
         bool   sparse    = rng.NextDouble() < 0.30;
-        float  gridW     = MathF.Max(2f, face.Width  / (sparse ? 3f : 5f));
-        float  gridH     = MathF.Max(2f, face.Height / (sparse ? 3f : 4f));
-        double sizeTier  = rng.NextDouble();
-        float  sizeScale = sizeTier < 0.30 ? 0.55f : sizeTier < 0.70 ? 0.45f : 0.35f;
-        float  winW      = gridW * sizeScale;
-        float  winH      = gridH * sizeScale;
+        double sizeTier   = rng.NextDouble();
+        float  sizeScale  = sizeTier < 0.30 ? 0.55f : sizeTier < 0.70 ? 0.45f : 0.35f;
+        var (gridW, gridH, cols, rows, winW, winH) = ComputeWindowGrid(face.Width, face.Height, sparse, sizeScale);
 
-        int cols    = Math.Max(1, (int)(face.Width  / gridW));
-        int rows    = Math.Max(1, (int)(face.Height / gridH));
         float startU = -(cols - 1) * gridW * 0.5f;
         float startV = -(rows - 1) * gridH * 0.5f;
 
