@@ -291,6 +291,234 @@ public sealed class ObjectDesignerEditingTests
         Assert.False(session.IsPreviewStale);
     }
 
+    [Fact]
+    public void Incident_faces_are_stable_ordered_and_do_not_change_selection_when_selected()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.b", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.b", shift: false);
+
+        IReadOnlyList<SemanticHullFaceDto> faces = session.GetIncidentFaces("test.b");
+        bool selected = session.SelectActiveFace("test.face.secondary");
+
+        Assert.Equal(["test.face.sloped", "test.face.secondary"], faces.Select(face => face.Id));
+        Assert.True(selected);
+        Assert.Equal(["test.a", "test.b", "test.off"], session.SelectedVertexIds);
+        Assert.Equal("test.b", session.ActiveVertexId);
+        Assert.Equal("test.face.secondary", session.ActiveFaceId);
+    }
+
+    [Fact]
+    public void Active_face_lifecycle_follows_active_vertex_without_arbitrary_choice()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+
+        session.SelectVertex("test.a", extend: false);
+        Assert.Equal("test.face.sloped", session.ActiveFaceId);
+
+        session.SelectActiveFace("test.face.sloped");
+        session.SelectVertex("test.b", extend: true);
+        Assert.Equal("test.face.sloped", session.ActiveFaceId);
+
+        session.ClearActiveFace();
+        session.SelectVertex("test.b", extend: false);
+        Assert.Null(session.ActiveFaceId);
+
+        session.SelectActiveFace("test.face.secondary");
+        session.SelectVertex("test.off", extend: true);
+        Assert.Null(session.ActiveFaceId);
+    }
+
+    [Fact]
+    public void Active_face_cycles_forward_backward_and_wraps()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertex("test.b", extend: false);
+
+        Assert.True(session.CycleActiveFace(1));
+        Assert.Equal("test.face.sloped", session.ActiveFaceId);
+        Assert.True(session.CycleActiveFace(1));
+        Assert.Equal("test.face.secondary", session.ActiveFaceId);
+        Assert.True(session.CycleActiveFace(1));
+        Assert.Equal("test.face.sloped", session.ActiveFaceId);
+        Assert.True(session.CycleActiveFace(-1));
+        Assert.Equal("test.face.secondary", session.ActiveFaceId);
+
+        session.SelectVertex("test.isolated", extend: false);
+        Assert.False(session.CycleActiveFace(1));
+        Assert.Null(session.ActiveFaceId);
+    }
+
+    [Fact]
+    public void Face_plane_drag_uses_non_axis_aligned_plane_intersection()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.a", shift: false);
+        Assert.True(session.SelectActiveFace("test.face.sloped"));
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
+
+        drag.Apply(session, projection, new Point(60, 40));
+
+        DVec3 delta = session.GetVertexPosition("test.a") - drag.OriginalPositions["test.a"];
+        Assert.InRange(Math.Abs(DVec3.Dot(delta, drag.ActiveFaceNormal!.Value)), 0, 1e-9);
+        AssertDVec3Close(new DVec3(1, 1.5, 1), delta);
+        Assert.NotEqual(0, delta.Y);
+        Assert.NotEqual(0, delta.Z);
+        AssertGroupDelta(session, drag.OriginalPositions, delta);
+    }
+
+    [Fact]
+    public void Captured_face_plane_does_not_recompute_mid_drag()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.b", "test.c"], replace: true);
+        session.BeginVertexDragSelection("test.a", shift: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
+        drag.Apply(session, projection, new Point(60, 40));
+        DVec3 firstDelta = session.GetVertexPosition("test.a") - drag.OriginalPositions["test.a"];
+
+        drag.Apply(session, projection, new Point(70, 30));
+        DVec3 secondDelta = session.GetVertexPosition("test.a") - drag.OriginalPositions["test.a"];
+
+        AssertDVec3Close(new DVec3(1, 1.5, 1), firstDelta);
+        AssertDVec3Close(new DVec3(2, 3, 2), secondDelta);
+        Assert.InRange(Math.Abs(DVec3.Dot(secondDelta, drag.ActiveFaceNormal!.Value)), 0, 1e-9);
+    }
+
+    [Fact]
+    public void Face_drag_without_active_face_blocks_without_mutation_or_command()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertex("test.b", extend: false);
+        session.ClearActiveFace();
+        DVec3 before = session.GetVertexPosition("test.b");
+
+        bool captured = VertexDragOperation.TryCapture(
+            session,
+            EditingConstraintMode.ActiveFacePlane,
+            new Point(50, 50),
+            new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f },
+            new Rectangle(0, 0, 100, 100),
+            out _,
+            out string? failure);
+
+        Assert.False(captured);
+        Assert.Contains("no active face", failure);
+        Assert.Equal(before, session.GetVertexPosition("test.b"));
+        Assert.Equal(0, session.History.Count);
+    }
+
+    [Fact]
+    public void Degenerate_and_edge_on_face_plane_drag_block_safely()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session, includeDegenerate: true);
+        var viewport = new Rectangle(0, 0, 100, 100);
+
+        session.SelectVertex("test.deg.a", extend: false);
+        session.SelectActiveFace("test.face.degenerate");
+        Assert.False(VertexDragOperation.TryCapture(
+            session,
+            EditingConstraintMode.ActiveFacePlane,
+            new Point(50, 50),
+            new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f },
+            viewport,
+            out _,
+            out string? degenerateFailure));
+        Assert.Contains("degenerate", degenerateFailure);
+
+        session.SelectVertex("test.a", extend: false);
+        session.SelectActiveFace("test.face.sloped");
+        Assert.False(VertexDragOperation.TryCapture(
+            session,
+            EditingConstraintMode.ActiveFacePlane,
+            new Point(50, 50),
+            new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f },
+            viewport,
+            out _,
+            out string? edgeFailure));
+        Assert.Contains("edge-on", edgeFailure);
+
+        Assert.True(VertexDragOperation.TryCapture(
+            session,
+            EditingConstraintMode.ActiveFacePlane,
+            new Point(50, 50),
+            new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f },
+            viewport,
+            out VertexDragOperation? drag,
+            out _));
+        Assert.NotNull(drag);
+        Assert.Equal(0, session.History.Count);
+    }
+
+    [Fact]
+    public void Face_plane_undo_redo_and_cancellation_restore_complete_group()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.a", shift: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
+        drag.Apply(session, projection, new Point(60, 40));
+        Dictionary<string, DVec3> after = drag.OriginalPositions.Keys.ToDictionary(id => id, session.GetVertexPosition, StringComparer.Ordinal);
+
+        drag.Restore(session);
+        foreach ((string id, DVec3 before) in drag.OriginalPositions)
+            Assert.Equal(before, session.GetVertexPosition(id));
+
+        session.Execute(new MoveVerticesCommand(drag.OriginalPositions, after));
+        session.Undo();
+        foreach ((string id, DVec3 before) in drag.OriginalPositions)
+            Assert.Equal(before, session.GetVertexPosition(id));
+
+        session.Redo();
+        foreach ((string id, DVec3 position) in after)
+            Assert.Equal(position, session.GetVertexPosition(id));
+        Assert.Equal(1, session.History.Count);
+    }
+
+    [Fact]
+    public void Active_face_overlay_data_contains_face_vertices_and_active_vertex()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertex("test.b", extend: false);
+        session.SelectActiveFace("test.face.sloped");
+
+        ActiveFaceOverlayData overlay = session.GetActiveFaceOverlayData();
+
+        Assert.Equal("test.face.sloped", overlay.ActiveFaceId);
+        Assert.Equal("test.b", overlay.ActiveVertexId);
+        Assert.Equal(session.GetVertexPosition("test.b"), overlay.ActiveVertexPosition);
+        Assert.Equal(
+            new[] { "test.a", "test.b", "test.c", "test.d" }.Select(session.GetVertexPosition).ToArray(),
+            overlay.FaceVertices);
+    }
+
     [Theory]
     [InlineData(ProjectionKind.Top, 10, 20, 30, 4, -6, 14, 20, 36)]
     [InlineData(ProjectionKind.Side, 10, 20, 30, 4, -6, 10, 26, 34)]
@@ -333,6 +561,54 @@ public sealed class ObjectDesignerEditingTests
         Assert.InRange(Math.Abs(actual.Y - expected.Y), 0, tolerance);
         Assert.InRange(Math.Abs(actual.Z - expected.Z), 0, tolerance);
     }
+
+    private static void AddFaceSelectionFixture(ObjectDesignerSession session, bool includeDegenerate = false)
+    {
+        AddVertex(session, "test.a", new DVec3(0, 0, 0));
+        AddVertex(session, "test.b", new DVec3(4, 0, 0));
+        AddVertex(session, "test.c", new DVec3(4, 3, 2));
+        AddVertex(session, "test.d", new DVec3(0, 3, 2));
+        AddVertex(session, "test.e", new DVec3(4, 0, 3));
+        AddVertex(session, "test.off", new DVec3(10, 10, 10));
+        AddVertex(session, "test.isolated", new DVec3(20, 0, 0));
+        AddFace(session, "test.face.sloped", ["test.a", "test.b", "test.c", "test.d"], HullSurfaceRole.PanelSeat, "test-metal");
+        AddFace(session, "test.face.secondary", ["test.b", "test.e", "test.c"], HullSurfaceRole.ServiceSurface, "test-service");
+
+        if (includeDegenerate)
+        {
+            AddVertex(session, "test.deg.a", new DVec3(30, 0, 0));
+            AddVertex(session, "test.deg.b", new DVec3(31, 0, 0));
+            AddVertex(session, "test.deg.c", new DVec3(32, 0, 0));
+            AddFace(session, "test.face.degenerate", ["test.deg.a", "test.deg.b", "test.deg.c"], HullSurfaceRole.PanelSeat, "test-metal");
+        }
+
+        session.RecomputeFaceNormals();
+        session.Rebuild();
+        session.ClearSelection();
+    }
+
+    private static void AddVertex(ObjectDesignerSession session, string id, DVec3 position)
+        => session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto
+        {
+            Id = id,
+            Position = Vec3Dto.From(position),
+        });
+
+    private static void AddFace(
+        ObjectDesignerSession session,
+        string id,
+        IEnumerable<string> vertexIds,
+        HullSurfaceRole role,
+        string materialGroup)
+        => session.Document.Hull.VisualGeometry.Faces.Add(new SemanticHullFaceDto
+        {
+            Id = id,
+            VertexIds = vertexIds.ToList(),
+            Role = role,
+            MaterialGroup = materialGroup,
+            OutwardNormal = Vec3Dto.From(DVec3.UnitY),
+            ContributesToClosedHull = false,
+        });
 
     private sealed class TempAsset : IDisposable
     {

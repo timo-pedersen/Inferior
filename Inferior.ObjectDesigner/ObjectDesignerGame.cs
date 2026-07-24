@@ -59,6 +59,8 @@ public sealed class ObjectDesignerGame : Game
     private TextBox _zBox = null!;
     private Label _titleLabel = null!;
     private Label _selectionLabel = null!;
+    private Button[] _faceButtons = [];
+    private readonly Dictionary<Button, string> _faceButtonIds = [];
     private Label _statusLabel = null!;
     private ChoiceGroup<ProjectionKind> _projectionChoices = null!;
     private ChoiceGroup<EditingConstraintMode> _constraintChoices = null!;
@@ -137,6 +139,14 @@ public sealed class ObjectDesignerGame : Game
             SetProjection(ProjectionKind.Front);
         if (input.IsKeyPressed(Keys.F4))
             _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal;
+        if (input.IsKeyPressed(Keys.G))
+        {
+            if (_session.CycleActiveFace(input.Shift ? -1 : 1))
+                _status = $"Active face: {_session.ActiveFaceId}";
+            else
+                _status = "No incident faces for active vertex.";
+            RefreshUiText();
+        }
 
         if (input.ScrollDelta != 0)
         {
@@ -229,6 +239,7 @@ public sealed class ObjectDesignerGame : Game
                 previewHull,
                 renderScaleOverride: 1.0f,
                 eyePositionWorld: cameraPosition);
+            DrawPerspectiveEditorOverlay(view, projection);
 
             if (_showCargo)
                 DrawCargoPreview(view, projection);
@@ -255,6 +266,41 @@ public sealed class ObjectDesignerGame : Game
             renderer.DrawText(sb, "Preview using last valid hull", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(230, 190, 80));
     }
 
+    private void DrawPerspectiveEditorOverlay(Matrix view, Matrix projection)
+    {
+        ActiveFaceOverlayData overlay = _session.GetActiveFaceOverlayData();
+        IReadOnlyList<DVec3> vertices = overlay.FaceVertices;
+        if (vertices.Count == 0 && overlay.ActiveVertexId is null)
+            return;
+
+        var lines = new List<VertexPositionColor>();
+        if (vertices.Count >= 2)
+        {
+            DVec3 offset = ActiveFaceNormalForOverlay(vertices) * 0.025;
+            for (int i = 0; i < vertices.Count; i++)
+                AddWorldLine(lines, vertices[i] + offset, vertices[(i + 1) % vertices.Count] + offset, new Color(80, 230, 255, 220));
+        }
+
+        if (overlay.ActiveVertexPosition is { } activeVertexPosition)
+            AddWorldCross(lines, activeVertexPosition, 0.35, new Color(255, 255, 80, 255));
+
+        if (lines.Count == 0)
+            return;
+
+        _lineEffect.World = Matrix.Identity;
+        _lineEffect.View = view;
+        _lineEffect.Projection = projection;
+        GraphicsDevice.BlendState = BlendState.AlphaBlend;
+        GraphicsDevice.DepthStencilState = DepthStencilState.None;
+        GraphicsDevice.RasterizerState = RasterizerState.CullNone;
+        foreach (EffectPass pass in _lineEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
+        }
+        GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+    }
+
     private void EnsurePreviewTarget(int width, int height)
     {
         if (_previewTargetTexture is not null
@@ -277,6 +323,7 @@ public sealed class ObjectDesignerGame : Game
         AddGrid(lines, vp);
         if (_showEdges)
             AddFaceEdges(lines, vp);
+        AddActiveFaceEdges(lines, vp);
         if (_showBounds)
             AddBounds(lines, vp);
 
@@ -348,9 +395,19 @@ public sealed class ObjectDesignerGame : Game
             if (vertexId is not null)
             {
                 bool hasDragSelection = _session.BeginVertexDragSelection(vertexId, input.Shift);
-                _vertexDrag = hasDragSelection
-                    ? VertexDragOperation.Capture(_session, _constraintMode, input.MousePosition)
-                    : null;
+                _vertexDrag = null;
+                if (hasDragSelection)
+                {
+                    if (VertexDragOperation.TryCapture(_session, _constraintMode, input.MousePosition, _projection, viewport, out VertexDragOperation? drag, out string? failure))
+                    {
+                        _vertexDrag = drag;
+                        _status = "";
+                    }
+                    else
+                    {
+                        _status = failure ?? "Cannot start vertex drag.";
+                    }
+                }
                 RefreshUiText();
             }
             else
@@ -365,8 +422,15 @@ public sealed class ObjectDesignerGame : Game
 
         if (_vertexDrag is not null && input.LeftHeld && _vertexDrag.OriginalPositions.Count > 0)
         {
-            _vertexDrag.Apply(_session, _projection, input.MousePosition);
-            _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
+            try
+            {
+                _vertexDrag.Apply(_session, _projection, input.MousePosition);
+                _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _status = ex.Message;
+            }
             RefreshUiText();
         }
 
@@ -505,7 +569,7 @@ public sealed class ObjectDesignerGame : Game
             Overflow = OverflowMode.Clip,
         };
         rightGrid.Rows.Add(GridLength.Star());
-        rightGrid.Rows.Add(GridLength.Fixed(310));
+        rightGrid.Rows.Add(GridLength.Fixed(380));
         rightGrid.Columns.Add(GridLength.Star());
         _rootLayout.Add(rightGrid, 1, 1);
 
@@ -522,24 +586,35 @@ public sealed class ObjectDesignerGame : Game
             IsExpanded = true,
         };
         rightGrid.Add(properties, 0, 1);
-        _propertiesPanel = new Panel { Bounds = new Rectangle(0, 0, 330, 270), ContentPadding = 8 };
+        _propertiesPanel = new Panel { Bounds = new Rectangle(0, 0, 330, 340), ContentPadding = 8 };
         properties.Add(_propertiesPanel);
 
         _titleLabel = new Label("", new Rectangle(0, 0, 320, 24));
         _selectionLabel = new Label("", new Rectangle(0, 30, 320, 82)) { FontScale = 0.72f };
         _propertiesPanel.Add(_titleLabel);
         _propertiesPanel.Add(_selectionLabel);
-        _propertiesPanel.Add(new Label("X", new Rectangle(0, 118, 20, 26)));
-        _propertiesPanel.Add(new Label("Y", new Rectangle(0, 151, 20, 26)));
-        _propertiesPanel.Add(new Label("Z", new Rectangle(0, 184, 20, 26)));
-        _xBox = CoordinateBox(24, 115);
-        _yBox = CoordinateBox(24, 148);
-        _zBox = CoordinateBox(24, 181);
+        _faceButtons =
+        [
+            FaceButton(0, 110),
+            FaceButton(0, 132),
+            FaceButton(0, 154),
+            FaceButton(0, 176),
+            FaceButton(0, 198),
+            FaceButton(0, 220),
+        ];
+        foreach (Button faceButton in _faceButtons)
+            _propertiesPanel.Add(faceButton);
+        _propertiesPanel.Add(new Label("X", new Rectangle(0, 250, 20, 26)));
+        _propertiesPanel.Add(new Label("Y", new Rectangle(0, 278, 20, 26)));
+        _propertiesPanel.Add(new Label("Z", new Rectangle(0, 306, 20, 26)));
+        _xBox = CoordinateBox(24, 247);
+        _yBox = CoordinateBox(24, 275);
+        _zBox = CoordinateBox(24, 303);
         _propertiesPanel.Add(_xBox);
         _propertiesPanel.Add(_yBox);
         _propertiesPanel.Add(_zBox);
-        _propertiesPanel.Add(new Label("Diagnostics", new Rectangle(0, 214, 320, 24)) { TextColor = new Color(170, 196, 204) });
-        _validationBlock = new TextBlock { Bounds = new Rectangle(0, 239, 320, 57), FontScale = 0.68f, Padding = 2 };
+        _propertiesPanel.Add(new Label("Diagnostics", new Rectangle(146, 250, 172, 24)) { TextColor = new Color(170, 196, 204) });
+        _validationBlock = new TextBlock { Bounds = new Rectangle(146, 275, 174, 57), FontScale = 0.58f, Padding = 2 };
         _propertiesPanel.Add(_validationBlock);
 
         _statusLabel = new Label("", new Rectangle(0, 0, 1000, 24)) { FontScale = 0.78f };
@@ -571,6 +646,21 @@ public sealed class ObjectDesignerGame : Game
         };
         box.Submitted += _ => TryApplyNumericEdit();
         return box;
+    }
+
+    private Button FaceButton(int x, int y)
+    {
+        var button = new Button("", new Rectangle(x, y, 320, 24)) { FontScale = 0.62f };
+        button.Clicked += clicked =>
+        {
+            string faceId = _faceButtonIds.GetValueOrDefault(clicked, "");
+            if (_session.SelectActiveFace(faceId))
+                _status = $"Active face: {faceId}";
+            else
+                _status = $"Cannot select face: {faceId}";
+            RefreshUiText();
+        };
+        return button;
     }
 
     private void TryApplyNumericEdit()
@@ -628,7 +718,8 @@ public sealed class ObjectDesignerGame : Game
         _titleLabel.Text = $"{_session.HullDefinition.DisplayName}{dirty} ({_session.HullDefinition.HullTypeId})";
         _selectionLabel.Text = _session.ActiveVertexId is null
             ? "No vertex selected"
-            : $"Selected {_session.SelectedVertexIds.Count} vertex/vertices:\n{_session.ActiveVertexId}\nConstraint: {_constraintMode}\nFaces: {IncidentFaceText()}";
+            : $"Selected {_session.SelectedVertexIds.Count} vertex/vertices:\nActive vertex: {_session.ActiveVertexId}\nConstraint: {_constraintMode}\nActive face: {_session.ActiveFaceId ?? "none"}\nFaces (G/Shift+G):";
+        RefreshFaceButtons();
         IEnumerable<AuthoringDiagnostic> diagnostics = _session.Diagnostics.Take(12);
         string validation = _session.Diagnostics.Count == 0
             ? "No validation errors."
@@ -669,6 +760,33 @@ public sealed class ObjectDesignerGame : Game
         return faces.Length == 0 ? "none" : string.Join(", ", faces);
     }
 
+    private void RefreshFaceButtons()
+    {
+        if (_faceButtons.Length == 0)
+            return;
+        IReadOnlyList<SemanticHullFaceDto> faces = _session.ActiveVertexId is null
+            ? []
+            : _session.GetIncidentFaces(_session.ActiveVertexId);
+        for (int i = 0; i < _faceButtons.Length; i++)
+        {
+            Button button = _faceButtons[i];
+            if (i >= faces.Count)
+            {
+                button.Visible = false;
+                button.Enabled = false;
+                _faceButtonIds.Remove(button);
+                button.Text = "";
+                continue;
+            }
+            SemanticHullFaceDto face = faces[i];
+            bool active = string.Equals(face.Id, _session.ActiveFaceId, StringComparison.Ordinal);
+            button.Visible = true;
+            button.Enabled = true;
+            _faceButtonIds[button] = face.Id;
+            button.Text = $"{(active ? "[>] " : "[ ] ")}{face.Id} {face.Role}/{face.MaterialGroup} v{face.VertexIds.Count}";
+        }
+    }
+
     private void AddGrid(List<VertexPositionColor> lines, Rectangle vp)
     {
         for (int i = -20; i <= 20; i++)
@@ -692,6 +810,19 @@ public sealed class ObjectDesignerGame : Game
                     continue;
                 AddScreenLine(lines, _projection.Project(a, vp), _projection.Project(b, vp), colour);
             }
+        }
+    }
+
+    private void AddActiveFaceEdges(List<VertexPositionColor> lines, Rectangle vp)
+    {
+        IReadOnlyList<DVec3> vertices = _session.GetActiveFaceOverlayData().FaceVertices;
+        if (vertices.Count < 2)
+            return;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            Vector2 nudge = pass == 0 ? Vector2.Zero : new Vector2(1, 1);
+            for (int i = 0; i < vertices.Count; i++)
+                AddScreenLine(lines, _projection.Project(vertices[i], vp) + nudge, _projection.Project(vertices[(i + 1) % vertices.Count], vp) + nudge, new Color(80, 230, 255));
         }
     }
 
@@ -721,10 +852,41 @@ public sealed class ObjectDesignerGame : Game
         {
             Vector2 p = _projection.Project(vertex.Position, vp);
             bool selected = _session.SelectedVertexIds.Contains(vertex.Id, StringComparer.Ordinal);
-            int size = selected ? 8 : 5;
-            Color colour = selected ? Color.Yellow : new Color(215, 230, 230);
+            bool active = string.Equals(vertex.Id, _session.ActiveVertexId, StringComparison.Ordinal);
+            int size = active ? 12 : selected ? 8 : 5;
+            Color colour = active ? new Color(80, 230, 255) : selected ? Color.Yellow : new Color(215, 230, 230);
             _spriteBatch.Draw(pixel, new Rectangle((int)p.X - size / 2, (int)p.Y - size / 2, size, size), colour);
         }
+    }
+
+    private static DVec3 ActiveFaceNormalForOverlay(IReadOnlyList<DVec3> vertices)
+    {
+        double x = 0;
+        double y = 0;
+        double z = 0;
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            DVec3 current = vertices[i];
+            DVec3 next = vertices[(i + 1) % vertices.Count];
+            x += (current.Y - next.Y) * (current.Z + next.Z);
+            y += (current.Z - next.Z) * (current.X + next.X);
+            z += (current.X - next.X) * (current.Y + next.Y);
+        }
+        DVec3 normal = new(x, y, z);
+        return normal.LengthSquared <= 1e-12 ? DVec3.Zero : normal.Normalized();
+    }
+
+    private static void AddWorldLine(List<VertexPositionColor> lines, DVec3 a, DVec3 b, Color color)
+    {
+        lines.Add(new VertexPositionColor(a.ToVector3(), color));
+        lines.Add(new VertexPositionColor(b.ToVector3(), color));
+    }
+
+    private static void AddWorldCross(List<VertexPositionColor> lines, DVec3 center, double radius, Color color)
+    {
+        AddWorldLine(lines, center - DVec3.UnitX * radius, center + DVec3.UnitX * radius, color);
+        AddWorldLine(lines, center - DVec3.UnitY * radius, center + DVec3.UnitY * radius, color);
+        AddWorldLine(lines, center - DVec3.UnitZ * radius, center + DVec3.UnitZ * radius, color);
     }
 
     private void DrawSelectionRectangle()
