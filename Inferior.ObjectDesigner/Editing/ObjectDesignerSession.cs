@@ -147,16 +147,13 @@ public sealed class ObjectDesignerSession
         ReconcileActiveFaceForActiveVertex();
     }
 
-    public bool BeginVertexDragSelection(string vertexId, bool shift)
+    public bool BeginVertexDragSelection(string vertexId, bool ctrl)
     {
         if (FindVertex(vertexId) is null)
             throw new KeyNotFoundException($"No semantic vertex '{vertexId}'.");
 
-        if (shift)
-        {
-            ToggleVertexSelection(vertexId);
-            return _selectedVertexIds.Count > 0;
-        }
+        if (ctrl)
+            return false;
 
         if (_selectedVertexIds.Contains(vertexId, StringComparer.Ordinal))
         {
@@ -171,6 +168,7 @@ public sealed class ObjectDesignerSession
 
     public void SelectVertices(IEnumerable<string> vertexIds, bool replace)
     {
+        string? previousActive = ActiveVertexId;
         if (replace)
             _selectedVertexIds.Clear();
         foreach (string vertexId in vertexIds)
@@ -178,7 +176,10 @@ public sealed class ObjectDesignerSession
             if (FindVertex(vertexId) is not null && !_selectedVertexIds.Contains(vertexId, StringComparer.Ordinal))
                 _selectedVertexIds.Add(vertexId);
         }
-        ActiveVertexId = _selectedVertexIds.LastOrDefault();
+        if (previousActive is not null && _selectedVertexIds.Contains(previousActive, StringComparer.Ordinal))
+            ActiveVertexId = previousActive;
+        else
+            ActiveVertexId = null;
         ReconcileActiveFaceForActiveVertex();
     }
 
@@ -186,11 +187,14 @@ public sealed class ObjectDesignerSession
     {
         if (_selectedVertexIds.Remove(vertexId))
         {
-            ActiveVertexId = _selectedVertexIds.LastOrDefault();
+            if (string.Equals(ActiveVertexId, vertexId, StringComparison.Ordinal))
+                ActiveVertexId = null;
             ReconcileActiveFaceForActiveVertex();
             return;
         }
-        SelectVertex(vertexId, extend: true);
+        if (FindVertex(vertexId) is null)
+            throw new KeyNotFoundException($"No semantic vertex '{vertexId}'.");
+        _selectedVertexIds.Add(vertexId);
     }
 
     public IReadOnlyList<SemanticHullFaceDto> GetIncidentFaces(string vertexId)
@@ -293,7 +297,9 @@ public sealed class ObjectDesignerSession
     {
         _selectedVertexIds.RemoveAll(id => FindVertex(id) is null);
         if (ActiveVertexId is not null && FindVertex(ActiveVertexId) is null)
-            ActiveVertexId = _selectedVertexIds.LastOrDefault();
+            ActiveVertexId = null;
+        if (ActiveVertexId is not null && !_selectedVertexIds.Contains(ActiveVertexId, StringComparer.Ordinal))
+            ActiveVertexId = null;
         ReconcileActiveFaceForActiveVertex();
     }
 
@@ -309,7 +315,7 @@ public sealed class ObjectDesignerSession
         if (ActiveFaceId is not null && incident.Any(face => string.Equals(face.Id, ActiveFaceId, StringComparison.Ordinal)))
             return;
 
-        ActiveFaceId = incident.Count == 1 ? incident[0].Id : null;
+        ActiveFaceId = null;
     }
 
     public void RecomputeFaceNormals()

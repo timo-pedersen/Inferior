@@ -391,31 +391,44 @@ public sealed class ObjectDesignerGame : Game
 
         if (input.LeftPressed && viewport.Contains(input.MousePosition))
         {
-            string? vertexId = PickVertex(input.MousePosition, viewport);
+            IReadOnlyList<VertexHitCandidate> candidates = GetVertexHitCandidates(input.MousePosition, viewport);
+            string? vertexId = candidates.FirstOrDefault()?.VertexId;
             if (vertexId is not null)
             {
-                bool hasDragSelection = _session.BeginVertexDragSelection(vertexId, input.Shift);
                 _vertexDrag = null;
-                if (hasDragSelection)
+                if (input.Ctrl)
                 {
-                    if (VertexDragOperation.TryCapture(_session, _constraintMode, input.MousePosition, _projection, viewport, out VertexDragOperation? drag, out string? failure))
+                    _session.ToggleVertexSelection(vertexId);
+                    _status = candidates.Count > 1
+                        ? $"{candidates.Count} vertices overlap here; selected {vertexId}"
+                        : "";
+                }
+                else
+                {
+                    bool hasDragSelection = _session.BeginVertexDragSelection(vertexId, ctrl: false);
+                    if (candidates.Count > 1)
+                        _status = $"{candidates.Count} vertices overlap here; selected {vertexId}";
+                    if (hasDragSelection)
                     {
-                        _vertexDrag = drag;
-                        _status = failure ?? "";
-                    }
-                    else
-                    {
-                        _status = failure ?? "Cannot start vertex drag.";
+                        if (VertexDragOperation.TryCapture(_session, _constraintMode, input.MousePosition, _projection, viewport, out VertexDragOperation? drag, out string? failure))
+                        {
+                            _vertexDrag = drag;
+                            _status = failure ?? _status;
+                        }
+                        else
+                        {
+                            _status = failure ?? "Cannot start vertex drag.";
+                        }
                     }
                 }
                 RefreshUiText();
             }
             else
             {
+                if (input.Ctrl)
+                    return;
                 _rectangleSelecting = true;
                 _selectionStartMouse = input.MousePosition;
-                if (!input.Shift)
-                    _session.ClearSelection();
                 RefreshUiText();
             }
         }
@@ -454,7 +467,7 @@ public sealed class ObjectDesignerGame : Game
             IEnumerable<string> selected = _session.HullDefinition.VisualGeometry!.Vertices
                 .Where(vertex => selection.Contains(_projection.Project(vertex.Position, viewport).ToPoint()))
                 .Select(vertex => vertex.Id);
-            _session.SelectVertices(selected, replace: false);
+            _session.SelectVertices(selected, replace: true);
             _rectangleSelecting = false;
             RefreshUiText();
         }
@@ -487,22 +500,14 @@ public sealed class ObjectDesignerGame : Game
     }
 
     private string? PickVertex(Point mouse, Rectangle viewport)
-    {
-        const float radius = 8f;
-        string? best = null;
-        float bestDistance = radius * radius;
-        foreach (var vertex in _session.HullDefinition.VisualGeometry!.Vertices)
-        {
-            Vector2 screen = _projection.Project(vertex.Position, viewport);
-            float distance = Vector2.DistanceSquared(screen, mouse.ToVector2());
-            if (distance < bestDistance)
-            {
-                bestDistance = distance;
-                best = vertex.Id;
-            }
-        }
-        return best;
-    }
+        => GetVertexHitCandidates(mouse, viewport).FirstOrDefault()?.VertexId;
+
+    private IReadOnlyList<VertexHitCandidate> GetVertexHitCandidates(Point mouse, Rectangle viewport)
+        => OrthographicVertexHitTester.GetVertexHitCandidates(
+            _session.HullDefinition.VisualGeometry!.Vertices,
+            _projection,
+            viewport,
+            mouse);
 
     private void BuildUi()
     {
