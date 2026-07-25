@@ -1,4 +1,5 @@
 using Inferior.Core.Math;
+using Inferior.ObjectDesigner.Controls;
 using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
@@ -59,8 +60,8 @@ public sealed class ObjectDesignerGame : Game
     private TextBox _zBox = null!;
     private Label _titleLabel = null!;
     private Label _selectionLabel = null!;
-    private Button[] _faceButtons = [];
-    private readonly Dictionary<Button, string> _faceButtonIds = [];
+    private IncidentFaceRow[] _faceRows = [];
+    private readonly Dictionary<IncidentFaceRow, string> _faceRowIds = [];
     private Label _statusLabel = null!;
     private ChoiceGroup<ProjectionKind> _projectionChoices = null!;
     private ChoiceGroup<EditingConstraintMode> _constraintChoices = null!;
@@ -437,8 +438,9 @@ public sealed class ObjectDesignerGame : Game
         {
             try
             {
-                _vertexDrag.Apply(_session, _projection, input.MousePosition);
+                _vertexDrag.Apply(_session, _projection, input.MousePosition, input.Shift);
                 _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
+                _status = _vertexDrag.ShiftDragStatus ?? "";
             }
             catch (InvalidOperationException ex)
             {
@@ -591,24 +593,22 @@ public sealed class ObjectDesignerGame : Game
             IsExpanded = true,
         };
         rightGrid.Add(properties, 0, 1);
-        _propertiesPanel = new Panel { Bounds = new Rectangle(0, 0, 330, 340), ContentPadding = 8 };
+        _propertiesPanel = new Panel { Bounds = new Rectangle(0, 0, 330, 340), ContentPadding = 8, Overflow = OverflowMode.Clip };
         properties.Add(_propertiesPanel);
 
-        _titleLabel = new Label("", new Rectangle(0, 0, 320, 24));
-        _selectionLabel = new Label("", new Rectangle(0, 30, 320, 82)) { FontScale = 0.72f };
+        _titleLabel = new Label("", new Rectangle(0, 0, 304, 24));
+        _selectionLabel = new Label("", new Rectangle(0, 28, 304, 58)) { FontScale = 0.58f };
         _propertiesPanel.Add(_titleLabel);
         _propertiesPanel.Add(_selectionLabel);
-        _faceButtons =
+        _faceRows =
         [
-            FaceButton(0, 110),
-            FaceButton(0, 132),
-            FaceButton(0, 154),
-            FaceButton(0, 176),
-            FaceButton(0, 198),
-            FaceButton(0, 220),
+            FaceRow(0, 88),
+            FaceRow(0, 126),
+            FaceRow(0, 164),
+            FaceRow(0, 202),
         ];
-        foreach (Button faceButton in _faceButtons)
-            _propertiesPanel.Add(faceButton);
+        foreach (IncidentFaceRow faceRow in _faceRows)
+            _propertiesPanel.Add(faceRow);
         _propertiesPanel.Add(new Label("X", new Rectangle(0, 250, 20, 26)));
         _propertiesPanel.Add(new Label("Y", new Rectangle(0, 278, 20, 26)));
         _propertiesPanel.Add(new Label("Z", new Rectangle(0, 306, 20, 26)));
@@ -653,19 +653,25 @@ public sealed class ObjectDesignerGame : Game
         return box;
     }
 
-    private Button FaceButton(int x, int y)
+    private IncidentFaceRow FaceRow(int x, int y)
     {
-        var button = new Button("", new Rectangle(x, y, 320, 24)) { FontScale = 0.62f };
-        button.Clicked += clicked =>
+        var row = new IncidentFaceRow { Bounds = new Rectangle(x, y, 304, 36), FontScale = 0.58f };
+        row.Clicked += clicked =>
         {
-            string faceId = _faceButtonIds.GetValueOrDefault(clicked, "");
+            string faceId = _faceRowIds.GetValueOrDefault(clicked, "");
             if (_session.SelectActiveFace(faceId))
                 _status = $"Active face: {faceId}";
             else
                 _status = $"Cannot select face: {faceId}";
             RefreshUiText();
         };
-        return button;
+        row.MouseEnter += hovered =>
+        {
+            if (_faceRowIds.TryGetValue((IncidentFaceRow)hovered, out string? faceId))
+                _status = faceId;
+        };
+        row.MouseLeave += _ => _status = "";
+        return row;
     }
 
     private void TryApplyNumericEdit()
@@ -721,9 +727,11 @@ public sealed class ObjectDesignerGame : Game
     {
         string dirty = _session.IsDirty ? "*" : "";
         _titleLabel.Text = $"{_session.HullDefinition.DisplayName}{dirty} ({_session.HullDefinition.HullTypeId})";
-        _selectionLabel.Text = _session.ActiveVertexId is null
-            ? "No vertex selected"
-            : $"Selected {_session.SelectedVertexIds.Count} vertex/vertices:\nActive vertex: {_session.ActiveVertexId}\nConstraint: {_constraintMode}\nActive face: {_session.ActiveFaceId ?? "none"}\nFaces (G/Shift+G):";
+        _selectionLabel.Text =
+            $"Selected {_session.SelectedVertexIds.Count} vertex/vertices\n"
+            + $"Active vertex\n{_session.ActiveVertexId ?? "None"}\n"
+            + $"Active face\n{_session.ActiveFaceId ?? "None"}\n"
+            + "Incident faces";
         RefreshFaceButtons();
         IEnumerable<AuthoringDiagnostic> diagnostics = _session.Diagnostics.Take(12);
         string validation = _session.Diagnostics.Count == 0
@@ -767,28 +775,32 @@ public sealed class ObjectDesignerGame : Game
 
     private void RefreshFaceButtons()
     {
-        if (_faceButtons.Length == 0)
+        if (_faceRows.Length == 0)
             return;
         IReadOnlyList<SemanticHullFaceDto> faces = _session.ActiveVertexId is null
             ? []
             : _session.GetIncidentFaces(_session.ActiveVertexId);
-        for (int i = 0; i < _faceButtons.Length; i++)
+        for (int i = 0; i < _faceRows.Length; i++)
         {
-            Button button = _faceButtons[i];
+            IncidentFaceRow row = _faceRows[i];
             if (i >= faces.Count)
             {
-                button.Visible = false;
-                button.Enabled = false;
-                _faceButtonIds.Remove(button);
-                button.Text = "";
+                row.Visible = false;
+                row.Enabled = false;
+                _faceRowIds.Remove(row);
+                row.FaceId = "";
+                row.Metadata = "";
+                row.IsActiveFace = false;
                 continue;
             }
             SemanticHullFaceDto face = faces[i];
             bool active = string.Equals(face.Id, _session.ActiveFaceId, StringComparison.Ordinal);
-            button.Visible = true;
-            button.Enabled = true;
-            _faceButtonIds[button] = face.Id;
-            button.Text = $"{(active ? "[>] " : "[ ] ")}{face.Id} {face.Role}/{face.MaterialGroup} v{face.VertexIds.Count}";
+            row.Visible = true;
+            row.Enabled = true;
+            _faceRowIds[row] = face.Id;
+            row.FaceId = face.Id;
+            row.Metadata = IncidentFaceRow.BuildMetadata(face.Role.ToString(), face.MaterialGroup, face.VertexIds.Count);
+            row.IsActiveFace = active;
         }
     }
 

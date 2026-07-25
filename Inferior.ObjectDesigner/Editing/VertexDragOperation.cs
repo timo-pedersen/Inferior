@@ -10,8 +10,16 @@ public enum FaceDragMode
     VisibleLine,
 }
 
+public enum ShiftDragAxis
+{
+    Horizontal,
+    Vertical,
+}
+
 public sealed class VertexDragOperation
 {
+    public const float ShiftLockDeadZonePixels = 4f;
+
     private readonly IReadOnlyDictionary<string, DVec3> _originalPositions;
     private readonly string? _activeVertexId;
     private readonly DVec3 _referencePosition;
@@ -19,6 +27,8 @@ public sealed class VertexDragOperation
     private readonly CapturedFacePlane? _activeFacePlane;
     private readonly DVec3? _facePlaneStartPoint;
     private readonly Point _startMouse;
+    private ShiftDragAxis? _shiftAxis;
+    private bool _shiftOverrideActive;
 
     private VertexDragOperation(
         IReadOnlyDictionary<string, DVec3> originalPositions,
@@ -44,6 +54,16 @@ public sealed class VertexDragOperation
     public DVec3? ActiveFaceNormal => _activeFacePlane?.Normal;
     public FaceDragMode? ActiveFaceDragMode => _activeFacePlane?.Mode;
     public DVec3? ActiveFaceLineDirection => _activeFacePlane?.LineDirection;
+    public ShiftDragAxis? ActiveShiftDragAxis => _shiftOverrideActive ? _shiftAxis : null;
+    public bool IsShiftDragActive => _shiftOverrideActive;
+    public string? ShiftDragStatus => !_shiftOverrideActive
+        ? null
+        : _shiftAxis switch
+        {
+            ShiftDragAxis.Horizontal => "SHIFT LOCK: HORIZONTAL",
+            ShiftDragAxis.Vertical => "SHIFT LOCK: VERTICAL",
+            _ => "SHIFT LOCK: move to choose axis",
+        };
     public EditingConstraintMode ConstraintMode => _constraintMode;
     public Point StartMouse => _startMouse;
 
@@ -156,8 +176,11 @@ public sealed class VertexDragOperation
     }
 
     public IReadOnlyDictionary<string, DVec3> PositionsFor(OrthographicProjection projection, Point mousePosition)
+        => PositionsFor(projection, mousePosition, shiftHeld: false);
+
+    public IReadOnlyDictionary<string, DVec3> PositionsFor(OrthographicProjection projection, Point mousePosition, bool shiftHeld)
     {
-        DVec3 delta = ConstrainedDelta(projection, mousePosition);
+        DVec3 delta = TotalDelta(projection, mousePosition, shiftHeld);
         return _originalPositions.ToDictionary(
             pair => pair.Key,
             pair => pair.Value + delta,
@@ -165,8 +188,11 @@ public sealed class VertexDragOperation
     }
 
     public void Apply(ObjectDesignerSession session, OrthographicProjection projection, Point mousePosition)
+        => Apply(session, projection, mousePosition, shiftHeld: false);
+
+    public void Apply(ObjectDesignerSession session, OrthographicProjection projection, Point mousePosition, bool shiftHeld)
     {
-        foreach ((string vertexId, DVec3 position) in PositionsFor(projection, mousePosition))
+        foreach ((string vertexId, DVec3 position) in PositionsFor(projection, mousePosition, shiftHeld))
             session.SetVertexPosition(vertexId, position, rebuild: false);
         session.RecomputeFaceNormals();
         session.Rebuild();
@@ -180,7 +206,17 @@ public sealed class VertexDragOperation
         session.Rebuild();
     }
 
-    private DVec3 ConstrainedDelta(OrthographicProjection projection, Point mousePosition)
+    private DVec3 TotalDelta(OrthographicProjection projection, Point mousePosition, bool shiftHeld)
+    {
+        _shiftOverrideActive = shiftHeld;
+        if (shiftHeld)
+            return ShiftOverrideDelta(projection, mousePosition);
+
+        _shiftAxis = null;
+        return PersistentConstraintDelta(projection, mousePosition);
+    }
+
+    private DVec3 PersistentConstraintDelta(OrthographicProjection projection, Point mousePosition)
     {
         Vector2 screenDelta = (mousePosition - _startMouse).ToVector2();
         DVec3 rawDelta = projection.ApplyScreenDelta(_referencePosition, screenDelta) - _referencePosition;
@@ -192,6 +228,25 @@ public sealed class VertexDragOperation
             EditingConstraintMode.ActiveFacePlane => FacePlaneDelta(projection, mousePosition),
             _ => rawDelta,
         };
+    }
+
+    private DVec3 ShiftOverrideDelta(OrthographicProjection projection, Point mousePosition)
+    {
+        Vector2 screenDelta = (mousePosition - _startMouse).ToVector2();
+        if (screenDelta.LengthSquared() < ShiftLockDeadZonePixels * ShiftLockDeadZonePixels)
+        {
+            _shiftAxis = null;
+            return DVec3.Zero;
+        }
+
+        _shiftAxis = Math.Abs(screenDelta.X) >= Math.Abs(screenDelta.Y)
+            ? ShiftDragAxis.Horizontal
+            : ShiftDragAxis.Vertical;
+
+        Vector2 lockedDelta = _shiftAxis == ShiftDragAxis.Horizontal
+            ? new Vector2(screenDelta.X, 0)
+            : new Vector2(0, screenDelta.Y);
+        return projection.ScreenDeltaToWorldPlaneDelta(lockedDelta);
     }
 
     private DVec3 FacePlaneDelta(OrthographicProjection projection, Point mousePosition)

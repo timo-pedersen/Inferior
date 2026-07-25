@@ -2,7 +2,9 @@ using System.Text.Json;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Hull.Authoring;
+using Inferior.ObjectDesigner.Controls;
 using Inferior.ObjectDesigner.Editing;
+using Inferior.UI;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -721,6 +723,202 @@ public sealed class ObjectDesignerEditingTests
         Assert.Equal(new DVec3(expectedX, expectedY, expectedZ), edited);
     }
 
+    [Theory]
+    [InlineData(ProjectionKind.Top, true, 1, 0, 0)]
+    [InlineData(ProjectionKind.Top, false, 0, 0, 1)]
+    [InlineData(ProjectionKind.Side, true, 0, 0, 1)]
+    [InlineData(ProjectionKind.Side, false, 0, 1, 0)]
+    [InlineData(ProjectionKind.Front, true, 1, 0, 0)]
+    [InlineData(ProjectionKind.Front, false, 0, 1, 0)]
+    public void Shift_drag_lock_uses_projection_view_axes(
+        ProjectionKind kind,
+        bool horizontal,
+        double expectedX,
+        double expectedY,
+        double expectedZ)
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        string id = FirstVertexIds(session, 1)[0];
+        session.SelectVertex(id, extend: false);
+        var projection = new OrthographicProjection { Kind = kind, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
+
+        Point mouse = horizontal ? new Point(10, 2) : new Point(2, -10);
+        DVec3 delta = DeltaFor(drag, projection, id, mouse, shiftHeld: true);
+
+        Assert.Equal(horizontal ? ShiftDragAxis.Horizontal : ShiftDragAxis.Vertical, drag.ActiveShiftDragAxis);
+        AssertDVec3Close(new DVec3(expectedX, expectedY, expectedZ), delta);
+    }
+
+    [Fact]
+    public void Shift_drag_axis_choice_dead_zone_tie_and_continuous_switch_are_deterministic()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        string id = FirstVertexIds(session, 1)[0];
+        session.SelectVertex(id, extend: false);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+
+        VertexDragOperation deadZone = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
+        AssertDVec3Close(DVec3.Zero, DeltaFor(deadZone, projection, id, new Point(3, 0), shiftHeld: true));
+        Assert.Null(deadZone.ActiveShiftDragAxis);
+        Assert.Equal("SHIFT LOCK: move to choose axis", deadZone.ShiftDragStatus);
+
+        VertexDragOperation tie = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
+        AssertDVec3Close(new DVec3(0.5, 0, 0), DeltaFor(tie, projection, id, new Point(5, -5), shiftHeld: true));
+        Assert.Equal(ShiftDragAxis.Horizontal, tie.ActiveShiftDragAxis);
+
+        VertexDragOperation switching = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
+        DeltaFor(switching, projection, id, new Point(10, -2), shiftHeld: true);
+        DVec3 crossed = DeltaFor(switching, projection, id, new Point(2, -30), shiftHeld: true);
+
+        Assert.Equal(ShiftDragAxis.Vertical, switching.ActiveShiftDragAxis);
+        AssertDVec3Close(new DVec3(0, 0, 3), crossed);
+    }
+
+    [Fact]
+    public void Shift_drag_uses_original_drag_origin_and_persistent_constraint_resumes()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        string id = FirstVertexIds(session, 1)[0];
+        session.SelectVertex(id, extend: false);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
+
+        DVec3 beforeShift = DeltaFor(drag, projection, id, new Point(20, -10), shiftHeld: false);
+        DVec3 shiftPressed = DeltaFor(drag, projection, id, new Point(20, -10), shiftHeld: true);
+        DVec3 shifted = DeltaFor(drag, projection, id, new Point(100, -20), shiftHeld: true);
+        DVec3 shiftReleased = DeltaFor(drag, projection, id, new Point(100, -20), shiftHeld: false);
+        DVec3 resumed = DeltaFor(drag, projection, id, new Point(110, -30), shiftHeld: false);
+
+        AssertDVec3Close(new DVec3(2, 0, 1), beforeShift);
+        AssertDVec3Close(new DVec3(2, 0, 0), shiftPressed);
+        AssertDVec3Close(new DVec3(10, 0, 0), shifted);
+        AssertDVec3Close(new DVec3(10, 0, 2), shiftReleased);
+        AssertDVec3Close(new DVec3(11, 0, 3), resumed);
+    }
+
+    [Fact]
+    public void Shift_drag_overrides_axis_constraint_temporarily_then_resumes_it()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        string id = FirstVertexIds(session, 1)[0];
+        session.SelectVertex(id, extend: false);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.AxisX, Point.Zero);
+
+        DVec3 beforeShift = DeltaFor(drag, projection, id, new Point(20, -10), shiftHeld: false);
+        DVec3 shiftPressed = DeltaFor(drag, projection, id, new Point(20, -10), shiftHeld: true);
+        DVec3 shifted = DeltaFor(drag, projection, id, new Point(20, -30), shiftHeld: true);
+        DVec3 shiftReleased = DeltaFor(drag, projection, id, new Point(20, -30), shiftHeld: false);
+        DVec3 resumed = DeltaFor(drag, projection, id, new Point(30, -40), shiftHeld: false);
+
+        AssertDVec3Close(new DVec3(2, 0, 0), beforeShift);
+        AssertDVec3Close(new DVec3(2, 0, 0), shiftPressed);
+        AssertDVec3Close(new DVec3(0, 0, 3), shifted);
+        AssertDVec3Close(new DVec3(2, 0, 0), shiftReleased);
+        AssertDVec3Close(new DVec3(3, 0, 0), resumed);
+        Assert.Equal(EditingConstraintMode.AxisX, drag.ConstraintMode);
+    }
+
+    [Fact]
+    public void Shift_drag_transitions_preserve_face_plane_and_visible_line_resume()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession planeSession = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(planeSession);
+        planeSession.SelectVertices(["test.a", "test.off"], replace: true);
+        planeSession.BeginVertexDragSelection("test.a", ctrl: false);
+        planeSession.SelectActiveFace("test.face.sloped");
+        var top = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation planeDrag = VertexDragOperation.Capture(planeSession, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), top, viewport);
+
+        DVec3 planeBeforeShift = DeltaFor(planeDrag, top, "test.a", new Point(60, 40), shiftHeld: false);
+        DVec3 planeShiftPressed = DeltaFor(planeDrag, top, "test.a", new Point(60, 40), shiftHeld: true);
+        DVec3 planeShiftReleased = DeltaFor(planeDrag, top, "test.a", new Point(70, 30), shiftHeld: false);
+        DVec3 planeResumed = DeltaFor(planeDrag, top, "test.a", new Point(80, 20), shiftHeld: false);
+
+        AssertDVec3Close(new DVec3(1, 1.5, 1), planeBeforeShift);
+        AssertDVec3Close(new DVec3(1, 0, 0), planeShiftPressed);
+        AssertDVec3Close(new DVec3(2, 3, 2), planeShiftReleased);
+        AssertDVec3Close(new DVec3(3, 4.5, 3), planeResumed);
+
+        ObjectDesignerSession lineSession = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(lineSession);
+        lineSession.SelectVertices(["test.a", "test.off"], replace: true);
+        lineSession.BeginVertexDragSelection("test.a", ctrl: false);
+        lineSession.SelectActiveFace("test.face.sloped");
+        var side = new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f };
+        VertexDragOperation lineDrag = VertexDragOperation.Capture(lineSession, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), side, viewport);
+
+        DVec3 lineBeforeShift = DeltaFor(lineDrag, side, "test.a", new Point(60, 40), shiftHeld: false);
+        DVec3 lineShiftPressed = DeltaFor(lineDrag, side, "test.a", new Point(60, 40), shiftHeld: true);
+        DVec3 lineShiftReleased = DeltaFor(lineDrag, side, "test.a", new Point(70, 30), shiftHeld: false);
+
+        Assert.Equal(FaceDragMode.VisibleLine, lineDrag.ActiveFaceDragMode);
+        AssertDVec3Close(new DVec3(0, 1.1538461538461537, 0.7692307692307693), lineBeforeShift);
+        AssertDVec3Close(new DVec3(0, 0, 1), lineShiftPressed);
+        AssertDVec3Close(new DVec3(0, 2.3076923076923075, 1.5384615384615385), lineShiftReleased);
+    }
+
+    [Fact]
+    public void Shift_drag_preserves_selection_active_face_group_delta_and_history()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.b", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.a", ctrl: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
+
+        drag.Apply(session, projection, new Point(20, -10), shiftHeld: false);
+        drag.Apply(session, projection, new Point(100, -20), shiftHeld: true);
+        drag.Apply(session, projection, new Point(110, -30), shiftHeld: false);
+        Dictionary<string, DVec3> after = drag.OriginalPositions.Keys.ToDictionary(id => id, session.GetVertexPosition, StringComparer.Ordinal);
+
+        Assert.Equal(["test.a", "test.b", "test.off"], session.SelectedVertexIds);
+        Assert.Equal("test.a", session.ActiveVertexId);
+        Assert.Equal("test.face.sloped", session.ActiveFaceId);
+        AssertGroupDelta(session, drag.OriginalPositions, new DVec3(11, 0, 3));
+
+        drag.Restore(session);
+        session.Execute(new MoveVerticesCommand(drag.OriginalPositions, after));
+        Assert.Equal(1, session.History.Count);
+        session.Undo();
+        foreach ((string vertexId, DVec3 before) in drag.OriginalPositions)
+            Assert.Equal(before, session.GetVertexPosition(vertexId));
+        session.Redo();
+        foreach ((string vertexId, DVec3 position) in after)
+            Assert.Equal(position, session.GetVertexPosition(vertexId));
+    }
+
+    [Fact]
+    public void Incident_face_row_composes_two_lines_and_uses_full_hit_bounds()
+    {
+        var panel = new Inferior.UI.Controls.Panel { Bounds = new Rectangle(300, 20, 330, 340), ContentPadding = 8, Overflow = OverflowMode.Clip };
+        var row = new IncidentFaceRow
+        {
+            Bounds = new Rectangle(0, 88, 304, 36),
+            FaceId = "beren.top.platform.face.with.a.very.long.authored.identifier",
+            Metadata = IncidentFaceRow.BuildMetadata("PanelSeat", "panel-exterior", 9),
+            IsActiveFace = true,
+        };
+        panel.Add(row);
+
+        Assert.Equal("PanelSeat / panel-exterior / 9 vertices", row.Metadata);
+        Assert.DoesNotContain("beren.vertex", row.Metadata);
+        Assert.True(panel.ContentBounds.Contains(row.AbsoluteBounds.Left, row.AbsoluteBounds.Top));
+        Assert.True(panel.ContentBounds.Contains(row.AbsoluteBounds.Right - 1, row.AbsoluteBounds.Bottom - 1));
+        Assert.True(row.HitTest(new Point(row.AbsoluteBounds.Right - 2, row.AbsoluteBounds.Bottom - 2)));
+        Assert.Equal(36, row.Bounds.Height);
+    }
+
     [Fact]
     public void Overlapping_vertex_hit_candidates_are_deterministic_and_pick_first_candidate()
     {
@@ -773,6 +971,14 @@ public sealed class ObjectDesignerEditingTests
         foreach ((string id, DVec3 position) in before)
             AssertDVec3Close(expectedDelta, session.GetVertexPosition(id) - position);
     }
+
+    private static DVec3 DeltaFor(
+        VertexDragOperation drag,
+        OrthographicProjection projection,
+        string vertexId,
+        Point mouse,
+        bool shiftHeld)
+        => drag.PositionsFor(projection, mouse, shiftHeld)[vertexId] - drag.OriginalPositions[vertexId];
 
     private static void AssertDVec3Close(DVec3 expected, DVec3 actual, double tolerance = 1e-9)
     {
