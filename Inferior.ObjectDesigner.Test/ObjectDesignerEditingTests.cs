@@ -368,6 +368,7 @@ public sealed class ObjectDesignerEditingTests
         var viewport = new Rectangle(0, 0, 100, 100);
         VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
 
+        Assert.Equal(FaceDragMode.Plane, drag.ActiveFaceDragMode);
         drag.Apply(session, projection, new Point(60, 40));
 
         DVec3 delta = session.GetVertexPosition("test.a") - drag.OriginalPositions["test.a"];
@@ -427,7 +428,79 @@ public sealed class ObjectDesignerEditingTests
     }
 
     [Fact]
-    public void Degenerate_and_edge_on_face_plane_drag_block_safely()
+    public void Edge_on_face_plane_drag_uses_visible_intersection_line()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.a", shift: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+
+        bool captured = VertexDragOperation.TryCapture(
+            session,
+            EditingConstraintMode.ActiveFacePlane,
+            new Point(50, 50),
+            projection,
+            viewport,
+            out VertexDragOperation? drag,
+            out string? message);
+
+        Assert.True(captured);
+        Assert.NotNull(drag);
+        Assert.Contains("edge-on", message);
+        Assert.Equal(FaceDragMode.VisibleLine, drag.ActiveFaceDragMode);
+        DVec3 line = drag.ActiveFaceLineDirection!.Value;
+        drag.Apply(session, projection, new Point(60, 40));
+
+        DVec3 delta = session.GetVertexPosition("test.a") - drag.OriginalPositions["test.a"];
+        Assert.True(delta.Length > 1e-9);
+        Assert.InRange(Math.Abs(DVec3.Dot(delta, drag.ActiveFaceNormal!.Value)), 0, 1e-9);
+        Assert.InRange(Math.Abs(DVec3.Dot(delta, projection.ViewDirection)), 0, 1e-9);
+        Assert.InRange((delta - line * DVec3.Dot(delta, line)).Length, 0, 1e-9);
+        AssertGroupDelta(session, drag.OriginalPositions, delta);
+    }
+
+    [Fact]
+    public void Edge_on_face_plane_drag_ignores_perpendicular_screen_motion()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertex("test.a", extend: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
+
+        drag.Apply(session, projection, new Point(80, 70));
+
+        DVec3 delta = session.GetVertexPosition("test.a") - drag.OriginalPositions["test.a"];
+        Assert.InRange(delta.Length, 0, 1e-9);
+    }
+
+    [Fact]
+    public void Near_edge_on_face_plane_drag_chooses_visible_line_mode()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddNearEdgeOnFaceFixture(session);
+        session.SelectVertex("test.near.a", extend: false);
+        session.SelectActiveFace("test.face.near-edge");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
+
+        Assert.Equal(FaceDragMode.VisibleLine, drag.ActiveFaceDragMode);
+        double viewDot = Math.Abs(DVec3.Dot(drag.ActiveFaceNormal!.Value, projection.ViewDirection));
+        Assert.InRange(viewDot, 0, OrthographicProjection.FacePlaneLineModeEpsilon);
+    }
+
+    [Fact]
+    public void Degenerate_face_plane_drag_blocks_safely()
     {
         using TempAsset asset = TempAsset.FromBeren();
         ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
@@ -448,16 +521,6 @@ public sealed class ObjectDesignerEditingTests
 
         session.SelectVertex("test.a", extend: false);
         session.SelectActiveFace("test.face.sloped");
-        Assert.False(VertexDragOperation.TryCapture(
-            session,
-            EditingConstraintMode.ActiveFacePlane,
-            new Point(50, 50),
-            new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f },
-            viewport,
-            out _,
-            out string? edgeFailure));
-        Assert.Contains("edge-on", edgeFailure);
-
         Assert.True(VertexDragOperation.TryCapture(
             session,
             EditingConstraintMode.ActiveFacePlane,
@@ -468,6 +531,36 @@ public sealed class ObjectDesignerEditingTests
             out _));
         Assert.NotNull(drag);
         Assert.Equal(0, session.History.Count);
+    }
+
+    [Fact]
+    public void Edge_on_face_plane_undo_redo_and_cancellation_restore_complete_group()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.a", shift: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport);
+        drag.Apply(session, projection, new Point(60, 40));
+        Dictionary<string, DVec3> after = drag.OriginalPositions.Keys.ToDictionary(id => id, session.GetVertexPosition, StringComparer.Ordinal);
+
+        drag.Restore(session);
+        foreach ((string id, DVec3 before) in drag.OriginalPositions)
+            Assert.Equal(before, session.GetVertexPosition(id));
+
+        session.Execute(new MoveVerticesCommand(drag.OriginalPositions, after));
+        session.Undo();
+        foreach ((string id, DVec3 before) in drag.OriginalPositions)
+            Assert.Equal(before, session.GetVertexPosition(id));
+
+        session.Redo();
+        foreach ((string id, DVec3 position) in after)
+            Assert.Equal(position, session.GetVertexPosition(id));
+        Assert.Equal(1, session.History.Count);
     }
 
     [Fact]
@@ -582,6 +675,18 @@ public sealed class ObjectDesignerEditingTests
             AddFace(session, "test.face.degenerate", ["test.deg.a", "test.deg.b", "test.deg.c"], HullSurfaceRole.PanelSeat, "test-metal");
         }
 
+        session.RecomputeFaceNormals();
+        session.Rebuild();
+        session.ClearSelection();
+    }
+
+    private static void AddNearEdgeOnFaceFixture(ObjectDesignerSession session)
+    {
+        AddVertex(session, "test.near.a", new DVec3(0, 0, 0));
+        AddVertex(session, "test.near.b", new DVec3(4, 0, -0.0006666666666666666));
+        AddVertex(session, "test.near.c", new DVec3(4, 3, 1.9993333333333334));
+        AddVertex(session, "test.near.d", new DVec3(0, 3, 2));
+        AddFace(session, "test.face.near-edge", ["test.near.a", "test.near.b", "test.near.c", "test.near.d"], HullSurfaceRole.PanelSeat, "test-metal");
         session.RecomputeFaceNormals();
         session.Rebuild();
         session.ClearSelection();

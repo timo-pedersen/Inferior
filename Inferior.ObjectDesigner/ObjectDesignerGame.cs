@@ -401,7 +401,7 @@ public sealed class ObjectDesignerGame : Game
                     if (VertexDragOperation.TryCapture(_session, _constraintMode, input.MousePosition, _projection, viewport, out VertexDragOperation? drag, out string? failure))
                     {
                         _vertexDrag = drag;
-                        _status = "";
+                        _status = failure ?? "";
                     }
                     else
                     {

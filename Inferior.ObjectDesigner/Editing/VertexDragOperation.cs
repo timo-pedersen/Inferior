@@ -4,6 +4,12 @@ using Microsoft.Xna.Framework;
 
 namespace Inferior.ObjectDesigner.Editing;
 
+public enum FaceDragMode
+{
+    Plane,
+    VisibleLine,
+}
+
 public sealed class VertexDragOperation
 {
     private readonly IReadOnlyDictionary<string, DVec3> _originalPositions;
@@ -36,6 +42,8 @@ public sealed class VertexDragOperation
     public string? ActiveVertexId => _activeVertexId;
     public string? ActiveFaceId => _activeFacePlane?.FaceId;
     public DVec3? ActiveFaceNormal => _activeFacePlane?.Normal;
+    public FaceDragMode? ActiveFaceDragMode => _activeFacePlane?.Mode;
+    public DVec3? ActiveFaceLineDirection => _activeFacePlane?.LineDirection;
     public EditingConstraintMode ConstraintMode => _constraintMode;
     public Point StartMouse => _startMouse;
 
@@ -68,6 +76,7 @@ public sealed class VertexDragOperation
             : originalPositions.Values.FirstOrDefault();
         CapturedFacePlane? activeFacePlane = null;
         DVec3? facePlaneStartPoint = null;
+        string? captureMessage = null;
 
         if (constraintMode == EditingConstraintMode.ActiveFacePlane)
         {
@@ -89,13 +98,49 @@ public sealed class VertexDragOperation
                 return false;
             }
             CapturedFacePlane plane = activeFacePlane ?? throw new InvalidOperationException("Face plane capture did not return a plane.");
-            if (!projection.TryIntersectScreenRayWithPlane(startMouse, viewport, plane.Origin, plane.Normal, out DVec3 startPoint))
+            double viewDot = Math.Abs(DVec3.Dot(plane.Normal, projection.ViewDirection));
+            if (viewDot < OrthographicProjection.FacePlaneLineModeEpsilon)
             {
-                operation = null;
-                failure = "Active face is edge-on in the current 2D view. Switch Top, Side, or Front view.";
-                return false;
+                DVec3 lineDirection = DVec3.Cross(plane.Normal, projection.ViewDirection);
+                if (lineDirection.LengthSquared <= 1e-12)
+                {
+                    operation = null;
+                    failure = "Cannot use Face Plane: active face is degenerate.";
+                    return false;
+                }
+
+                activeFacePlane = plane with
+                {
+                    Mode = FaceDragMode.VisibleLine,
+                    ViewDirection = projection.ViewDirection,
+                    ViewHorizontal = projection.HorizontalAxis,
+                    ViewVertical = projection.VerticalAxis,
+                    WorldUnitsPerPixel = projection.WorldUnitsPerPixel,
+                    PanPixels = projection.PanPixels,
+                    LineDirection = lineDirection.Normalized(),
+                };
+                facePlaneStartPoint = null;
+                captureMessage = "Active face is edge-on; movement is constrained to its visible line.";
             }
-            facePlaneStartPoint = startPoint;
+            else
+            {
+                if (!projection.TryIntersectScreenRayWithPlane(startMouse, viewport, plane.Origin, plane.Normal, out DVec3 startPoint))
+                {
+                    operation = null;
+                    failure = "Cannot use Face Plane: projection bounds are unavailable.";
+                    return false;
+                }
+                activeFacePlane = plane with
+                {
+                    Mode = FaceDragMode.Plane,
+                    ViewDirection = projection.ViewDirection,
+                    ViewHorizontal = projection.HorizontalAxis,
+                    ViewVertical = projection.VerticalAxis,
+                    WorldUnitsPerPixel = projection.WorldUnitsPerPixel,
+                    PanPixels = projection.PanPixels,
+                };
+                facePlaneStartPoint = startPoint;
+            }
         }
 
         operation = new VertexDragOperation(
@@ -106,7 +151,7 @@ public sealed class VertexDragOperation
             activeFacePlane,
             facePlaneStartPoint,
             startMouse);
-        failure = null;
+        failure = captureMessage;
         return true;
     }
 
@@ -151,11 +196,44 @@ public sealed class VertexDragOperation
 
     private DVec3 FacePlaneDelta(OrthographicProjection projection, Point mousePosition)
     {
-        if (_activeFacePlane is null || _facePlaneStartPoint is null)
+        if (_activeFacePlane is null)
             throw new InvalidOperationException("Cannot use Face Plane: no active face plane was captured.");
-        if (!projection.TryIntersectScreenRayWithPlane(mousePosition, _activeFacePlane.Viewport, _activeFacePlane.Origin, _activeFacePlane.Normal, out DVec3 currentPoint))
-            throw new InvalidOperationException("Active face is edge-on in the current 2D view. Switch Top, Side, or Front view.");
+        if (_activeFacePlane.Mode == FaceDragMode.VisibleLine)
+            return VisibleLineDelta(mousePosition);
+
+        if (_facePlaneStartPoint is null)
+            throw new InvalidOperationException("Cannot use Face Plane: no active face plane start point was captured.");
+        if (!TryIntersectCapturedScreenRayWithPlane(mousePosition, _activeFacePlane, out DVec3 currentPoint))
+            throw new InvalidOperationException("Cannot use Face Plane: captured plane movement became unstable.");
         return currentPoint - _facePlaneStartPoint.Value;
+    }
+
+    private static bool TryIntersectCapturedScreenRayWithPlane(Point mouse, CapturedFacePlane plane, out DVec3 point)
+    {
+        double a = (mouse.X - plane.Viewport.X - plane.Viewport.Width * 0.5 - plane.PanPixels.X) * plane.WorldUnitsPerPixel;
+        double b = -(mouse.Y - plane.Viewport.Y - plane.Viewport.Height * 0.5 - plane.PanPixels.Y) * plane.WorldUnitsPerPixel;
+        DVec3 rayOrigin = plane.ViewHorizontal * a + plane.ViewVertical * b;
+        double denom = DVec3.Dot(plane.ViewDirection, plane.Normal);
+        if (Math.Abs(denom) < OrthographicProjection.FacePlaneLineModeEpsilon)
+        {
+            point = DVec3.Zero;
+            return false;
+        }
+
+        double t = DVec3.Dot(plane.Origin - rayOrigin, plane.Normal) / denom;
+        point = rayOrigin + plane.ViewDirection * t;
+        return double.IsFinite(point.X) && double.IsFinite(point.Y) && double.IsFinite(point.Z);
+    }
+
+    private DVec3 VisibleLineDelta(Point mousePosition)
+    {
+        if (_activeFacePlane is null || _activeFacePlane.LineDirection is not { } lineDirection)
+            throw new InvalidOperationException("Cannot use Face Plane: no visible line direction was captured.");
+        Vector2 screenDelta = (mousePosition - _startMouse).ToVector2();
+        double a = screenDelta.X * _activeFacePlane.WorldUnitsPerPixel;
+        double b = -screenDelta.Y * _activeFacePlane.WorldUnitsPerPixel;
+        DVec3 mouseWorldDelta = _activeFacePlane.ViewHorizontal * a + _activeFacePlane.ViewVertical * b;
+        return lineDirection * DVec3.Dot(mouseWorldDelta, lineDirection);
     }
 
     private static bool TryCaptureFacePlane(
@@ -194,7 +272,18 @@ public sealed class VertexDragOperation
             centroid += position;
         centroid /= positions.Count;
 
-        plane = new CapturedFacePlane(face.Id, centroid, normal.Normalized(), viewport);
+        plane = new CapturedFacePlane(
+            face.Id,
+            centroid,
+            normal.Normalized(),
+            viewport,
+            FaceDragMode.Plane,
+            DVec3.Zero,
+            DVec3.Zero,
+            DVec3.Zero,
+            0,
+            Vector2.Zero,
+            null);
         failure = null;
         return true;
     }
@@ -215,5 +304,16 @@ public sealed class VertexDragOperation
         return new DVec3(x, y, z);
     }
 
-    private sealed record CapturedFacePlane(string FaceId, DVec3 Origin, DVec3 Normal, Rectangle Viewport);
+    private sealed record CapturedFacePlane(
+        string FaceId,
+        DVec3 Origin,
+        DVec3 Normal,
+        Rectangle Viewport,
+        FaceDragMode Mode,
+        DVec3 ViewDirection,
+        DVec3 ViewHorizontal,
+        DVec3 ViewVertical,
+        double WorldUnitsPerPixel,
+        Vector2 PanPixels,
+        DVec3? LineDirection);
 }

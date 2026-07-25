@@ -5,7 +5,7 @@ namespace Inferior.ObjectDesigner.Editing;
 
 public sealed class OrthographicProjection
 {
-    public const double RayPlaneParallelEpsilon = 1e-6;
+    public const double FacePlaneLineModeEpsilon = 1e-3;
 
     public ProjectionKind Kind { get; set; } = ProjectionKind.Top;
     public float PixelsPerMeter { get; set; } = 28.0f;
@@ -56,6 +56,42 @@ public sealed class OrthographicProjection
         _ => throw new ArgumentOutOfRangeException(nameof(Kind)),
     };
 
+    public DVec3 ViewDirection => Kind switch
+    {
+        ProjectionKind.Top => DVec3.UnitY,
+        ProjectionKind.Side => DVec3.UnitX,
+        ProjectionKind.Front => DVec3.UnitZ,
+        _ => throw new ArgumentOutOfRangeException(nameof(Kind)),
+    };
+
+    public DVec3 HorizontalAxis => Kind switch
+    {
+        ProjectionKind.Top => DVec3.UnitX,
+        ProjectionKind.Side => DVec3.UnitZ,
+        ProjectionKind.Front => DVec3.UnitX,
+        _ => throw new ArgumentOutOfRangeException(nameof(Kind)),
+    };
+
+    public DVec3 VerticalAxis => Kind switch
+    {
+        ProjectionKind.Top => DVec3.UnitZ,
+        ProjectionKind.Side => DVec3.UnitY,
+        ProjectionKind.Front => DVec3.UnitY,
+        _ => throw new ArgumentOutOfRangeException(nameof(Kind)),
+    };
+
+    public double WorldUnitsPerPixel => 1.0 / PixelsPerMeter;
+
+    public DVec3 ScreenDeltaToWorldPlaneDelta(Point startMouse, Point mousePosition)
+        => ScreenDeltaToWorldPlaneDelta((mousePosition - startMouse).ToVector2());
+
+    public DVec3 ScreenDeltaToWorldPlaneDelta(Vector2 screenDelta)
+    {
+        double a = screenDelta.X * WorldUnitsPerPixel;
+        double b = -screenDelta.Y * WorldUnitsPerPixel;
+        return HorizontalAxis * a + VerticalAxis * b;
+    }
+
     public (DVec3 Origin, DVec3 Direction) RayFromScreen(Point mouse, Rectangle viewport)
     {
         Vector2 axes = ScreenToProjectionAxes(mouse, viewport);
@@ -77,7 +113,7 @@ public sealed class OrthographicProjection
     {
         (DVec3 rayOrigin, DVec3 rayDirection) = RayFromScreen(mouse, viewport);
         double denom = DVec3.Dot(rayDirection, planeNormal);
-        if (Math.Abs(denom) < RayPlaneParallelEpsilon)
+        if (Math.Abs(denom) < FacePlaneLineModeEpsilon)
         {
             point = DVec3.Zero;
             return false;
