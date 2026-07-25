@@ -31,21 +31,17 @@ public static partial class StationDecorator
 
     private static FaceInfo[] ComputeFaces(PlacedModule mod)
     {
-        // Custom-mesh modules: derive face info from the hull mesh geometry.
-        if (mod.Definition.MeshFactory != null && mod.Mesh != null)
+        // Custom-mesh modules: derive face info from the separate hull mesh (Brief U1 —
+        // mod.HullMesh contains only load-bearing hull geometry, so its whole FaceCount is
+        // the right limit; no sub-range needed since decoration never shares this mesh).
+        if (mod.Definition.MeshFactory != null && mod.HullMesh != null)
         {
-            // Brief F1: HullFaceCount, not BaseFaceCount — decoration is placed on the
-            // factory's real hull faces specifically, not on however many faces
-            // BaseFaceCount now also covers (it advances to include panel-seam decoration
-            // too, post Brief F1 Fix 2). Also called later from BuildInternalNormalSet
-            // (AO), where using the stable hull count avoids redundantly walking every
-            // seam face just to collect a normal it already shares with its parent wall.
-            int limit  = mod.Mesh.HullFaceCount;
+            int limit  = mod.HullMesh.FaceCount;
             var result = new FaceInfo[limit];
             for (int i = 0; i < limit; i++)
             {
-                Vector3 n              = mod.Mesh.LocalFaceNormal(i);
-                var (center, w, h)     = mod.Mesh.GetFaceBounds(i);
+                Vector3 n              = mod.HullMesh.LocalFaceNormal(i);
+                var (center, w, h)     = mod.HullMesh.GetFaceBounds(i);
                 var (right, up)        = TangentFrame(n);
                 bool blocked           = IsFaceBlocked(mod, n);
                 result[i]              = new FaceInfo(n, center, right, up, w, h, !blocked);

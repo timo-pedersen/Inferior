@@ -458,10 +458,20 @@ public sealed partial class SystemSpaceState : GameState
                 if (glassGpu.HasValue)
                     _glassMeshes[mod] = glassGpu.Value;
 
-                // Custom-mesh modules (MeshFactory) include the hull in mod.Mesh,
-                // rendered by the deco pass with baked lighting — skip box hull.
+                // Brief U1: every module now has a separate hull — box modules build
+                // theirs procedurally (BuildHullMesh, from Definition/ChamferDepth alone);
+                // MeshFactory modules build theirs once in StationDecorator.Decorate and
+                // store it in mod.HullMesh (arbitrary geometry, can't be derived on the
+                // fly). Either way _hullMeshes ends up with an entry, and the hull-pass
+                // draw loop below never needs to know which kind it's looking at.
                 if (mod.Definition.MeshFactory == null)
                     _hullMeshes[mod] = BuildHullMesh(_gd, mod);
+                else
+                {
+                    var hullGpu = mod.HullMesh?.Build(_gd);
+                    if (hullGpu.HasValue)
+                        _hullMeshes[mod] = hullGpu.Value;
+                }
             }
 
             BuildStationShadowCasterMeshes(modules);

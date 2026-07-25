@@ -17,12 +17,15 @@ public sealed class StationModuleDefinition
     // geometry and this queryable value can never drift apart) and by callers wanting to know
     // door dimensions without generating any geometry (e.g. the system map's station stats).
     public          Vector2                      DoorOpening  { get; init; } = Vector2.Zero;
-    // If set, called once per station to create the hull mesh for this module.
-    // The factory receives the module's seed and returns a StationModuleMesh with
-    // BaseFaceCount already set to the hull face count. StationDecorator.Decorate captures
-    // that value into HullFaceCount immediately (Brief F1) before advancing BaseFaceCount
-    // further to also cover seam decoration — HullFaceCount is what stays fixed at "the
-    // factory's own hull faces" for the rest of the module's lifetime (draw-technique
-    // split, AO exclusion); BaseFaceCount is not, once Decorate has run.
-    public          Func<int, StationModuleMesh>? MeshFactory { get; init; }
+    // If set, called once per station to create this module's hull. Brief U1: returns two
+    // meshes, not one — Hull (load-bearing exterior geometry only; arbitrary, since only
+    // the factory can produce it) and Deco (any structural-but-decoration content the
+    // factory itself needs to seed, e.g. DockingBayHull's door frame/chamfer/interior
+    // walls — StationDecorator.Decorate's own passes append to this the same way they
+    // build up a box module's mod.Mesh from nothing). This mirrors the box-module shape
+    // exactly: a separate hull (SystemSpaceState.BuildHullMesh for box modules, this
+    // factory's Hull for MeshFactory modules), drawn DynamicLit, never AO'd; a decoration
+    // mesh (mod.Mesh either way), drawn BakedColorLit, AO'd. Deco may be empty (the
+    // octagonal hull factories return a fresh, empty one — their entire mesh is hull).
+    public          Func<int, (StationModuleMesh Hull, StationModuleMesh Deco)>? MeshFactory { get; init; }
 }

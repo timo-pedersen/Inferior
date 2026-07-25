@@ -60,6 +60,10 @@ public sealed partial class SystemSpaceState
         // Brief S1: station hulls share DynamicLit with ships/containers/the calibration
         // cube, so they pick up the same specular term (station decoration below stays
         // BakedColorLit* and untouched until S2 — a deliberate scope call, not a gap).
+        // Brief U1: this loop needs no module-kind branch at all — _hullMeshes holds an
+        // entry for every module, box or MeshFactory alike (see the OnEnter rebuild in
+        // SystemSpaceState.cs), so a docking-bay's hull draws through the exact same path
+        // as a hab-block's, material map (gloss/bump) included.
         foreach (var (station, universePos) in _stationPositions)
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
@@ -172,86 +176,28 @@ public sealed partial class SystemSpaceState
                 // artifact.
                 Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.White;
 
-                // Brief F1: MeshFactory modules (docking-bay, the octagonal blocks) bake
-                // their whole hull into this same mesh instead of getting a separate
-                // _hullMeshes entry (see the hull pass above), so this single VB/IB now
-                // holds two different kinds of geometry — load-bearing hull, then
-                // decoration. Split the draw by index range: the hull range draws
-                // DynamicLit(Shadowed), same technique/materialColor/material-map/specular
-                // as every other dynamic surface (previously it drew BakedColorLit like
-                // decoration — vertex-colour x AO with no specular/gloss/bump at all, and
-                // AO baked straight into load-bearing hull vertices; see the D-Dark
-                // measurement report). Box modules have no hull faces in this mesh at all
-                // (HullFaceCount defaults to 0), so hullIndexCount is 0 and they fall
-                // through to the single whole-mesh BakedColorLit draw, unchanged.
-                int hullIndexCount = mod.Mesh != null
-                    ? mod.Mesh.IndexCountForFirstFaces(mod.Mesh.HullFaceCount)
-                    : 0;
-
+                // Brief U1: mod.Mesh is decoration only, for every module kind — a
+                // MeshFactory module's hull now lives in its own separate mesh (drawn in
+                // the hull pass above, alongside box modules), so this is always a single,
+                // unconditional decoration draw, exactly as it was before Brief F1's
+                // now-deleted hull/decoration index-range split.
                 if (useShadow)
                 {
                     var ctx = _stationShadowContext!;
                     float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
-
-                    if (hullIndexCount > 0)
-                    {
-                        _meshRenderer.DrawDynamicLitShadowedRange(deco.vb, deco.ib, 0, hullIndexCount,
-                            world, view, proj,
-                            Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
-                            specStrength, specShininess,
-                            tex, _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
-                            ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
-                            new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
-                            StationShadowCorrectionLimit, shadowBiasDepth,
-                            _stationShadowBinaryView, _stationShadowDeltaView,
-                            ShadowKernelRadiusFor(_shadowKernelMode),
-                            mod.MaterialInstance, StationBumpStrength);
-
-                        int decoIndexCount = deco.ib.IndexCount - hullIndexCount;
-                        if (decoIndexCount > 0)
-                            _meshRenderer.DrawBakedColorLitShadowedRange(deco.vb, deco.ib, hullIndexCount, decoIndexCount,
-                                world, view, proj,
-                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
-                                _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
-                                ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
-                                new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
-                                StationShadowCorrectionLimit, shadowBiasDepth,
-                                _stationShadowBinaryView, _stationShadowDeltaView,
-                                ShadowKernelRadiusFor(_shadowKernelMode));
-                    }
-                    else
-                    {
-                        _meshRenderer.DrawBakedColorLitShadowed(deco.vb, deco.ib, world, view, proj,
-                            SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
-                            _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
-                            ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
-                            new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
-                            StationShadowCorrectionLimit, shadowBiasDepth,
-                            _stationShadowBinaryView, _stationShadowDeltaView,
-                            ShadowKernelRadiusFor(_shadowKernelMode));
-                    }
+                    _meshRenderer.DrawBakedColorLitShadowed(deco.vb, deco.ib, world, view, proj,
+                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
+                        _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
+                        ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
+                        new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
+                        StationShadowCorrectionLimit, shadowBiasDepth,
+                        _stationShadowBinaryView, _stationShadowDeltaView,
+                        ShadowKernelRadiusFor(_shadowKernelMode));
                 }
                 else
                 {
-                    if (hullIndexCount > 0)
-                    {
-                        _meshRenderer.DrawDynamicLitRange(deco.vb, deco.ib, 0, hullIndexCount,
-                            world, view, proj,
-                            Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
-                            specStrength, specShininess,
-                            tex, mod.MaterialInstance, StationBumpStrength);
-
-                        int decoIndexCount = deco.ib.IndexCount - hullIndexCount;
-                        if (decoIndexCount > 0)
-                            _meshRenderer.DrawBakedColorLitRange(deco.vb, deco.ib, hullIndexCount, decoIndexCount,
-                                world, view, proj,
-                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
-                    }
-                    else
-                    {
-                        _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
-                            SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
-                    }
+                    _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
+                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
                 }
             }
         }

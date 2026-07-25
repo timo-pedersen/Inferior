@@ -2,11 +2,10 @@ using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
 
-// Builds the complete hull for the "docking-bay" module — the first hollow station module:
-// 5 solid exterior walls, a chamfered-rectangle (octagon-by-construction) framed opening on the
-// -Z face, and interior wall surfaces so the cavity is visible from inside. MeshFactory modules
-// own their entire hull (see HabBlockOctagonal) — there is no separate box-hull draw path for
-// them (SystemSpaceState.cs skips BuildHullMesh whenever Definition.MeshFactory != null).
+// Builds the "docking-bay" module: 5 solid exterior walls (the load-bearing hull), a
+// chamfered-rectangle (octagon-by-construction) framed opening on the -Z face, and interior
+// wall surfaces so the cavity is visible from inside (structural, but decoration-classified —
+// AO'd, drawn BakedColorLit, same as StationDecorator's own passes; see Brief U1).
 //
 // Envelope and door size come from the DockingBayLayout computed once in
 // StationModuleRegistry.CreateDockingBay (pad-mix driven) — this factory just builds geometry
@@ -22,9 +21,10 @@ internal static class DockingBayHull
     private static float WallThicknessForSeed(int seed)
         => 0.5f + (float)new System.Random(seed ^ 0x444F434B).NextDouble() * 1.0f;
 
-    public static StationModuleMesh Build(int seed, DockingBayLayout layout)
+    public static (StationModuleMesh Hull, StationModuleMesh Deco) Build(int seed, DockingBayLayout layout)
     {
-        var mesh = new StationModuleMesh();
+        var hull = new StationModuleMesh();
+        var deco = new StationModuleMesh();
 
         float chamfer = StationGenerator.ChamferDepthForSeed(seed);
         float t       = WallThicknessForSeed(seed);
@@ -47,34 +47,33 @@ internal static class DockingBayHull
         Color interiorColor = Color.Lerp(hullColor, Color.Black, 0.15f);
         Color trimColor     = StationDecorator.LightenColor(hullColor, 1.12f);
 
-        // ── 5 solid exterior walls (everything but the door face, -Z) ──────────────────────
-        // Same per-face inset math as BuildHullMesh: face panel inset by si on its two lateral
-        // axes so the chamfer strip along each edge isn't hidden behind the panel.
+        // ── 5 solid exterior walls (everything but the door face, -Z) — the load-bearing
+        // hull, Brief U1: its own mesh, drawn DynamicLit, never AO'd, exactly like a box
+        // module's BuildHullMesh output. Same per-face inset math as BuildHullMesh: face
+        // panel inset by si on its two lateral axes so the chamfer strip along each edge
+        // isn't hidden behind the panel.
 
         // +Z — back wall, opposite the door
-        mesh.AddQuad(new(-h.X+si,-h.Y+si,+h.Z), new(+h.X-si,-h.Y+si,+h.Z),
+        hull.AddQuad(new(-h.X+si,-h.Y+si,+h.Z), new(+h.X-si,-h.Y+si,+h.Z),
                      new(+h.X-si,+h.Y-si,+h.Z), new(-h.X+si,+h.Y-si,+h.Z), hullColor);
         // -X
-        mesh.AddQuad(new(-h.X,-h.Y+si,-h.Z+si), new(-h.X,-h.Y+si,+h.Z-si),
+        hull.AddQuad(new(-h.X,-h.Y+si,-h.Z+si), new(-h.X,-h.Y+si,+h.Z-si),
                      new(-h.X,+h.Y-si,+h.Z-si), new(-h.X,+h.Y-si,-h.Z+si), hullColor);
         // +X
-        mesh.AddQuad(new(+h.X,-h.Y+si,+h.Z-si), new(+h.X,-h.Y+si,-h.Z+si),
+        hull.AddQuad(new(+h.X,-h.Y+si,+h.Z-si), new(+h.X,-h.Y+si,-h.Z+si),
                      new(+h.X,+h.Y-si,-h.Z+si), new(+h.X,+h.Y-si,+h.Z-si), hullColor);
         // +Y
-        mesh.AddQuad(new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si),
+        hull.AddQuad(new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si),
                      new(+h.X-si,+h.Y,-h.Z+si), new(-h.X+si,+h.Y,-h.Z+si), hullColor);
         // -Y
-        mesh.AddQuad(new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si),
+        hull.AddQuad(new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si),
                      new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), hullColor);
 
-        // BaseFaceCount = exactly these 5 solid walls — StationDecorator.ComputeFaces and
-        // ApplyAmbientOcclusion both key off this for MeshFactory modules, and everything
-        // after this point (door frame, chamfer bevel, interior walls) must NOT be treated
-        // as a decoratable base face. This is what turns standard exterior decoration
-        // (windows, greebles, vents, panel seams, edge trim, AO) back on for this module —
-        // the MVP pass deliberately left it at 0 to skip decoration entirely; that's no
-        // longer wanted now that the exterior needs to look like every other module.
-        mesh.BaseFaceCount = mesh.FaceCount;
+        // ── Everything below is decoration, Brief U1: structural content only the factory
+        // can produce (door frame, chamfer bevel, interior walls), but shaded/AO'd/drawn
+        // exactly like StationDecorator's own passes — appended to `deco`, which
+        // StationDecorator.Decorate continues building on (panel seams, windows, tanks,
+        // ...) the same way it builds up a box module's mod.Mesh from nothing.
 
         // ── Door frame at -Z: an octagon-by-construction hole (rectangle chamfered at all 4
         // corners) between the door opening and the inset outer rectangle (flush with the other
@@ -82,9 +81,9 @@ internal static class DockingBayHull
         // brief, unlike every other edge on this hull. Both an outer- and inner-facing surface,
         // separated by the module's own wall thickness — same treatment as the other 5 walls.
         float outerX = h.X - si, outerY = h.Y - si;
-        AddDoorFrame(mesh, doorHalfW, doorHalfH, doorChamfer, outerX, outerY,
+        AddDoorFrame(deco, doorHalfW, doorHalfH, doorChamfer, outerX, outerY,
                      -h.Z,     -Vector3.UnitZ, hullColor);
-        AddDoorFrame(mesh, doorHalfW, doorHalfH, doorChamfer, outerX, outerY,
+        AddDoorFrame(deco, doorHalfW, doorHalfH, doorChamfer, outerX, outerY,
                      -h.Z + t,  Vector3.UnitZ, interiorColor);
 
         // ── Door throat: the frame's outer and inner faces share the exact same door-hole
@@ -93,11 +92,11 @@ internal static class DockingBayHull
         // which read as zero wall thickness no matter what `t` was set to. These 8 quads (4 flat
         // sides + 4 chamfer diagonals, tracing the same octagon perimeter AddDoorFrame uses) wall
         // in that gap, giving the opening an actual visible tunnel.
-        AddDoorThroat(mesh, doorHalfW, doorHalfH, doorChamfer, -h.Z, -h.Z + t, interiorColor);
+        AddDoorThroat(deco, doorHalfW, doorHalfH, doorChamfer, -h.Z, -h.Z + t, interiorColor);
 
         // ── Chamfer bevel — all 12 edges + 8 corners. The door hole sits well inside the -Z
         // face, so the box's outer silhouette (and this bevel) is completely unaffected by it.
-        StationDecorator.AddChamferEdgeTrim(mesh, h, chamfer, trimColor);
+        StationDecorator.AddChamferEdgeTrim(deco, h, chamfer, trimColor);
 
         // ── Interior walls — the hollow cavity, open at -Z (the door; ships pass straight
         // through, no wall there). The back wall (+Z) closes the far end as a single quad. Side
@@ -112,9 +111,9 @@ internal static class DockingBayHull
         float doorZ = -h.Z;
         float depth = backZ - doorZ;
 
-        int interiorFaceStart = mesh.FaceCount;
+        int interiorFaceStart = deco.FaceCount;
 
-        AddWoundQuad(mesh, new(-cx,-cy,backZ), new(cx,-cy,backZ), new(cx,cy,backZ), new(-cx,cy,backZ),
+        AddWoundQuad(deco, new(-cx,-cy,backZ), new(cx,-cy,backZ), new(cx,cy,backZ), new(-cx,cy,backZ),
                       -Vector3.UnitZ, interiorColor);                                          // back wall
 
         int segments = System.Math.Clamp((int)MathF.Round(depth / 20f), 3, 8);
@@ -123,13 +122,13 @@ internal static class DockingBayHull
             float z0 = doorZ + depth * s       / segments;
             float z1 = doorZ + depth * (s + 1) / segments;
 
-            AddWoundQuad(mesh, new(h.X-t,-cy,z0), new(h.X-t,cy,z0), new(h.X-t,cy,z1), new(h.X-t,-cy,z1),
+            AddWoundQuad(deco, new(h.X-t,-cy,z0), new(h.X-t,cy,z0), new(h.X-t,cy,z1), new(h.X-t,-cy,z1),
                           -Vector3.UnitX, interiorColor);                                      // +X side
-            AddWoundQuad(mesh, new(-(h.X-t),-cy,z0), new(-(h.X-t),cy,z0), new(-(h.X-t),cy,z1), new(-(h.X-t),-cy,z1),
+            AddWoundQuad(deco, new(-(h.X-t),-cy,z0), new(-(h.X-t),cy,z0), new(-(h.X-t),cy,z1), new(-(h.X-t),-cy,z1),
                           Vector3.UnitX, interiorColor);                                       // -X side
-            AddWoundQuad(mesh, new(-cx,h.Y-t,z0), new(cx,h.Y-t,z0), new(cx,h.Y-t,z1), new(-cx,h.Y-t,z1),
+            AddWoundQuad(deco, new(-cx,h.Y-t,z0), new(cx,h.Y-t,z0), new(cx,h.Y-t,z1), new(-cx,h.Y-t,z1),
                           -Vector3.UnitY, interiorColor);                                      // +Y side
-            AddWoundQuad(mesh, new(-cx,-(h.Y-t),z0), new(cx,-(h.Y-t),z0), new(cx,-(h.Y-t),z1), new(-cx,-(h.Y-t),z1),
+            AddWoundQuad(deco, new(-cx,-(h.Y-t),z0), new(cx,-(h.Y-t),z0), new(cx,-(h.Y-t),z1), new(-cx,-(h.Y-t),z1),
                           Vector3.UnitY, interiorColor);                                       // -Y side
         }
 
@@ -139,10 +138,10 @@ internal static class DockingBayHull
         // near-black or flat just because the sun isn't reaching it directly. Still a disposable
         // approximation on top of the existing pre-baked lighting, not a new lighting model —
         // requires no unwinding once real interior-light-fixture baking happens.
-        mesh.AmbientOverrideFaceStart = interiorFaceStart;
-        mesh.AmbientOverrideFaceCount = mesh.FaceCount - interiorFaceStart;
+        deco.AmbientOverrideFaceStart = interiorFaceStart;
+        deco.AmbientOverrideFaceCount = deco.FaceCount - interiorFaceStart;
 
-        return mesh;
+        return (hull, deco);
     }
 
     // Builds one face of the door frame (either the outer or inner surface) at a fixed z plane:

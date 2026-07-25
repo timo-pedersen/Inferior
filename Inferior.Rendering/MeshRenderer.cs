@@ -124,45 +124,6 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx);
     }
 
-    // Brief F1: index-range counterpart of DrawDynamicLitShadowed, mirroring how
-    // DrawDynamicLitRange relates to DrawDynamicLit — lets a MeshFactory module's combined
-    // VB/IB be split so its hull index range draws DynamicLitShadowed while the rest of
-    // the same buffer draws BakedColorLitShadowed (see DrawBakedColorLitShadowedRange).
-    public void DrawDynamicLitShadowedRange(
-        VertexBuffer vb, IndexBuffer ib,
-        int startIndex, int indexCount,
-        Matrix world, Matrix view, Matrix projection,
-        Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
-        float specularStrength, float specularShininess,
-        Texture2D texture, Texture2D shadowMap,
-        Matrix moduleToStationLocal, Matrix stationLocalToLightView,
-        Vector2 shadowMinXY, Vector2 shadowInvSize,
-        float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
-        float shadowCorrectionLimit, float shadowBiasDepth,
-        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
-        Texture2D? materialMap = null, float bumpStrength = 0f)
-    {
-        if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
-            throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
-
-        var fx = _litSurfaceEffect;
-        fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
-        fx.Parameters["Texture"].SetValue(texture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
-        SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
-            shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
-            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
-            shadowKernelRadius);
-        Draw(vb, ib, fx, startIndex, indexCount / 3);
-    }
-
     /// <summary>
     /// Pre-baked (albedo x AO) vertex-colour geometry (station decoration). Vertex alpha is
     /// the self-illumination floor S — see StationModuleMesh.ApplyIlluminationFlags.
@@ -183,32 +144,6 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["Texture"].SetValue(texture);
         Draw(vb, ib, fx);
-    }
-
-    // Brief F1: index-range counterpart of DrawBakedColorLit — the decoration half of a
-    // MeshFactory module's split draw (hull range draws DynamicLitRange instead; see
-    // SystemSpaceState.Stations.cs). Box modules keep using the unranged DrawBakedColorLit
-    // above (their mod.Mesh has no hull range to split out at all).
-    public void DrawBakedColorLitRange(
-        VertexBuffer vb, IndexBuffer ib,
-        int startIndex, int indexCount,
-        Matrix world, Matrix view, Matrix projection,
-        Vector3 sunDirection, Color sunColour, float ambient,
-        Texture2D texture)
-    {
-        if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
-            throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
-
-        var fx = _litSurfaceEffect;
-        fx.CurrentTechnique = fx.Techniques["BakedColorLit"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["Texture"].SetValue(texture);
-        Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
     public void DrawBakedColorLitShadowed(
@@ -236,39 +171,6 @@ public sealed class MeshRenderer : IDisposable
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
             shadowKernelRadius);
         Draw(vb, ib, fx);
-    }
-
-    // Brief F1: index-range counterpart of DrawBakedColorLitShadowed — see
-    // DrawBakedColorLitRange.
-    public void DrawBakedColorLitShadowedRange(
-        VertexBuffer vb, IndexBuffer ib,
-        int startIndex, int indexCount,
-        Matrix world, Matrix view, Matrix projection,
-        Vector3 sunDirection, Color sunColour, float ambient,
-        Texture2D texture, Texture2D shadowMap,
-        Matrix moduleToStationLocal, Matrix stationLocalToLightView,
-        Vector2 shadowMinXY, Vector2 shadowInvSize,
-        float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
-        float shadowCorrectionLimit, float shadowBiasDepth,
-        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius)
-    {
-        if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
-            throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
-
-        var fx = _litSurfaceEffect;
-        fx.CurrentTechnique = fx.Techniques["BakedColorLitShadowed"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["Texture"].SetValue(texture);
-        SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
-            shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
-            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
-            shadowKernelRadius);
-        Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
     public void Dispose()
