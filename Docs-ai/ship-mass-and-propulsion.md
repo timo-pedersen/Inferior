@@ -89,10 +89,10 @@ All masses include the current 1,200 kg default reactor contribution.
 
 | Ship | Engines | Mass | Forward accel | Lateral accel | Lift accel | Empty hover estimate |
 |---|---:|---:|---:|---:|---:|---:|
-| Aries | 2 Mule | 78,000 kg | 4.00 m/s2 | 2.00 m/s2 | 3.00 m/s2 | 0.306 g |
-| Asterisk | 1 Mule | 15,600 kg | 7.50 m/s2 | 3.75 m/s2 | 5.625 m/s2 | 0.574 g |
-| Beren | 4 Needle | 187,800 kg | 4.00 m/s2 | 2.00 m/s2 | 3.00 m/s2 | 0.306 g |
-| Antega | 4 Atlas | 3,585,200 kg | 4.00 m/s2 | 1.00 m/s2 | 2.00 m/s2 | 0.204 g |
+| Aries | 2 Mule | 78,000 kg | 20.00 m/s2 | 10.00 m/s2 | 15.00 m/s2 | 1.529 g |
+| Asterisk | 1 Mule | 15,600 kg | 37.50 m/s2 | 18.75 m/s2 | 28.125 m/s2 | 2.868 g |
+| Beren | 4 Needle | 187,800 kg | 20.00 m/s2 | 10.00 m/s2 | 15.00 m/s2 | 1.529 g |
+| Antega | 4 Atlas | 3,585,200 kg | 20.00 m/s2 | 5.00 m/s2 | 10.00 m/s2 | 1.020 g |
 
 Asterisk efficiencies are provisionally 0.75 forward, 0.75 maneuvering, and 0.60
 rotation. All current other hulls use 1.0.

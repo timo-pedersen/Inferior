@@ -54,7 +54,7 @@ public static class MuleEngineDefinitionFactory
             "Mule",
             new DVec3(2.10, 2.10, 6.55),
             dryMassKg: 2_400.0,
-            maximumForwardThrustN: 156_000.0,
+            maximumForwardThrustN: 780_000.0,
             reverseThrustFraction: 1.0,
             lateralThrustFraction: 0.50,
             liftThrustFraction: 0.75,

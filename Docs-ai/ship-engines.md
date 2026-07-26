@@ -545,9 +545,9 @@ Provisional active tuning:
 
 | Family | Dry mass | Max forward | Rev / lat / lift | Max torque | Harmonies | Min thrust | Speed endpoints |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Mule | 2,400 kg | 156,000 N | 1.00 / 0.50 / 0.75 | 600,000 N m | 8 | 0.10 | 50 / 25,600 m/s |
-| Needle | 1,650 kg | 187,800 N | 1.00 / 0.50 / 0.75 | 1,050,000 N m | 16 | 0.10 | 50 / 25,600 m/s |
-| Atlas Civilian Drive | 96,000 kg | 3,585,200 N | 1.00 / 0.25 / 0.50 | 90,000,000 N m | 10 | 0.10 | 50 / 25,600 m/s |
+| Mule | 2,400 kg | 780,000 N | 1.00 / 0.50 / 0.75 | 600,000 N m | 8 | 0.10 | 50 / 25,600 m/s |
+| Needle | 1,650 kg | 939,000 N | 1.00 / 0.50 / 0.75 | 1,050,000 N m | 16 | 0.10 | 50 / 25,600 m/s |
+| Atlas Civilian Drive | 96,000 kg | 17,926,000 N | 1.00 / 0.25 / 0.50 | 90,000,000 N m | 10 | 0.10 | 50 / 25,600 m/s |
 
 Each `EngineInstance` owns `SelectedHarmony` in `1..HarmonyCount`. Pilot scroll input
 changes all active-ship instances through the simulation authority, while retaining the
