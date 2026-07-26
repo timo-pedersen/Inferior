@@ -117,7 +117,7 @@ public sealed partial class CockpitUI
         }
         else
         {
-            SpritePrimitives.DrawText(sb, _font, "Mouse Y: pitch   Mouse X: roll   Q/E: yaw   WASD: fwd/strafe   RF/Space: vertical   M: system map   N: galaxy map   F11: debug   TAB: UI",
+            SpritePrimitives.DrawText(sb, _font, "Mouse Y: pitch   Mouse X: roll   A/D: yaw   W/S Q/E: thrust   RF/Space: vertical   M: system map   N: galaxy map   F11: debug   TAB: UI",
                 new Vector2(16, _gd.Viewport.Height - 30), ColHUDDim, 0.72f);
         }
     }

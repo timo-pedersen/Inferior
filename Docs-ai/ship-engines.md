@@ -706,7 +706,7 @@ X-Stop active AND velocity non-zero
     ↓
 Velocity correction / braking visual
 
-Propulsion input active (WASD/RF)
+Propulsion input active (W/S/Q/E/R/F)
     ↓
 Normal thrust visual
 

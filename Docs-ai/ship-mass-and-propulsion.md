@@ -140,8 +140,8 @@ not represented.
 
 `PlayerInput` pitch, yaw, and roll fields are normalized assisted-rate commands. Mouse
 deltas are normalized at `ShipInputMapper`; mouse vertical drives pitch, mouse horizontal
-drives roll, and `Q/E` drives digital yaw. Mouse-right produces positive roll command,
-`Q` produces positive (left) yaw, and `E` produces negative (right) yaw. Because
+drives roll, and `A/D` drives digital yaw. Mouse-right produces positive roll command,
+`A` produces positive (left) yaw, and `D` produces negative (right) yaw. Because
 ship-forward is local `-Z`, positive roll input maps to negative local-Z angular velocity.
 Assisted target limits remain:
 

@@ -682,7 +682,7 @@ Current design:
 Forward/reverse controls:
     longitudinal engine output
 
-A/D:
+Q/E:
     lateral thrust
 
 F/R:
@@ -810,7 +810,7 @@ Mouse Y:
 Mouse X:
     roll
 
-Q / E:
+A / D:
     yaw
 ```
 
