@@ -1207,7 +1207,7 @@ frame and lock geometry.
 Viewed from the front under the native `+X` starboard convention, the starboard cockpit
 appears on viewer-left and the single port Mule appears on viewer-right. The hull owns
 their opposed C2/H2 sockets and support geometry; the installed modules remain separate.
-The Asterisk cockpit camera is a definition-owned child looking 30 degrees toward
+The Asterisk cockpit camera is a definition-owned child looking 20 degrees toward
 starboard, so the generic projected ship-forward reticle appears left of screen centre.
 First-person own-ship geometry remains hidden.
 

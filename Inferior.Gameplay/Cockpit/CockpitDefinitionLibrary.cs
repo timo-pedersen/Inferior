@@ -105,7 +105,7 @@ public static class CockpitDefinitionLibrary
 
     private static Quaternion CreateAsteriskCameraOrientation()
     {
-        float angle = MathHelper.ToRadians(30.0f);
+        float angle = MathHelper.ToRadians(20.0f);
         var forward = new Vector3(0.0f, MathF.Sin(angle), -MathF.Cos(angle));
         return CreateLookOrientation(forward, -Vector3.UnitX);
     }

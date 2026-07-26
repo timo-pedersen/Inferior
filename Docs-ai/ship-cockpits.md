@@ -324,7 +324,7 @@ deferred — see **Future extensions**.
 
 - Aries: one top-facing C2 mount with the Aries civilian canopy cockpit.
 - Asterisk: one starboard-facing C2 mount with a compact side command blister.
-  Its camera looks primarily forward and 30 degrees outward toward starboard.
+  Its camera looks primarily forward and 20 degrees outward toward starboard.
 - Beren: one downward-facing forward C2 mount with a fully underslung command pod.
   Its camera looks forward and 10 degrees down.
 - Antega: one upward-facing, keyed C5 mount on the dorsal centreline far aft, allowing

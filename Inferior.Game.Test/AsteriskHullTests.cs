@@ -64,7 +64,7 @@ public sealed class AsteriskHullTests
     }
 
     [Fact]
-    public void Camera_LooksForwardAndThirtyDegreesTowardStarboard()
+    public void Camera_LooksForwardAndTwentyDegreesTowardStarboard()
     {
         HullDefinition hull = HullDefinitionLibrary.Get(AsteriskHullDefinitionFactory.HullId);
         CockpitMountDefinition mount = Assert.Single(hull.CockpitMounts);
@@ -85,7 +85,7 @@ public sealed class AsteriskHullTests
             Vector3.Transform(Vector3.UnitY, orientation));
         double yawDegrees = Math.Atan2(forward.X, -forward.Z) * 180.0 / Math.PI;
 
-        Assert.InRange(yawDegrees, 29.99, 30.01);
+        Assert.InRange(yawDegrees, 19.99, 20.01);
         Assert.True(forward.X > 0.0f);
         Assert.True(forward.Z < 0.0f);
         Assert.InRange(Math.Abs(forward.Y), 0.0f, 1e-5f);
