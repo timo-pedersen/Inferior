@@ -179,9 +179,18 @@ public static partial class StationDecorator
         _              => new Color(118, 118, 118),
     };
 
+    // Brief Z2 Part 3: parallel=true is PipeCorridor's content — "several parallel
+    // lines... imagine five pipes running in parallel," a weighting of this same pass
+    // rather than new geometry. Dispatches to a completely separate forced-mode body
+    // (GenerateParallelSurfacePipes) rather than branching every line of the original —
+    // the original per-run independent orientation/offset/spec rolls are exactly what
+    // must NOT change for the existing probabilistic (non-corridor) call sites, so the
+    // original method is left untouched byte-for-byte and forced mode is its own routine.
     private static void GenerateSurfacePipes(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh)
+        System.Random rng, StationModuleMesh mesh, bool parallel = false)
     {
+        if (parallel) { GenerateParallelSurfacePipes(mod, face, rng, mesh); return; }
+
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 40f) return;
         if (rng.NextDouble() > 0.45) return;
@@ -216,6 +225,51 @@ public static partial class StationDecorator
             // Both ends sit mid-face with margin — genuinely floating, not touching
             // anything (unlike GeneratePipes' full-edge-length runs, which continue
             // past the module edge).
+            mesh.AddPrismPipe(pipeStart, pipeEnd, radius, sides, colour, capStart: true, capEnd: true);
+            AddPipeBrackets(mesh, pipeStart, pipeEnd, runDir, perpDir,
+                            face.LocalNormal, radius, bracketH, colour, rng);
+        }
+    }
+
+    // Forced-parallel content for a PipeCorridor zone: ONE shared orientation (the zone's
+    // own long axis, not an independent per-run roll) and ONE shared pipe spec (radius/
+    // sides/colour/standoff height) across every run, evenly spaced across the
+    // perpendicular span — reads as one coherent piping system, not several independently-
+    // scattered pipes. No probability/area gate — a PipeCorridor zone is guaranteed
+    // content, not a probabilistic extra (same discipline as GenerateWindows' guaranteed
+    // parameter from Brief F1 Fix 4).
+    private static void GenerateParallelSurfacePipes(PlacedModule mod, FaceInfo face,
+        System.Random rng, StationModuleMesh mesh)
+    {
+        if (!face.IsExposed) return;
+
+        bool    horizontal = face.Width >= face.Height;
+        Vector3 runDir     = horizontal ? face.LocalRight : face.LocalUp;
+        Vector3 perpDir    = horizontal ? face.LocalUp    : face.LocalRight;
+        float   runSpan    = horizontal ? face.Width  : face.Height;
+        float   perpSpan   = horizontal ? face.Height : face.Width;
+
+        float runHalfLen = runSpan * 0.5f - 1.5f;
+        if (runHalfLen <= 0.5f) return;
+
+        int runCount = 4 + rng.Next(3); // 4-6, "imagine five pipes running in parallel"
+
+        double sizeRoll  = rng.NextDouble();
+        float  radius    = sizeRoll < 0.35 ? 0.10f : sizeRoll < 0.70 ? 0.22f : 0.40f;
+        int    sides     = PipeSides(rng);
+        Color  colour    = SurfacePipeColour(mod.Definition.Category, rng);
+        float  bracketH  = radius + 0.35f + (float)rng.NextDouble() * 0.45f;
+
+        float usableSpan = MathF.Max(0f, perpSpan - 1.5f);
+
+        for (int i = 0; i < runCount; i++)
+        {
+            float perpOff = runCount > 1 ? -usableSpan * 0.5f + i * (usableSpan / (runCount - 1)) : 0f;
+
+            Vector3 pipeCtr   = face.LocalCenter + perpDir * perpOff + face.LocalNormal * bracketH;
+            Vector3 pipeStart = pipeCtr - runDir * runHalfLen;
+            Vector3 pipeEnd   = pipeCtr + runDir * runHalfLen;
+
             mesh.AddPrismPipe(pipeStart, pipeEnd, radius, sides, colour, capStart: true, capEnd: true);
             AddPipeBrackets(mesh, pipeStart, pipeEnd, runDir, perpDir,
                             face.LocalNormal, radius, bracketH, colour, rng);

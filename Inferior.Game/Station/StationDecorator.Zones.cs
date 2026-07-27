@@ -63,11 +63,18 @@ public static partial class StationDecorator
     // Per Timo: tanks and pipes should dominate industrial/bay categories (Machinery +
     // TankFarm weighted heavily there); Structural should be common enough to visibly break
     // up large faces everywhere.
+    //
+    // Brief Z2: Signage removed from docking-bay's entry (it was Z1's only weight-table
+    // reference to Signage). Part 4 frames Signage as "one reserved blank area per
+    // multi-zone module" — singular, deliberate — so like Windows it's now guaranteed-set-
+    // only, never weight-selectable; leaving it here let the weight pass roll additional
+    // Signage zones on top of the guaranteed one, breaking "exactly 1 per module." The
+    // freed 0.05 moved to Storage.
     private static readonly IReadOnlyDictionary<string, (ZoneType Type, float Weight)[]> ZoneTypeWeights =
         new Dictionary<string, (ZoneType, float)[]>
         {
             ["industrial"]  = [(ZoneType.Machinery, 0.30f), (ZoneType.TankFarm, 0.30f), (ZoneType.Structural, 0.20f), (ZoneType.ServiceCore, 0.15f), (ZoneType.Storage, 0.05f)],
-            ["docking-bay"] = [(ZoneType.Machinery, 0.25f), (ZoneType.TankFarm, 0.25f), (ZoneType.Structural, 0.20f), (ZoneType.ServiceCore, 0.15f), (ZoneType.Storage, 0.10f), (ZoneType.Signage, 0.05f)],
+            ["docking-bay"] = [(ZoneType.Machinery, 0.25f), (ZoneType.TankFarm, 0.25f), (ZoneType.Structural, 0.20f), (ZoneType.ServiceCore, 0.15f), (ZoneType.Storage, 0.15f)],
             ["cargo"]       = [(ZoneType.Storage, 0.35f), (ZoneType.Structural, 0.20f), (ZoneType.Machinery, 0.20f), (ZoneType.ServiceCore, 0.15f), (ZoneType.TankFarm, 0.10f)],
             ["hab"]         = [(ZoneType.ServiceCore, 0.35f), (ZoneType.Structural, 0.30f), (ZoneType.Machinery, 0.20f), (ZoneType.Storage, 0.15f)],
             ["science"]     = [(ZoneType.ServiceCore, 0.35f), (ZoneType.Structural, 0.30f), (ZoneType.Machinery, 0.20f), (ZoneType.Storage, 0.15f)],
@@ -152,35 +159,203 @@ public static partial class StationDecorator
         return ([.. zones], false);
     }
 
-    // Assigns a ZoneType to every zone on one face. Windows are handled first and
-    // separately (count-driven, see the class comment); everything else is a weighted pick
-    // from ZoneTypeWeights. moduleWindowZoneBudget is threaded by ref across every face of
-    // one module so the 5-per-module cap holds regardless of how many faces contribute.
-    internal static ZoneType[] AssignZoneTypes(string category, FaceInfo[] zones, System.Random zoneRng, ref int moduleWindowZoneBudget)
+    // Brief Z2: per-module state threaded across every multi-zone face's AssignZoneTypes
+    // call for one module — bundled into one mutable object rather than five separate ref
+    // parameters. Only ever touched from Decorate()'s multi-zone (else) branch, so a module
+    // whose faces are all single-zone never has this object's fields consumed at all — the
+    // "guaranteed set applies only to modules with a multi-zone face" rule (Brief Z2's
+    // CRITICAL note) holds by construction, not by a category/module-kind check.
+    // internal, not private: constructed directly by StationZoningTests.
+    internal sealed class ModuleZoneBudget
     {
-        var types = new ZoneType[zones.Length];
+        public int  WindowZonesRemaining = MaxWindowZonesPerModule;
+        // Lazily rolled (1-4) on first real use inside AssignZoneTypes, not here — a
+        // module that never reaches a multi-zone face must never consume zoneRng for this,
+        // matching the brief's determinism requirement exactly as strictly as windows'
+        // existing budget already does for rng-free modules.
+        public int? TankFarmRemaining;
+        public bool NeedsPipeCorridor = true;
+        public bool NeedsCommsArray   = true;
+        public bool NeedsSignage      = true;
+    }
 
-        int windowZoneCount = Math.Min(zoneRng.Next(MaxWindowZonesPerFace + 1), moduleWindowZoneBudget);
-        windowZoneCount = Math.Min(windowZoneCount, zones.Length);
-        moduleWindowZoneBudget -= windowZoneCount;
+    // Picks a uniformly random still-unclaimed zone index, or -1 if none remain. Marking
+    // claimed[] as zones are picked makes repeated calls behave like sampling without
+    // replacement — equivalent to a Fisher-Yates shuffle, just rebuilt each call (zone
+    // counts here are at most a few dozen, so this is not a hot loop).
+    private static int PickUnclaimed(bool[] claimed, System.Random zoneRng)
+    {
+        int count = 0;
+        for (int i = 0; i < claimed.Length; i++) if (!claimed[i]) count++;
+        if (count == 0) return -1;
 
-        // Partial Fisher-Yates: picks windowZoneCount distinct zone indices uniformly,
-        // deterministic from zoneRng, without biasing toward low indices.
-        var indices = new int[zones.Length];
-        for (int i = 0; i < indices.Length; i++) indices[i] = i;
-        for (int i = 0; i < windowZoneCount; i++)
+        int pick = zoneRng.Next(count);
+        for (int i = 0; i < claimed.Length; i++)
         {
-            int j = i + zoneRng.Next(indices.Length - i);
-            (indices[i], indices[j]) = (indices[j], indices[i]);
-            types[indices[i]] = ZoneType.Windows;
+            if (claimed[i]) continue;
+            if (pick == 0) return i;
+            pick--;
+        }
+        return -1; // unreachable
+    }
+
+    // Brief Z2 Part 3: "long and thin" shape preference for PipeCorridor — zones are
+    // already-formed rectangles by the time AssignZoneTypes runs (ComputeZones' greedy
+    // merge decides shape before any type is assigned), so this doesn't reshape anything;
+    // it just prefers an already-elongated zone (a "band" or "riser," in ComputeZones' own
+    // words) over a squarish one when there's a choice.
+    private const float PipeCorridorElongationRatio = 1.8f;
+
+    // internal, not private: StationZoningTests' adjacency-rate check reuses this exact
+    // test rather than duplicating the rectangle math.
+    internal static bool IsElongatedZone(FaceInfo zone)
+        => MathF.Max(zone.Width, zone.Height) / MathF.Max(0.01f, MathF.Min(zone.Width, zone.Height))
+           >= PipeCorridorElongationRatio;
+
+    // Rectangle-touching test in the shared face-local (u, v) tangent plane — every zone
+    // in one AssignZoneTypes call shares the same LocalRight/LocalUp (all derived from one
+    // parent face by ComputeZones), so projecting each zone's centre onto either zone's own
+    // axes gives directly-comparable coordinates. "Touching" allows a small tolerance for
+    // floating-point cell-boundary noise, not just an exact zero gap.
+    // internal, not private: StationZoningTests' adjacency-rate check reuses this exact
+    // test rather than duplicating the rectangle math.
+    private const float ZoneAdjacencyTolerance = 0.5f; // metres
+    internal static bool ZonesAreAdjacent(FaceInfo a, FaceInfo b)
+    {
+        float au = Vector3.Dot(a.LocalCenter, a.LocalRight), av = Vector3.Dot(a.LocalCenter, a.LocalUp);
+        float bu = Vector3.Dot(b.LocalCenter, a.LocalRight), bv = Vector3.Dot(b.LocalCenter, a.LocalUp);
+
+        float uGap = MathF.Abs(au - bu) - (a.Width  * 0.5f + b.Width  * 0.5f);
+        float vGap = MathF.Abs(av - bv) - (a.Height * 0.5f + b.Height * 0.5f);
+
+        bool uTouches  = uGap <= ZoneAdjacencyTolerance;
+        bool vTouches  = vGap <= ZoneAdjacencyTolerance;
+        bool uOverlaps = uGap < 0f;
+        bool vOverlaps = vGap < 0f;
+
+        // Two axis-aligned rectangles share an edge when one axis's gap is ~0 (touching)
+        // while the other axis's ranges actually overlap (not just also touching at a
+        // corner) — the classic edge-vs-corner-adjacency distinction.
+        return (uTouches && vOverlaps) || (vTouches && uOverlaps);
+    }
+
+    // Brief Z2 Part 3's adjacency bias: "prefer placing pipe corridors adjacent to
+    // TankFarm zones... best-effort, not a hard constraint." Preference order: adjacent AND
+    // elongated (best), then just adjacent, then just elongated, then any unclaimed zone —
+    // never fails to pick if any unclaimed zone remains.
+    private static int PickForPipeCorridor(
+        FaceInfo[] zones, bool[] claimed, List<int> tankFarmIndices, System.Random zoneRng)
+    {
+        bool AdjacentToAnyTankFarm(int idx)
+        {
+            foreach (int t in tankFarmIndices)
+                if (ZonesAreAdjacent(zones[idx], zones[t])) return true;
+            return false;
         }
 
-        var isWindowZone = new bool[zones.Length];
-        for (int i = 0; i < windowZoneCount; i++) isWindowZone[indices[i]] = true;
+        var candidates = new List<int>();
+        void Collect(bool requireAdjacent, bool requireElongated)
+        {
+            candidates.Clear();
+            for (int i = 0; i < zones.Length; i++)
+            {
+                if (claimed[i]) continue;
+                if (requireAdjacent && !AdjacentToAnyTankFarm(i)) continue;
+                if (requireElongated && !IsElongatedZone(zones[i])) continue;
+                candidates.Add(i);
+            }
+        }
 
+        Collect(requireAdjacent: true,  requireElongated: true);
+        if (candidates.Count == 0) Collect(requireAdjacent: true,  requireElongated: false);
+        if (candidates.Count == 0) Collect(requireAdjacent: false, requireElongated: true);
+        if (candidates.Count == 0) Collect(requireAdjacent: false, requireElongated: false);
+        if (candidates.Count == 0) return -1;
+
+        return candidates[zoneRng.Next(candidates.Count)];
+    }
+
+    // Assigns a ZoneType to every zone on one face, in the Brief Z2 order:
+    //   1. GUARANTEED — tank farm (1-4/module), structural (>=1/face), pipe corridor
+    //      (>=1/module), comms array (>=1/module), signage (exactly 1/module), claimed in
+    //      that priority so a small face degrades gracefully (takes what it can, in order,
+    //      no error) instead of losing an arbitrary one. A floor, not a budget: the weight
+    //      pass below can and does add more Machinery/TankFarm zones on top.
+    //   2. COUNT — windows, into whatever's still unclaimed (0-3/face, capped 5/module).
+    //   3. WEIGHT — PickWeightedZoneType fills every zone still unclaimed.
+    // budget is threaded across every face of one module (see ModuleZoneBudget's own
+    // comment) — internal, not private: StationZoningTests constructs it directly.
+    internal static ZoneType[] AssignZoneTypes(
+        string category, FaceInfo[] zones, System.Random zoneRng, ModuleZoneBudget budget)
+    {
+        var types   = new ZoneType[zones.Length];
+        var claimed = new bool[zones.Length];
+
+        // ── Step 1: GUARANTEED ──
+        budget.TankFarmRemaining ??= 1 + zoneRng.Next(4); // 1-4 inclusive, per module
+
+        var tankFarmIndices = new List<int>();
+        while (budget.TankFarmRemaining > 0)
+        {
+            int idx = PickUnclaimed(claimed, zoneRng);
+            if (idx < 0) break;
+            types[idx] = ZoneType.TankFarm;
+            claimed[idx] = true;
+            tankFarmIndices.Add(idx);
+            budget.TankFarmRemaining--;
+        }
+
+        // Structural: >=1 per face (every face reaching AssignZoneTypes is already "large"
+        // by ZoneSingleZoneThreshold's own gating) — not module-threaded, so every
+        // multi-zone face gets its own blank band regardless of what other faces claimed.
+        {
+            int idx = PickUnclaimed(claimed, zoneRng);
+            if (idx >= 0) { types[idx] = ZoneType.Structural; claimed[idx] = true; }
+        }
+
+        if (budget.NeedsPipeCorridor)
+        {
+            int idx = PickForPipeCorridor(zones, claimed, tankFarmIndices, zoneRng);
+            if (idx >= 0)
+            {
+                types[idx] = ZoneType.PipeCorridor;
+                claimed[idx] = true;
+                budget.NeedsPipeCorridor = false;
+            }
+        }
+
+        if (budget.NeedsCommsArray)
+        {
+            int idx = PickUnclaimed(claimed, zoneRng);
+            if (idx >= 0) { types[idx] = ZoneType.CommsArray; claimed[idx] = true; budget.NeedsCommsArray = false; }
+        }
+
+        if (budget.NeedsSignage)
+        {
+            int idx = PickUnclaimed(claimed, zoneRng);
+            if (idx >= 0) { types[idx] = ZoneType.Signage; claimed[idx] = true; budget.NeedsSignage = false; }
+        }
+
+        // ── Step 2: COUNT (windows) — only into what's still unclaimed ──
+        int unclaimedBeforeWindows = 0;
+        for (int i = 0; i < claimed.Length; i++) if (!claimed[i]) unclaimedBeforeWindows++;
+
+        int windowZoneCount = Math.Min(zoneRng.Next(MaxWindowZonesPerFace + 1), budget.WindowZonesRemaining);
+        windowZoneCount = Math.Min(windowZoneCount, unclaimedBeforeWindows);
+        budget.WindowZonesRemaining -= windowZoneCount;
+
+        for (int n = 0; n < windowZoneCount; n++)
+        {
+            int idx = PickUnclaimed(claimed, zoneRng);
+            types[idx] = ZoneType.Windows;
+            claimed[idx] = true;
+        }
+
+        // ── Step 3: WEIGHT — fills whatever's left. Per Timo: guaranteed is a floor, not
+        // a budget — this legitimately adds MORE TankFarm/Machinery zones on top. ──
         for (int i = 0; i < zones.Length; i++)
         {
-            if (isWindowZone[i]) continue;
+            if (claimed[i]) continue;
             types[i] = PickWeightedZoneType(category, zoneRng);
         }
 
@@ -203,30 +378,39 @@ public static partial class StationDecorator
         return weights[^1].Type; // float-rounding fallback
     }
 
+    // Brief Z2 Part 2: cap on CommsArray's "a small greeble tank or 5" — see GenerateTanks'
+    // sizeCap parameter. 0.85 is PickTankRadius's own "common small" tier ceiling, so a
+    // CommsArray tank never rolls into the medium/large/rare tiers regardless of which one
+    // the underlying roll landed on.
+    private const float CommsArrayTankSizeCap = 0.85f;
+
     // Dispatches one zone's content by type. Antennas/Dishes aren't assigned to any
     // specific ZoneType in Z1's table (the brief lists them as "zoned" scope but doesn't
     // give them a table row) — they run as a background pass on every zone regardless of
     // type, same as they already ran unconditionally on the whole face today, just now on
     // a smaller area per call. Not new content and no change to either pass's own
-    // placement/occupancy logic.
+    // placement/occupancy logic. Brief Z2 Part 2: antennas run "heavy" specifically for
+    // CommsArray — this IS their real home (F1 excluded them from Structural/Signage;
+    // CommsArray is where they're supposed to dominate).
     private static void RunZonePasses(
         PlacedModule mod, FaceInfo zone, ZoneType type,
         StationModuleMesh mesh, StationModuleMesh glassMesh, FaceOccupancy occupancy,
         List<PlacedGreebleInfo> greeblePlacements,
         System.Random windowRng, System.Random hatchRng, System.Random antennaRng, System.Random dishRng,
-        System.Random ventRng, System.Random greebleRng, System.Random tankRng, System.Random containerRng)
+        System.Random ventRng, System.Random greebleRng, System.Random tankRng, System.Random containerRng,
+        System.Random surfacePipeRng)
     {
         // Brief F1 Fix 3: excluded from Structural and Signage specifically — Structural's
         // whole purpose is a genuinely blank band breaking up the field, and an antenna or
         // dish sprinkled into it partly undoes that; Signage is reserved area a future
-        // sign/placard needs to be able to claim cleanly. Every other type (including the
-        // still-unassigned-in-Z1 CommsArray/PipeCorridor) keeps them as a background pass —
-        // this was a gap in Z1's own zone-type table, not an error, and Z2 gives
-        // antennas/dishes a proper home in CommsArray instead of this blanket allow-list.
+        // sign/placard needs to be able to claim cleanly. Every other type keeps them as a
+        // background pass — CommsArray gets the "heavy" variant (Brief Z2 Part 2), everyone
+        // else (including PipeCorridor) gets the normal occasional roll unchanged.
         if (type != ZoneType.Structural && type != ZoneType.Signage)
         {
             mesh.CurrentDecorClass = DecorClass.Antennas;
-            GenerateAntennas(mod, zone, antennaRng, mesh, mod.GlowLights, occupancy, greeblePlacements);
+            GenerateAntennas(mod, zone, antennaRng, mesh, mod.GlowLights, occupancy, greeblePlacements,
+                heavy: type == ZoneType.CommsArray);
             mesh.CurrentDecorClass = DecorClass.Dishes;
             GenerateDishes(mod, zone, dishRng, mesh, occupancy, greeblePlacements);
         }
@@ -271,13 +455,37 @@ public static partial class StationDecorator
                 GenerateContainers(mod, zone, mesh, occupancy, new System.Random(containerRng.Next()));
                 break;
 
+            // Brief Z2 Part 2: assembled from existing passes, not new geometry. Antennas
+            // (heavy, above) are the dominant read; greeble boxes at their natural
+            // per-category rate (equipment cabinets at mast bases); a few small tanks
+            // (Timo: "a small greeble tank or 5") via GenerateTanks' sizeCap. Cables need
+            // no wiring here — greeblePlacements collected from this zone already flow into
+            // the SAME per-face list StationCableGenerator.GenerateFaceCables consumes
+            // (Decorate()'s multi-zone branch declares it once per face, threads it through
+            // every zone's RunZonePasses call). Dishes stay whatever the unmodified
+            // background pass produces — already structurally rare/absent for most
+            // categories (DishCategories excludes docking-bay/industrial/hab/cargo
+            // outright), so "shouldn't dominate" holds without any change here.
+            case ZoneType.CommsArray:
+                mesh.CurrentDecorClass = DecorClass.Greebles;
+                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements);
+                mesh.CurrentDecorClass = DecorClass.Tanks;
+                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()), sizeCap: CommsArrayTankSizeCap);
+                break;
+
+            // Brief Z2 Part 3: parallel surface-pipe runs along the zone's long axis — a
+            // weighting of GenerateSurfacePipes (its parallel parameter), not new geometry.
+            case ZoneType.PipeCorridor:
+                mesh.CurrentDecorClass = DecorClass.SurfacePipes;
+                GenerateSurfacePipes(mod, zone, surfacePipeRng, mesh, parallel: true);
+                break;
+
             case ZoneType.Structural:
             case ZoneType.Signage:
-            case ZoneType.CommsArray:
-            case ZoneType.PipeCorridor:
-                // Blank in Z1 — Structural is permanently blank by design (the floor-slab/
-                // rib bands that break up the field); Signage/CommsArray/PipeCorridor claim
-                // area but generate nothing until Z2.
+                // Blank — Structural is permanently blank by design (the floor-slab/rib
+                // bands that break up the field); Signage claims area and generates nothing
+                // until its own future brief (Brief Z2 Part 4 — direction-to-nearest-door
+                // hook noted there, not built).
                 break;
         }
     }

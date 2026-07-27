@@ -16,13 +16,17 @@ public static partial class StationDecorator
         return (float)(rng.NextDouble() * 5.0 + 10.5);                    // 10.5–15.5 m
     }
 
+    // Brief Z2 Part 2: heavy (default false, unchanged behaviour) is CommsArray's "weight
+    // the existing pass toward antennas/masts — heavily": skips the 35% placement gate
+    // (near-certain instead of occasional) and rolls more instances per call. Nothing else
+    // about antenna placement/appearance changes — same colours, same Yagi/spike mix.
     private static void GenerateAntennas(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, List<StationLightInfo> lights,
-        FaceOccupancy occupancy, List<PlacedGreebleInfo> placements)
+        FaceOccupancy occupancy, List<PlacedGreebleInfo> placements, bool heavy = false)
     {
         if (!face.IsExposed)           return;
         if (face.LocalNormal.Y < -0.3f) return;
-        if (rng.NextDouble() > 0.35)   return;
+        if (!heavy && rng.NextDouble() > 0.35) return;
 
         Color baseCol    = StationModuleRegistry.CategoryColor(mod.Definition.Category);
         Color antennaCol = DarkenColor(baseCol, 0.45f);
@@ -32,7 +36,7 @@ public static partial class StationDecorator
         bool faceIsWhite = rng.NextDouble() < 0.25;
         if (faceIsWhite) antennaCol = new Color(228, 232, 230);
 
-        int count = rng.Next(1, 3);
+        int count = heavy ? rng.Next(2, 5) : rng.Next(1, 3);
         for (int i = 0; i < count; i++)
         {
             float u = (float)(rng.NextDouble() - 0.5) * face.Width  * 0.5f;

@@ -75,7 +75,11 @@ public static partial class StationDecorator
             // must not shift any existing per-pass RNG stream or re-roll every station in
             // the galaxy. Capped per-module across every face below, not just one.
             var zoneRng = new System.Random(mod.Seed ^ ZoneRngSalt);
-            int moduleWindowZoneBudget = MaxWindowZonesPerModule;
+            // Brief Z2: replaces the plain int window budget with the fuller per-module
+            // guaranteed-set state (tank farm/pipe corridor/comms array/signage) — see
+            // ModuleZoneBudget's own comment for why constructing this unconditionally here
+            // is still safe for wholly-ordinary (all-single-zone) modules.
+            var moduleZoneBudget = new ModuleZoneBudget();
 
             foreach (var face in faces)
             {
@@ -138,13 +142,14 @@ public static partial class StationDecorator
                     GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
 
                     var greeblePlacements = new List<PlacedGreebleInfo>();
-                    var zoneTypes = AssignZoneTypes(mod.Definition.Category, zones, zoneRng, ref moduleWindowZoneBudget);
+                    var zoneTypes = AssignZoneTypes(mod.Definition.Category, zones, zoneRng, moduleZoneBudget);
 
                     for (int i = 0; i < zones.Length; i++)
                     {
                         var occupancy = new FaceOccupancy(); // zones don't overlap, so no cross-zone conflicts by construction
                         RunZonePasses(mod, zones[i], zoneTypes[i], mesh, glassMesh, occupancy, greeblePlacements,
-                            windowRng, hatchRng, antennaRng, dishRng, ventRng, greebleRng, tankRng, containerRng);
+                            windowRng, hatchRng, antennaRng, dishRng, ventRng, greebleRng, tankRng, containerRng,
+                            surfacePipeRng);
                     }
 
                     // Cables still run per-face, collecting placements from every zone on
