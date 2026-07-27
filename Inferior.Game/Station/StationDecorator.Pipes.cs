@@ -42,6 +42,11 @@ public static partial class StationDecorator
         _      => 8,
     };
 
+    // Brief P1 Fix B: docking-bay previously wasn't in GeneratePipes' category filter at
+    // all (bays never got edge pipes), so this tier never had a chance to run before now.
+    // Sized chunkier than industrial's (up to 0.80) — a bay's edges run 100-238m, dwarfing
+    // a hab-block's — with the same institutional grey/blue family as SurfacePipeColour's
+    // new bay entries, for a consistent bay palette between edge and surface pipes.
     private static (float radius, int sides, Color colour) PipeSpec(string category, System.Random rng)
     {
         double roll = rng.NextDouble();
@@ -63,6 +68,12 @@ public static partial class StationDecorator
                 ? (0.50f, 6, new Color(155, 100, 50))
                 : (0.28f, 4, new Color(165, 110, 55)),
 
+            "docking-bay" => roll < 0.20
+                ? (1.20f, 8, new Color(90,  95,  100))
+                : roll < 0.55
+                ? (0.65f, 6, new Color(70,  110, 130))
+                : (0.35f, 6, new Color(150, 150, 145)),
+
             _ => roll < 0.25
                 ? (0.22f, 6, new Color(120, 120, 120))
                 : (0.10f, 4, new Color(135, 135, 140)),
@@ -72,7 +83,11 @@ public static partial class StationDecorator
     private static void GeneratePipes(PlacedModule mod, FaceInfo[] faces,
         System.Random rng, StationModuleMesh mesh)
     {
-        if (mod.Definition.Category is not ("industrial" or "cargo" or "connector" or "core"))
+        // Brief P1 Fix B: docking-bay added — D-Greeble found it excluded outright, so bays
+        // never got edge pipes at all. mod.Definition.BoundingBox is the bay's real envelope
+        // (set in StationModuleRegistry.CreateDockingBay), so the edge-corner math below
+        // needs no bay-specific branch beyond this filter and PipeSpec's own bay tier.
+        if (mod.Definition.Category is not ("industrial" or "cargo" or "connector" or "core" or "docking-bay"))
             return;
 
         Vector3 bb   = mod.Definition.BoundingBox;
@@ -143,14 +158,25 @@ public static partial class StationDecorator
 
     // ── Surface pipe runs ─────────────────────────────────────────────────────
 
+    // Brief P1 Fix B: docking-bay previously fell to the flat (118,118,118) default in
+    // every sample (D-Greeble measured this directly) — a real entry gives bay surface
+    // pipes the same category-appropriate variety every other category already has.
+    // Institutional greys/blues (fuel/coolant-line reads) rather than industrial's
+    // rust/orange — a bay is a logistics structure, not a refinery.
     private static Color SurfacePipeColour(string category, System.Random rng) => category switch
     {
         "industrial" or "fuel" => rng.NextDouble() < 0.5
             ? new Color(160, 105, 50)
             : new Color(85,  85,  85),
-        "science"    => new Color(100, 130, 160),
-        "cargo"      => new Color(155, 100, 50),
-        _            => new Color(118, 118, 118),
+        "science"      => new Color(100, 130, 160),
+        "cargo"        => new Color(155, 100, 50),
+        "docking-bay"  => rng.NextDouble() switch
+        {
+            < 0.40 => new Color(90,  95,  100),
+            < 0.75 => new Color(70,  110, 130),
+            _      => new Color(150, 150, 145),
+        },
+        _              => new Color(118, 118, 118),
     };
 
     private static void GenerateSurfacePipes(PlacedModule mod, FaceInfo face,

@@ -13,11 +13,16 @@ public static partial class StationDecorator
         PlacedModule owner)
     {
         if (!face.IsExposed) return;
+        // Brief P1 Fix B: docking-bay previously fell to the 0f default (D-Greeble measured
+        // this directly — a bay never got a single chimney across 4 sampled stations).
+        // Modest, not industrial-level — a bay is a logistics/docking structure, plausibly
+        // venting life-support/power equipment near its walls, not a refinery stack farm.
         float prob = mod.Definition.Category switch
         {
-            "industrial" => 0.75f,
-            "core"       => 0.35f,
-            _            => 0f,
+            "industrial"  => 0.75f,
+            "core"        => 0.35f,
+            "docking-bay" => 0.20f,
+            _             => 0f,
         };
         if (rng.NextDouble() > prob) return;
 

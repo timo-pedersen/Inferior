@@ -732,7 +732,10 @@ public sealed class StationGenerator
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static int NameHash(string name)
+    // internal, not private: Brief P1's Nova Anchorage regression test needs to reconstruct
+    // the exact same StationProfile (and therefore economy/palette) that Generate() derived
+    // internally, without a second, drifting seed derivation living in test code.
+    internal static int NameHash(string name)
     {
         int h = 17;
         foreach (char c in name) h = h * 31 + c;

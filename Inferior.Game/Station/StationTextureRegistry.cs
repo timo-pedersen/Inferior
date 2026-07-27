@@ -112,6 +112,18 @@ public static class StationTextureRegistry
     // so this offset is deterministic per variant seed without perturbing pixel layout.
     // internal, not private: StationPanelVariantTests asserts variants actually differ in
     // colour, not just position — the exact regression the S2b-1 gate-fix addressed.
+    //
+    // Brief P1 Fix A: BaseColour's HSV value is floored at MinVariantBaseValue (D-NovaTank —
+    // Nova Anchorage's Independent-economy docking-bay rolled a variant whose brightnessDelta
+    // crushed V to 0, producing a literal (0,0,0) BaseColour and a ~17-mean-luminance texture;
+    // both the hull (PS_DynamicLit) and every decoration pass (PS_BakedColorLit) multiply
+    // through that same bitmap, so a black variant reads as "no surface" rather than "a dark
+    // module"). The floor applies to BaseColour only, not GrimeColour — grime is deliberately
+    // near-black already by design (e.g. Industrial's GrimeColour has V≈0.11, already below
+    // this floor), so flooring it too would brighten ordinary wear patches as a side effect
+    // rather than only fixing the pathological all-black case. Hue/saturation spread are
+    // untouched either way — the wide colour variance on high-spread economies (Independent,
+    // Agricultural) is intentional and must survive.
     internal static TexturePalette OffsetPaletteForVariant(TexturePalette basePalette, int seed, float colourSpread)
     {
         var rng = new System.Random(seed ^ 0x484F4655); // "HOFU" — colour-offset salt
@@ -126,7 +138,7 @@ public static class StationTextureRegistry
 
         return new TexturePalette
         {
-            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
+            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta, MinVariantBaseValue),
             AccentColour     = basePalette.AccentColour,
             GrimeColour      = ApplyHsvOffset(basePalette.GrimeColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
             NoiseStrength    = basePalette.NoiseStrength,
@@ -138,12 +150,22 @@ public static class StationTextureRegistry
         };
     }
 
-    private static Color ApplyHsvOffset(Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta)
+    // Brief P1 Fix A: the texture is a multiplier on everything sampled through it (hull
+    // albedo, decoration albedo, and — via the material map's height/gloss channels —
+    // specular and bump too), so its brightness sets the ceiling on how much of any of that
+    // can ever reach the screen. At V=0 a module doesn't read as "a black module," it reads
+    // as "a module with no surface." 0.15 sits in the brief's suggested 0.12-0.18 range: dark
+    // enough that a floored module still reads as dramatically darker than a normal
+    // neighbour, bright enough that panel grid/seams/wear/specular/bump still show through.
+    internal const float MinVariantBaseValue = 0.15f;
+
+    private static Color ApplyHsvOffset(
+        Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta, float minValue = 0f)
     {
         RgbToHsv(c, out float h, out float s, out float v);
         h = (h + hueDeltaDegrees + 360f) % 360f;
         s = Math.Clamp(s + saturationDelta, 0f, 1f);
-        v = Math.Clamp(v + brightnessDelta, 0f, 1f);
+        v = Math.Clamp(v + brightnessDelta, minValue, 1f);
         return HsvToRgb(h, s, v);
     }
 
