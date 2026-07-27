@@ -8,6 +8,11 @@ namespace Inferior.Game.StationGen.Megastations;
 public sealed record MegastationPrototypeDiagnostics(
     string StationPersistenceId,
     int GeneratorVersion,
+    int SeedCompatibilityVersion,
+    int PositiveYUrbanSeedVersion,
+    int FaceUrbanAlgorithmVersion,
+    int EdgeAlgorithmVersion,
+    int CornerAlgorithmVersion,
     int RootSeed,
     int XSliceCount,
     int YSliceCount,
@@ -42,6 +47,7 @@ public sealed record MegastationPrototypeCpuResult(
     SliceGrid Grid,
     StructuralOccupancy Occupancy,
     IReadOnlyList<SurfacePatch> Patches,
+    MegastationUrbanStyle Style,
     IReadOnlyList<UrbanGrowthResult> Faces,
     IReadOnlyList<EdgeRegionPlan> Edges,
     IReadOnlyList<CornerRegionPlan> Corners,
@@ -93,7 +99,7 @@ public static class MegastationPrototypeGenerator
     {
         settings ??= MegastationPrototypeSettings.Default;
         stopwatch ??= Stopwatch.StartNew();
-        int rootSeed = MegastationSeed.Root(persistenceId, settings.GeneratorVersion);
+        int rootSeed = MegastationSeed.Root(persistenceId, settings.SeedCompatibilityVersion);
 
         var grid = SliceGrid.Create(settings, MegastationSeed.Derive(rootSeed, "slice-grid layout"));
         var occupancy = new CuboidStructuralVolumeGenerator().Generate(grid);
@@ -126,6 +132,11 @@ public static class MegastationPrototypeGenerator
         var diag = new MegastationPrototypeDiagnostics(
             persistenceId,
             settings.GeneratorVersion,
+            settings.SeedCompatibilityVersion,
+            settings.PositiveYUrbanSeedVersion,
+            settings.FaceUrbanAlgorithmVersion,
+            settings.EdgeAlgorithmVersion,
+            settings.CornerAlgorithmVersion,
             rootSeed,
             grid.XCount,
             grid.YCount,
@@ -151,7 +162,7 @@ public static class MegastationPrototypeGenerator
             meshStats.MeshPageCount,
             stopwatch.ElapsedMilliseconds);
 
-        return new MegastationPrototypeCpuResult(grid, occupancy, patches, faceResults, edges, corners, mesh, meshStats, diag);
+        return new MegastationPrototypeCpuResult(grid, occupancy, patches, style, faceResults, edges, corners, mesh, meshStats, diag);
     }
 
     private static Texture2D MakeFlat(GraphicsDevice gd, Color color)

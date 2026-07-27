@@ -63,7 +63,7 @@ public sealed partial class SystemSpaceState
         MegastationPrototypeSelectionMode mode)
     {
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
-            $"Megastation Prototype B [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; " +
+            $"Megastation Prototype B [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; " +
             $"seed={d.RootSeed}; slices={d.XSliceCount}x{d.YSliceCount}x{d.ZSliceCount}; " +
             $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; urban={d.UrbanOccupiedCellCount}; " +
             $"faces={d.UrbanizedFaceCount}; faceCells={d.FaceRegionOccupiedCellCount}; edgeCells={d.EdgeRegionOccupiedCellCount}; cornerCells={d.CornerRegionOccupiedCellCount}; " +

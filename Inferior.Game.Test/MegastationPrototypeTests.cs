@@ -8,6 +8,7 @@ namespace Inferior.Game.Test;
 public sealed class MegastationPrototypeTests
 {
     private const string StationId = "Test Star:Test Parent:Prototype Station";
+    private const string StarterStationId = "Oranae:Oranae I:Nova Anchorage";
 
     [Fact]
     public void SliceGrid_IsDeterministicPositiveAndMatchesCoreDimensions()
@@ -148,9 +149,11 @@ public sealed class MegastationPrototypeTests
     public void PositiveYAcceptedFace_DepthMapMatchesPrototypeASeedPath()
     {
         var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
+        Assert.Equal(2, result.Diagnostics.GeneratorVersion);
+        Assert.Equal(1, result.Diagnostics.SeedCompatibilityVersion);
         UrbanGrowthResult positiveY = PositiveYFace(result);
 
-        int rootSeed = MegastationSeed.Root(StationId, MegastationPrototypeSettings.Default.GeneratorVersion);
+        int rootSeed = MegastationSeed.Root(StationId, MegastationPrototypeSettings.Default.SeedCompatibilityVersion);
         var legacyGrid = SliceGrid.Create(MegastationPrototypeSettings.Default, MegastationSeed.Derive(rootSeed, "slice-grid layout"));
         var legacyOccupancy = new CuboidStructuralVolumeGenerator().Generate(legacyGrid);
         ExteriorSpace.ClassifyExternallyAccessibleEmpty(legacyOccupancy);
@@ -163,6 +166,133 @@ public sealed class MegastationPrototypeTests
             MegastationSeed.Derive(rootSeed, "district layout"));
 
         Assert.Equal(HashDepths(legacy.Depths), HashDepths(positiveY.Depths));
+    }
+
+    [Fact]
+    public void MassingSignatures_FreezeAcceptedPrototypeBFixtures()
+    {
+        var fixtures = new[]
+        {
+            new MassingFixture(
+                "forced starter",
+                StarterStationId,
+                "4A8DC8BAE3EFFE8ABA512AA70CBA58840A8335C55A1DC2C60F380E1C2FCF736E",
+                "BDF65C8AA6211665A4538F136F6F04C0D6ACE2F0B16166FD6E0BBB7954549C43",
+                "CE435ACF5AF0BE63CC8CD60F724AA94EFCC557EE9166C7F367F3B935E8E1465B",
+                "E36C0EF1F4D190D1CB011F24A80B377CC8D0C9C33CE337F08ACF3D70B70933BF",
+                7728, 6083, 5731, 482, 1, false),
+            new MassingFixture(
+                "representative",
+                StationId,
+                "3C3184C6582FDB5D7FE14C217E5BF5212CB68EF22E11BF3E5A9B154C3FBFE76A",
+                "CA3560409FDA6B54281415730A84F77DF1EE66E2F7998C425612385AFDB73F5C",
+                "F2AC444329E4EE09E93EEF214E568BD7BA85FF282DF95280C3E1FB13A620752C",
+                "207D2E70186629E818AC6524BA31E0392A2BB47F0E6A70CB4EA1D7DA7DC77B9F",
+                11200, 7344, 3412, 364, 1, false),
+            new MassingFixture(
+                "strong edge",
+                "Test Star:Test Parent:Edge Strong 0001",
+                "64D43B0876B9104604A1392C1E2074BFA602BA88C8FC1F2C800C03897D057D1A",
+                "BB89097CC731B836DE9AA1909F644BA5E51B59BAD6F67BB7D21EC7126A45ED85",
+                "2631049EC90414E57CD073A7313BA95DB59278312C04310CA13EFCA38241B245",
+                "5B09F96CE77FE99324C8D435D20359D1AC5D9779A5FBF096A6BC878F7B099D5C",
+                8550, 6517, 5027, 575, 1, false),
+            new MassingFixture(
+                "broken edge",
+                "Test Star:Test Parent:Broken Edge 0001",
+                "6159FD22BC7597BA614738C631DDDC5481844C8238E9A87F54FD4DC3DFFD9A62",
+                "B11ED8D9B5D73068E8CEA7F81CC74AD600EAD1CCABCF1F4283D95A58DCD41B85",
+                "8C9F3040F0DADE91EF561F12B904EE707F8AB2F41D7C9202B9B45DBD915E0256",
+                "50C3A2EAB26308AF9B743BAF5CB7072F54F8B1D10C50B0241E5911DAF968AA85",
+                9216, 5882, 1872, 121, 1, false),
+        };
+
+        foreach (var fixture in fixtures)
+        {
+            var result = MegastationPrototypeGenerator.GenerateCpu(fixture.StationId);
+            var signature = MegastationMassingSignatureBuilder.Compute(result);
+
+            Assert.Equal(2, result.Diagnostics.GeneratorVersion);
+            Assert.Equal(1, result.Diagnostics.SeedCompatibilityVersion);
+            Assert.Equal(fixture.CompleteSignature, signature.Complete);
+            Assert.Equal(fixture.BodySignature, signature.Body);
+            Assert.Equal(fixture.SliceGridSignature, signature.SliceGrid);
+            Assert.Equal(fixture.PositiveYDepthMapSignature, signature.PositiveYDepthMap);
+            Assert.Equal(fixture.StructuralCells, result.Occupancy.StructuralOccupiedCount);
+            Assert.Equal(fixture.FaceCells, result.Occupancy.FaceRegionOccupiedCount);
+            Assert.Equal(fixture.EdgeCells, result.Occupancy.EdgeRegionOccupiedCount);
+            Assert.Equal(fixture.CornerCells, result.Occupancy.CornerRegionOccupiedCount);
+            Assert.Equal(fixture.ConnectedComponents, result.Diagnostics.ConnectedComponentsBeforeValidation);
+            Assert.Equal(fixture.HasSealedCavity, result.Diagnostics.HasSealedCavity);
+        }
+    }
+
+    [Fact]
+    public void PrototypeBVersion2_UsesSeedCompatibilityVersion1ForAcceptedMassing()
+    {
+        var current = MegastationPrototypeGenerator.GenerateCpu(StationId);
+        var explicitCompatibility = MegastationPrototypeGenerator.GenerateCpu(
+            StationId,
+            MegastationPrototypeSettings.Default with { GeneratorVersion = 99, SeedCompatibilityVersion = 1 });
+        var incompatibleSeed = MegastationPrototypeGenerator.GenerateCpu(
+            StationId,
+            MegastationPrototypeSettings.Default with { GeneratorVersion = 2, SeedCompatibilityVersion = 2 });
+
+        Assert.Equal(2, current.Diagnostics.GeneratorVersion);
+        Assert.Equal(1, current.Diagnostics.SeedCompatibilityVersion);
+        Assert.Equal(MegastationMassingSignatureBuilder.Compute(current).Body,
+            MegastationMassingSignatureBuilder.Compute(explicitCompatibility).Body);
+        Assert.NotEqual(MegastationMassingSignatureBuilder.Compute(current).Body,
+            MegastationMassingSignatureBuilder.Compute(incompatibleSeed).Body);
+    }
+
+    [Fact]
+    public void SubsystemVersionChanges_AreIsolatedUntilExplicitlyUsedByGeneration()
+    {
+        var baseline = MegastationPrototypeGenerator.GenerateCpu(StationId);
+        string baselinePositiveY = MegastationMassingSignatureBuilder.Compute(baseline).PositiveYDepthMap;
+        string baselineGrid = MegastationMassingSignatureBuilder.Compute(baseline).SliceGrid;
+
+        var edgeChanged = MegastationPrototypeGenerator.GenerateCpu(
+            StationId,
+            MegastationPrototypeSettings.Default with { EdgeAlgorithmVersion = 99 });
+        var cornerChanged = MegastationPrototypeGenerator.GenerateCpu(
+            StationId,
+            MegastationPrototypeSettings.Default with { CornerAlgorithmVersion = 99 });
+        var faceChanged = MegastationPrototypeGenerator.GenerateCpu(
+            StationId,
+            MegastationPrototypeSettings.Default with { FaceUrbanAlgorithmVersion = 99 });
+
+        Assert.Equal(baselinePositiveY, MegastationMassingSignatureBuilder.Compute(edgeChanged).PositiveYDepthMap);
+        Assert.Equal(baselineGrid, MegastationMassingSignatureBuilder.Compute(cornerChanged).SliceGrid);
+        Assert.Equal(baselinePositiveY, MegastationMassingSignatureBuilder.Compute(faceChanged).PositiveYDepthMap);
+    }
+
+    [Fact]
+    public void DebugColorMode_DoesNotAlterGeneratedMassing()
+    {
+        var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
+        string before = MegastationMassingSignatureBuilder.Compute(result).Body;
+
+        foreach (MegastationDebugColorMode mode in Enum.GetValues<MegastationDebugColorMode>())
+            MegastationPrototypeMeshBuilder.Build(result.Occupancy, new StationModuleMesh(), mode);
+
+        Assert.Equal(before, MegastationMassingSignatureBuilder.Compute(result).Body);
+    }
+
+    [Fact]
+    public void DevelopmentSelection_IsNotPartOfGeometrySeed()
+    {
+        Assert.Equal(MegastationPrototypeSelectionMode.Frequent, MegastationPrototypeSettings.DevelopmentSelection.Mode);
+        Assert.Equal(0.50, MegastationPrototypeSettings.DevelopmentSelection.MegastationProbability);
+        Assert.True(MegastationPrototypeSettings.DevelopmentSelection.ForceStarterStation);
+
+        var canonical = MegastationPrototypeGenerator.GenerateCpu(StarterStationId);
+        var forced = MegastationPrototypeGenerator.GenerateCpu(StarterStationId);
+
+        Assert.Equal(
+            MegastationMassingSignatureBuilder.Compute(canonical).Body,
+            MegastationMassingSignatureBuilder.Compute(forced).Body);
     }
 
     [Fact]
@@ -336,4 +466,18 @@ public sealed class MegastationPrototypeTests
         Assert.False(float.IsNaN(value.Y) || float.IsInfinity(value.Y));
         Assert.False(float.IsNaN(value.Z) || float.IsInfinity(value.Z));
     }
+
+    private sealed record MassingFixture(
+        string Name,
+        string StationId,
+        string CompleteSignature,
+        string BodySignature,
+        string SliceGridSignature,
+        string PositiveYDepthMapSignature,
+        int StructuralCells,
+        int FaceCells,
+        int EdgeCells,
+        int CornerCells,
+        int ConnectedComponents,
+        bool HasSealedCavity);
 }

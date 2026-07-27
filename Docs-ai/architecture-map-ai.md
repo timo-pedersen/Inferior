@@ -416,8 +416,28 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `TexturePainter.cs` — CPU pixel-buffer text drawing using `BitmapFonts`.
 - `TexturePalette.cs` — per-economy colour scheme (base/accent/grime, panel noise/contrast).
 
+**Station/Megastations/** — occupancy-generated megastation prototype path
+
+- `ConnectivityValidation.cs` — GraphicsDevice-free validation of occupied-volume connected components and sealed empty cavities.
+- `CornerRegionGenerator.cs` — plans and applies eight shared corner-region masses around the structural core.
+- `EdgeRegionGenerator.cs` — plans and applies twelve shared edge-region profiles plus face-region support shoulders.
+- `ExteriorSpace.cs` — flood-fills externally accessible empty cells and tests exposed structural faces.
+- `MegastationMassingSignature.cs` — canonical SHA-256 signatures for accepted megastation occupancy/massing regression fixtures.
+- `MegastationPrototypeGenerator.cs` — CPU/GPU entry point for Prototype B generation, diagnostics, and single-module station-model wrapping.
+- `MegastationPrototypeMeshBuilder.cs` — emits the current unchamfered exterior boundary mesh from final occupancy, with debug colour modes.
+- `MegastationPrototypeSettings.cs` — generation settings, development-selection source, and generator/seed compatibility version declarations.
+- `MegastationSeed.cs` — stable semantic FNV-style seed derivation for megastation subsystems.
+- `RegionPlans.cs` — stable region identities and edge/corner plan records.
+- `SliceGrid.cs` — deterministic non-uniform rectilinear grid, core ranges, exterior layers, and cell coordinate helpers.
+- `StructuralOccupancy.cs` — compact per-cell occupancy flags, owner metadata, and stable region ids.
+- `StructuralVolumeGenerator.cs` — fills the current cuboid structural core occupancy baseline.
+- `SurfacePatch.cs` — exposed-face patch records and patch-local coordinate discovery.
+- `UrbanGrowth.cs` — monotonic face-interior district/depth-map growth for each major surface patch.
+- `UrbanStyle.cs` — station-wide style tendencies and deterministic per-face settings modifiers.
+
 ---
 
 ## Inferior.Game.Test
 
+- `MegastationPrototypeTests.cs` — xUnit coverage for the occupancy-generated megastation prototype: slice grid, exterior flood fill, face/edge/corner ownership, connectivity, massing signatures, version/seed compatibility, and mesh sanity.
 - `ShipRecordContainmentTests.cs` — xUnit test enforcing that `ShipRecord` only appears in `ShipBuilder`/`ShipExtensions`/`ShipPersistenceService`.

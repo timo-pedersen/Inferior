@@ -20,7 +20,12 @@ public sealed record MegastationPrototypeSettings
     public static MegastationDevelopmentSelection DevelopmentSelection { get; } =
         new(MegastationPrototypeSelectionMode.Frequent, MegastationProbability: 0.50, ForceStarterStation: true);
 
-    public int GeneratorVersion { get; init; } = 1;
+    public int GeneratorVersion { get; init; } = 2;
+    public int SeedCompatibilityVersion { get; init; } = 1;
+    public int PositiveYUrbanSeedVersion { get; init; } = 1;
+    public int FaceUrbanAlgorithmVersion { get; init; } = 1;
+    public int EdgeAlgorithmVersion { get; init; } = 1;
+    public int CornerAlgorithmVersion { get; init; } = 1;
 
     public Vector3 CoreDimensions { get; init; } = new(1400f, 520f, 900f);
     public IntRange CoreXSlices { get; init; } = new(26, 34);

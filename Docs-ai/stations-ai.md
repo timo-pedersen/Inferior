@@ -28,14 +28,21 @@ separate `SpriteBatch` pass using `BlendState.Additive`.
 ### Megastation prototypes
 
 The megastation generator is an explicit alternate station-generation path, not a replacement for
-the ordinary port/module growth path.
+the ordinary port/module growth path. Ordinary stations still use `StationGenerator` /
+`StationGrowthEngine`-style port attachment plus `StationDecorator`; occupancy-generated
+megastations are a separate macro path and are not an implementation of the old module-budget
+table.
 
 Prototype A produced one large filled cuboid structural volume with one dense positive-Y urban
 face and five plain structural faces. Timo visually accepted that one-face result in-engine.
 
 Prototype B wraps the accepted city identity around the whole cuboid: all six faces grow city
 interiors, all twelve edges are shared generated regions, and all eight corners are shared
-generated regions. The positive-Y face preserves Prototype A's accepted seed path.
+generated regions. Timo visually accepted Prototype B in-engine after checking multiple seeds,
+all faces, shared edges/corners, close and distant views, silhouette readability, immense scale,
+organic departure from the cuboid, and mixed small/large masses. Its occupied massing is frozen
+unless a later explicit brief reopens it. The positive-Y face preserves Prototype A's accepted
+seed path.
 
 Implementation:
 
@@ -69,6 +76,10 @@ Implementation:
   union occupancy through `StationModuleMesh`; it uses the existing station hull lighting/render
   path and does not add a prototype shader. Optional mesh colouring supports structural-vs-urban,
   region-owner, and outward-normal debug modes.
+- `MegastationMassingSignatureBuilder` computes GraphicsDevice-free SHA-256 regression
+  signatures over canonical bytes, not GPU buffers. The long-lived massing signature covers
+  seed compatibility, algorithm versions, slice widths, core ranges, station-wide style,
+  per-cell occupied/owner/region data, face depth maps, edge profiles, and corner plans.
 
 Development controls:
 
@@ -77,6 +88,16 @@ Development controls:
   `ForceStarterStation = true`.
 - `Canonical` remains supported by changing that value; generator identity and geometry do not
   depend on selection mode.
+
+Versioning:
+
+- `GeneratorVersion = 2` is the current overall Prototype B generator/output version reported
+  in diagnostics and included in complete regression signatures.
+- `SeedCompatibilityVersion = 1` is intentionally retained for accepted massing. The root seed is
+  derived from this compatibility version, not from the diagnostic generator version, so reporting
+  Prototype B honestly as version 2 does not alter accepted output.
+- `PositiveYUrbanSeedVersion`, `FaceUrbanAlgorithmVersion`, `EdgeAlgorithmVersion`, and
+  `CornerAlgorithmVersion` are explicit version declarations for future intentional revisions.
 
 Diagnostics are published as a `SystemMessage` whenever a prototype is generated: station
 persistent identity, generator version/root seed, slice counts, grid cells, structural/urban
@@ -92,10 +113,10 @@ Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` 
 | Default prototype | 41x28x36 | 41,328 | 8,100 | 12,003 | 6,326 | 5,375 | 302 | 49 | 11,678 | 23,356 | 46,712 | 283 ms |
 | Stress | 67x41x59 | 162,073 | 30,096 | 45,779 | 24,784 | 20,088 | 907 | 81 | 32,968 | 65,936 | 131,872 | 859 ms |
 
-Prototype B is not visually accepted yet. Deferred by design: production chamfers, semantic module
-partitioning, windows, lights, greeble, pipes, tanks, antennas, attached annexes, Boolean cuts,
-O/L/T shapes, jagged structural-core erosion, bridges, overhangs, docking bays, interiors, final
-megastation rarity, LOD redesign, and shadow changes.
+Prototype B is visually accepted and frozen at the occupied-massing layer. Deferred by design:
+production chamfers, semantic module partitioning, windows, lights, greeble, pipes, tanks,
+antennas, attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges,
+overhangs, docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
 
 ---
 
