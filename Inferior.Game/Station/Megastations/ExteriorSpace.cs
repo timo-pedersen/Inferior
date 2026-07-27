@@ -75,4 +75,53 @@ public static class Direction
     };
 
     public static int Sign(GridDirection direction) => direction is GridDirection.PositiveX or GridDirection.PositiveY or GridDirection.PositiveZ ? 1 : -1;
+
+    public static GridDirection Negative(GridAxis axis) => axis switch
+    {
+        GridAxis.X => GridDirection.NegativeX,
+        GridAxis.Y => GridDirection.NegativeY,
+        _          => GridDirection.NegativeZ,
+    };
+
+    public static GridDirection Positive(GridAxis axis) => axis switch
+    {
+        GridAxis.X => GridDirection.PositiveX,
+        GridAxis.Y => GridDirection.PositiveY,
+        _          => GridDirection.PositiveZ,
+    };
+
+    public static string Id(GridDirection direction) => direction switch
+    {
+        GridDirection.NegativeX => "-x",
+        GridDirection.PositiveX => "+x",
+        GridDirection.NegativeY => "-y",
+        GridDirection.PositiveY => "+y",
+        GridDirection.NegativeZ => "-z",
+        _                       => "+z",
+    };
+
+    public static int OutwardIndex(SliceGrid grid, GridDirection direction, int layer)
+    {
+        GridAxis axis = PrimaryAxis(direction);
+        Range core = grid.CoreRange(axis);
+        return Sign(direction) > 0
+            ? core.End.Value + layer - 1
+            : core.Start.Value - layer;
+    }
+
+    public static int AvailableLayers(SliceGrid grid, GridDirection direction)
+    {
+        GridAxis axis = PrimaryAxis(direction);
+        Range core = grid.CoreRange(axis);
+        return Sign(direction) > 0
+            ? grid.Count(axis) - core.End.Value
+            : core.Start.Value;
+    }
+
+    public static int CoreBoundaryIndex(SliceGrid grid, GridDirection direction)
+    {
+        GridAxis axis = PrimaryAxis(direction);
+        Range core = grid.CoreRange(axis);
+        return Sign(direction) > 0 ? core.End.Value - 1 : core.Start.Value;
+    }
 }

@@ -15,8 +15,18 @@ public sealed record MegastationPrototypeDiagnostics(
     int GridCellCount,
     int StructuralOccupiedCellCount,
     int UrbanOccupiedCellCount,
+    int UrbanizedFaceCount,
+    int FaceRegionOccupiedCellCount,
+    int EdgeRegionOccupiedCellCount,
+    int CornerRegionOccupiedCellCount,
     int DistrictCount,
     int MaximumUrbanDepth,
+    IReadOnlyList<string> PerFaceSummary,
+    IReadOnlyList<string> PerEdgeSummary,
+    IReadOnlyList<string> PerCornerSummary,
+    int ConnectedComponentsBeforeValidation,
+    int RemovedDisconnectedCells,
+    bool HasSealedCavity,
     int ExposedQuadCount,
     int TriangleCount,
     int VertexCount,
@@ -32,7 +42,9 @@ public sealed record MegastationPrototypeCpuResult(
     SliceGrid Grid,
     StructuralOccupancy Occupancy,
     IReadOnlyList<SurfacePatch> Patches,
-    UrbanGrowthResult Urban,
+    IReadOnlyList<UrbanGrowthResult> Faces,
+    IReadOnlyList<EdgeRegionPlan> Edges,
+    IReadOnlyList<CornerRegionPlan> Corners,
     StationModuleMesh Mesh,
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
@@ -49,7 +61,7 @@ public static class MegastationPrototypeGenerator
         Vector3 bounds = new(cpu.Grid.Dimension(GridAxis.X), cpu.Grid.Dimension(GridAxis.Y), cpu.Grid.Dimension(GridAxis.Z));
         var def = new StationModuleDefinition
         {
-            Id = "megastation-prototype-a",
+            Id = "megastation-prototype-b",
             Category = "megastation-prototype",
             BoundingBox = bounds,
             MinScale = StationScale.Outpost,
@@ -87,15 +99,29 @@ public static class MegastationPrototypeGenerator
         var occupancy = new CuboidStructuralVolumeGenerator().Generate(grid);
         ExteriorSpace.ClassifyExternallyAccessibleEmpty(occupancy);
         var patches = SurfacePatchFinder.FindPatches(occupancy);
-        var patch = patches
-            .Where(p => p.Direction == settings.UrbanPatchNormal)
-            .OrderByDescending(p => p.Cells.Count)
-            .First();
+        var style = MegastationUrbanStyle.Generate(rootSeed);
+        var corners = CornerRegionGenerator.PlanCorners(grid, settings, style, rootSeed);
+        CornerRegionGenerator.Apply(occupancy, corners);
+        var edges = EdgeRegionGenerator.PlanEdges(grid, settings, style, corners, rootSeed);
+        EdgeRegionGenerator.Apply(occupancy, edges);
 
-        var urban = UrbanGrowth.Generate(occupancy, patch, settings, MegastationSeed.Derive(rootSeed, "district layout"));
+        var faceResults = new List<UrbanGrowthResult>(6);
+        foreach (var patch in patches.OrderBy(p => p.Id, StringComparer.Ordinal))
+        {
+            var faceSettings = MegastationFaceSettings.ForPatch(settings, style, grid, patch, rootSeed);
+            int faceSeed = patch.Direction == settings.UrbanPatchNormal
+                ? MegastationSeed.Derive(rootSeed, "district layout")
+                : MegastationSeed.Derive(rootSeed, $"district layout:{patch.Id}");
+            faceResults.Add(UrbanGrowth.Generate(occupancy, patch, faceSettings, faceSeed));
+        }
+
+        var validation = MegastationConnectivity.Validate(occupancy);
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
         stopwatch.Stop();
+
+        int districtCount = faceResults.Sum(f => f.Districts.Count);
+        int maxDepth = faceResults.Count == 0 ? 0 : faceResults.Max(f => f.MaximumDepth);
 
         var diag = new MegastationPrototypeDiagnostics(
             persistenceId,
@@ -107,15 +133,25 @@ public static class MegastationPrototypeGenerator
             grid.CellCount,
             occupancy.StructuralOccupiedCount,
             occupancy.UrbanOccupiedCount,
-            urban.Districts.Count,
-            urban.MaximumDepth,
+            faceResults.Count(f => f.Districts.Count > 0),
+            occupancy.FaceRegionOccupiedCount,
+            occupancy.EdgeRegionOccupiedCount,
+            occupancy.CornerRegionOccupiedCount,
+            districtCount,
+            maxDepth,
+            faceResults.Select(f => $"{RegionIdentity.Face(f.Patch.Direction)} districts={f.Districts.Count} maxDepth={f.MaximumDepth}").ToArray(),
+            edges.Select(e => $"{e.Id} {e.ProfileSummary} start=({e.StartCornerDepthA},{e.StartCornerDepthB}) end=({e.EndCornerDepthA},{e.EndCornerDepthB})").ToArray(),
+            corners.Select(c => $"{c.Id} {c.Summary} extents=({c.DepthA},{c.DepthB},{c.DepthC})").ToArray(),
+            validation.ConnectedComponentsBeforeValidation,
+            validation.RemovedDisconnectedCells,
+            validation.HasSealedCavity,
             meshStats.ExposedQuadCount,
             meshStats.TriangleCount,
             meshStats.VertexCount,
             meshStats.MeshPageCount,
             stopwatch.ElapsedMilliseconds);
 
-        return new MegastationPrototypeCpuResult(grid, occupancy, patches, urban, mesh, meshStats, diag);
+        return new MegastationPrototypeCpuResult(grid, occupancy, patches, faceResults, edges, corners, mesh, meshStats, diag);
     }
 
     private static Texture2D MakeFlat(GraphicsDevice gd, Color color)

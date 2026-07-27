@@ -32,9 +32,61 @@ public sealed class SliceGrid
     public float GetCellCentre(GridAxis axis, int index) => (GetCellMinimum(axis, index) + GetCellMaximum(axis, index)) * 0.5f;
     public float GetCellSize(GridAxis axis, int index) => _widths[(int)axis][index];
     public Range CoreRange(GridAxis axis) => axis switch { GridAxis.X => CoreX, GridAxis.Y => CoreY, _ => CoreZ };
+    public bool IsInCoreRange(GridAxis axis, int index)
+    {
+        Range range = CoreRange(axis);
+        return index >= range.Start.Value && index < range.End.Value;
+    }
 
     public int Index(int x, int y, int z) => (y * ZCount + z) * XCount + x;
     public bool Contains(int x, int y, int z) => (uint)x < XCount && (uint)y < YCount && (uint)z < ZCount;
+    public IReadOnlyList<GridDirection> ExteriorDirections(int x, int y, int z)
+    {
+        var directions = new List<GridDirection>(3);
+        AddAxisExterior(directions, GridAxis.X, x);
+        AddAxisExterior(directions, GridAxis.Y, y);
+        AddAxisExterior(directions, GridAxis.Z, z);
+        return directions;
+    }
+
+    public int ExteriorAxisCount(int x, int y, int z) => ExteriorDirections(x, y, z).Count;
+
+    public bool IsFaceRegion(int x, int y, int z, GridDirection direction)
+    {
+        var dirs = ExteriorDirections(x, y, z);
+        return dirs.Count == 1 && dirs[0] == direction;
+    }
+
+    public bool IsEdgeRegion(int x, int y, int z, GridDirection a, GridDirection b)
+    {
+        var dirs = ExteriorDirections(x, y, z);
+        return dirs.Count == 2 && dirs.Contains(a) && dirs.Contains(b);
+    }
+
+    public bool IsCornerRegion(int x, int y, int z, GridDirection a, GridDirection b, GridDirection c)
+    {
+        var dirs = ExteriorDirections(x, y, z);
+        return dirs.Count == 3 && dirs.Contains(a) && dirs.Contains(b) && dirs.Contains(c);
+    }
+
+    private void AddAxisExterior(List<GridDirection> directions, GridAxis axis, int index)
+    {
+        Range range = CoreRange(axis);
+        if (index < range.Start.Value)
+            directions.Add(axis switch
+            {
+                GridAxis.X => GridDirection.NegativeX,
+                GridAxis.Y => GridDirection.NegativeY,
+                _          => GridDirection.NegativeZ,
+            });
+        else if (index >= range.End.Value)
+            directions.Add(axis switch
+            {
+                GridAxis.X => GridDirection.PositiveX,
+                GridAxis.Y => GridDirection.PositiveY,
+                _          => GridDirection.PositiveZ,
+            });
+    }
 
     internal static SliceGrid Create(MegastationPrototypeSettings settings, int seed)
     {

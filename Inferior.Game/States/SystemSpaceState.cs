@@ -430,20 +430,20 @@ public sealed partial class SystemSpaceState : GameState
         _stationPanelTextures.Clear();
         foreach (var v in _shadowCasterMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _shadowCasterMeshes.Clear();
-        MegastationPrototypeSelectionMode megaMode = MegastationPrototypeSettings.ReadSelectionMode();
-        Galaxy.Station? starterStation = megaMode == MegastationPrototypeSelectionMode.ForceStarterStation
+        MegastationDevelopmentSelection megaSelection = MegastationPrototypeSettings.DevelopmentSelection;
+        Galaxy.Station? starterStation = megaSelection.ForceStarterStation || megaSelection.Mode == MegastationPrototypeSelectionMode.ForceStarterStation
             ? StarterSystemSelector.SelectStarterStation(_system.Stations)
             : null;
 
         foreach (var station in _system.Stations)
         {
-            bool useMegaPrototype = ShouldUseMegastationPrototype(station, starterStation, megaMode);
+            bool useMegaPrototype = ShouldUseMegastationPrototype(station, starterStation, megaSelection);
             var result  = StationGenerator.Generate(station, _gd, _gameTimeSeconds, useMegaPrototype);
             var modules = result.Modules;
             _stationGeometry[station] = modules;
             _stationPanelTextures[station] = result.PanelTextures;
             if (result.MegastationDiagnostics is { } megaDiag)
-                PublishMegastationPrototypeDiagnostics(megaDiag, megaMode);
+                PublishMegastationPrototypeDiagnostics(megaDiag, megaSelection.Mode);
 
             // Flat (ungraded) snapshot — captured before ambient occlusion darkens
             // faces below — used for Medium/Minimal DetailLevel. Same generator,
