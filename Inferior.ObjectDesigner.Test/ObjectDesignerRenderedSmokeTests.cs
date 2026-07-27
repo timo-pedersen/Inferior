@@ -1,11 +1,14 @@
 using Inferior.Core.Math;
 using Inferior.Gameplay.Hull;
+using Inferior.ObjectDesigner.Editing;
 using Inferior.Rendering;
 using Inferior.UI;
 using Inferior.UI.Controls;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using Xunit;
 
 namespace Inferior.ObjectDesigner.Test;
@@ -20,6 +23,7 @@ public sealed class ObjectDesignerGpuRenderCollection
 public sealed class ObjectDesignerRenderedSmokeTests
 {
     private static readonly Color Root = Color.Black;
+    private static readonly Color GridBackground = new(9, 12, 13);
     private static readonly Color Toolbar = Color.Red;
     private static readonly Color TwoD = Color.Green;
     private static readonly Color ThreeD = Color.Blue;
@@ -68,6 +72,26 @@ public sealed class ObjectDesignerRenderedSmokeTests
         Assert.Equal(DynamicLitMaterialSettings.Tight.SpecularShininess, tightMaterial.SpecularShininess);
         int nonBackgroundPixels = CountNonBackgroundPixels(tightMaterial.Frame, new Color(8, 10, 11));
         Assert.True(nonBackgroundPixels > 100, $"The real preview ship render produced too few non-background pixels: {nonBackgroundPixels}.");
+    }
+
+    [Fact]
+    public void Metric_grid_render_smoke_shows_zoom_levels_and_stays_under_editor_marks()
+    {
+        Rectangle viewport = new(20, 20, 160, 160);
+        RenderedFrame hierarchy = RenderGridFrame(800f, viewport, drawEditorMarks: true);
+
+        hierarchy.AssertPixel(new Point(100, 100), Color.Yellow, "editor mark over metre grid");
+        double background = Luminance(GridBackground);
+        double metreLuma = MaxLuminanceNear(hierarchy, new Point(100, 103));
+        double decimetreLuma = MaxLuminanceNear(hierarchy, new Point(180, 103));
+        double centimetreLuma = MaxLuminanceNear(hierarchy, new Point(108, 103));
+        Assert.True(metreLuma - decimetreLuma > 30, $"metre {metreLuma} should be substantially brighter than decimetre {decimetreLuma}");
+        Assert.True(decimetreLuma - centimetreLuma > 8, $"decimetre {decimetreLuma} should be substantially brighter than centimetre {centimetreLuma}");
+        Assert.True(centimetreLuma > background, $"centimetre {centimetreLuma} should remain above background {background}");
+        hierarchy.AssertPixel(new Point(10, 100), GridBackground, "outside 2D pane");
+
+        AssertFramebufferFade([50f, 59f, 69.62f, 80f], MetricGrid.DecimetreSpacing, "decimetre");
+        AssertFramebufferFade([500f, 590f, 696.2f, 800f], MetricGrid.CentimetreSpacing, "centimetre");
     }
 
     private static GridPanel BuildDesignerLikeTree(Func<Texture2D?> previewTexture)
@@ -257,6 +281,74 @@ public sealed class ObjectDesignerRenderedSmokeTests
         return texture;
     }
 
+    private static RenderedFrame RenderGridFrame(float pixelsPerMeter, Rectangle viewport, bool drawEditorMarks)
+        => RenderHarness.Render(200, 200, gd =>
+        {
+            gd.Clear(GridBackground);
+            var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = pixelsPerMeter };
+            using var effect = new BasicEffect(gd)
+            {
+                VertexColorEnabled = true,
+                Projection = Matrix.CreateOrthographicOffCenter(0, gd.Viewport.Width, gd.Viewport.Height, 0, 0, 1),
+            };
+            VertexPositionColor[] vertices = ProductionGridVertices(projection, viewport);
+            gd.BlendState = BlendState.AlphaBlend;
+            gd.RasterizerState = RasterizerState.CullNone;
+            foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                if (vertices.Length > 0)
+                    gd.DrawUserPrimitives(PrimitiveType.LineList, vertices, 0, vertices.Length / 2);
+            }
+
+            if (drawEditorMarks)
+            {
+                using Texture2D pixel = CreatePixel(gd);
+                using var sb = new SpriteBatch(gd);
+                sb.Begin(blendState: BlendState.AlphaBlend);
+                sb.Draw(pixel, new Rectangle(96, 96, 8, 8), Color.Yellow);
+                sb.End();
+            }
+        });
+
+    private static VertexPositionColor[] ProductionGridVertices(OrthographicProjection projection, Rectangle viewport)
+    {
+        var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+        typeof(ObjectDesignerGame).GetField("_projection", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, projection);
+        var lines = new List<VertexPositionColor>();
+        typeof(ObjectDesignerGame).GetMethod("AddGrid", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, [lines, viewport]);
+        return [.. lines];
+    }
+
+    private static void AssertFramebufferFade(float[] zooms, double coordinate, string label)
+    {
+        Rectangle viewport = new(20, 20, 160, 160);
+        double[] values = zooms.Select(zoom =>
+        {
+            RenderedFrame frame = RenderGridFrame(zoom, viewport, drawEditorMarks: false);
+            int x = (int)Math.Round(100 + coordinate * zoom);
+            return MaxLuminanceNear(frame, new Point(x, 103));
+        }).ToArray();
+
+        double background = Luminance(GridBackground);
+        Assert.True(values[0] <= background + 0.5, $"{label} first sample should be background, got {values[0]}");
+        Assert.True(values[1] > values[0] + 1, $"{label} first visible step did not rise: {string.Join(", ", values)}");
+        Assert.True(values[2] > values[1] + 1, $"{label} second visible step did not rise: {string.Join(", ", values)}");
+        Assert.True(values[3] > values[2] + 1, $"{label} full step did not rise: {string.Join(", ", values)}");
+    }
+
+    private static double Luminance(Color color)
+        => 0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B;
+
+    private static double MaxLuminanceNear(RenderedFrame frame, Point center)
+    {
+        double max = 0;
+        for (int y = center.Y - 1; y <= center.Y + 1; y++)
+        for (int x = center.X - 1; x <= center.X + 1; x++)
+            max = Math.Max(max, Luminance(frame.PixelAt(new Point(x, y))));
+        return max;
+    }
+
     private static ShipPreviewFrame RenderShipPreview(Vector3 eyePositionWorld, DynamicLitMaterialSettings material)
     {
         RenderedFrame? frame = null;
@@ -356,6 +448,8 @@ public sealed class ObjectDesignerRenderedSmokeTests
             Color actual = Pixels[point.Y * Width + point.X];
             Assert.True(actual == expected, $"{label} at {point}: expected {expected}, actual {actual}");
         }
+
+        public Color PixelAt(Point point) => Pixels[point.Y * Width + point.X];
     }
 
     private sealed record ShipPreviewFrame(RenderedFrame Frame, Vector3 EyePositionWorld, float SpecularStrength, float SpecularShininess);

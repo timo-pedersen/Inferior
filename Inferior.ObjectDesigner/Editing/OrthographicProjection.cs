@@ -123,10 +123,32 @@ public sealed class OrthographicProjection
         return IsFinite(point);
     }
 
-    private Vector2 ScreenToProjectionAxes(Point mouse, Rectangle viewport)
+    public Vector2 ProjectionAxesToScreen(Vector2 axes, Rectangle viewport)
+        => new(
+            viewport.X + viewport.Width * 0.5f + PanPixels.X + axes.X * PixelsPerMeter,
+            viewport.Y + viewport.Height * 0.5f + PanPixels.Y - axes.Y * PixelsPerMeter);
+
+    public (Vector2 Min, Vector2 Max) VisibleProjectionBounds(Rectangle viewport)
+    {
+        Vector2 a = ScreenToProjectionAxes(new Point(viewport.Left, viewport.Top), viewport);
+        Vector2 b = ScreenToProjectionAxes(new Point(viewport.Right, viewport.Bottom), viewport);
+        return (
+            new Vector2(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y)),
+            new Vector2(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y)));
+    }
+
+    public Vector2 ScreenToProjectionAxes(Point mouse, Rectangle viewport)
         => new(
             (mouse.X - viewport.X - viewport.Width * 0.5f - PanPixels.X) / PixelsPerMeter,
             -(mouse.Y - viewport.Y - viewport.Height * 0.5f - PanPixels.Y) / PixelsPerMeter);
+
+    public void CenterOnProjectionAxes(Vector2 axes)
+        => PanPixels = new Vector2(-axes.X * PixelsPerMeter, axes.Y * PixelsPerMeter);
+
+    public void CenterProjectionAxesAtScreenPoint(Vector2 axes, Point screenPoint, Rectangle viewport)
+        => PanPixels = new Vector2(
+            screenPoint.X - viewport.X - viewport.Width * 0.5f - axes.X * PixelsPerMeter,
+            screenPoint.Y - viewport.Y - viewport.Height * 0.5f + axes.Y * PixelsPerMeter);
 
     private static bool IsFinite(DVec3 value)
         => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);

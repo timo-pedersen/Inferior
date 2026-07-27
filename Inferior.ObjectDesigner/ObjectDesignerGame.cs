@@ -38,6 +38,7 @@ public sealed class ObjectDesignerGame : Game
     private bool _showBounds = true;
     private bool _showCargo = true;
     private EditingConstraintMode _constraintMode = EditingConstraintMode.ViewPlane;
+    private LinearSnapMode _snapMode = LinearSnapMode.Off;
     private float _yaw = -0.6f;
     private float _pitch = -0.25f;
     private float _distance = 42f;
@@ -47,8 +48,19 @@ public sealed class ObjectDesignerGame : Game
 
     private VertexDragOperation? _vertexDrag;
     private bool _panningOrtho;
+    private Point _middlePressMouse;
+    private bool _middleClickMoved;
+    private double _lastMiddleClickTime = double.NegativeInfinity;
+    private Point _lastMiddleClickMouse;
     private Point _selectionStartMouse;
     private bool _rectangleSelecting;
+    private readonly Dictionary<ProjectionKind, Vector2> _projectionPans = new()
+    {
+        [ProjectionKind.Top] = Vector2.Zero,
+        [ProjectionKind.Side] = Vector2.Zero,
+        [ProjectionKind.Front] = Vector2.Zero,
+    };
+    private readonly HashSet<ProjectionKind> _initializedProjectionPans = [];
 
     private GridPanel _rootLayout = null!;
     private DesignerSurfaceControl _perspectiveSurface = null!;
@@ -65,6 +77,7 @@ public sealed class ObjectDesignerGame : Game
     private Label _statusLabel = null!;
     private ChoiceGroup<ProjectionKind> _projectionChoices = null!;
     private ChoiceGroup<EditingConstraintMode> _constraintChoices = null!;
+    private ChoiceGroup<LinearSnapMode> _snapChoices = null!;
     private bool _updatingTextBoxes;
     private RenderTarget2D? _previewTargetTexture;
     private static readonly RasterizerState ScissorLineState = new() { ScissorTestEnable = true, CullMode = CullMode.None };
@@ -105,6 +118,8 @@ public sealed class ObjectDesignerGame : Game
         _session = ObjectDesignerSession.Load(assetPath);
         _session.History.MarkClean();
         BuildUi();
+        InitializeProjectionPanIfNeeded(_projection.Kind);
+        _projection.PanPixels = _projectionPans[_projection.Kind];
     }
 
     protected override void Update(GameTime gameTime)
@@ -154,7 +169,10 @@ public sealed class ObjectDesignerGame : Game
             if (PerspectiveViewport.Contains(input.MousePosition))
                 _distance = MathHelper.Clamp(_distance - input.ScrollDelta * 0.02f, 8f, 140f);
             else if (OrthoViewport.Contains(input.MousePosition))
-                _projection.PixelsPerMeter = MathHelper.Clamp(_projection.PixelsPerMeter + input.ScrollDelta * 0.02f, 4f, 120f);
+            {
+                OrthographicNavigation.ZoomAroundCursor(_projection, OrthoViewport, input.MousePosition, input.ScrollDelta);
+                _projectionPans[_projection.Kind] = _projection.PanPixels;
+            }
         }
 
         _rootLayout.Bounds = new Rectangle(0, 0, GraphicsDevice.Viewport.Width, GraphicsDevice.Viewport.Height);
@@ -339,6 +357,7 @@ public sealed class ObjectDesignerGame : Game
             1);
         GraphicsDevice.ScissorRectangle = vp;
         GraphicsDevice.RasterizerState = ScissorLineState;
+        GraphicsDevice.BlendState = BlendState.AlphaBlend;
         foreach (EffectPass pass in _lineEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
@@ -378,15 +397,38 @@ public sealed class ObjectDesignerGame : Game
 
         if (input.MiddlePressed && viewport.Contains(input.MousePosition))
         {
+            double sinceLastClick = _time - _lastMiddleClickTime;
+            if (sinceLastClick <= OrthographicNavigation.MiddleDoubleClickSeconds
+                && DistanceSquared(input.MousePosition, _lastMiddleClickMouse) <= OrthographicNavigation.MiddleDoubleClickMaxPixels * OrthographicNavigation.MiddleDoubleClickMaxPixels)
+            {
+                RecenterOrthographicView();
+                _lastMiddleClickTime = double.NegativeInfinity;
+                _panningOrtho = false;
+                RefreshUiText();
+                return;
+            }
+
             _panningOrtho = true;
+            _middlePressMouse = input.MousePosition;
+            _middleClickMoved = false;
             return;
         }
 
         if (_panningOrtho && input.MiddleReleased)
+        {
+            if (!_middleClickMoved)
+            {
+                _lastMiddleClickTime = _time;
+                _lastMiddleClickMouse = input.MousePosition;
+            }
             _panningOrtho = false;
+        }
         if (_panningOrtho && input.MouseDelta != Point.Zero)
         {
+            if (DistanceSquared(input.MousePosition, _middlePressMouse) > OrthographicNavigation.MiddleDoubleClickMaxPixels * OrthographicNavigation.MiddleDoubleClickMaxPixels)
+                _middleClickMoved = true;
             _projection.PanPixels += input.MouseDelta.ToVector2();
+            _projectionPans[_projection.Kind] = _projection.PanPixels;
             return;
         }
 
@@ -411,7 +453,7 @@ public sealed class ObjectDesignerGame : Game
                         _status = $"{candidates.Count} vertices overlap here; selected {vertexId}";
                     if (hasDragSelection)
                     {
-                        if (VertexDragOperation.TryCapture(_session, _constraintMode, input.MousePosition, _projection, viewport, out VertexDragOperation? drag, out string? failure))
+                        if (VertexDragOperation.TryCapture(_session, _constraintMode, input.MousePosition, _projection, viewport, out VertexDragOperation? drag, out string? failure, _snapMode))
                         {
                             _vertexDrag = drag;
                             _status = failure ?? _status;
@@ -440,7 +482,7 @@ public sealed class ObjectDesignerGame : Game
             {
                 _vertexDrag.Apply(_session, _projection, input.MousePosition, input.Shift);
                 _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId);
-                _status = _vertexDrag.ShiftDragStatus ?? "";
+                _status = DragStatus(_vertexDrag);
             }
             catch (InvalidOperationException ex)
             {
@@ -550,7 +592,7 @@ public sealed class ObjectDesignerGame : Game
         AddButton(toolbar, "Redo", () => { _session.Redo(); _shipRenderer.InvalidateSemanticHull(_session.PreviewHullDefinition.HullTypeId); RefreshUiText(); });
         AddButton(toolbar, "Roles", () => _debugMode = _debugMode == SemanticHullDebugMode.Normal ? SemanticHullDebugMode.SurfaceRoles : SemanticHullDebugMode.Normal);
         _projectionChoices = new ChoiceGroup<ProjectionKind>(_projection.Kind);
-        _projectionChoices.SelectionChanged += value => _projection.Kind = value;
+        _projectionChoices.SelectionChanged += OnProjectionChoiceChanged;
         AddChoice(toolbar, _projectionChoices, ProjectionKind.Top, "Top");
         AddChoice(toolbar, _projectionChoices, ProjectionKind.Side, "Side");
         AddChoice(toolbar, _projectionChoices, ProjectionKind.Front, "Front");
@@ -562,6 +604,13 @@ public sealed class ObjectDesignerGame : Game
         AddChoice(toolbar, _constraintChoices, EditingConstraintMode.AxisY, "Y");
         AddChoice(toolbar, _constraintChoices, EditingConstraintMode.AxisZ, "Z");
         AddChoice(toolbar, _constraintChoices, EditingConstraintMode.ActiveFacePlane, "Face");
+
+        _snapChoices = new ChoiceGroup<LinearSnapMode>(_snapMode);
+        _snapChoices.SelectionChanged += value => _snapMode = value;
+        AddChoice(toolbar, _snapChoices, LinearSnapMode.Off, "OFF");
+        AddChoice(toolbar, _snapChoices, LinearSnapMode.Metre, "1 m");
+        AddChoice(toolbar, _snapChoices, LinearSnapMode.Decimetre, "10 cm");
+        AddChoice(toolbar, _snapChoices, LinearSnapMode.Centimetre, "1 cm");
 
         _orthoSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Orthographic, "2D editor")
         {
@@ -745,10 +794,15 @@ public sealed class ObjectDesignerGame : Game
 
     private void SetProjection(ProjectionKind kind)
     {
+        _projectionPans[_projection.Kind] = _projection.PanPixels;
         _projection.Kind = kind;
+        InitializeProjectionPanIfNeeded(kind);
+        _projection.PanPixels = _projectionPans[kind];
         if (_projectionChoices is not null)
             _projectionChoices.SelectedValue = kind;
     }
+
+    private void OnProjectionChoiceChanged(ProjectionKind kind) => SetProjection(kind);
 
     private Rectangle PerspectiveViewport => _perspectiveSurface.ContentBounds;
     private Rectangle OrthoViewport => _orthoSurface.ContentBounds;
@@ -806,12 +860,50 @@ public sealed class ObjectDesignerGame : Game
 
     private void AddGrid(List<VertexPositionColor> lines, Rectangle vp)
     {
-        for (int i = -20; i <= 20; i++)
+        foreach (MetricGridLine gridLine in MetricGrid.Generate(_projection, vp))
         {
-            Color c = i == 0 ? new Color(95, 110, 115) : new Color(34, 40, 42);
-            AddScreenLine(lines, new Vector2(vp.X, vp.Y + vp.Height / 2f + i * _projection.PixelsPerMeter), new Vector2(vp.Right, vp.Y + vp.Height / 2f + i * _projection.PixelsPerMeter), c);
-            AddScreenLine(lines, new Vector2(vp.X + vp.Width / 2f + i * _projection.PixelsPerMeter, vp.Y), new Vector2(vp.X + vp.Width / 2f + i * _projection.PixelsPerMeter, vp.Bottom), c);
+            Color c = GridLineColor(gridLine);
+            if (gridLine.Vertical)
+            {
+                float x = _projection.ProjectionAxesToScreen(new Vector2((float)gridLine.Coordinate, 0), vp).X;
+                AddScreenLine(lines, new Vector2(x, vp.Y), new Vector2(x, vp.Bottom), c);
+            }
+            else
+            {
+                float y = _projection.ProjectionAxesToScreen(new Vector2(0, (float)gridLine.Coordinate), vp).Y;
+                AddScreenLine(lines, new Vector2(vp.X, y), new Vector2(vp.Right, y), c);
+            }
         }
+    }
+
+    private static Color GridLineColor(MetricGridLine line)
+    {
+        Color background = new(9, 12, 13);
+        bool origin = Math.Abs(line.Coordinate) <= 1e-9;
+        Color baseColor = line.Spacing switch
+        {
+            MetricGrid.MetreSpacing => origin ? new Color(105, 122, 128) : new Color(72, 86, 92),
+            MetricGrid.DecimetreSpacing => new Color(55, 68, 73),
+            MetricGrid.CentimetreSpacing => new Color(40, 48, 52),
+            _ => background,
+        };
+        Color full = ResolveGridColor(background, baseColor, MetricGrid.StrengthForSpacing(line.Spacing));
+        return ResolveGridColor(background, full, line.Opacity);
+    }
+
+    private static Color ResolveGridColor(Color background, Color fullColor, float fade)
+    {
+        Color result = Color.Lerp(background, fullColor, MathHelper.Clamp(fade, 0f, 1f));
+        return new Color((int)result.R, (int)result.G, (int)result.B, 255);
+    }
+
+    private static string DragStatus(VertexDragOperation drag)
+    {
+        string? shift = drag.ShiftDragStatus;
+        string? snap = drag.SnapStatus;
+        if (shift is not null && snap is not null)
+            return $"{shift} | {snap}";
+        return shift ?? snap ?? "";
     }
 
     private void AddFaceEdges(List<VertexPositionColor> lines, Rectangle vp)
@@ -940,9 +1032,43 @@ public sealed class ObjectDesignerGame : Game
         Vector2 span = Vector2.Max(max - min, new Vector2(1f, 1f));
         float scaleX = (viewport.Width - 48) / Math.Max(0.1f, span.X);
         float scaleY = (viewport.Height - 48) / Math.Max(0.1f, span.Y);
-        _projection.PixelsPerMeter = MathHelper.Clamp(Math.Min(scaleX, scaleY), 4f, 120f);
+        _projection.PixelsPerMeter = OrthographicNavigation.ClampPixelsPerMeter(Math.Min(scaleX, scaleY));
         Vector2 center = (min + max) * 0.5f;
-        _projection.PanPixels = new Vector2(-center.X * _projection.PixelsPerMeter, center.Y * _projection.PixelsPerMeter);
+        _projection.CenterOnProjectionAxes(center);
+        _projectionPans[_projection.Kind] = _projection.PanPixels;
+    }
+
+    private void RecenterOrthographicView()
+    {
+        Vector2 center = _session.SelectedVertexIds.Count > 0
+            ? OrthographicNavigation.Centroid(_session.SelectedVertexIds.Select(_session.GetVertexPosition), _projection)
+            : OrthographicNavigation.HullBoundsCenter(_session.HullDefinition.VisualGeometry!.Vertices.Select(v => v.Position), _projection);
+        _projection.CenterOnProjectionAxes(center);
+        _projectionPans[_projection.Kind] = _projection.PanPixels;
+        _status = _session.SelectedVertexIds.Count > 0 ? "2D view centered on selection." : "2D view centered on hull.";
+    }
+
+    private void InitializeProjectionPanIfNeeded(ProjectionKind kind)
+    {
+        if (_initializedProjectionPans.Contains(kind) || _session?.HullDefinition.VisualGeometry is null)
+            return;
+
+        ProjectionKind oldKind = _projection.Kind;
+        Vector2 oldPan = _projection.PanPixels;
+        _projection.Kind = kind;
+        Vector2 center = OrthographicNavigation.HullBoundsCenter(_session.HullDefinition.VisualGeometry.Vertices.Select(v => v.Position), _projection);
+        _projection.CenterOnProjectionAxes(center);
+        _projectionPans[kind] = _projection.PanPixels;
+        _initializedProjectionPans.Add(kind);
+        _projection.Kind = oldKind;
+        _projection.PanPixels = oldPan;
+    }
+
+    private static int DistanceSquared(Point a, Point b)
+    {
+        int dx = a.X - b.X;
+        int dy = a.Y - b.Y;
+        return dx * dx + dy * dy;
     }
 
     private Texture2D? _pixel;

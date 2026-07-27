@@ -14,6 +14,8 @@ public enum ShiftDragAxis
 {
     Horizontal,
     Vertical,
+    DiagonalDownRight,
+    DiagonalUpRight,
 }
 
 public sealed class VertexDragOperation
@@ -27,6 +29,7 @@ public sealed class VertexDragOperation
     private readonly CapturedFacePlane? _activeFacePlane;
     private readonly DVec3? _facePlaneStartPoint;
     private readonly Point _startMouse;
+    private readonly double? _snapSpacing;
     private ShiftDragAxis? _shiftAxis;
     private bool _shiftOverrideActive;
 
@@ -37,7 +40,8 @@ public sealed class VertexDragOperation
         EditingConstraintMode constraintMode,
         CapturedFacePlane? activeFacePlane,
         DVec3? facePlaneStartPoint,
-        Point startMouse)
+        Point startMouse,
+        double? snapSpacing)
     {
         _originalPositions = originalPositions;
         _activeVertexId = activeVertexId;
@@ -46,6 +50,7 @@ public sealed class VertexDragOperation
         _activeFacePlane = activeFacePlane;
         _facePlaneStartPoint = facePlaneStartPoint;
         _startMouse = startMouse;
+        _snapSpacing = snapSpacing;
     }
 
     public IReadOnlyDictionary<string, DVec3> OriginalPositions => _originalPositions;
@@ -62,19 +67,26 @@ public sealed class VertexDragOperation
         {
             ShiftDragAxis.Horizontal => "SHIFT LOCK: HORIZONTAL",
             ShiftDragAxis.Vertical => "SHIFT LOCK: VERTICAL",
+            ShiftDragAxis.DiagonalDownRight => "SHIFT LOCK: DIAGONAL DOWN-RIGHT",
+            ShiftDragAxis.DiagonalUpRight => "SHIFT LOCK: DIAGONAL UP-RIGHT",
             _ => "SHIFT LOCK: move to choose axis",
         };
     public EditingConstraintMode ConstraintMode => _constraintMode;
     public Point StartMouse => _startMouse;
+    public double? SnapSpacing => _snapSpacing;
+    public string? SnapStatus => _snapSpacing is null
+        ? null
+        : $"SNAP {LinearSnap.DisplayName(SnapModeForSpacing(_snapSpacing.Value))}";
 
     public static VertexDragOperation Capture(
         ObjectDesignerSession session,
         EditingConstraintMode constraintMode,
         Point startMouse,
         OrthographicProjection? projection = null,
-        Rectangle viewport = default)
+        Rectangle viewport = default,
+        LinearSnapMode snapMode = LinearSnapMode.Off)
     {
-        if (!TryCapture(session, constraintMode, startMouse, projection, viewport, out VertexDragOperation? operation, out string? failure))
+        if (!TryCapture(session, constraintMode, startMouse, projection, viewport, out VertexDragOperation? operation, out string? failure, snapMode))
             throw new InvalidOperationException(failure);
         return operation ?? throw new InvalidOperationException("Vertex drag capture did not return an operation.");
     }
@@ -86,7 +98,8 @@ public sealed class VertexDragOperation
         OrthographicProjection? projection,
         Rectangle viewport,
         out VertexDragOperation? operation,
-        out string? failure)
+        out string? failure,
+        LinearSnapMode snapMode = LinearSnapMode.Off)
     {
         Dictionary<string, DVec3> originalPositions = session.SelectedVertexIds
             .ToDictionary(id => id, session.GetVertexPosition, StringComparer.Ordinal);
@@ -163,6 +176,7 @@ public sealed class VertexDragOperation
             }
         }
 
+        // Snap mode is captured per drag; toolbar changes take effect on the next drag.
         operation = new VertexDragOperation(
             originalPositions,
             activeVertexId,
@@ -170,7 +184,8 @@ public sealed class VertexDragOperation
             constraintMode,
             activeFacePlane,
             facePlaneStartPoint,
-            startMouse);
+            startMouse,
+            LinearSnap.SpacingFor(snapMode));
         failure = captureMessage;
         return true;
     }
@@ -210,10 +225,10 @@ public sealed class VertexDragOperation
     {
         _shiftOverrideActive = shiftHeld;
         if (shiftHeld)
-            return ShiftOverrideDelta(projection, mousePosition);
+            return SnapDelta(projection, ShiftOverrideDelta(projection, mousePosition), shiftHeld);
 
         _shiftAxis = null;
-        return PersistentConstraintDelta(projection, mousePosition);
+        return SnapDelta(projection, PersistentConstraintDelta(projection, mousePosition), shiftHeld);
     }
 
     private DVec3 PersistentConstraintDelta(OrthographicProjection projection, Point mousePosition)
@@ -239,15 +254,37 @@ public sealed class VertexDragOperation
             return DVec3.Zero;
         }
 
-        _shiftAxis = Math.Abs(screenDelta.X) >= Math.Abs(screenDelta.Y)
-            ? ShiftDragAxis.Horizontal
-            : ShiftDragAxis.Vertical;
-
-        Vector2 lockedDelta = _shiftAxis == ShiftDragAxis.Horizontal
-            ? new Vector2(screenDelta.X, 0)
-            : new Vector2(0, screenDelta.Y);
+        _shiftAxis = QuantizeShiftAxis(screenDelta);
+        Vector2 direction = ShiftScreenDirection(_shiftAxis.Value);
+        float amount = Vector2.Dot(screenDelta, direction);
+        Vector2 lockedDelta = direction * amount;
         return projection.ScreenDeltaToWorldPlaneDelta(lockedDelta);
     }
+
+    private static ShiftDragAxis QuantizeShiftAxis(Vector2 screenDelta)
+    {
+        double angle = Math.Atan2(screenDelta.Y, screenDelta.X);
+        double step = Math.PI / 4.0;
+        int octant = (int)Math.Round(angle / step, MidpointRounding.AwayFromZero);
+        int family = ((octant % 4) + 4) % 4;
+        return family switch
+        {
+            0 => ShiftDragAxis.Horizontal,
+            1 => ShiftDragAxis.DiagonalDownRight,
+            2 => ShiftDragAxis.Vertical,
+            _ => ShiftDragAxis.DiagonalUpRight,
+        };
+    }
+
+    private static Vector2 ShiftScreenDirection(ShiftDragAxis axis)
+        => axis switch
+        {
+            ShiftDragAxis.Horizontal => Vector2.UnitX,
+            ShiftDragAxis.Vertical => Vector2.UnitY,
+            ShiftDragAxis.DiagonalDownRight => Vector2.Normalize(new Vector2(1, 1)),
+            ShiftDragAxis.DiagonalUpRight => Vector2.Normalize(new Vector2(1, -1)),
+            _ => throw new ArgumentOutOfRangeException(nameof(axis)),
+        };
 
     private DVec3 FacePlaneDelta(OrthographicProjection projection, Point mousePosition)
     {
@@ -290,6 +327,124 @@ public sealed class VertexDragOperation
         DVec3 mouseWorldDelta = _activeFacePlane.ViewHorizontal * a + _activeFacePlane.ViewVertical * b;
         return lineDirection * DVec3.Dot(mouseWorldDelta, lineDirection);
     }
+
+    private DVec3 SnapDelta(OrthographicProjection projection, DVec3 delta, bool shiftHeld)
+    {
+        if (_snapSpacing is not { } spacing || _activeVertexId is null)
+            return delta;
+
+        if (shiftHeld && _shiftAxis is not null)
+            return SnapShiftDelta(projection, delta, spacing);
+
+        return _constraintMode switch
+        {
+            EditingConstraintMode.AxisX => new DVec3(SnapComponent(_referencePosition.X, delta.X, spacing), 0, 0),
+            EditingConstraintMode.AxisY => new DVec3(0, SnapComponent(_referencePosition.Y, delta.Y, spacing), 0),
+            EditingConstraintMode.AxisZ => new DVec3(0, 0, SnapComponent(_referencePosition.Z, delta.Z, spacing)),
+            EditingConstraintMode.ActiveFacePlane => SnapFaceDelta(projection, delta, spacing),
+            _ => SnapViewPlaneDelta(projection, delta, spacing),
+        };
+    }
+
+    private DVec3 SnapViewPlaneDelta(OrthographicProjection projection, DVec3 delta, double spacing)
+    {
+        Vector2 originalAxes = projection.ToProjectionAxes(_referencePosition);
+        Vector2 candidateAxes = projection.ToProjectionAxes(_referencePosition + delta);
+        Vector2 snappedAxes = new(
+            (float)LinearSnap.SnapCoordinate(candidateAxes.X, spacing),
+            (float)LinearSnap.SnapCoordinate(candidateAxes.Y, spacing));
+        return projection.HorizontalAxis * (snappedAxes.X - originalAxes.X)
+            + projection.VerticalAxis * (snappedAxes.Y - originalAxes.Y);
+    }
+
+    private DVec3 SnapShiftDelta(OrthographicProjection projection, DVec3 delta, double spacing)
+    {
+        if (_shiftAxis is null)
+            return delta;
+
+        DVec3 lineDirection = projection.ScreenDeltaToWorldPlaneDelta(ShiftScreenDirection(_shiftAxis.Value)).Normalized();
+        if (lineDirection.LengthSquared <= 1e-12)
+            return delta;
+
+        Vector2 baseAxes = projection.ToProjectionAxes(_referencePosition);
+        Vector2 candidateAxes = projection.ToProjectionAxes(_referencePosition + delta);
+        double lineA = DVec3.Dot(lineDirection, projection.HorizontalAxis);
+        double lineB = DVec3.Dot(lineDirection, projection.VerticalAxis);
+        if (Math.Abs(lineA) < 1e-12 && Math.Abs(lineB) < 1e-12)
+            return delta;
+
+        double t;
+        if (Math.Abs(lineA) >= Math.Abs(lineB) && Math.Abs(lineA) >= 1e-12)
+            t = (LinearSnap.SnapCoordinate(candidateAxes.X, spacing) - baseAxes.X) / lineA;
+        else
+            t = (LinearSnap.SnapCoordinate(candidateAxes.Y, spacing) - baseAxes.Y) / lineB;
+
+        return lineDirection * t;
+    }
+
+    private DVec3 SnapFaceDelta(OrthographicProjection projection, DVec3 delta, double spacing)
+    {
+        if (_activeFacePlane is null)
+            return delta;
+
+        return _activeFacePlane.Mode == FaceDragMode.VisibleLine
+            ? SnapVisibleLineDelta(projection, delta, spacing)
+            : SnapFacePlaneDelta(projection, delta, spacing);
+    }
+
+    private DVec3 SnapFacePlaneDelta(OrthographicProjection projection, DVec3 delta, double spacing)
+    {
+        if (_activeFacePlane is null)
+            return delta;
+
+        Vector2 candidateAxes = projection.ToProjectionAxes(_referencePosition + delta);
+        double a = LinearSnap.SnapCoordinate(candidateAxes.X, spacing);
+        double b = LinearSnap.SnapCoordinate(candidateAxes.Y, spacing);
+        DVec3 rayOrigin = _activeFacePlane.ViewHorizontal * a + _activeFacePlane.ViewVertical * b;
+        double denom = DVec3.Dot(_activeFacePlane.ViewDirection, _activeFacePlane.Normal);
+        if (Math.Abs(denom) < OrthographicProjection.FacePlaneLineModeEpsilon)
+            return delta;
+
+        double t = DVec3.Dot(_activeFacePlane.Origin - rayOrigin, _activeFacePlane.Normal) / denom;
+        DVec3 snapped = rayOrigin + _activeFacePlane.ViewDirection * t;
+        return IsFinite(snapped) ? snapped - _referencePosition : delta;
+    }
+
+    private DVec3 SnapVisibleLineDelta(OrthographicProjection projection, DVec3 delta, double spacing)
+    {
+        if (_activeFacePlane?.LineDirection is not { } lineDirection)
+            return delta;
+
+        Vector2 originalAxes = projection.ToProjectionAxes(_referencePosition);
+        Vector2 candidateAxes = projection.ToProjectionAxes(_referencePosition + delta);
+        double lineA = DVec3.Dot(lineDirection, _activeFacePlane.ViewHorizontal);
+        double lineB = DVec3.Dot(lineDirection, _activeFacePlane.ViewVertical);
+        if (Math.Abs(lineA) < 1e-12 && Math.Abs(lineB) < 1e-12)
+            return delta;
+
+        double t;
+        if (Math.Abs(lineA) >= Math.Abs(lineB) && Math.Abs(lineA) >= 1e-12)
+            t = (LinearSnap.SnapCoordinate(candidateAxes.X, spacing) - originalAxes.X) / lineA;
+        else
+            t = (LinearSnap.SnapCoordinate(candidateAxes.Y, spacing) - originalAxes.Y) / lineB;
+
+        return lineDirection * t;
+    }
+
+    private static double SnapComponent(double original, double delta, double spacing)
+        => LinearSnap.SnapCoordinate(original + delta, spacing) - original;
+
+    private static LinearSnapMode SnapModeForSpacing(double spacing)
+        => spacing switch
+        {
+            1.0 => LinearSnapMode.Metre,
+            0.1 => LinearSnapMode.Decimetre,
+            0.01 => LinearSnapMode.Centimetre,
+            _ => LinearSnapMode.Off,
+        };
+
+    private static bool IsFinite(DVec3 value)
+        => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
 
     private static bool TryCaptureFacePlane(
         ObjectDesignerSession session,

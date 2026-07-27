@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Inferior.Core.Math;
 using Inferior.Gameplay.Hull;
@@ -752,7 +754,7 @@ public sealed class ObjectDesignerEditingTests
     }
 
     [Fact]
-    public void Shift_drag_axis_choice_dead_zone_tie_and_continuous_switch_are_deterministic()
+    public void Shift_drag_axis_choice_dead_zone_tie_and_dynamic_switch_are_deterministic()
     {
         using TempAsset asset = TempAsset.FromBeren();
         ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
@@ -766,8 +768,8 @@ public sealed class ObjectDesignerEditingTests
         Assert.Equal("SHIFT LOCK: move to choose axis", deadZone.ShiftDragStatus);
 
         VertexDragOperation tie = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
-        AssertDVec3Close(new DVec3(0.5, 0, 0), DeltaFor(tie, projection, id, new Point(5, -5), shiftHeld: true));
-        Assert.Equal(ShiftDragAxis.Horizontal, tie.ActiveShiftDragAxis);
+        AssertDVec3Close(new DVec3(0.5, 0, 0.5), DeltaFor(tie, projection, id, new Point(5, -5), shiftHeld: true));
+        Assert.Equal(ShiftDragAxis.DiagonalUpRight, tie.ActiveShiftDragAxis);
 
         VertexDragOperation switching = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero);
         DeltaFor(switching, projection, id, new Point(10, -2), shiftHeld: true);
@@ -794,7 +796,7 @@ public sealed class ObjectDesignerEditingTests
         DVec3 resumed = DeltaFor(drag, projection, id, new Point(110, -30), shiftHeld: false);
 
         AssertDVec3Close(new DVec3(2, 0, 1), beforeShift);
-        AssertDVec3Close(new DVec3(2, 0, 0), shiftPressed);
+        AssertDVec3Close(new DVec3(1.5, 0, 1.5), shiftPressed);
         AssertDVec3Close(new DVec3(10, 0, 0), shifted);
         AssertDVec3Close(new DVec3(10, 0, 2), shiftReleased);
         AssertDVec3Close(new DVec3(11, 0, 3), resumed);
@@ -817,8 +819,8 @@ public sealed class ObjectDesignerEditingTests
         DVec3 resumed = DeltaFor(drag, projection, id, new Point(30, -40), shiftHeld: false);
 
         AssertDVec3Close(new DVec3(2, 0, 0), beforeShift);
-        AssertDVec3Close(new DVec3(2, 0, 0), shiftPressed);
-        AssertDVec3Close(new DVec3(0, 0, 3), shifted);
+        AssertDVec3Close(new DVec3(1.5, 0, 1.5), shiftPressed);
+        AssertDVec3Close(new DVec3(2.5, 0, 2.5), shifted);
         AssertDVec3Close(new DVec3(2, 0, 0), shiftReleased);
         AssertDVec3Close(new DVec3(3, 0, 0), resumed);
         Assert.Equal(EditingConstraintMode.AxisX, drag.ConstraintMode);
@@ -843,7 +845,7 @@ public sealed class ObjectDesignerEditingTests
         DVec3 planeResumed = DeltaFor(planeDrag, top, "test.a", new Point(80, 20), shiftHeld: false);
 
         AssertDVec3Close(new DVec3(1, 1.5, 1), planeBeforeShift);
-        AssertDVec3Close(new DVec3(1, 0, 0), planeShiftPressed);
+        AssertDVec3Close(new DVec3(1, 0, 1), planeShiftPressed);
         AssertDVec3Close(new DVec3(2, 3, 2), planeShiftReleased);
         AssertDVec3Close(new DVec3(3, 4.5, 3), planeResumed);
 
@@ -861,7 +863,7 @@ public sealed class ObjectDesignerEditingTests
 
         Assert.Equal(FaceDragMode.VisibleLine, lineDrag.ActiveFaceDragMode);
         AssertDVec3Close(new DVec3(0, 1.1538461538461537, 0.7692307692307693), lineBeforeShift);
-        AssertDVec3Close(new DVec3(0, 0, 1), lineShiftPressed);
+        AssertDVec3Close(new DVec3(0, 1, 1), lineShiftPressed);
         AssertDVec3Close(new DVec3(0, 2.3076923076923075, 1.5384615384615385), lineShiftReleased);
     }
 
@@ -957,19 +959,370 @@ public sealed class ObjectDesignerEditingTests
         Assert.Null(session.ActiveFaceId);
     }
 
+    [Theory]
+    [InlineData(LinearSnapMode.Metre, 1.24, 1)]
+    [InlineData(LinearSnapMode.Metre, 1.5, 2)]
+    [InlineData(LinearSnapMode.Metre, -1.5, -2)]
+    [InlineData(LinearSnapMode.Decimetre, 1.24, 1.2)]
+    [InlineData(LinearSnapMode.Centimetre, -1.235, -1.24)]
+    public void Linear_snap_rounds_coordinates_with_midpoints_away_from_zero(LinearSnapMode mode, double value, double expected)
+    {
+        double spacing = LinearSnap.SpacingFor(mode)!.Value;
+
+        double snapped = LinearSnap.SnapCoordinate(value, spacing);
+
+        Assert.InRange(Math.Abs(snapped - expected), 0, 1e-9);
+    }
+
+    [Fact]
+    public void Linear_snap_off_preserves_unsnapped_drag_result()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddVertex(session, "test.snap.a", new DVec3(0.24, 0, 0.26));
+        session.SelectVertex("test.snap.a", extend: false);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero, snapMode: LinearSnapMode.Off);
+
+        DVec3 delta = DeltaFor(drag, projection, "test.snap.a", new Point(4, -6), shiftHeld: false);
+
+        Assert.Null(drag.SnapSpacing);
+        AssertDVec3Close(new DVec3(0.4, 0, 0.6), delta, 1e-7);
+    }
+
+    [Fact]
+    public void Plane_snap_quantizes_active_vertex_visible_coordinates_and_moves_group_rigidly()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddVertex(session, "test.snap.a", new DVec3(0.24, 0, 0.26));
+        AddVertex(session, "test.snap.b", new DVec3(2.31, 1, 3.39));
+        session.SelectVertices(["test.snap.a", "test.snap.b"], replace: true);
+        session.BeginVertexDragSelection("test.snap.a", ctrl: false);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero, snapMode: LinearSnapMode.Decimetre);
+
+        drag.Apply(session, projection, new Point(4, -6));
+
+        DVec3 expectedDelta = new(0.36, 0, 0.64);
+        AssertDVec3Close(new DVec3(0.6, 0, 0.9), session.GetVertexPosition("test.snap.a"), 1e-7);
+        AssertGroupDelta(session, drag.OriginalPositions, expectedDelta, 1e-7);
+        Assert.Equal("SNAP 10 cm", drag.SnapStatus);
+    }
+
+    [Theory]
+    [InlineData(EditingConstraintMode.AxisX, ProjectionKind.Top, 0.24, 0.26, 4, -6, 0.76, 0, 0)]
+    [InlineData(EditingConstraintMode.AxisZ, ProjectionKind.Top, 0.24, 0.26, 4, -6, 0, 0, 0.74)]
+    [InlineData(EditingConstraintMode.AxisY, ProjectionKind.Front, 0.24, 0.26, 4, -6, 0, 0.74, 0)]
+    public void Axis_snap_quantizes_only_the_moving_world_coordinate(
+        EditingConstraintMode constraint,
+        ProjectionKind kind,
+        double x,
+        double visibleY,
+        int mouseX,
+        int mouseY,
+        double expectedX,
+        double expectedY,
+        double expectedZ)
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        DVec3 start = kind == ProjectionKind.Front
+            ? new DVec3(x, visibleY, 0)
+            : new DVec3(x, 0, visibleY);
+        AddVertex(session, "test.snap.a", start);
+        session.SelectVertex("test.snap.a", extend: false);
+        var projection = new OrthographicProjection { Kind = kind, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, constraint, Point.Zero, snapMode: LinearSnapMode.Metre);
+
+        DVec3 delta = DeltaFor(drag, projection, "test.snap.a", new Point(mouseX, mouseY), shiftHeld: false);
+
+        AssertDVec3Close(new DVec3(expectedX, expectedY, expectedZ), delta);
+    }
+
+    [Fact]
+    public void Shift_snap_quantizes_only_the_current_shift_axis()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddVertex(session, "test.snap.a", new DVec3(0.24, 0, 0.26));
+        session.SelectVertex("test.snap.a", extend: false);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero, snapMode: LinearSnapMode.Metre);
+
+        DVec3 horizontal = DeltaFor(drag, projection, "test.snap.a", new Point(4, -1), shiftHeld: true);
+        VertexDragOperation verticalDrag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero, snapMode: LinearSnapMode.Metre);
+        DVec3 vertical = DeltaFor(verticalDrag, projection, "test.snap.a", new Point(1, -6), shiftHeld: true);
+        VertexDragOperation diagonalDrag = VertexDragOperation.Capture(session, EditingConstraintMode.ViewPlane, Point.Zero, snapMode: LinearSnapMode.Metre);
+        DVec3 diagonal = DeltaFor(diagonalDrag, projection, "test.snap.a", new Point(7, -7), shiftHeld: true);
+
+        AssertDVec3Close(new DVec3(0.76, 0, 0), horizontal, 1e-7);
+        AssertDVec3Close(new DVec3(0, 0, 0.74), vertical, 1e-7);
+        Assert.Equal(ShiftDragAxis.DiagonalUpRight, diagonalDrag.ActiveShiftDragAxis);
+        AssertDVec3Close(new DVec3(0.76, 0, 0.76), diagonal, 1e-7);
+    }
+
+    [Fact]
+    public void Face_plane_snap_keeps_oblique_face_constraint_and_lands_on_visible_grid_intersection()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertices(["test.a", "test.off"], replace: true);
+        session.BeginVertexDragSelection("test.a", ctrl: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport, LinearSnapMode.Metre);
+
+        DVec3 delta = DeltaFor(drag, projection, "test.a", new Point(56, 44), shiftHeld: false);
+
+        AssertDVec3Close(new DVec3(1, 1.5, 1), delta);
+        Assert.InRange(Math.Abs(DVec3.Dot(delta, drag.ActiveFaceNormal!.Value)), 0, 1e-9);
+    }
+
+    [Fact]
+    public void Edge_on_face_snap_stays_on_visible_line_and_reaches_a_grid_line()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        AddFaceSelectionFixture(session);
+        session.SelectVertex("test.a", extend: false);
+        session.SelectActiveFace("test.face.sloped");
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Side, PixelsPerMeter = 10f };
+        var viewport = new Rectangle(0, 0, 100, 100);
+        VertexDragOperation drag = VertexDragOperation.Capture(session, EditingConstraintMode.ActiveFacePlane, new Point(50, 50), projection, viewport, LinearSnapMode.Metre);
+
+        DVec3 delta = DeltaFor(drag, projection, "test.a", new Point(60, 40), shiftHeld: false);
+        Vector2 axes = projection.ToProjectionAxes(drag.OriginalPositions["test.a"] + delta);
+
+        Assert.Equal(FaceDragMode.VisibleLine, drag.ActiveFaceDragMode);
+        Assert.InRange(Math.Abs(DVec3.Dot(delta, drag.ActiveFaceNormal!.Value)), 0, 1e-9);
+        Assert.InRange(Math.Abs(DVec3.Dot(delta, projection.ViewDirection)), 0, 1e-9);
+        Assert.True(LinearSnap.IsMultiple(axes.X, 1.0) || LinearSnap.IsMultiple(axes.Y, 1.0));
+    }
+
+    [Fact]
+    public void Metric_grid_is_world_anchored_excludes_coarser_lines_and_uses_zoom_thresholds()
+    {
+        var viewport = new Rectangle(0, 0, 100, 100);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 100f };
+
+        IReadOnlyList<MetricGridLine> centered = MetricGrid.Generate(projection, viewport);
+        projection.PanPixels = new Vector2(13, -7);
+        IReadOnlyList<MetricGridLine> panned = MetricGrid.Generate(projection, viewport);
+
+        Assert.Contains(centered, line => line.Vertical && line.Spacing == MetricGrid.MetreSpacing && Math.Abs(line.Coordinate) <= 1e-9);
+        Assert.Contains(centered, line => !line.Vertical && line.Spacing == MetricGrid.DecimetreSpacing && Math.Abs(line.Coordinate - 0.1) <= 1e-9);
+        Assert.DoesNotContain(centered, line => line.Spacing == MetricGrid.DecimetreSpacing && LinearSnap.IsMultiple(line.Coordinate, 1.0));
+        Assert.DoesNotContain(centered, line => line.Spacing == MetricGrid.CentimetreSpacing && LinearSnap.IsMultiple(line.Coordinate, 0.1));
+        Assert.NotEqual(centered.Where(line => line.Vertical).Select(line => line.Coordinate), panned.Where(line => line.Vertical).Select(line => line.Coordinate));
+
+        Assert.Equal(1f, MetricGrid.OpacityForSpacing(28f, MetricGrid.MetreSpacing));
+        Assert.Equal(0f, MetricGrid.OpacityForSpacing(28f, MetricGrid.CentimetreSpacing));
+        Assert.True(MetricGrid.OpacityForSpacing(120f, MetricGrid.DecimetreSpacing) > 0f);
+        Assert.True(MetricGrid.OpacityForSpacing(1200f, MetricGrid.CentimetreSpacing) > 0f);
+    }
+
+    [Fact]
+    public void Orthographic_zoom_reaches_centimetre_grid_requirement_and_clamps_cleanly()
+    {
+        float max = OrthographicNavigation.ApplyWheelZoom(OrthographicNavigation.MaximumPixelsPerMeter, 120);
+        float min = OrthographicNavigation.ApplyWheelZoom(OrthographicNavigation.MinimumPixelsPerMeter, -120);
+
+        Assert.Equal(OrthographicNavigation.MaximumPixelsPerMeter, max);
+        Assert.Equal(OrthographicNavigation.MinimumPixelsPerMeter, min);
+        Assert.True(OrthographicNavigation.MaximumPixelsPerMeter * 0.01 >= OrthographicNavigation.MinimumCentimetreGridPixels);
+        Assert.Equal(OrthographicNavigation.MinimumWorldUnitsPerPixel, 1.0 / OrthographicNavigation.MaximumPixelsPerMeter, 12);
+        Assert.Equal(OrthographicNavigation.MaximumWorldUnitsPerPixel, 1.0 / OrthographicNavigation.MinimumPixelsPerMeter, 12);
+    }
+
+    [Fact]
+    public void Orthographic_zoom_is_multiplicative_reversible_and_cursor_centred()
+    {
+        float start = 28f;
+        float zoomed = OrthographicNavigation.ApplyWheelZoom(start, 120);
+        float restored = OrthographicNavigation.ApplyWheelZoom(zoomed, -120);
+        var viewport = new Rectangle(10, 20, 300, 200);
+        var cursor = new Point(87, 142);
+        var projection = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = start, PanPixels = new Vector2(17, -23) };
+        Vector2 before = projection.ScreenToProjectionAxes(cursor, viewport);
+
+        OrthographicNavigation.ZoomAroundCursor(projection, viewport, cursor, 120);
+        Vector2 after = projection.ScreenToProjectionAxes(cursor, viewport);
+
+        Assert.InRange(Math.Abs(zoomed - start * OrthographicNavigation.ZoomStepFactor), 0, 1e-6);
+        Assert.InRange(Math.Abs(restored - start), 0, 1e-5);
+        Assert.InRange(Vector2.Distance(before, after), 0, 1e-5);
+    }
+
+    [Fact]
+    public void Metric_grid_opacity_is_smooth_monotonic_and_strength_hierarchical()
+    {
+        float below = MetricGrid.OpacityForSpacing(40f, MetricGrid.DecimetreSpacing);
+        float partial = MetricGrid.OpacityForSpacing(65f, MetricGrid.DecimetreSpacing);
+        float full = MetricGrid.OpacityForSpacing(80f, MetricGrid.DecimetreSpacing);
+        float centimetreBeforeMax = MetricGrid.OpacityForSpacing(900f, MetricGrid.CentimetreSpacing);
+
+        Assert.Equal(0f, below);
+        Assert.InRange(partial, 0.01f, 0.99f);
+        Assert.Equal(1f, full);
+        Assert.True(below < partial && partial < full);
+        Assert.True(centimetreBeforeMax > 0f);
+        Assert.True(MetricGrid.StrengthForSpacing(MetricGrid.MetreSpacing) > MetricGrid.StrengthForSpacing(MetricGrid.DecimetreSpacing));
+        Assert.True(MetricGrid.StrengthForSpacing(MetricGrid.DecimetreSpacing) > MetricGrid.StrengthForSpacing(MetricGrid.CentimetreSpacing));
+    }
+
+    [Fact]
+    public void Orthographic_recenter_targets_selected_centroid_or_hull_bounds_center_without_zoom_change()
+    {
+        var top = new OrthographicProjection { Kind = ProjectionKind.Top, PixelsPerMeter = 77f };
+        DVec3[] hull = [new(-2, -4, -6), new(6, 8, 10)];
+        DVec3[] selected = [new(1, 9, 2), new(5, -3, 10)];
+
+        Vector2 hullCenter = OrthographicNavigation.HullBoundsCenter(hull, top);
+        Vector2 selectedCenter = OrthographicNavigation.Centroid(selected, top);
+        top.CenterOnProjectionAxes(selectedCenter);
+
+        Assert.Equal(new Vector2(2, 2), hullCenter);
+        Assert.Equal(new Vector2(3, 6), selectedCenter);
+        Assert.Equal(77f, top.PixelsPerMeter);
+        Assert.Equal(new Vector2(-231, 462), top.PanPixels);
+    }
+
+    [Fact]
+    public void Toolbar_projection_callback_restores_independent_pan_states()
+    {
+        ObjectDesignerGame game = ProjectionSwitchHarness(
+            ProjectionKind.Side,
+            top: new Vector2(10, 1),
+            side: new Vector2(200, 2),
+            front: new Vector2(-50, 3));
+
+        ProjectionOf(game).PanPixels += new Vector2(25, 0);
+        PansOf(game)[ProjectionKind.Side] = ProjectionOf(game).PanPixels;
+        InvokeToolbarProjection(game, ProjectionKind.Front);
+
+        Assert.Equal(ProjectionKind.Front, ProjectionOf(game).Kind);
+        Assert.Equal(new Vector2(-50, 3), ProjectionOf(game).PanPixels);
+
+        InvokeToolbarProjection(game, ProjectionKind.Side);
+
+        Assert.Equal(new Vector2(225, 2), ProjectionOf(game).PanPixels);
+    }
+
+    [Fact]
+    public void Toolbar_projection_callback_preserves_three_independent_centres()
+    {
+        ObjectDesignerGame game = ProjectionSwitchHarness(
+            ProjectionKind.Top,
+            top: new Vector2(11, 101),
+            side: new Vector2(22, 202),
+            front: new Vector2(33, 303));
+
+        InvokeToolbarProjection(game, ProjectionKind.Side);
+        Assert.Equal(new Vector2(22, 202), ProjectionOf(game).PanPixels);
+        InvokeToolbarProjection(game, ProjectionKind.Front);
+        Assert.Equal(new Vector2(33, 303), ProjectionOf(game).PanPixels);
+        InvokeToolbarProjection(game, ProjectionKind.Top);
+        Assert.Equal(new Vector2(11, 101), ProjectionOf(game).PanPixels);
+        InvokeToolbarProjection(game, ProjectionKind.Front);
+        Assert.Equal(new Vector2(33, 303), ProjectionOf(game).PanPixels);
+    }
+
+    [Fact]
+    public void Recenter_active_view_does_not_change_other_toolbar_projection_states_or_history()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        session.History.MarkClean();
+        ObjectDesignerGame game = ProjectionSwitchHarness(
+            ProjectionKind.Top,
+            top: new Vector2(99, 99),
+            side: new Vector2(22, 202),
+            front: new Vector2(33, 303),
+            session);
+
+        InvokePrivate(game, "RecenterOrthographicView");
+        Vector2 side = PansOf(game)[ProjectionKind.Side];
+        InvokeToolbarProjection(game, ProjectionKind.Side);
+
+        Assert.Equal(side, ProjectionOf(game).PanPixels);
+        Assert.Equal(new Vector2(22, 202), side);
+        Assert.Equal(0, session.History.Count);
+    }
+
+    [Fact]
+    public void Keyboard_and_toolbar_projection_paths_produce_identical_pan_transitions()
+    {
+        ObjectDesignerGame keyboard = ProjectionSwitchHarness(ProjectionKind.Top, new Vector2(1, 10), new Vector2(2, 20), new Vector2(3, 30));
+        ObjectDesignerGame toolbar = ProjectionSwitchHarness(ProjectionKind.Top, new Vector2(1, 10), new Vector2(2, 20), new Vector2(3, 30));
+
+        InvokePrivate(keyboard, "SetProjection", ProjectionKind.Side);
+        InvokeToolbarProjection(toolbar, ProjectionKind.Side);
+
+        Assert.Equal(ProjectionOf(keyboard).Kind, ProjectionOf(toolbar).Kind);
+        Assert.Equal(ProjectionOf(keyboard).PanPixels, ProjectionOf(toolbar).PanPixels);
+        Assert.Equal(PansOf(keyboard)[ProjectionKind.Top], PansOf(toolbar)[ProjectionKind.Top]);
+        Assert.Equal(PansOf(keyboard)[ProjectionKind.Side], PansOf(toolbar)[ProjectionKind.Side]);
+    }
+
     private static string[] FirstVertexIds(ObjectDesignerSession session, int count)
         => session.Document.Hull.VisualGeometry.Vertices
             .Take(count)
             .Select(vertex => vertex.Id)
             .ToArray();
 
+    private static ObjectDesignerGame ProjectionSwitchHarness(
+        ProjectionKind kind,
+        Vector2 top,
+        Vector2 side,
+        Vector2 front,
+        ObjectDesignerSession? session = null)
+    {
+        var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+        var projection = new OrthographicProjection { Kind = kind, PixelsPerMeter = 10f };
+        var pans = new Dictionary<ProjectionKind, Vector2>
+        {
+            [ProjectionKind.Top] = top,
+            [ProjectionKind.Side] = side,
+            [ProjectionKind.Front] = front,
+        };
+        projection.PanPixels = pans[kind];
+        SetField(game, "_projection", projection);
+        SetField(game, "_projectionPans", pans);
+        SetField(game, "_initializedProjectionPans", new HashSet<ProjectionKind> { ProjectionKind.Top, ProjectionKind.Side, ProjectionKind.Front });
+        if (session is not null)
+            SetField(game, "_session", session);
+        return game;
+    }
+
+    private static OrthographicProjection ProjectionOf(ObjectDesignerGame game)
+        => (OrthographicProjection)GetField(game, "_projection");
+
+    private static Dictionary<ProjectionKind, Vector2> PansOf(ObjectDesignerGame game)
+        => (Dictionary<ProjectionKind, Vector2>)GetField(game, "_projectionPans");
+
+    private static void InvokeToolbarProjection(ObjectDesignerGame game, ProjectionKind kind)
+        => InvokePrivate(game, "OnProjectionChoiceChanged", kind);
+
+    private static object? InvokePrivate(object target, string method, params object[] args)
+        => target.GetType().GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, args);
+
+    private static object GetField(object target, string field)
+        => target.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(target)!;
+
+    private static void SetField(object target, string field, object value)
+        => target.GetType().GetField(field, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(target, value);
+
     private static void AssertGroupDelta(
         ObjectDesignerSession session,
         IReadOnlyDictionary<string, DVec3> before,
-        DVec3 expectedDelta)
+        DVec3 expectedDelta,
+        double tolerance = 1e-9)
     {
         foreach ((string id, DVec3 position) in before)
-            AssertDVec3Close(expectedDelta, session.GetVertexPosition(id) - position);
+            AssertDVec3Close(expectedDelta, session.GetVertexPosition(id) - position, tolerance);
     }
 
     private static DVec3 DeltaFor(
