@@ -1,4 +1,5 @@
 using Inferior.Core.DataBus;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework.Input;
 
 namespace Inferior.Game.States;
@@ -13,21 +14,14 @@ public sealed partial class SystemSpaceState
     // E1). Default is Tight — Timo's in-engine gate on the calibration cube, a container,
     // and a ship hull picked it over Off/Subtle/Default/Strong ("looks nicest by far");
     // K still cycles live for further A/B.
-    private enum SpecularPreset { Off, Subtle, Default, Strong, Tight }
-    private SpecularPreset _specularPreset = SpecularPreset.Tight;
+    private DynamicLitSpecularPreset _specularPreset = DynamicLitSpecularPreset.Tight;
 
     // Off carries strength 0 — that alone zeroes SpecularHighlight's contribution exactly
     // (0 * anything = 0), so "Off" is provably byte-identical to pre-S1 output without a
     // separate enable/disable flag. Shininess for Off is arbitrary (unused at strength 0);
     // kept at the Default value rather than 0 only so an accidental read isn't degenerate.
-    private static (float strength, float shininess) SpecularParamsFor(SpecularPreset preset) => preset switch
-    {
-        SpecularPreset.Subtle  => (0.2f, 16f),
-        SpecularPreset.Default => (0.4f, 32f),
-        SpecularPreset.Strong  => (0.7f, 24f),
-        SpecularPreset.Tight   => (0.5f, 96f),
-        _                      => (0f, 32f),
-    };
+    private static DynamicLitMaterialSettings SpecularParamsFor(DynamicLitSpecularPreset preset)
+        => DynamicLitMaterialSettings.ForPreset(preset);
 
     private void UpdateSpecularInput(KeyboardState keys)
     {
@@ -39,7 +33,7 @@ public sealed partial class SystemSpaceState
         bool kJustPressed = keys.IsKeyDown(Keys.K) && !_prevKeys.IsKeyDown(Keys.K);
         if (!kJustPressed) return;
 
-        _specularPreset = (SpecularPreset)(((int)_specularPreset + 1) % 5);
+        _specularPreset = (DynamicLitSpecularPreset)(((int)_specularPreset + 1) % 5);
         var (strength, shininess) = SpecularParamsFor(_specularPreset);
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
             $"Specular: {_specularPreset} (strength {strength:F2}, shininess {shininess:F0})",

@@ -52,7 +52,8 @@ public sealed class MeshRenderer : IDisposable
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
-        Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f)
+        Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f,
+        Vector3? eyePositionWorld = null)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
@@ -64,7 +65,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         Draw(vb, ib, fx);
     }
 
@@ -74,7 +75,8 @@ public sealed class MeshRenderer : IDisposable
         Matrix world, Matrix view, Matrix projection,
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
-        Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f)
+        Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f,
+        Vector3? eyePositionWorld = null)
     {
         if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
             throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
@@ -89,7 +91,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
@@ -104,7 +106,8 @@ public sealed class MeshRenderer : IDisposable
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
         float shadowCorrectionLimit, float shadowBiasDepth,
         bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
-        Texture2D? materialMap = null, float bumpStrength = 0f)
+        Texture2D? materialMap = null, float bumpStrength = 0f,
+        Vector3? eyePositionWorld = null)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
@@ -116,7 +119,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
-        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength);
+        SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
@@ -206,16 +209,12 @@ public sealed class MeshRenderer : IDisposable
     }
 
     // Brief S1: DynamicLit*/station-hulls only (BakedColorLit*/station decoration is out
-    // of scope until S2 — no caller here). EyePositionWorld is not a parameter to this
-    // method: every World matrix in this codebase already places geometry relative to the
-    // same camera whose View matrix looks from Vector3.Zero (Camera3D.ToRenderSpace /
-    // Camera3D.ViewMatrix), so the render-space eye is always the origin — there is no
-    // second eye position for a caller to supply. It's still a real shader parameter
-    // (not a hardcoded .fx constant) so this stays correct if that convention ever
-    // changes; if it does, this is the one place to update, not every draw call site.
-    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess, Texture2D materialMap, float bumpStrength)
+    // of scope until S2). SystemSpace draws use the origin-shifted Camera3D convention,
+    // so their render-space eye remains Vector3.Zero. Offscreen previews may use a local
+    // target camera instead; those callers pass the matching render-space eye explicitly.
+    private static void SetSpecularParameters(Effect fx, float specularStrength, float specularShininess, Texture2D materialMap, float bumpStrength, Vector3 eyePositionWorld)
     {
-        fx.Parameters["EyePositionWorld"].SetValue(Vector3.Zero);
+        fx.Parameters["EyePositionWorld"].SetValue(eyePositionWorld);
         fx.Parameters["SpecularStrength"].SetValue(specularStrength);
         fx.Parameters["SpecularShininess"].SetValue(specularShininess);
         // Brief S2c-1: bound every DynamicLit*/station-hull draw call, no exceptions —

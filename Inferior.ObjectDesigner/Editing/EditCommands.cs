@@ -45,6 +45,7 @@ public sealed class EditHistory
     public bool CanUndo => _nextIndex > 0;
     public bool CanRedo => _nextIndex < _commands.Count;
     public bool IsDirty => _nextIndex != _cleanIndex;
+    public int Count => _commands.Count;
 
     public void Execute(IEditCommand command, ObjectDesignerSession session)
     {

@@ -90,10 +90,12 @@ public sealed class ShipMeshRenderer : IDisposable
         double engineVisualTimeSeconds = 0.0,
         CockpitPresentationSnapshot? cockpit = null,
         HullDefinition? hullOverride = null,
-        float? renderScaleOverride = null)
+        float? renderScaleOverride = null,
+        Vector3? eyePositionWorld = null)
     {
         float renderScale = renderScaleOverride ?? (float)Camera3D.RenderScale;
         Vector3 renderPos = camera.ToRenderSpace(shipPosition);
+        Vector3 eyePosition = eyePositionWorld ?? Vector3.Zero;
         var sunColour = new Color(SceneLighting.SunColour);
         ShipHullRenderPath renderPath;
         Matrix world;
@@ -114,13 +116,14 @@ public sealed class ShipMeshRenderer : IDisposable
                 sunColour,
                 specularStrength,
                 specularShininess,
-                debugMode);
+                debugMode,
+                eyePosition);
         }
         else
         {
             renderPath = ShipHullRenderPath.LegacyFallback;
             world = BuildLegacyWorldTransform(renderScale, renderPos, shipOrientation);
-            DrawLegacyFallback(world, currentView, currentProjection, sunColour, specularStrength, specularShininess);
+            DrawLegacyFallback(world, currentView, currentProjection, sunColour, specularStrength, specularShininess, eyePosition);
         }
 
         if (engineMounts is not null)
@@ -132,7 +135,8 @@ public sealed class ShipMeshRenderer : IDisposable
                 currentProjection,
                 sunColour,
                 specularStrength,
-                specularShininess);
+                specularShininess,
+                eyePosition);
             DrawEngineExhaustGlows(
                 engineMounts,
                 world,
@@ -145,7 +149,7 @@ public sealed class ShipMeshRenderer : IDisposable
         }
 
         if (cockpit is not null)
-            DrawInstalledCockpit(camera, cockpit, currentView, currentProjection, sunColour, specularStrength, specularShininess);
+            DrawInstalledCockpit(camera, cockpit, currentView, currentProjection, sunColour, specularStrength, specularShininess, eyePosition);
 
         _gd.RasterizerState = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
@@ -182,7 +186,8 @@ public sealed class ShipMeshRenderer : IDisposable
         Color sunColour,
         float specularStrength,
         float specularShininess,
-        SemanticHullDebugMode debugMode)
+        SemanticHullDebugMode debugMode,
+        Vector3 eyePositionWorld)
     {
         SemanticHullGpuMesh mesh = GetOrCreateSemanticMesh(hullDefinition);
 
@@ -205,7 +210,8 @@ public sealed class ShipMeshRenderer : IDisposable
                         sunColour,
                         SceneLighting.Ambient,
                         specularStrength,
-                        specularShininess);
+                        specularShininess,
+                        eyePositionWorld: eyePositionWorld);
                 }
             }
             else
@@ -221,7 +227,8 @@ public sealed class ShipMeshRenderer : IDisposable
                     sunColour,
                     SceneLighting.Ambient,
                     specularStrength,
-                    specularShininess);
+                    specularShininess,
+                    eyePositionWorld: eyePositionWorld);
             }
         }
 
@@ -396,7 +403,8 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix projection,
         Color sunColour,
         float specularStrength,
-        float specularShininess)
+        float specularShininess,
+        Vector3 eyePositionWorld)
     {
         foreach (EnginePresentationSnapshot engine in engineMounts
             .Select(mount => mount.InstalledEngine)
@@ -420,7 +428,8 @@ public sealed class ShipMeshRenderer : IDisposable
                     sunColour,
                     SceneLighting.Ambient,
                     specularStrength,
-                    specularShininess);
+                    specularShininess,
+                    eyePositionWorld: eyePositionWorld);
             }
         }
     }
@@ -443,7 +452,8 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix projection,
         Color sunColour,
         float specularStrength,
-        float specularShininess)
+        float specularShininess,
+        Vector3 eyePositionWorld)
     {
         if (!CockpitDefinitionLibrary.TryGet(
                 cockpit.DefinitionId,
@@ -484,7 +494,8 @@ public sealed class ShipMeshRenderer : IDisposable
                 emissive ? Color.Black : sunColour,
                 emissive ? 1.0f : SceneLighting.Ambient,
                 specularStrength,
-                specularShininess);
+                specularShininess,
+                eyePositionWorld: eyePositionWorld);
         }
     }
 
@@ -773,19 +784,23 @@ public sealed class ShipMeshRenderer : IDisposable
         Matrix projection,
         Color sunColour,
         float specularStrength,
-        float specularShininess)
+        float specularShininess,
+        Vector3 eyePositionWorld)
     {
         LegacyFallbackMesh legacy = GetOrCreateLegacyFallback();
 
         _meshRenderer.DrawDynamicLit(legacy.HullVb, legacy.HullIb, world, currentView, projection,
             Type1HullFactory.HullColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient,
-            specularStrength, specularShininess);
+            specularStrength, specularShininess,
+            eyePositionWorld: eyePositionWorld);
         _meshRenderer.DrawDynamicLit(legacy.NacelleVb, legacy.NacelleIb, world, currentView, projection,
             Type1HullFactory.NacelleColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient,
-            specularStrength, specularShininess);
+            specularStrength, specularShininess,
+            eyePositionWorld: eyePositionWorld);
         _meshRenderer.DrawDynamicLit(legacy.PylonVb, legacy.PylonIb, world, currentView, projection,
             Type1HullFactory.PylonColour, SceneLighting.SunDirection, sunColour, SceneLighting.Ambient,
-            specularStrength, specularShininess);
+            specularStrength, specularShininess,
+            eyePositionWorld: eyePositionWorld);
     }
 
     private LegacyFallbackMesh GetOrCreateLegacyFallback()
