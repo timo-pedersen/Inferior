@@ -41,6 +41,9 @@ public static class UrbanGrowth
     {
         var rng = new Random(seed);
         int reserve = settings.ReservedPatchEdgeCells;
+        if (patch.MinU + reserve > patch.MaxU - reserve || patch.MinV + reserve > patch.MaxV - reserve)
+            return [];
+
         var rects = new List<(int minU, int maxU, int minV, int maxV)>
         {
             (patch.MinU + reserve, patch.MaxU - reserve, patch.MinV + reserve, patch.MaxV - reserve),
@@ -206,9 +209,14 @@ public static class UrbanGrowth
             int depth = depths[u, v];
             for (int layer = 1; layer <= depth; layer++)
             {
-                if (!occupancy.Grid.Contains(cell.X + dx * layer, cell.Y + dy * layer, cell.Z + dz * layer))
+                int x = cell.X + dx * layer;
+                int y = cell.Y + dy * layer;
+                int z = cell.Z + dz * layer;
+                if (!occupancy.Grid.Contains(x, y, z))
                     break;
-                occupancy.MarkUrban(cell.X + dx * layer, cell.Y + dy * layer, cell.Z + dz * layer);
+                if (!occupancy.Grid.IsFaceRegion(x, y, z, patch.Direction))
+                    break;
+                occupancy.MarkUrban(x, y, z, MegacellOwner.FaceInterior, RegionIdentity.Face(patch.Direction));
             }
         }
     }

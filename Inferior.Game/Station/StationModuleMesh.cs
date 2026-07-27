@@ -677,6 +677,9 @@ public sealed class StationModuleMesh
         return (verts, indices);
     }
 
+    public (VertexPositionNormalColorTexture[] verts, int[] indices) ToIntArrays()
+        => (_verts.ToArray(), _idx.ToArray());
+
     // Builds GPU buffers from accumulated geometry. Returns null if the mesh is empty.
     public (VertexBuffer vb, IndexBuffer ib, int triCount)? Build(GraphicsDevice gd)
     {

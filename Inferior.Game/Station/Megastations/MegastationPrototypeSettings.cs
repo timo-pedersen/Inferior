@@ -9,9 +9,16 @@ public enum MegastationPrototypeSelectionMode
     Frequent,
 }
 
+public sealed record MegastationDevelopmentSelection(
+    MegastationPrototypeSelectionMode Mode,
+    double MegastationProbability,
+    bool ForceStarterStation);
+
 public sealed record MegastationPrototypeSettings
 {
     public static MegastationPrototypeSettings Default { get; } = new();
+    public static MegastationDevelopmentSelection DevelopmentSelection { get; } =
+        new(MegastationPrototypeSelectionMode.Frequent, MegastationProbability: 0.50, ForceStarterStation: true);
 
     public int GeneratorVersion { get; init; } = 1;
 
@@ -33,17 +40,6 @@ public sealed record MegastationPrototypeSettings
     public IntRange TowerRadiusCells { get; init; } = new(2, 6);
     public FloatRange TrenchDensity { get; init; } = new(0.06f, 0.14f);
     public FloatRange CourtyardDensity { get; init; } = new(0.04f, 0.10f);
-
-    public static MegastationPrototypeSelectionMode ReadSelectionMode()
-    {
-        string? raw = Environment.GetEnvironmentVariable("INFERIOR_MEGASTATION_PROTOTYPE");
-        return raw?.Trim().ToLowerInvariant() switch
-        {
-            "force" or "forced" or "force-starter" or "starter" => MegastationPrototypeSelectionMode.ForceStarterStation,
-            "frequent" or "many"                                => MegastationPrototypeSelectionMode.Frequent,
-            _                                                    => MegastationPrototypeSelectionMode.Canonical,
-        };
-    }
 }
 
 public readonly record struct IntRange(int Min, int Max)

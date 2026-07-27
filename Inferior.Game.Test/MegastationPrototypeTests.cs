@@ -86,54 +86,83 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
-    public void UrbanGrowth_OnlyUsesSelectedPatchAndLeavesReservedBoundaryClear()
+    public void FaceGrowth_UrbanizesAllSixFacesAndLeavesReservedBoundaryClear()
     {
         var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
-        var patch = result.Urban.Patch;
+        Assert.Equal(6, result.Faces.Count);
+        Assert.Equal(6, result.Diagnostics.UrbanizedFaceCount);
         int reserve = MegastationPrototypeSettings.Default.ReservedPatchEdgeCells;
 
-        Assert.Equal(GridDirection.PositiveY, patch.Direction);
-        foreach (var cell in patch.Cells)
+        foreach (var face in result.Faces)
         {
-            int u = SurfacePatchFinder.Coordinate(cell, patch.UAxis);
-            int v = SurfacePatchFinder.Coordinate(cell, patch.VAxis);
-            bool reserved = u < patch.MinU + reserve || u > patch.MaxU - reserve
-                         || v < patch.MinV + reserve || v > patch.MaxV - reserve;
-            if (reserved)
-                Assert.Equal(0, result.Urban.Depths[u - patch.MinU, v - patch.MinV]);
+            var patch = face.Patch;
+            foreach (var cell in patch.Cells)
+            {
+                int u = SurfacePatchFinder.Coordinate(cell, patch.UAxis);
+                int v = SurfacePatchFinder.Coordinate(cell, patch.VAxis);
+                bool reserved = u < patch.MinU + reserve || u > patch.MaxU - reserve
+                             || v < patch.MinV + reserve || v > patch.MaxV - reserve;
+                if (reserved)
+                    Assert.Equal(0, face.Depths[u - patch.MinU, v - patch.MinV]);
+            }
         }
 
         for (int x = 0; x < result.Grid.XCount; x++)
         for (int y = 0; y < result.Grid.YCount; y++)
         for (int z = 0; z < result.Grid.ZCount; z++)
         {
-            if (!result.Occupancy.IsUrban(x, y, z)) continue;
-            Assert.True(y >= result.Grid.CoreY.End.Value);
+            if (result.Occupancy.Owner(x, y, z) != MegacellOwner.FaceInterior) continue;
+            Assert.Equal(1, result.Grid.ExteriorAxisCount(x, y, z));
         }
     }
 
     [Fact]
-    public void UrbanGrowth_IsMonotonicAndConnectedToCore()
+    public void FaceGrowth_IsMonotonicAndConnectedToCore()
     {
         var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
-        var patch = result.Urban.Patch;
-        Assert.True(result.Urban.MaximumDepth <= MegastationPrototypeSettings.Default.MaximumUrbanDepth);
-        Assert.All(result.Urban.Districts, d =>
-        {
-            Assert.True(d.MaxU - d.MinU + 1 >= MegastationPrototypeSettings.Default.MinimumDistrictCells);
-            Assert.True(d.MaxV - d.MinV + 1 >= MegastationPrototypeSettings.Default.MinimumDistrictCells);
-        });
+        Assert.True(result.Faces.Max(f => f.MaximumDepth) <= 16);
 
-        foreach (var cell in patch.Cells)
+        foreach (var face in result.Faces)
         {
-            int depth = result.Urban.Depths[
-                SurfacePatchFinder.Coordinate(cell, patch.UAxis) - patch.MinU,
-                SurfacePatchFinder.Coordinate(cell, patch.VAxis) - patch.MinV];
-            for (int layer = 1; layer <= depth; layer++)
-                Assert.True(result.Occupancy.IsUrban(cell.X, cell.Y + layer, cell.Z));
+            Assert.All(face.Districts, d =>
+            {
+                Assert.True(d.MaxU - d.MinU + 1 >= MegastationPrototypeSettings.Default.MinimumDistrictCells);
+                Assert.True(d.MaxV - d.MinV + 1 >= MegastationPrototypeSettings.Default.MinimumDistrictCells);
+            });
+
+            var (dx, dy, dz) = Direction.Offset(face.Patch.Direction);
+            foreach (var cell in face.Patch.Cells)
+            {
+                int depth = face.Depths[
+                    SurfacePatchFinder.Coordinate(cell, face.Patch.UAxis) - face.Patch.MinU,
+                    SurfacePatchFinder.Coordinate(cell, face.Patch.VAxis) - face.Patch.MinV];
+                for (int layer = 1; layer <= depth; layer++)
+                    Assert.True(result.Occupancy.IsUrban(cell.X + dx * layer, cell.Y + dy * layer, cell.Z + dz * layer));
+            }
         }
 
         Assert.Equal(result.Occupancy.TotalOccupiedCount, CountConnectedOccupied(result.Occupancy));
+    }
+
+    [Fact]
+    public void PositiveYAcceptedFace_DepthMapMatchesPrototypeASeedPath()
+    {
+        var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
+        UrbanGrowthResult positiveY = PositiveYFace(result);
+
+        int rootSeed = MegastationSeed.Root(StationId, MegastationPrototypeSettings.Default.GeneratorVersion);
+        var legacyGrid = SliceGrid.Create(MegastationPrototypeSettings.Default, MegastationSeed.Derive(rootSeed, "slice-grid layout"));
+        var legacyOccupancy = new CuboidStructuralVolumeGenerator().Generate(legacyGrid);
+        ExteriorSpace.ClassifyExternallyAccessibleEmpty(legacyOccupancy);
+        SurfacePatch legacyPatch = SurfacePatchFinder.FindPatches(legacyOccupancy)
+            .Single(p => p.Direction == GridDirection.PositiveY);
+        UrbanGrowthResult legacy = UrbanGrowth.Generate(
+            legacyOccupancy,
+            legacyPatch,
+            MegastationPrototypeSettings.Default,
+            MegastationSeed.Derive(rootSeed, "district layout"));
+
+        Assert.Equal(HashDepths(legacy.Depths), HashDepths(positiveY.Depths));
     }
 
     [Fact]
@@ -153,10 +182,45 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    public void EdgeAndCornerRegions_AreGeneratedWithStableOwnership()
+    {
+        var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
+
+        Assert.Equal(12, result.Edges.Count);
+        Assert.Equal(8, result.Corners.Count);
+        Assert.Equal(result.Edges.Select(e => e.Id).Distinct(StringComparer.Ordinal).Count(), result.Edges.Count);
+        Assert.Equal(result.Corners.Select(c => c.Id).Distinct(StringComparer.Ordinal).Count(), result.Corners.Count);
+        Assert.True(result.Occupancy.EdgeRegionOccupiedCount > 0);
+        Assert.True(result.Occupancy.CornerRegionOccupiedCount > 0);
+
+        for (int x = 0; x < result.Grid.XCount; x++)
+        for (int y = 0; y < result.Grid.YCount; y++)
+        for (int z = 0; z < result.Grid.ZCount; z++)
+        {
+            var owner = result.Occupancy.Owner(x, y, z);
+            if (owner == MegacellOwner.EdgeRegion)
+                Assert.Equal(2, result.Grid.ExteriorAxisCount(x, y, z));
+            if (owner == MegacellOwner.CornerRegion)
+                Assert.Equal(3, result.Grid.ExteriorAxisCount(x, y, z));
+        }
+    }
+
+    [Fact]
+    public void WholeVolume_IsConnectedAndHasNoSealedCavities()
+    {
+        var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
+
+        Assert.Equal(1, result.Diagnostics.ConnectedComponentsBeforeValidation);
+        Assert.Equal(0, result.Diagnostics.RemovedDisconnectedCells);
+        Assert.False(result.Diagnostics.HasSealedCavity);
+        Assert.Equal(result.Occupancy.TotalOccupiedCount, CountConnectedOccupied(result.Occupancy));
+    }
+
+    [Fact]
     public void Mesh_HasFiniteNonDegenerateFacesAndContainsVerticesInBounds()
     {
         var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
-        var (verts, indices) = result.Mesh.ToArrays();
+        var (verts, indices) = result.Mesh.ToIntArrays();
         Assert.NotEmpty(verts);
         Assert.NotEmpty(indices);
 
@@ -214,6 +278,24 @@ public sealed class MegastationPrototypeTests
 
         float coreWidth = grid.GetCellMaximum(axis, core.End.Value - 1) - grid.GetCellMinimum(axis, core.Start.Value);
         Assert.Equal(expectedCoreDimension, coreWidth, 3);
+    }
+
+    private static UrbanGrowthResult PositiveYFace(MegastationPrototypeCpuResult result)
+        => result.Faces.Single(f => f.Patch.Direction == GridDirection.PositiveY);
+
+    private static string HashDepths(int[,] depths)
+    {
+        unchecked
+        {
+            uint hash = 2166136261u;
+        for (int x = 0; x < depths.GetLength(0); x++)
+        for (int y = 0; y < depths.GetLength(1); y++)
+            {
+                hash ^= (uint)depths[x, y];
+                hash *= 16777619u;
+            }
+            return hash.ToString("X8");
+        }
     }
 
     private static int CountConnectedOccupied(StructuralOccupancy occupancy)

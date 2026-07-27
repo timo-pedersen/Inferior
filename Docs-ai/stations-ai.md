@@ -25,19 +25,26 @@ separate `SpriteBatch` pass using `BlendState.Additive`.
 > experiment is quarantined on `wip/station-lighting-shadows`
 > (`Docs-archive/Shadow_fail_retrospective.md`). Next spec phase (B) adds the shadow map.
 
-### Megastation Prototype A
+### Megastation prototypes
 
-Prototype A is an explicit alternate station-generation path, not a replacement for the ordinary
-port/module growth path. It currently produces one large filled cuboid structural volume with
-one dense positive-Y urban face and five plain structural faces.
+The megastation generator is an explicit alternate station-generation path, not a replacement for
+the ordinary port/module growth path.
+
+Prototype A produced one large filled cuboid structural volume with one dense positive-Y urban
+face and five plain structural faces. Timo visually accepted that one-face result in-engine.
+
+Prototype B wraps the accepted city identity around the whole cuboid: all six faces grow city
+interiors, all twelve edges are shared generated regions, and all eight corners are shared
+generated regions. The positive-Y face preserves Prototype A's accepted seed path.
 
 Implementation:
 
 - `Inferior.Game/Station/Megastations/SliceGrid.cs` owns one non-uniform rectilinear grid with
   deterministic X/Y/Z slice widths, explicit core ranges, exterior growth layers, and centralized
   cell coordinate helpers.
-- `StructuralOccupancy` stores compact per-cell flags for structural mass, urban mass, and
-  externally accessible empty space.
+- `StructuralOccupancy` stores compact per-cell flags for structural mass, urban mass,
+  externally accessible empty space, generation owner (`StructuralCore`, `FaceInterior`,
+  `EdgeRegion`, `CornerRegion`), and a stable region id.
 - `CuboidStructuralVolumeGenerator` fills the structural core only. Later rectilinear/Boolean
   generators should produce the same occupancy shape rather than changing urban growth.
 - `ExteriorSpace` flood-fills empty cells from the generation boundary. A solid face is external
@@ -45,40 +52,50 @@ Implementation:
   outside hull.
 - `SurfacePatchFinder` discovers connected coplanar exposed face patches with stable geometric
   identities, outward normals, and patch-local U/V axes.
-- `UrbanGrowth` selects the configured major patch (`PositiveY` by default), reserves a perimeter
-  band, BSP-splits the usable area into rectilinear districts, assigns coherent district depth,
-  broad tower attractors, trenches/courtyards, and a small cleanup pass, then writes monotonic
-  outward occupancy from layer 1 through target depth.
+- `MegastationUrbanStyle` derives station-wide density/depth/tower/trench/courtyard/edge/corner
+  tendencies from stable station identity. Each non-accepted face gets deterministic patch-local
+  modifiers from its patch id; `PositiveY` keeps the old `root -> "district layout"` seed path.
+- `CornerRegionGenerator` plans eight corner regions first as coherent stepped octant masses.
+- `EdgeRegionGenerator` plans twelve edge profiles using the adjacent corner endpoint depths.
+  Edge profiles include strong spine, broken spine, low structural band, irregular towers, and
+  mostly-open edge summaries. Edge generation also fills face-region support shoulders along
+  reserved perimeters so edge/corner mass is six-neighbor connected without changing face depth
+  maps.
+- `UrbanGrowth` runs on all six major patches through each patch's local U/V basis, reserves a
+  perimeter band for shared edge/corner work, BSP-splits usable area into rectilinear districts,
+  assigns coherent district depth, broad tower attractors, trenches/courtyards, and a small
+  cleanup pass, then writes monotonic outward occupancy from layer 1 through target depth.
 - `MegastationPrototypeMeshBuilder` emits an unchamfered exterior boundary mesh from the final
   union occupancy through `StationModuleMesh`; it uses the existing station hull lighting/render
-  path and does not add a prototype shader.
+  path and does not add a prototype shader. Optional mesh colouring supports structural-vs-urban,
+  region-owner, and outward-normal debug modes.
 
 Development controls:
 
-- Environment variable `INFERIOR_MEGASTATION_PROTOTYPE` unset/unknown: `Canonical`, ordinary
-  stations unchanged.
-- `INFERIOR_MEGASTATION_PROTOTYPE=force` (also `force-starter` or `starter`): force the canonical
-  starter station to use Prototype A.
-- `INFERIOR_MEGASTATION_PROTOTYPE=frequent` (also `many`): stable roughly-one-third prototype
-  selection for seed/system-transition testing.
+- `MegastationPrototypeSettings.DevelopmentSelection` is the one source location.
+- Current active development setting: `Frequent`, `MegastationProbability = 0.50`,
+  `ForceStarterStation = true`.
+- `Canonical` remains supported by changing that value; generator identity and geometry do not
+  depend on selection mode.
 
 Diagnostics are published as a `SystemMessage` whenever a prototype is generated: station
 persistent identity, generator version/root seed, slice counts, grid cells, structural/urban
-occupied cells, district count, maximum urban depth, exposed quads, triangles, vertices, mesh
-pages, and generation time.
+occupied cells, urbanized face count, face/edge/corner occupied cells, total district count,
+maximum face depth, per-face summaries, per-edge profile summaries, per-corner extent summaries,
+connected components before validation, removed disconnected cells, sealed-cavity flag, exposed
+quads, triangles, vertices, mesh pages, and generation time.
 
-Measured CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
+Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
 
-| Config | Slices | Cells | Structural | Urban | Quads | Tris | Verts | Pages | Time |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Small test | 15x12x14 | 2,520 | 540 | 76 | 506 | 1,012 | 2,024 | 1 | 52 ms |
-| Default prototype | 41x28x36 | 41,328 | 8,100 | 1,188 | 3,680 | 7,360 | 14,720 | 1 | 108 ms |
-| Stress | 62x36x54 | 120,528 | 30,096 | 4,028 | 8,940 | 17,880 | 35,760 | 1 | 323 ms |
+| Config | Slices | Cells | Structural | Urban | Face | Edge | Corner | Districts | Quads | Tris | Verts | Time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Default prototype | 41x28x36 | 41,328 | 8,100 | 12,003 | 6,326 | 5,375 | 302 | 49 | 11,678 | 23,356 | 46,712 | 283 ms |
+| Stress | 67x41x59 | 162,073 | 30,096 | 45,779 | 24,784 | 20,088 | 907 | 81 | 32,968 | 65,936 | 131,872 | 859 ms |
 
-Not visually accepted yet. Deferred by design: growth on all exposed surfaces, shared edges and
-corners, Boolean cuts, open interiors, bridges/overhangs, jagged boundaries, docking bays,
-historical annexes, topology-derived chamfers, semantic module partitioning, final windows,
-greeble, lights, pipes, antennas, and final galaxy-wide rarity.
+Prototype B is not visually accepted yet. Deferred by design: production chamfers, semantic module
+partitioning, windows, lights, greeble, pipes, tanks, antennas, attached annexes, Boolean cuts,
+O/L/T shapes, jagged structural-core erosion, bridges, overhangs, docking bays, interiors, final
+megastation rarity, LOD redesign, and shadow changes.
 
 ---
 

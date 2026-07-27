@@ -29,19 +29,22 @@ public sealed partial class SystemSpaceState
     private static bool ShouldUseMegastationPrototype(
         Galaxy.Station station,
         Galaxy.Station? starterStation,
-        MegastationPrototypeSelectionMode mode)
+        MegastationDevelopmentSelection selection)
     {
-        return mode switch
+        if (selection.ForceStarterStation && starterStation != null && ReferenceEquals(station, starterStation))
+            return true;
+
+        return selection.Mode switch
         {
+            MegastationPrototypeSelectionMode.Frequent =>
+                StableProbability(station.PersistenceId ?? station.Name) < selection.MegastationProbability,
             MegastationPrototypeSelectionMode.ForceStarterStation =>
                 starterStation != null && ReferenceEquals(station, starterStation),
-            MegastationPrototypeSelectionMode.Frequent =>
-                StableModulo(station.PersistenceId ?? station.Name, 3) == 0,
             _ => false,
         };
     }
 
-    private static int StableModulo(string value, int modulus)
+    private static double StableProbability(string value)
     {
         unchecked
         {
@@ -51,7 +54,7 @@ public sealed partial class SystemSpaceState
                 h ^= c;
                 h *= 16777619u;
             }
-            return (int)(h % (uint)modulus);
+            return (h % 10_000u) / 10_000.0;
         }
     }
 
@@ -60,10 +63,11 @@ public sealed partial class SystemSpaceState
         MegastationPrototypeSelectionMode mode)
     {
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
-            $"Megastation Prototype A [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; " +
+            $"Megastation Prototype B [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; " +
             $"seed={d.RootSeed}; slices={d.XSliceCount}x{d.YSliceCount}x{d.ZSliceCount}; " +
             $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; urban={d.UrbanOccupiedCellCount}; " +
-            $"districts={d.DistrictCount}; maxDepth={d.MaximumUrbanDepth}; quads={d.ExposedQuadCount}; " +
+            $"faces={d.UrbanizedFaceCount}; faceCells={d.FaceRegionOccupiedCellCount}; edgeCells={d.EdgeRegionOccupiedCellCount}; cornerCells={d.CornerRegionOccupiedCellCount}; " +
+            $"districts={d.DistrictCount}; maxDepth={d.MaximumUrbanDepth}; components={d.ConnectedComponentsBeforeValidation}; sealed={d.HasSealedCavity}; quads={d.ExposedQuadCount}; " +
             $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; genMs={d.GenerationMilliseconds}",
             SystemMessagePriority.NB));
     }
