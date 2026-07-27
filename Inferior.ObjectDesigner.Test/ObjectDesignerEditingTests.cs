@@ -1267,11 +1267,109 @@ public sealed class ObjectDesignerEditingTests
         Assert.Equal(PansOf(keyboard)[ProjectionKind.Side], PansOf(toolbar)[ProjectionKind.Side]);
     }
 
+    [Fact]
+    public void Non_planar_face_diagnostic_carries_stable_face_and_vertex_identity()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        string movedVertexId = face.VertexIds[1];
+
+        session.SetVertexPosition(movedVertexId, session.GetVertexPosition(movedVertexId) + new DVec3(0, 0.25, 0));
+
+        AuthoringDiagnostic diagnostic = Assert.Single(
+            session.Diagnostics,
+            diagnostic => diagnostic.Code == "HULL_FACE_NON_PLANAR" && diagnostic.StableFaceId == face.Id);
+        Assert.Equal(face.Id, diagnostic.EntityId);
+        Assert.Equal(face.Id, diagnostic.StableFaceId);
+        Assert.Contains(movedVertexId, diagnostic.StableVertexIds);
+        Assert.Contains(face.Id, session.DiagnosticOverlay.InvalidFaceIds);
+        Assert.Contains(movedVertexId, session.DiagnosticOverlay.InvalidVertexIds);
+    }
+
+    [Fact]
+    public void Diagnostic_overlay_uses_semantic_ids_not_face_order()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        string faceId = face.Id;
+        string movedVertexId = face.VertexIds[1];
+
+        session.Document.Hull.VisualGeometry.Faces.Reverse();
+        session.SetVertexPosition(movedVertexId, session.GetVertexPosition(movedVertexId) + new DVec3(0, 0.25, 0));
+
+        Assert.Contains(faceId, session.DiagnosticOverlay.InvalidFaceIds);
+        Assert.DoesNotContain(session.Document.Hull.VisualGeometry.Faces[0].Id, session.DiagnosticOverlay.InvalidFaceIds.Where(id => !string.Equals(id, faceId, StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void Multiple_face_diagnostics_highlight_one_semantic_face_once()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        face.VertexIds[1] = face.VertexIds[0];
+
+        session.Rebuild();
+
+        Assert.Contains(face.Id, session.DiagnosticOverlay.InvalidFaceIds);
+        Assert.Single(session.DiagnosticOverlay.InvalidFaceIds, id => string.Equals(id, face.Id, StringComparison.Ordinal));
+        Assert.True(session.DiagnosticOverlay.FaceDiagnosticsById[face.Id].Count >= 1);
+    }
+
+    [Fact]
+    public void Active_invalid_face_and_selected_vertices_remain_in_overlay_state()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        string activeVertexId = face.VertexIds[0];
+        string selectedVertexId = face.VertexIds[1];
+        session.SelectVertex(activeVertexId, extend: false);
+        session.SelectVertex(selectedVertexId, extend: true);
+        Assert.True(session.SelectActiveFace(face.Id));
+
+        session.SetVertexPosition(selectedVertexId, session.GetVertexPosition(selectedVertexId) + new DVec3(0, 0.25, 0));
+
+        Assert.Equal(face.Id, session.ActiveFaceId);
+        Assert.Equal([activeVertexId, selectedVertexId], session.SelectedVertexIds);
+        Assert.Contains(face.Id, session.DiagnosticOverlay.InvalidFaceIds);
+        Assert.Contains(selectedVertexId, session.DiagnosticOverlay.InvalidVertexIds);
+        Assert.NotNull(session.DiagnosticOverlay.MostRelevantForFace(face.Id));
+    }
+
+    [Fact]
+    public void Invalid_edit_retains_last_valid_preview_while_overlay_uses_current_positions()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        HullDefinition lastValid = session.PreviewHullDefinition;
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        string movedVertexId = face.VertexIds[1];
+        DVec3 currentPosition = session.GetVertexPosition(movedVertexId) + new DVec3(0, 0.25, 0);
+
+        session.Execute(new MoveVertexCommand(movedVertexId, session.GetVertexPosition(movedVertexId), currentPosition));
+
+        Assert.True(session.IsPreviewStale);
+        Assert.Same(lastValid, session.PreviewHullDefinition);
+        Assert.Equal(currentPosition, session.GetVertexPosition(movedVertexId));
+        Assert.Contains(face.Id, session.DiagnosticOverlay.InvalidFaceIds);
+
+        session.Undo();
+
+        Assert.False(session.IsPreviewStale);
+        Assert.DoesNotContain(face.Id, session.DiagnosticOverlay.InvalidFaceIds);
+    }
+
     private static string[] FirstVertexIds(ObjectDesignerSession session, int count)
         => session.Document.Hull.VisualGeometry.Vertices
             .Take(count)
             .Select(vertex => vertex.Id)
             .ToArray();
+
+    private static SemanticHullFaceDto FirstQuadFace(ObjectDesignerSession session)
+        => session.Document.Hull.VisualGeometry.Faces.First(face => face.VertexIds.Count >= 4);
 
     private static ObjectDesignerGame ProjectionSwitchHarness(
         ProjectionKind kind,

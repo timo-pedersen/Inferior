@@ -1,5 +1,6 @@
 using Inferior.Core.Math;
 using Inferior.Gameplay.Hull;
+using Inferior.Gameplay.Hull.Authoring;
 using Inferior.ObjectDesigner.Editing;
 using Inferior.Rendering;
 using Inferior.UI;
@@ -9,6 +10,7 @@ using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Xunit;
 
 namespace Inferior.ObjectDesigner.Test;
@@ -72,6 +74,58 @@ public sealed class ObjectDesignerRenderedSmokeTests
         Assert.Equal(DynamicLitMaterialSettings.Tight.SpecularShininess, tightMaterial.SpecularShininess);
         int nonBackgroundPixels = CountNonBackgroundPixels(tightMaterial.Frame, new Color(8, 10, 11));
         Assert.True(nonBackgroundPixels > 100, $"The real preview ship render produced too few non-background pixels: {nonBackgroundPixels}.");
+    }
+
+    [Fact]
+    public void ObjectDesigner_3d_overlay_draws_invalid_current_perimeter_over_last_valid_preview()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        session.Document.Hull.VisualGeometry.RequireClosedHull = false;
+        session.Document.Hull.VisualGeometry.Vertices.Clear();
+        session.Document.Hull.VisualGeometry.Faces.Clear();
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.a", Position = Vec3Dto.From(new DVec3(-4, -2, 0)) });
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.b", Position = Vec3Dto.From(new DVec3(4, -2, 0.4)) });
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.c", Position = Vec3Dto.From(new DVec3(4, 2, 0)) });
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.d", Position = Vec3Dto.From(new DVec3(-4, 2, 0)) });
+        session.Document.Hull.VisualGeometry.Faces.Add(new SemanticHullFaceDto
+        {
+            Id = "overlay.invalid",
+            VertexIds = ["overlay.a", "overlay.b", "overlay.c", "overlay.d"],
+            Role = HullSurfaceRole.ServiceSurface,
+            MaterialGroup = "test",
+            OutwardNormal = Vec3Dto.From(DVec3.UnitZ),
+            ContributesToClosedHull = false,
+        });
+        session.Rebuild();
+        session.SelectVertex("overlay.a", extend: false);
+        Assert.True(session.SelectActiveFace("overlay.invalid"));
+        Assert.True(session.IsPreviewStale);
+
+        RenderedFrame frame = RenderHarness.Render(320, 240, gd =>
+        {
+            gd.Clear(ThreeD);
+            var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+            typeof(ObjectDesignerGame).GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, session);
+            typeof(ObjectDesignerGame).GetField("_lineEffect", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, new BasicEffect(gd)
+            {
+                VertexColorEnabled = true,
+                LightingEnabled = false,
+                TextureEnabled = false,
+            });
+
+            Matrix view = Matrix.CreateLookAt(new Vector3(0, 0, 30), Vector3.Zero, Vector3.UnitY);
+            Matrix projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(35f), 320f / 240f, 0.05f, 400f);
+            typeof(ObjectDesignerGame).GetMethod("DrawPerspectiveEditorOverlay", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, [gd, view, projection]);
+        });
+
+        int shadedPixels = CountPixels(frame, ThreeD);
+        int invalidPixels = CountPixelsNear(frame, new Color(245, 76, 64), tolerance: 8);
+        int activePixels = CountPixelsNear(frame, new Color(80, 230, 255), tolerance: 8);
+
+        Assert.True(shadedPixels > 70_000, $"The overlay should not clear or replace the shaded preview background; remaining blue pixels: {shadedPixels}.");
+        Assert.True(invalidPixels > 0, "The invalid current face perimeter did not render in the 3D overlay.");
+        Assert.True(activePixels > 0, "The active-face secondary outline did not render distinctly from the invalid highlight.");
     }
 
     [Fact]
@@ -424,6 +478,15 @@ public sealed class ObjectDesignerRenderedSmokeTests
         return count;
     }
 
+    private static int CountPixels(RenderedFrame frame, Color colour)
+        => frame.Pixels.Count(pixel => pixel == colour);
+
+    private static int CountPixelsNear(RenderedFrame frame, Color colour, int tolerance)
+        => frame.Pixels.Count(pixel =>
+            Math.Abs(pixel.R - colour.R) <= tolerance
+            && Math.Abs(pixel.G - colour.G) <= tolerance
+            && Math.Abs(pixel.B - colour.B) <= tolerance);
+
     private static string FindContentRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
@@ -453,6 +516,26 @@ public sealed class ObjectDesignerRenderedSmokeTests
     }
 
     private sealed record ShipPreviewFrame(RenderedFrame Frame, Vector3 EyePositionWorld, float SpecularStrength, float SpecularShininess);
+
+    private sealed class TempAsset : IDisposable
+    {
+        public required string Path { get; init; }
+
+        public static TempAsset FromBeren()
+        {
+            string json = File.ReadAllText(AssetPathResolver.ResolveAssetPath(BerenHullDefinitionFactory.AssetPath));
+            ShipAuthoringDocument doc = JsonSerializer.Deserialize<ShipAuthoringDocument>(json, ShipAuthoringJson.Options)!;
+            string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"beren-render-{Guid.NewGuid():N}.ship.json");
+            ShipAuthoringJson.Save(path, doc);
+            return new TempAsset { Path = path };
+        }
+
+        public void Dispose()
+        {
+            if (File.Exists(Path))
+                File.Delete(Path);
+        }
+    }
 
     private sealed class GraphicsDeviceServiceProvider(GraphicsDevice graphicsDevice) : IServiceProvider, IGraphicsDeviceService
     {

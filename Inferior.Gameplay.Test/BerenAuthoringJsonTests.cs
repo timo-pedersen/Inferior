@@ -74,6 +74,9 @@ public sealed class BerenAuthoringJsonTests
             diagnostic => diagnostic.Code == "HULL_FACE_UNKNOWN_VERTEX");
 
         Assert.Equal(doc.Hull.VisualGeometry.Faces[0].Id, diagnostic.EntityId);
+        Assert.Equal(doc.Hull.VisualGeometry.Faces[0].Id, diagnostic.StableFaceId);
+        Assert.Contains("missing.vertex", diagnostic.StableVertexIds);
+        Assert.Contains(doc.Hull.VisualGeometry.Faces[0].Id, diagnostic.RelatedEntityIds);
         Assert.Contains("missing.vertex", diagnostic.Summary);
     }
 

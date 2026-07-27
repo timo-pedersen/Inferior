@@ -28,6 +28,7 @@ public sealed class ObjectDesignerSession
     public HullDefinition HullDefinition { get; private set; }
     public HullDefinition PreviewHullDefinition { get; private set; }
     public IReadOnlyList<AuthoringDiagnostic> Diagnostics { get; private set; }
+    public GeometryDiagnosticOverlay DiagnosticOverlay { get; private set; } = GeometryDiagnosticOverlay.Empty;
     public EditHistory History { get; } = new();
     public string? SelectedVertexId
     {
@@ -63,6 +64,7 @@ public sealed class ObjectDesignerSession
         HullDefinition = hullDefinition;
         PreviewHullDefinition = hullDefinition;
         Diagnostics = diagnostics;
+        DiagnosticOverlay = GeometryDiagnosticOverlay.From(Diagnostics);
         RefreshPreviewState();
     }
 
@@ -79,6 +81,7 @@ public sealed class ObjectDesignerSession
         HullDefinition = result.HullDefinition;
         PreviewHullDefinition = result.HullDefinition;
         Diagnostics = result.Diagnostics;
+        DiagnosticOverlay = GeometryDiagnosticOverlay.From(Diagnostics);
         IsPreviewStale = false;
         History.ResetClean();
         RemoveMissingSelections();
@@ -124,6 +127,7 @@ public sealed class ObjectDesignerSession
     {
         HullDefinition = ShipAuthoringConverter.ToHullDefinition(Document);
         Diagnostics = ShipAuthoringValidator.Validate(Document, HullDefinition);
+        DiagnosticOverlay = GeometryDiagnosticOverlay.From(Diagnostics);
         RefreshPreviewState();
         ReconcileActiveFaceForActiveVertex();
     }
@@ -288,6 +292,7 @@ public sealed class ObjectDesignerSession
                     Summary = ex.Message,
                     Details = "The current hull document is kept editable, but the 3D preview remains on the last renderable hull.",
                 }).ToArray();
+                DiagnosticOverlay = GeometryDiagnosticOverlay.From(Diagnostics);
             }
         }
         IsPreviewStale = true;

@@ -81,6 +81,13 @@ public sealed class ObjectDesignerGame : Game
     private bool _updatingTextBoxes;
     private RenderTarget2D? _previewTargetTexture;
     private static readonly RasterizerState ScissorLineState = new() { ScissorTestEnable = true, CullMode = CullMode.None };
+    private static readonly Color CurrentWireColour = new(112, 126, 130, 170);
+    private static readonly Color InvalidFaceColour = new(245, 76, 64, 255);
+    private static readonly Color WarningFaceColour = new(235, 148, 44, 255);
+    private static readonly Color ActiveFaceColour = new(80, 230, 255, 255);
+    private static readonly Color SelectedVertexColour = new(255, 220, 72, 255);
+    private static readonly Color ActiveVertexColour = new(255, 255, 90, 255);
+    private static readonly Color InvalidVertexColour = new(255, 82, 72, 255);
 
     public ObjectDesignerGame()
     {
@@ -258,10 +265,11 @@ public sealed class ObjectDesignerGame : Game
                 previewHull,
                 renderScaleOverride: 1.0f,
                 eyePositionWorld: cameraPosition);
-            DrawPerspectiveEditorOverlay(view, projection);
 
             if (_showCargo)
                 DrawCargoPreview(view, projection);
+
+            DrawPerspectiveEditorOverlay(GraphicsDevice, view, projection);
         }
         finally
         {
@@ -282,26 +290,56 @@ public sealed class ObjectDesignerGame : Game
         renderer.FillRect(sb, viewport, new Color(8, 10, 11));
         sb.Draw(_previewTargetTexture, viewport, Color.White);
         if (_session.IsPreviewStale)
-            renderer.DrawText(sb, "Preview using last valid hull", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(230, 190, 80));
+            renderer.DrawText(sb, "3D PREVIEW: LAST VALID", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(230, 190, 80));
+        else
+            renderer.DrawText(sb, "3D PREVIEW: CURRENT", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(150, 205, 185));
     }
 
-    private void DrawPerspectiveEditorOverlay(Matrix view, Matrix projection)
+    private void DrawPerspectiveEditorOverlay(GraphicsDevice graphicsDevice, Matrix view, Matrix projection)
     {
-        ActiveFaceOverlayData overlay = _session.GetActiveFaceOverlayData();
-        IReadOnlyList<DVec3> vertices = overlay.FaceVertices;
-        if (vertices.Count == 0 && overlay.ActiveVertexId is null)
+        SemanticHullGeometry geometry = _session.HullDefinition.VisualGeometry!;
+        if (geometry.Vertices.Count == 0)
             return;
 
+        GeometryDiagnosticOverlay diagnostics = _session.DiagnosticOverlay;
+        Dictionary<string, DVec3> verticesById = geometry.Vertices.ToDictionary(v => v.Id, v => v.Position, StringComparer.Ordinal);
         var lines = new List<VertexPositionColor>();
-        if (vertices.Count >= 2)
+
+        foreach (SemanticHullFace face in geometry.Faces)
         {
-            DVec3 offset = ActiveFaceNormalForOverlay(vertices) * 0.025;
-            for (int i = 0; i < vertices.Count; i++)
-                AddWorldLine(lines, vertices[i] + offset, vertices[(i + 1) % vertices.Count] + offset, new Color(80, 230, 255, 220));
+            Color colour = FaceOverlayColour(face.Id, diagnostics);
+            for (int i = 0; i < face.VertexIds.Count; i++)
+            {
+                if (!verticesById.TryGetValue(face.VertexIds[i], out DVec3 a)
+                    || !verticesById.TryGetValue(face.VertexIds[(i + 1) % face.VertexIds.Count], out DVec3 b))
+                {
+                    continue;
+                }
+                AddWorldLine(lines, a, b, colour);
+            }
         }
 
-        if (overlay.ActiveVertexPosition is { } activeVertexPosition)
-            AddWorldCross(lines, activeVertexPosition, 0.35, new Color(255, 255, 80, 255));
+        ActiveFaceOverlayData activeOverlay = _session.GetActiveFaceOverlayData();
+        IReadOnlyList<DVec3> activeFaceVertices = activeOverlay.FaceVertices;
+        if (activeFaceVertices.Count >= 2)
+        {
+            DVec3 offset = ActiveFaceNormalForOverlay(activeFaceVertices) * 0.035;
+            for (int i = 0; i < activeFaceVertices.Count; i++)
+                AddWorldLine(lines, activeFaceVertices[i] + offset, activeFaceVertices[(i + 1) % activeFaceVertices.Count] + offset, ActiveFaceColour);
+        }
+
+        foreach (SemanticHullVertex vertex in geometry.Vertices)
+        {
+            bool selected = _session.SelectedVertexIds.Contains(vertex.Id, StringComparer.Ordinal);
+            bool active = string.Equals(vertex.Id, _session.ActiveVertexId, StringComparison.Ordinal);
+            bool invalid = diagnostics.InvalidVertexIds.Contains(vertex.Id);
+            if (!selected && !active && !invalid)
+                continue;
+
+            Color colour = active ? ActiveVertexColour : selected ? SelectedVertexColour : InvalidVertexColour;
+            double radius = active ? 0.42 : selected ? 0.32 : 0.25;
+            AddWorldCross(lines, vertex.Position, radius, colour);
+        }
 
         if (lines.Count == 0)
             return;
@@ -309,15 +347,15 @@ public sealed class ObjectDesignerGame : Game
         _lineEffect.World = Matrix.Identity;
         _lineEffect.View = view;
         _lineEffect.Projection = projection;
-        GraphicsDevice.BlendState = BlendState.AlphaBlend;
-        GraphicsDevice.DepthStencilState = DepthStencilState.None;
-        GraphicsDevice.RasterizerState = RasterizerState.CullNone;
+        graphicsDevice.BlendState = BlendState.AlphaBlend;
+        graphicsDevice.DepthStencilState = DepthStencilState.None;
+        graphicsDevice.RasterizerState = RasterizerState.CullNone;
         foreach (EffectPass pass in _lineEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
-            GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
+            graphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
         }
-        GraphicsDevice.DepthStencilState = DepthStencilState.Default;
+        graphicsDevice.DepthStencilState = DepthStencilState.Default;
     }
 
     private void EnsurePreviewTarget(int width, int height)
@@ -787,9 +825,26 @@ public sealed class ObjectDesignerGame : Game
             ? "No validation errors."
             : string.Join("\n", diagnostics.Select(d => $"{d.Severity} [{d.Code}]: {d.Summary}"));
         _validationBlock.Text = validation;
+        string summary = ValidationSummary();
         _statusLabel.Text = string.IsNullOrWhiteSpace(_status)
-            ? (_session.IsPreviewStale ? "Preview is showing the last valid hull." : "Ready.")
+            ? (_session.IsPreviewStale ? $"{summary}  3D PREVIEW: LAST VALID" : $"{summary}  3D PREVIEW: CURRENT")
             : _status;
+    }
+
+    private string ValidationSummary()
+    {
+        int errors = _session.Diagnostics.Count(diagnostic => diagnostic.Severity == AuthoringDiagnosticSeverity.Error);
+        int warnings = _session.Diagnostics.Count(diagnostic => diagnostic.Severity == AuthoringDiagnosticSeverity.Warning);
+        string summary = $"{errors} errors | {warnings} warnings";
+        if (_session.ActiveFaceId is { } faceId
+            && _session.DiagnosticOverlay.MostRelevantForFace(faceId) is { } diagnostic)
+        {
+            string detail = diagnostic.MeasuredValue is { } measured && string.Equals(diagnostic.Code, "HULL_FACE_NON_PLANAR", StringComparison.Ordinal)
+                ? $"{diagnostic.Summary} ({measured:0.###} m)"
+                : diagnostic.Summary;
+            summary += $" | {faceId}: {detail}";
+        }
+        return summary;
     }
 
     private void SetProjection(ProjectionKind kind)
@@ -909,10 +964,11 @@ public sealed class ObjectDesignerGame : Game
     private void AddFaceEdges(List<VertexPositionColor> lines, Rectangle vp)
     {
         SemanticHullGeometry geometry = _session.HullDefinition.VisualGeometry!;
-        Dictionary<string, DVec3> vertices = geometry.Vertices.ToDictionary(v => v.Id, v => v.Position);
+        GeometryDiagnosticOverlay overlay = _session.DiagnosticOverlay;
+        Dictionary<string, DVec3> vertices = geometry.Vertices.ToDictionary(v => v.Id, v => v.Position, StringComparer.Ordinal);
         foreach (SemanticHullFace face in geometry.Faces)
         {
-            Color colour = face.AssemblyId is not null ? new Color(82, 174, 105) : new Color(130, 145, 148);
+            Color colour = FaceOverlayColour(face.Id, overlay);
             for (int i = 0; i < face.VertexIds.Count; i++)
             {
                 if (!vertices.TryGetValue(face.VertexIds[i], out DVec3 a) || !vertices.TryGetValue(face.VertexIds[(i + 1) % face.VertexIds.Count], out DVec3 b))
@@ -920,6 +976,18 @@ public sealed class ObjectDesignerGame : Game
                 AddScreenLine(lines, _projection.Project(a, vp), _projection.Project(b, vp), colour);
             }
         }
+    }
+
+    private Color FaceOverlayColour(string faceId, GeometryDiagnosticOverlay overlay)
+    {
+        bool active = string.Equals(faceId, _session.ActiveFaceId, StringComparison.Ordinal);
+        if (overlay.InvalidFaceIds.Contains(faceId))
+            return InvalidFaceColour;
+        if (overlay.WarningFaceIds.Contains(faceId))
+            return WarningFaceColour;
+        if (active)
+            return ActiveFaceColour;
+        return CurrentWireColour;
     }
 
     private void AddActiveFaceEdges(List<VertexPositionColor> lines, Rectangle vp)
@@ -957,14 +1025,39 @@ public sealed class ObjectDesignerGame : Game
     private void DrawVertexMarkers(Rectangle vp)
     {
         Texture2D pixel = TexturePixel;
-        foreach (SemanticHullVertex vertex in _session.HullDefinition.VisualGeometry!.Vertices)
+        SemanticHullGeometry geometry = _session.HullDefinition.VisualGeometry!;
+        for (int pass = 0; pass < 4; pass++)
         {
-            Vector2 p = _projection.Project(vertex.Position, vp);
-            bool selected = _session.SelectedVertexIds.Contains(vertex.Id, StringComparer.Ordinal);
-            bool active = string.Equals(vertex.Id, _session.ActiveVertexId, StringComparison.Ordinal);
-            int size = active ? 12 : selected ? 8 : 5;
-            Color colour = active ? new Color(80, 230, 255) : selected ? Color.Yellow : new Color(215, 230, 230);
-            _spriteBatch.Draw(pixel, new Rectangle((int)p.X - size / 2, (int)p.Y - size / 2, size, size), colour);
+            foreach (SemanticHullVertex vertex in geometry.Vertices)
+            {
+                bool selected = _session.SelectedVertexIds.Contains(vertex.Id, StringComparer.Ordinal);
+                bool active = string.Equals(vertex.Id, _session.ActiveVertexId, StringComparison.Ordinal);
+                bool invalid = _session.DiagnosticOverlay.InvalidVertexIds.Contains(vertex.Id);
+                if ((pass == 0 && (selected || active || invalid))
+                    || (pass == 1 && !invalid)
+                    || (pass == 2 && !selected)
+                    || (pass == 3 && !active))
+                {
+                    continue;
+                }
+
+                Vector2 p = _projection.Project(vertex.Position, vp);
+                int size = pass switch
+                {
+                    3 => 12,
+                    2 => 8,
+                    1 => 10,
+                    _ => 5,
+                };
+                Color colour = pass switch
+                {
+                    3 => ActiveVertexColour,
+                    2 => SelectedVertexColour,
+                    1 => InvalidVertexColour,
+                    _ => new Color(215, 230, 230),
+                };
+                _spriteBatch.Draw(pixel, new Rectangle((int)p.X - size / 2, (int)p.Y - size / 2, size, size), colour);
+            }
         }
     }
 
