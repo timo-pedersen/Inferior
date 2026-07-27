@@ -25,6 +25,61 @@ separate `SpriteBatch` pass using `BlendState.Additive`.
 > experiment is quarantined on `wip/station-lighting-shadows`
 > (`Docs-archive/Shadow_fail_retrospective.md`). Next spec phase (B) adds the shadow map.
 
+### Megastation Prototype A
+
+Prototype A is an explicit alternate station-generation path, not a replacement for the ordinary
+port/module growth path. It currently produces one large filled cuboid structural volume with
+one dense positive-Y urban face and five plain structural faces.
+
+Implementation:
+
+- `Inferior.Game/Station/Megastations/SliceGrid.cs` owns one non-uniform rectilinear grid with
+  deterministic X/Y/Z slice widths, explicit core ranges, exterior growth layers, and centralized
+  cell coordinate helpers.
+- `StructuralOccupancy` stores compact per-cell flags for structural mass, urban mass, and
+  externally accessible empty space.
+- `CuboidStructuralVolumeGenerator` fills the structural core only. Later rectilinear/Boolean
+  generators should produce the same occupancy shape rather than changing urban growth.
+- `ExteriorSpace` flood-fills empty cells from the generation boundary. A solid face is external
+  only when adjacent to externally accessible empty space, so sealed cavities are not treated as
+  outside hull.
+- `SurfacePatchFinder` discovers connected coplanar exposed face patches with stable geometric
+  identities, outward normals, and patch-local U/V axes.
+- `UrbanGrowth` selects the configured major patch (`PositiveY` by default), reserves a perimeter
+  band, BSP-splits the usable area into rectilinear districts, assigns coherent district depth,
+  broad tower attractors, trenches/courtyards, and a small cleanup pass, then writes monotonic
+  outward occupancy from layer 1 through target depth.
+- `MegastationPrototypeMeshBuilder` emits an unchamfered exterior boundary mesh from the final
+  union occupancy through `StationModuleMesh`; it uses the existing station hull lighting/render
+  path and does not add a prototype shader.
+
+Development controls:
+
+- Environment variable `INFERIOR_MEGASTATION_PROTOTYPE` unset/unknown: `Canonical`, ordinary
+  stations unchanged.
+- `INFERIOR_MEGASTATION_PROTOTYPE=force` (also `force-starter` or `starter`): force the canonical
+  starter station to use Prototype A.
+- `INFERIOR_MEGASTATION_PROTOTYPE=frequent` (also `many`): stable roughly-one-third prototype
+  selection for seed/system-transition testing.
+
+Diagnostics are published as a `SystemMessage` whenever a prototype is generated: station
+persistent identity, generator version/root seed, slice counts, grid cells, structural/urban
+occupied cells, district count, maximum urban depth, exposed quads, triangles, vertices, mesh
+pages, and generation time.
+
+Measured CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
+
+| Config | Slices | Cells | Structural | Urban | Quads | Tris | Verts | Pages | Time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Small test | 15x12x14 | 2,520 | 540 | 76 | 506 | 1,012 | 2,024 | 1 | 52 ms |
+| Default prototype | 41x28x36 | 41,328 | 8,100 | 1,188 | 3,680 | 7,360 | 14,720 | 1 | 108 ms |
+| Stress | 62x36x54 | 120,528 | 30,096 | 4,028 | 8,940 | 17,880 | 35,760 | 1 | 323 ms |
+
+Not visually accepted yet. Deferred by design: growth on all exposed surfaces, shared edges and
+corners, Boolean cuts, open interiors, bridges/overhangs, jagged boundaries, docking bays,
+historical annexes, topology-derived chamfers, semantic module partitioning, final windows,
+greeble, lights, pipes, antennas, and final galaxy-wide rarity.
+
 ---
 
 ## Station size classes

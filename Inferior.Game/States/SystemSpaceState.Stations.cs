@@ -5,6 +5,7 @@ using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Inferior.Game.Hyperspace;
 using Inferior.Game.StationGen;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Components;
@@ -25,6 +26,47 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    private static bool ShouldUseMegastationPrototype(
+        Galaxy.Station station,
+        Galaxy.Station? starterStation,
+        MegastationPrototypeSelectionMode mode)
+    {
+        return mode switch
+        {
+            MegastationPrototypeSelectionMode.ForceStarterStation =>
+                starterStation != null && ReferenceEquals(station, starterStation),
+            MegastationPrototypeSelectionMode.Frequent =>
+                StableModulo(station.PersistenceId ?? station.Name, 3) == 0,
+            _ => false,
+        };
+    }
+
+    private static int StableModulo(string value, int modulus)
+    {
+        unchecked
+        {
+            uint h = 2166136261u;
+            foreach (char c in value)
+            {
+                h ^= c;
+                h *= 16777619u;
+            }
+            return (int)(h % (uint)modulus);
+        }
+    }
+
+    private static void PublishMegastationPrototypeDiagnostics(
+        MegastationPrototypeDiagnostics d,
+        MegastationPrototypeSelectionMode mode)
+    {
+        DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            $"Megastation Prototype A [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; " +
+            $"seed={d.RootSeed}; slices={d.XSliceCount}x{d.YSliceCount}x{d.ZSliceCount}; " +
+            $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; urban={d.UrbanOccupiedCellCount}; " +
+            $"districts={d.DistrictCount}; maxDepth={d.MaximumUrbanDepth}; quads={d.ExposedQuadCount}; " +
+            $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; genMs={d.GenerationMilliseconds}",
+            SystemMessagePriority.NB));
+    }
 
     // ── 3D drawing ────────────────────────────────────────────────────────────
 

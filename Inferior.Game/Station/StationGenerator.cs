@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Inferior.Core.Math;
 using Inferior.Core.Random;
 using Inferior.Galaxy;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
@@ -14,7 +15,10 @@ namespace Inferior.Game.StationGen;
 // is unchanged; PanelTextures is purely a disposal manifest, not something callers need
 // to index — every module's own PlacedModule.TextureInstance already points at the right
 // element.
-public sealed record StationGenerationResult(List<PlacedModule> Modules, IReadOnlyList<Texture2D> PanelTextures);
+public sealed record StationGenerationResult(
+    List<PlacedModule> Modules,
+    IReadOnlyList<Texture2D> PanelTextures,
+    MegastationPrototypeDiagnostics? MegastationDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -48,8 +52,18 @@ public sealed class StationGenerator
     // LitSurface.fx (Docs/station-lighting-pipeline-spec.md Phase A). Kept on the signature
     // rather than touching this public entry point's call site for a lighting-only brief.
     public static StationGenerationResult Generate(Galaxy.Station station, GraphicsDevice gd,
-                                               double gameTime = 0.0)
+                                               double gameTime = 0.0,
+                                               bool useMegastationPrototype = false)
     {
+        if (useMegastationPrototype)
+        {
+            var prototype = MegastationPrototypeGenerator.Generate(station, gd);
+            return new StationGenerationResult(
+                prototype.Modules,
+                prototype.PanelTextures,
+                prototype.Diagnostics);
+        }
+
         int seed = NameHash(station.Name);
         var gen  = new StationGenerator(seed);
 

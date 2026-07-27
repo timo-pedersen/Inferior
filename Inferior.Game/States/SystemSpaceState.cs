@@ -6,6 +6,7 @@ using Inferior.Galaxy;
 using Inferior.Game.Input;
 using Inferior.Game.Hyperspace;
 using Inferior.Game.StationGen;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Cockpit;
@@ -429,12 +430,20 @@ public sealed partial class SystemSpaceState : GameState
         _stationPanelTextures.Clear();
         foreach (var v in _shadowCasterMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
         _shadowCasterMeshes.Clear();
+        MegastationPrototypeSelectionMode megaMode = MegastationPrototypeSettings.ReadSelectionMode();
+        Galaxy.Station? starterStation = megaMode == MegastationPrototypeSelectionMode.ForceStarterStation
+            ? StarterSystemSelector.SelectStarterStation(_system.Stations)
+            : null;
+
         foreach (var station in _system.Stations)
         {
-            var result  = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
+            bool useMegaPrototype = ShouldUseMegastationPrototype(station, starterStation, megaMode);
+            var result  = StationGenerator.Generate(station, _gd, _gameTimeSeconds, useMegaPrototype);
             var modules = result.Modules;
             _stationGeometry[station] = modules;
             _stationPanelTextures[station] = result.PanelTextures;
+            if (result.MegastationDiagnostics is { } megaDiag)
+                PublishMegastationPrototypeDiagnostics(megaDiag, megaMode);
 
             // Flat (ungraded) snapshot — captured before ambient occlusion darkens
             // faces below — used for Medium/Minimal DetailLevel. Same generator,
