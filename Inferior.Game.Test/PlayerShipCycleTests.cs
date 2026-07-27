@@ -11,19 +11,23 @@ namespace Inferior.Game.Test;
 public sealed class PlayerShipCycleTests
 {
     [Fact]
-    public void Catalog_CyclesAriesAsteriskBerenAntegaAndWraps()
+    public void Catalog_CyclesAriesCosmoAsteriskBerenAntegaAndWraps()
     {
         Assert.Equal(
             [
                 AriesHullDefinitionFactory.HullId,
+                CosmoHullDefinitionFactory.HullId,
                 AsteriskHullDefinitionFactory.HullId,
                 BerenHullDefinitionFactory.HullId,
                 AntegaHullDefinitionFactory.HullId,
             ],
             PlayerShipCycleCatalog.HullTypeIds);
         Assert.Equal(
-            AsteriskHullDefinitionFactory.HullId,
+            CosmoHullDefinitionFactory.HullId,
             PlayerShipCycleCatalog.GetNext(AriesHullDefinitionFactory.HullId));
+        Assert.Equal(
+            AsteriskHullDefinitionFactory.HullId,
+            PlayerShipCycleCatalog.GetNext(CosmoHullDefinitionFactory.HullId));
         Assert.Equal(
             BerenHullDefinitionFactory.HullId,
             PlayerShipCycleCatalog.GetNext(AsteriskHullDefinitionFactory.HullId));
@@ -78,7 +82,7 @@ public sealed class PlayerShipCycleTests
         simulation.TickForTests(PlayerInput.Zero, 0.0);
 
         Assert.Equal(
-            BerenHullDefinitionFactory.HullId,
+            AsteriskHullDefinitionFactory.HullId,
             simulation.ShipState!.HullTypeId);
     }
 

@@ -258,10 +258,10 @@ public sealed class ShipPropulsionTests
     }
 
     [Theory]
-    [InlineData(AriesHullDefinitionFactory.HullId, 78_000.0, 4_800.0, 2, 312_000.0, 156_000.0, 234_000.0, 1_200_000.0)]
-    [InlineData(AsteriskHullDefinitionFactory.HullId, 15_600.0, 2_400.0, 1, 117_000.0, 58_500.0, 87_750.0, 360_000.0)]
-    [InlineData(BerenHullDefinitionFactory.HullId, 187_800.0, 6_600.0, 4, 751_200.0, 375_600.0, 563_400.0, 4_200_000.0)]
-    [InlineData(AntegaHullDefinitionFactory.HullId, 3_585_200.0, 384_000.0, 4, 14_340_800.0, 3_585_200.0, 7_170_400.0, 360_000_000.0)]
+    [InlineData(AriesHullDefinitionFactory.HullId, 78_000.0, 4_800.0, 2, 1_560_000.0, 780_000.0, 1_170_000.0, 1_200_000.0)]
+    [InlineData(AsteriskHullDefinitionFactory.HullId, 15_600.0, 2_400.0, 1, 585_000.0, 292_500.0, 438_750.0, 360_000.0)]
+    [InlineData(BerenHullDefinitionFactory.HullId, 187_800.0, 6_600.0, 4, 3_756_000.0, 1_878_000.0, 2_817_000.0, 4_200_000.0)]
+    [InlineData(AntegaHullDefinitionFactory.HullId, 3_585_200.0, 384_000.0, 4, 71_704_000.0, 17_926_000.0, 35_852_000.0, 360_000_000.0)]
     public void ConfiguredShips_AggregateMaximumHarmonyMassAndPropulsion(
         string hullId,
         double expectedMass,
@@ -292,7 +292,7 @@ public sealed class ShipPropulsionTests
         Ship ship = BuildConfiguredShip(AriesHullDefinitionFactory.HullId);
         ShipPropulsionCapability propulsion = ShipPropulsion.Resolve(ship);
 
-        Assert.Equal(31_200.0, propulsion.AvailableForwardForceShipLocalN.Length, 6);
+        Assert.Equal(156_000.0, propulsion.AvailableForwardForceShipLocalN.Length, 6);
         Assert.Equal(120_000.0, propulsion.AvailableRotationalTorqueNm, 6);
         Assert.Equal(50.0, propulsion.SpeedCeilingMps, 6);
     }
@@ -369,8 +369,8 @@ public sealed class ShipPropulsionTests
         ShipPropulsionCapability capability = ShipPropulsion.Resolve(ship);
 
         double liftAcceleration = capability.AvailableLiftThrustN / capability.CurrentMassKg;
-        Assert.Equal(2.0, liftAcceleration, 6);
-        Assert.Equal(2.0 / ShipPropulsion.StandardGravityMps2,
+        Assert.Equal(10.0, liftAcceleration, 6);
+        Assert.Equal(10.0 / ShipPropulsion.StandardGravityMps2,
             ShipPropulsion.MaximumHoverGravityG(capability), 6);
     }
 

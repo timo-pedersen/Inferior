@@ -7,6 +7,7 @@ public static class PlayerShipCycleCatalog
     public static IReadOnlyList<string> HullTypeIds { get; } =
     [
         AriesHullDefinitionFactory.HullId,
+        CosmoHullDefinitionFactory.HullId,
         AsteriskHullDefinitionFactory.HullId,
         BerenHullDefinitionFactory.HullId,
         AntegaHullDefinitionFactory.HullId,

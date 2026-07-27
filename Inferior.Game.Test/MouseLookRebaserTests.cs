@@ -104,7 +104,7 @@ public sealed class MouseLookRebaserTests
     public void RebasedSamplePreservesKeyboardAxesButtonsAndScroll()
     {
         var lookInput = new MouseLookInput(0.0, 0.0, Rebased: true);
-        var keys = new KeyboardState(Keys.W, Keys.D, Keys.R, Keys.E, Keys.V, Keys.G, Keys.X, Keys.Z);
+        var keys = new KeyboardState(Keys.W, Keys.E, Keys.R, Keys.D, Keys.V, Keys.G, Keys.X, Keys.Z);
         var prevKeys = new KeyboardState();
         var mouse = Mouse(400, 300, scroll: 120);
         var prevMouse = Mouse(400, 300, scroll: 0);
@@ -202,9 +202,31 @@ public sealed class MouseLookRebaserTests
     }
 
     [Theory]
-    [InlineData(Keys.Q, 1.0)]
-    [InlineData(Keys.E, -1.0)]
-    public void ShipInputMapper_QAndEProduceOppositeYawWithoutRoll(
+    [InlineData(Keys.Q, -1.0)]
+    [InlineData(Keys.E, 1.0)]
+    public void ShipInputMapper_QAndEProduceOppositeLateralThrustWithoutRotation(
+        Keys key,
+        double expectedLateral)
+    {
+        var mouse = Mouse(400, 300);
+
+        PlayerInput input = ShipInputMapper.Build(
+            new KeyboardState(key),
+            new KeyboardState(),
+            mouse,
+            mouse,
+            new MouseLookInput(0.0, 0.0, Rebased: false));
+
+        Assert.Equal(expectedLateral, input.ThrustLateral);
+        Assert.Equal(0.0, input.YawInput);
+        Assert.Equal(0.0, input.RollInput);
+        Assert.Equal(0.0, input.PitchInput);
+    }
+
+    [Theory]
+    [InlineData(Keys.A, 1.0)]
+    [InlineData(Keys.D, -1.0)]
+    public void ShipInputMapper_AAndDProduceOppositeYawWithoutThrust(
         Keys key,
         double expectedYaw)
     {
@@ -218,6 +240,7 @@ public sealed class MouseLookRebaserTests
             new MouseLookInput(0.0, 0.0, Rebased: false));
 
         Assert.Equal(expectedYaw, input.YawInput);
+        Assert.Equal(0.0, input.ThrustLateral);
         Assert.Equal(0.0, input.RollInput);
         Assert.Equal(0.0, input.PitchInput);
     }
@@ -228,7 +251,7 @@ public sealed class MouseLookRebaserTests
         var mouse = Mouse(400, 300);
 
         PlayerInput input = ShipInputMapper.Build(
-            new KeyboardState(Keys.Q),
+            new KeyboardState(Keys.A),
             new KeyboardState(),
             mouse,
             mouse,
@@ -242,7 +265,7 @@ public sealed class MouseLookRebaserTests
     [Fact]
     public void ShipInputMapper_ClampsFinalRotationCommandComponents()
     {
-        var keys = new KeyboardState(Keys.Q);
+        var keys = new KeyboardState(Keys.A);
         var mouse = Mouse(400, 300);
 
         var input = ShipInputMapper.Build(
@@ -262,7 +285,7 @@ public sealed class MouseLookRebaserTests
     {
         var mouse = Mouse(400, 300);
         PlayerInput input = ShipInputMapper.Build(
-            new KeyboardState(Keys.Q),
+            new KeyboardState(Keys.A),
             new KeyboardState(),
             mouse,
             mouse,

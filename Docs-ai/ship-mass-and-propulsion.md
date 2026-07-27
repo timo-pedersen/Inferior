@@ -89,13 +89,14 @@ All masses include the current 1,200 kg default reactor contribution.
 
 | Ship | Engines | Mass | Forward accel | Lateral accel | Lift accel | Empty hover estimate |
 |---|---:|---:|---:|---:|---:|---:|
-| Aries | 2 Mule | 78,000 kg | 4.00 m/s2 | 2.00 m/s2 | 3.00 m/s2 | 0.306 g |
-| Asterisk | 1 Mule | 15,600 kg | 7.50 m/s2 | 3.75 m/s2 | 5.625 m/s2 | 0.574 g |
-| Beren | 4 Needle | 187,800 kg | 4.00 m/s2 | 2.00 m/s2 | 3.00 m/s2 | 0.306 g |
-| Antega | 4 Atlas | 3,585,200 kg | 4.00 m/s2 | 1.00 m/s2 | 2.00 m/s2 | 0.204 g |
+| Aries | 2 Mule | 78,000 kg | 20.00 m/s2 | 10.00 m/s2 | 15.00 m/s2 | 1.529 g |
+| Cosmo | 1 Needle | 14,850 kg | 47.42 m/s2 | 23.71 m/s2 | 35.57 m/s2 | 3.627 g |
+| Asterisk | 1 Mule | 15,600 kg | 37.50 m/s2 | 18.75 m/s2 | 28.125 m/s2 | 2.868 g |
+| Beren | 4 Needle | 187,800 kg | 20.00 m/s2 | 10.00 m/s2 | 15.00 m/s2 | 1.529 g |
+| Antega | 4 Atlas | 3,585,200 kg | 20.00 m/s2 | 5.00 m/s2 | 10.00 m/s2 | 1.020 g |
 
-Asterisk efficiencies are provisionally 0.75 forward, 0.75 maneuvering, and 0.60
-rotation. All current other hulls use 1.0.
+Asterisk and Cosmo efficiencies are provisionally 0.75 forward, 0.75 maneuvering, and
+0.60 rotation. All current other hulls use 1.0.
 
 ## Snapshot and diagnostics
 
@@ -140,8 +141,8 @@ not represented.
 
 `PlayerInput` pitch, yaw, and roll fields are normalized assisted-rate commands. Mouse
 deltas are normalized at `ShipInputMapper`; mouse vertical drives pitch, mouse horizontal
-drives roll, and `Q/E` drives digital yaw. Mouse-right produces positive roll command,
-`Q` produces positive (left) yaw, and `E` produces negative (right) yaw. Because
+drives roll, and `A/D` drives digital yaw. Mouse-right produces positive roll command,
+`A` produces positive (left) yaw, and `D` produces negative (right) yaw. Because
 ship-forward is local `-Z`, positive roll input maps to negative local-Z angular velocity.
 Assisted target limits remain:
 
