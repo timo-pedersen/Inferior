@@ -180,6 +180,12 @@ public sealed class SystemMapState : GameState
         UpdateScreenCentre();
         FitSystemToView();
 
+        // Seed input history so a key still held down from the keypress that
+        // opened this state (e.g. M/N) isn't misread as a fresh press on the
+        // very first Update() and immediately closes the map back to flight.
+        _prevMouse = Mouse.GetState();
+        _prevKeys  = Keyboard.GetState();
+
         var theme = Theme.InferiorDark(_font);
         _ui?.Dispose();
         _ui = new UIManager(_gd, theme);
