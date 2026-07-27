@@ -6,6 +6,7 @@ namespace Inferior.Gameplay.Cockpit;
 public static class CockpitDefinitionLibrary
 {
     public const string AriesCivilianCanopyId = "aries-civilian-canopy-cockpit";
+    public const string CosmoC1SportCockpitId = "cosmo-c1-sport-cockpit";
     public const string AsteriskStarboardCockpitId = "asterisk-starboard-cockpit";
     public const string BerenUnderslungCockpitId = "beren-underslung-cockpit";
     public const string AntegaCivilianBridgeId = "antega-civilian-bridge";
@@ -30,6 +31,22 @@ public static class CockpitDefinitionLibrary
             HasCanopyLights = true,
             HasCockpitLights = true,
             VisualGeometry = AriesCivilianCockpitGeometryFactory.Create(),
+        });
+        Register(new CockpitModuleDefinition
+        {
+            DefinitionId = CosmoC1SportCockpitId,
+            DisplayName = "Cosmo C1 Sport Cockpit",
+            RequiredMountClass = CockpitMountClass.C1,
+            PilotLocalPosition = new DVec3(0.0, -0.24, 0.05),
+            PilotLocalOrientation = Quaternion.Identity,
+            CameraLocalPosition = DVec3.Zero,
+            CameraLocalOrientation = Quaternion.Identity,
+            CanopyLocalPosition = new DVec3(0.0, 0.30, -0.10),
+            CanopyLocalOrientation = Quaternion.Identity,
+            PreferredFacing = MountFacing.Up,
+            HasCanopyLights = true,
+            HasCockpitLights = true,
+            VisualGeometry = CosmoC1CockpitGeometryFactory.Create(),
         });
         Register(new CockpitModuleDefinition
         {

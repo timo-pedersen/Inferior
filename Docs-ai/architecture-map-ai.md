@@ -115,6 +115,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics, and optional designed-single-engine propulsion efficiencies.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
+- `CosmoHullDefinitionFactory.cs` — compact no-cargo Cosmo sport hull: C1 top cockpit, dorsal single Needle H2 mount, tapered octagonal semantic geometry.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
 - `BerenHullDefinitionFactory.cs` — thin loader-backed adapter for `Assets/Ships/beren.ship.json`.
 - `AntegaHullDefinitionFactory.cs` — 99 m, 120-container civilian hauler with segmented forward hatch, dorsal aft C5 bridge mount, and four external Atlas H10 engine mounts.
@@ -140,11 +141,12 @@ Simulation domain model. Depends on Core, Galaxy.
 **Cockpit/**
 
 - `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
-- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, Beren underslung command pod, and Antega C5 civilian bridge.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Cosmo C1 sport cockpit, Asterisk starboard command blister, Beren underslung command pod, and Antega C5 civilian bridge.
 - `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
 - `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
 - `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
 - `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
+- `CosmoC1CockpitGeometryFactory.cs` — compact C1 top sport cockpit geometry: low canopy, housing, frame, backing, and independent light geometry.
 - `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
 - `BerenUnderslungCockpitGeometryFactory.cs` — full downward-mounted C2 command pod with collar, housing, faceted canopy, frame, backing, and independent light geometry.
 - `AntegaCivilianBridgeGeometryFactory.cs` — broad keyed C5 bridge plug, armoured base and housing, framed forward/side glazing, backing, and restrained light geometry.
@@ -335,7 +337,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
 - `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); owns shared pilot harmony changes, applies per-engine allocated force/current-mass translation and harmony-scaled torque/box-inertia assisted rotation, and publishes immutable propulsion/rotation diagnostics. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
-- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
+- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Cosmo -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads

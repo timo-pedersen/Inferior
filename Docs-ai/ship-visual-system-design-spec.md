@@ -1211,7 +1211,17 @@ The Asterisk cockpit camera is a definition-owned child looking 20 degrees towar
 starboard, so the generic projected ship-forward reticle appears left of screen centre.
 First-person own-ship geometry remains hidden.
 
-### 28.3 Beren Phase 1 checkpoint
+### 28.3 Cosmo Phase 1 checkpoint
+
+Cosmo (`cosmo`) is the smallest current flyable small-class hull: an approximately
+8 m no-cargo sport ship with a three-ring tapered octagonal body, flatter underside,
+shorter/narrower forward ring, and slightly narrower rear ring. Its centred top cockpit
+uses a new C1 compact sport module. A single Needle H2 is mounted above and behind the
+cockpit on a 1.5 m dorsal strut; this is an intentionally provisional top-mounted use of
+the existing Needle until a more suitable engine is authored. Cosmo uses the same
+designed-single-engine efficiency model as Asterisk.
+
+### 28.4 Beren Phase 1 checkpoint
 
 Beren (`beren`) is a medium authored semantic hull with a 27 m by 20 m broad, mildly
 spade-shaped upper platform and a total structural depth of 6.2 m. Its underside cargo
@@ -1225,7 +1235,7 @@ the generic projected ship-forward reticle above screen centre. Own-ship geometr
 hidden in first-person.
 
 The cockpit CTRL rail includes a `NEXT SHIP` button. It requests the stable cycle
-Aries -> Asterisk -> Beren -> Antega -> Aries. `SpaceSimulation` performs the replacement and
+Aries -> Cosmo -> Asterisk -> Beren -> Antega -> Aries. `SpaceSimulation` performs the replacement and
 preserves the current position, velocity, orientation, and flight state; rendering and
 UI do not retain a second mutable ship authority.
 
