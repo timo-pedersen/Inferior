@@ -42,6 +42,11 @@ public static partial class StationDecorator
         _      => 8,
     };
 
+    // Brief P1 Fix B: docking-bay previously wasn't in GeneratePipes' category filter at
+    // all (bays never got edge pipes), so this tier never had a chance to run before now.
+    // Sized chunkier than industrial's (up to 0.80) — a bay's edges run 100-238m, dwarfing
+    // a hab-block's — with the same institutional grey/blue family as SurfacePipeColour's
+    // new bay entries, for a consistent bay palette between edge and surface pipes.
     private static (float radius, int sides, Color colour) PipeSpec(string category, System.Random rng)
     {
         double roll = rng.NextDouble();
@@ -63,6 +68,12 @@ public static partial class StationDecorator
                 ? (0.50f, 6, new Color(155, 100, 50))
                 : (0.28f, 4, new Color(165, 110, 55)),
 
+            "docking-bay" => roll < 0.20
+                ? (1.20f, 8, new Color(90,  95,  100))
+                : roll < 0.55
+                ? (0.65f, 6, new Color(70,  110, 130))
+                : (0.35f, 6, new Color(150, 150, 145)),
+
             _ => roll < 0.25
                 ? (0.22f, 6, new Color(120, 120, 120))
                 : (0.10f, 4, new Color(135, 135, 140)),
@@ -72,7 +83,11 @@ public static partial class StationDecorator
     private static void GeneratePipes(PlacedModule mod, FaceInfo[] faces,
         System.Random rng, StationModuleMesh mesh)
     {
-        if (mod.Definition.Category is not ("industrial" or "cargo" or "connector" or "core"))
+        // Brief P1 Fix B: docking-bay added — D-Greeble found it excluded outright, so bays
+        // never got edge pipes at all. mod.Definition.BoundingBox is the bay's real envelope
+        // (set in StationModuleRegistry.CreateDockingBay), so the edge-corner math below
+        // needs no bay-specific branch beyond this filter and PipeSpec's own bay tier.
+        if (mod.Definition.Category is not ("industrial" or "cargo" or "connector" or "core" or "docking-bay"))
             return;
 
         Vector3 bb   = mod.Definition.BoundingBox;
@@ -143,19 +158,39 @@ public static partial class StationDecorator
 
     // ── Surface pipe runs ─────────────────────────────────────────────────────
 
+    // Brief P1 Fix B: docking-bay previously fell to the flat (118,118,118) default in
+    // every sample (D-Greeble measured this directly) — a real entry gives bay surface
+    // pipes the same category-appropriate variety every other category already has.
+    // Institutional greys/blues (fuel/coolant-line reads) rather than industrial's
+    // rust/orange — a bay is a logistics structure, not a refinery.
     private static Color SurfacePipeColour(string category, System.Random rng) => category switch
     {
         "industrial" or "fuel" => rng.NextDouble() < 0.5
             ? new Color(160, 105, 50)
             : new Color(85,  85,  85),
-        "science"    => new Color(100, 130, 160),
-        "cargo"      => new Color(155, 100, 50),
-        _            => new Color(118, 118, 118),
+        "science"      => new Color(100, 130, 160),
+        "cargo"        => new Color(155, 100, 50),
+        "docking-bay"  => rng.NextDouble() switch
+        {
+            < 0.40 => new Color(90,  95,  100),
+            < 0.75 => new Color(70,  110, 130),
+            _      => new Color(150, 150, 145),
+        },
+        _              => new Color(118, 118, 118),
     };
 
+    // Brief Z2 Part 3: parallel=true is PipeCorridor's content — "several parallel
+    // lines... imagine five pipes running in parallel," a weighting of this same pass
+    // rather than new geometry. Dispatches to a completely separate forced-mode body
+    // (GenerateParallelSurfacePipes) rather than branching every line of the original —
+    // the original per-run independent orientation/offset/spec rolls are exactly what
+    // must NOT change for the existing probabilistic (non-corridor) call sites, so the
+    // original method is left untouched byte-for-byte and forced mode is its own routine.
     private static void GenerateSurfacePipes(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh)
+        System.Random rng, StationModuleMesh mesh, bool parallel = false)
     {
+        if (parallel) { GenerateParallelSurfacePipes(mod, face, rng, mesh); return; }
+
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 40f) return;
         if (rng.NextDouble() > 0.45) return;
@@ -190,6 +225,51 @@ public static partial class StationDecorator
             // Both ends sit mid-face with margin — genuinely floating, not touching
             // anything (unlike GeneratePipes' full-edge-length runs, which continue
             // past the module edge).
+            mesh.AddPrismPipe(pipeStart, pipeEnd, radius, sides, colour, capStart: true, capEnd: true);
+            AddPipeBrackets(mesh, pipeStart, pipeEnd, runDir, perpDir,
+                            face.LocalNormal, radius, bracketH, colour, rng);
+        }
+    }
+
+    // Forced-parallel content for a PipeCorridor zone: ONE shared orientation (the zone's
+    // own long axis, not an independent per-run roll) and ONE shared pipe spec (radius/
+    // sides/colour/standoff height) across every run, evenly spaced across the
+    // perpendicular span — reads as one coherent piping system, not several independently-
+    // scattered pipes. No probability/area gate — a PipeCorridor zone is guaranteed
+    // content, not a probabilistic extra (same discipline as GenerateWindows' guaranteed
+    // parameter from Brief F1 Fix 4).
+    private static void GenerateParallelSurfacePipes(PlacedModule mod, FaceInfo face,
+        System.Random rng, StationModuleMesh mesh)
+    {
+        if (!face.IsExposed) return;
+
+        bool    horizontal = face.Width >= face.Height;
+        Vector3 runDir     = horizontal ? face.LocalRight : face.LocalUp;
+        Vector3 perpDir    = horizontal ? face.LocalUp    : face.LocalRight;
+        float   runSpan    = horizontal ? face.Width  : face.Height;
+        float   perpSpan   = horizontal ? face.Height : face.Width;
+
+        float runHalfLen = runSpan * 0.5f - 1.5f;
+        if (runHalfLen <= 0.5f) return;
+
+        int runCount = 4 + rng.Next(3); // 4-6, "imagine five pipes running in parallel"
+
+        double sizeRoll  = rng.NextDouble();
+        float  radius    = sizeRoll < 0.35 ? 0.10f : sizeRoll < 0.70 ? 0.22f : 0.40f;
+        int    sides     = PipeSides(rng);
+        Color  colour    = SurfacePipeColour(mod.Definition.Category, rng);
+        float  bracketH  = radius + 0.35f + (float)rng.NextDouble() * 0.45f;
+
+        float usableSpan = MathF.Max(0f, perpSpan - 1.5f);
+
+        for (int i = 0; i < runCount; i++)
+        {
+            float perpOff = runCount > 1 ? -usableSpan * 0.5f + i * (usableSpan / (runCount - 1)) : 0f;
+
+            Vector3 pipeCtr   = face.LocalCenter + perpDir * perpOff + face.LocalNormal * bracketH;
+            Vector3 pipeStart = pipeCtr - runDir * runHalfLen;
+            Vector3 pipeEnd   = pipeCtr + runDir * runHalfLen;
+
             mesh.AddPrismPipe(pipeStart, pipeEnd, radius, sides, colour, capStart: true, capEnd: true);
             AddPipeBrackets(mesh, pipeStart, pipeEnd, runDir, perpDir,
                             face.LocalNormal, radius, bracketH, colour, rng);

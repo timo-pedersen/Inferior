@@ -117,23 +117,25 @@ public sealed class StationZoningTests
         Assert.False(isUnzoned);
         Assert.True(zones.Length > 5, "Need a large enough zone count for this test to mean anything");
 
-        int moduleBudget = 5;
+        var budget = new StationDecorator.ModuleZoneBudget();
         int totalWindowZones = 0;
-        // Simulate several faces of one module sharing the same ref budget.
+        // Simulate several faces of one module sharing the same budget object.
         for (int f = 0; f < 4; f++)
         {
-            var types = StationDecorator.AssignZoneTypes("docking-bay", zones, rng, ref moduleBudget);
+            var types = StationDecorator.AssignZoneTypes("docking-bay", zones, rng, budget);
             int thisFace = types.Count(t => t == StationDecorator.ZoneType.Windows);
             Assert.True(thisFace <= 3, $"Expected <=3 window zones per face, got {thisFace}");
             totalWindowZones += thisFace;
         }
 
         Assert.True(totalWindowZones <= 5, $"Expected <=5 window zones per module, got {totalWindowZones}");
-        Assert.True(moduleBudget >= 0);
+        Assert.True(budget.WindowZonesRemaining >= 0);
     }
 
-    // CommsArray/PipeCorridor are reserved for Z2 — Z1 must never assign them from the
-    // weight table (they intentionally have no entry in ZoneTypeWeights).
+    // Brief Z2 superseded Z1's "CommsArray/PipeCorridor never assigned" invariant — they're
+    // now real guaranteed-set types. What's still true: ZoneTypeWeights itself has no entry
+    // for either, so the WEIGHT pass alone (guaranteed set pre-satisfied/exhausted) must
+    // never produce them.
     [Theory]
     [InlineData("industrial")]
     [InlineData("docking-bay")]
@@ -143,14 +145,21 @@ public sealed class StationZoningTests
     [InlineData("core")]
     [InlineData("connector")]
     [InlineData("some-unlisted-category")]
-    public void AssignZoneTypes_NeverAssignsZ2ReservedTypes(string category)
+    public void AssignZoneTypes_WeightPassAlone_NeverProducesCommsArrayOrPipeCorridor(string category)
     {
         var rng = new System.Random(31337);
         var face = MakeFace(239.47f, 239.47f);
         var (zones, _) = StationDecorator.ComputeZones(face, rng);
-        int budget = 5;
 
-        var types = StationDecorator.AssignZoneTypes(category, zones, rng, ref budget);
+        var budget = new StationDecorator.ModuleZoneBudget
+        {
+            TankFarmRemaining = 0,
+            NeedsPipeCorridor = false,
+            NeedsCommsArray   = false,
+            NeedsSignage      = false,
+        };
+
+        var types = StationDecorator.AssignZoneTypes(category, zones, rng, budget);
 
         Assert.DoesNotContain(StationDecorator.ZoneType.CommsArray,   types);
         Assert.DoesNotContain(StationDecorator.ZoneType.PipeCorridor, types);
@@ -158,7 +167,8 @@ public sealed class StationZoningTests
 
     // Per Timo: tanks and pipes should dominate industrial/bay categories. Statistical
     // check over many zones/seeds rather than a single roll, since PickWeightedZoneType is
-    // randomized per zone.
+    // randomized per zone. Under Z2, guaranteed TankFarm zones add to this share too — the
+    // bound stays a loose statistical floor, not an exact accounting.
     [Fact]
     public void AssignZoneTypes_IndustrialCategory_MachineryAndTankFarmDominate()
     {
@@ -169,8 +179,8 @@ public sealed class StationZoningTests
         {
             var rng = new System.Random(seed);
             var (zones, _) = StationDecorator.ComputeZones(face, rng);
-            int budget = 5;
-            var types = StationDecorator.AssignZoneTypes("industrial", zones, rng, ref budget);
+            var budget = new StationDecorator.ModuleZoneBudget();
+            var types = StationDecorator.AssignZoneTypes("industrial", zones, rng, budget);
             foreach (var t in types)
                 counts[t] = counts.GetValueOrDefault(t) + 1;
         }
@@ -185,7 +195,9 @@ public sealed class StationZoningTests
 
     // Structural zones must be common enough to visibly break up large faces (brief
     // verification item 4) — check they appear at all across a realistic sample, for every
-    // category's weight table.
+    // category's weight table. Under Z2 this is now a per-face GUARANTEE (see the dedicated
+    // test below), so this loose statistical check necessarily still holds — kept as-is
+    // since it's still a true, valid statement, just a weaker one than the new guarantee.
     [Theory]
     [InlineData("industrial")]
     [InlineData("docking-bay")]
@@ -203,11 +215,147 @@ public sealed class StationZoningTests
         {
             var rng = new System.Random(seed);
             var (zones, _) = StationDecorator.ComputeZones(face, rng);
-            int budget = 5;
-            var types = StationDecorator.AssignZoneTypes(category, zones, rng, ref budget);
+            var budget = new StationDecorator.ModuleZoneBudget();
+            var types = StationDecorator.AssignZoneTypes(category, zones, rng, budget);
             structuralCount += types.Count(t => t == StationDecorator.ZoneType.Structural);
         }
 
         Assert.True(structuralCount > 0, $"Expected at least some Structural zones for category '{category}'");
+    }
+
+    // ── Brief Z2: guaranteed set (Part 1) ──────────────────────────────────────
+
+    // The core Z2 guarantee: across a module's several multi-zone faces sharing one
+    // ModuleZoneBudget (exactly how Decorate() constructs and threads it), the floor is
+    // met — 1-4 tank farms, >=1 pipe corridor, >=1 comms array, exactly 1 signage — and
+    // Structural appears on EVERY individual face (a per-face floor, not module-wide).
+    [Fact]
+    public void AssignZoneTypes_GuaranteedSet_MetAcrossModule()
+    {
+        var rng = new System.Random(9001);
+        var face = MakeFace(239.47f, 239.47f);
+        var budget = new StationDecorator.ModuleZoneBudget();
+
+        int tankFarmTotal = 0;
+        for (int f = 0; f < 5; f++)
+        {
+            var (zones, isUnzoned) = StationDecorator.ComputeZones(face, rng);
+            Assert.False(isUnzoned);
+            var types = StationDecorator.AssignZoneTypes("docking-bay", zones, rng, budget);
+
+            Assert.Contains(StationDecorator.ZoneType.Structural, types);
+            tankFarmTotal += types.Count(t => t == StationDecorator.ZoneType.TankFarm);
+        }
+
+        // The guaranteed floor itself is satisfied (budget fully consumed, not still
+        // pending) — the weight pass may have added even more TankFarm zones on top of
+        // the 1-4 target, so tankFarmTotal itself has no fixed upper bound here.
+        Assert.Equal(0, budget.TankFarmRemaining);
+        Assert.True(tankFarmTotal >= 1, "Expected at least one TankFarm zone across the module");
+        Assert.False(budget.NeedsPipeCorridor, "Expected the module-wide PipeCorridor guarantee to be met");
+        Assert.False(budget.NeedsCommsArray,   "Expected the module-wide CommsArray guarantee to be met");
+        Assert.False(budget.NeedsSignage,      "Expected the module-wide Signage guarantee to be met");
+    }
+
+    // Exactly one Signage zone per module, never more, even across many faces.
+    [Fact]
+    public void AssignZoneTypes_Signage_ExactlyOnePerModule()
+    {
+        var rng = new System.Random(1357);
+        var face = MakeFace(239.47f, 239.47f);
+        var budget = new StationDecorator.ModuleZoneBudget();
+
+        int signageTotal = 0;
+        for (int f = 0; f < 6; f++)
+        {
+            var (zones, _) = StationDecorator.ComputeZones(face, rng);
+            var types = StationDecorator.AssignZoneTypes("docking-bay", zones, rng, budget);
+            signageTotal += types.Count(t => t == StationDecorator.ZoneType.Signage);
+        }
+
+        Assert.Equal(1, signageTotal);
+    }
+
+    // Graceful degradation (Brief Z2 Part 1): a face with too few zones for the full
+    // guaranteed set claims in strict priority order (tank farm, then structural, then
+    // pipe corridor, then comms array, then signage) rather than an arbitrary subset, and
+    // never throws. A hand-built 2-zone array (bypassing ComputeZones' own randomness)
+    // makes the exact zone count deterministic. TankFarm's own target is forced to exactly
+    // 1 (rather than left to its normal 1-4 roll) so this test isolates priority order
+    // itself, not TankFarm's random target size: with a target of 1 and 2 zones available,
+    // TankFarm (priority 1) takes exactly one slot, Structural (priority 2) takes the
+    // other, and PipeCorridor/CommsArray/Signage get nothing this face — simply pending on
+    // the budget for a later face, not an error.
+    [Fact]
+    public void AssignZoneTypes_TooFewZonesForFullGuaranteedSet_ClaimsInPriorityOrder()
+    {
+        var zones = new[] { MakeFace(10f, 10f), MakeFace(10f, 10f) };
+        var rng = new System.Random(4242);
+        var budget = new StationDecorator.ModuleZoneBudget { TankFarmRemaining = 1 };
+
+        var types = StationDecorator.AssignZoneTypes("docking-bay", zones, rng, budget);
+
+        Assert.Equal(2, types.Length);
+        Assert.Contains(StationDecorator.ZoneType.TankFarm,   types);
+        Assert.Contains(StationDecorator.ZoneType.Structural, types);
+        Assert.DoesNotContain(StationDecorator.ZoneType.PipeCorridor, types);
+        Assert.DoesNotContain(StationDecorator.ZoneType.CommsArray,   types);
+        Assert.DoesNotContain(StationDecorator.ZoneType.Signage,      types);
+        Assert.Equal(0, budget.TankFarmRemaining);
+        Assert.True(budget.NeedsPipeCorridor);
+        Assert.True(budget.NeedsCommsArray);
+        Assert.True(budget.NeedsSignage);
+    }
+
+    [Fact]
+    public void AssignZoneTypes_IsDeterministic()
+    {
+        var face = MakeFace(239.47f, 239.47f);
+
+        var rngA = new System.Random(2468);
+        var (zonesA, _) = StationDecorator.ComputeZones(face, rngA);
+        var typesA = StationDecorator.AssignZoneTypes("docking-bay", zonesA, rngA, new StationDecorator.ModuleZoneBudget());
+
+        var rngB = new System.Random(2468);
+        var (zonesB, _) = StationDecorator.ComputeZones(face, rngB);
+        var typesB = StationDecorator.AssignZoneTypes("docking-bay", zonesB, rngB, new StationDecorator.ModuleZoneBudget());
+
+        Assert.Equal(typesA, typesB);
+    }
+
+    // Brief Z2 Part 3's adjacency bias is best-effort, not a hard constraint — this checks
+    // it actually fires at a real, nonzero rate across many seeds (the number itself is
+    // reported, not asserted against a specific threshold beyond ">0").
+    [Fact]
+    public void AssignZoneTypes_PipeCorridor_OftenLandsAdjacentToTankFarm()
+    {
+        var face = MakeFace(239.47f, 239.47f);
+        int withPipeCorridor = 0, adjacentToTankFarm = 0;
+
+        for (int seed = 0; seed < 200; seed++)
+        {
+            var rng = new System.Random(seed);
+            var (zones, _) = StationDecorator.ComputeZones(face, rng);
+            var budget = new StationDecorator.ModuleZoneBudget();
+            var types = StationDecorator.AssignZoneTypes("docking-bay", zones, rng, budget);
+
+            int pipeIdx = Array.IndexOf(types, StationDecorator.ZoneType.PipeCorridor);
+            if (pipeIdx < 0) continue;
+            withPipeCorridor++;
+
+            for (int i = 0; i < types.Length; i++)
+            {
+                if (types[i] != StationDecorator.ZoneType.TankFarm) continue;
+                if (StationDecorator.ZonesAreAdjacent(zones[pipeIdx], zones[i]))
+                {
+                    adjacentToTankFarm++;
+                    break;
+                }
+            }
+        }
+
+        Assert.True(withPipeCorridor > 0, "Expected at least some seeds to produce a PipeCorridor zone");
+        Assert.True(adjacentToTankFarm > 0,
+            $"Expected the adjacency bias to succeed at least sometimes, got {adjacentToTankFarm}/{withPipeCorridor}");
     }
 }

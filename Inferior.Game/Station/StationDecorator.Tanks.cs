@@ -231,14 +231,21 @@ public static partial class StationDecorator
         }
     }
 
-    // Radius picker biased toward small/medium with rare large tanks.
-    private static float PickTankRadius(System.Random rng) => rng.NextDouble() switch
+    // Radius picker biased toward small/medium with rare large tanks. Brief Z2 Part 2:
+    // cap threaded down from GenerateTanks for CommsArray's "a small greeble tank or 5" —
+    // same distribution, just clamped, so a CommsArray tank never rolls into the
+    // medium/large/rare tiers regardless of which one the roll landed in.
+    private static float PickTankRadius(System.Random rng, float? cap = null)
     {
-        < 0.55 => 0.30f + (float)rng.NextDouble() * 0.55f,   // 0.30–0.85 m: common small
-        < 0.80 => 0.85f + (float)rng.NextDouble() * 0.85f,   // 0.85–1.70 m: medium
-        < 0.93 => 1.70f + (float)rng.NextDouble() * 0.80f,   // 1.70–2.50 m: large
-        _      => 2.50f + (float)rng.NextDouble() * 2.50f,   // 2.50–5.00 m: rare
-    };
+        float r = rng.NextDouble() switch
+        {
+            < 0.55 => 0.30f + (float)rng.NextDouble() * 0.55f,   // 0.30–0.85 m: common small
+            < 0.80 => 0.85f + (float)rng.NextDouble() * 0.85f,   // 0.85–1.70 m: medium
+            < 0.93 => 1.70f + (float)rng.NextDouble() * 0.80f,   // 1.70–2.50 m: large
+            _      => 2.50f + (float)rng.NextDouble() * 2.50f,   // 2.50–5.00 m: rare
+        };
+        return cap.HasValue ? MathF.Min(r, cap.Value) : r;
+    }
 
     private static void AddTank(StationModuleMesh mesh,
         Vector3 start, Vector3 end, float bodyRadius,
@@ -290,11 +297,11 @@ public static partial class StationDecorator
 
     private static void PlaceTankRow(PlacedModule mod, FaceInfo face,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
-        string substance, Color bodyColor, Color stripeColor, int stripes)
+        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap)
     {
         int   maxCount = mod.Definition.Category is "fuel" or "industrial" or "military" ? 6 : 4;
         int   count    = 2 + rng.Next(maxCount - 1);
-        float radius   = PickTankRadius(rng);
+        float radius   = PickTankRadius(rng, sizeCap);
         float length   = radius * 2.0f + (float)rng.NextDouble() * radius * 2.5f;
         float gap      = radius * 0.14f;
         float step     = radius * 2 + gap;
@@ -351,9 +358,9 @@ public static partial class StationDecorator
 
     private static void PlaceSingleTank(PlacedModule mod, FaceInfo face,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
-        string substance, Color bodyColor, Color stripeColor, int stripes)
+        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap)
     {
-        float radius = MathF.Max(0.80f, PickTankRadius(rng));
+        float radius = MathF.Max(0.80f, PickTankRadius(rng, sizeCap));
         float length = radius * 1.8f + (float)rng.NextDouble() * radius * 3f;
         float cu     = ((float)rng.NextDouble() - 0.5f) * MathF.Max(0.1f, face.Width  - radius * 2.5f);
         float cv     = ((float)rng.NextDouble() - 0.5f) * MathF.Max(0.1f, face.Height - radius * 2.5f);
@@ -372,9 +379,9 @@ public static partial class StationDecorator
 
     private static void PlaceTankPair(PlacedModule mod, FaceInfo face,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
-        string substance, Color bodyColor, Color stripeColor, int stripes)
+        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap)
     {
-        float radius  = PickTankRadius(rng);
+        float radius  = PickTankRadius(rng, sizeCap);
         float length  = radius * 2.5f + (float)rng.NextDouble() * radius * 2.5f;
         float spacing = radius * 2.4f;
 
@@ -404,7 +411,7 @@ public static partial class StationDecorator
     }
 
     private static void PlaceTankCluster(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, int clusterIdx)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, int clusterIdx, float? sizeCap)
     {
         int paletteSeed = mod.Seed ^ (0xAB12 + clusterIdx * 0x2F1B);
         var (bodyColor, stripeColor, stripes, paletteIdx) = TankPalette(paletteSeed);
@@ -412,15 +419,18 @@ public static partial class StationDecorator
 
         double typeRoll = rng.NextDouble();
         if (face.Width * face.Height > 100f && typeRoll < 0.28)
-            PlaceSingleTank(mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes);
+            PlaceSingleTank(mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap);
         else if (typeRoll < 0.65)
-            PlaceTankRow   (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes);
+            PlaceTankRow   (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap);
         else
-            PlaceTankPair  (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes);
+            PlaceTankPair  (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap);
     }
 
+    // Brief Z2 Part 2: sizeCap (default null = unlimited, unchanged behaviour) lets
+    // CommsArray zones request "a small greeble tank or 5" — the SAME cluster-type/count/
+    // probability logic, just with PickTankRadius clamped down the whole way through.
     private static void GenerateTanks(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, float? sizeCap = null)
     {
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 12f) return;
@@ -444,14 +454,14 @@ public static partial class StationDecorator
             _                         => 1,
         };
 
-        PlaceTankCluster(mod, face, mesh, occupancy, rng, 0);
+        PlaceTankCluster(mod, face, mesh, occupancy, rng, 0, sizeCap);
 
         float nextProb = 0.55f;
         for (int extra = 1; extra < maxClusters; extra++)
         {
             if (rng.NextDouble() > nextProb) break;
             nextProb *= 0.65f;
-            PlaceTankCluster(mod, face, mesh, occupancy, rng, extra);
+            PlaceTankCluster(mod, face, mesh, occupancy, rng, extra, sizeCap);
         }
     }
 
