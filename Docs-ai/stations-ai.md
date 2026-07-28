@@ -40,9 +40,16 @@ Prototype B wraps the accepted city identity around the whole cuboid: all six fa
 interiors, all twelve edges are shared generated regions, and all eight corners are shared
 generated regions. Timo visually accepted Prototype B in-engine after checking multiple seeds,
 all faces, shared edges/corners, close and distant views, silhouette readability, immense scale,
-organic departure from the cuboid, and mixed small/large masses. Its occupied massing is frozen
-unless a later explicit brief reopens it. The positive-Y face preserves Prototype A's accepted
-seed path.
+organic departure from the cuboid, and mixed small/large masses. Its raw occupied massing is
+frozen unless a later explicit brief reopens it. The positive-Y face preserves Prototype A's
+accepted seed path.
+
+Prototype C0 is implemented and merged on `mega-stations`. It adds deterministic topology
+regularisation after raw Prototype B massing, producing a separate regularised structural solid
+for rendering and later boundary/chamfer work. Timo has visually confirmed C0. The 24-station
+deterministic/manifold sweep passed: no edge-critical or vertex-critical configurations remained,
+no material was removed, connected-component and sealed-cavity state stayed unchanged, and the
+ordinary sharp boundary mesh was manifold for every checked station.
 
 Implementation:
 
@@ -51,7 +58,7 @@ Implementation:
   cell coordinate helpers.
 - `StructuralOccupancy` stores compact per-cell flags for structural mass, urban mass,
   externally accessible empty space, generation owner (`StructuralCore`, `FaceInterior`,
-  `EdgeRegion`, `CornerRegion`), and a stable region id.
+  `EdgeRegion`, `CornerRegion`, `TopologyRegularisation`), and a stable region id.
 - `CuboidStructuralVolumeGenerator` fills the structural core only. Later rectilinear/Boolean
   generators should produce the same occupancy shape rather than changing urban growth.
 - `ExteriorSpace` flood-fills empty cells from the generation boundary. A solid face is external
@@ -72,14 +79,28 @@ Implementation:
   perimeter band for shared edge/corner work, BSP-splits usable area into rectilinear districts,
   assigns coherent district depth, broad tower attractors, trenches/courtyards, and a small
   cleanup pass, then writes monotonic outward occupancy from layer 1 through target depth.
-- `MegastationPrototypeMeshBuilder` emits an unchamfered exterior boundary mesh from the final
-  union occupancy through `StationModuleMesh`; it uses the existing station hull lighting/render
-  path and does not add a prototype shader. Optional mesh colouring supports structural-vs-urban,
-  region-owner, and outward-normal debug modes.
+- `TopologyRegulariser` derives a valid structural solid from the raw accepted occupancy using
+  material addition only. It audits edge-diagonal and vertex-only contacts, preserves the raw
+  occupancy separately, and records repair counts, critical configurations, connected components,
+  sealed-cavity state, and owner-pair summaries.
+- `MegastationPrototypeMeshBuilder` emits an unchamfered exterior boundary mesh from
+  `RegularisedOccupancy` through `StationModuleMesh`; it uses the existing station hull
+  lighting/render path and does not add a prototype shader. Optional mesh colouring supports
+  structural-vs-urban, region-owner, and outward-normal debug modes.
 - `MegastationMassingSignatureBuilder` computes GraphicsDevice-free SHA-256 regression
-  signatures over canonical bytes, not GPU buffers. The long-lived massing signature covers
-  seed compatibility, algorithm versions, slice widths, core ranges, station-wide style,
-  per-cell occupied/owner/region data, face depth maps, edge profiles, and corner plans.
+  signatures over canonical bytes, not GPU buffers. The long-lived raw massing signature covers
+  seed compatibility, raw massing algorithm versions, slice widths, core ranges, station-wide
+  style, raw per-cell occupied/owner/region data, face depth maps, edge profiles, and corner
+  plans. The separate regularised structural-solid signature covers the authoritative mesh input.
+
+Authoritative megastation pipeline:
+
+```text
+Raw deterministic urban massing
+→ topology regularisation
+→ regularised structural solid
+→ boundary extraction and mesh generation
+```
 
 Development controls:
 
@@ -91,20 +112,22 @@ Development controls:
 
 Versioning:
 
-- `GeneratorVersion = 2` is the current overall Prototype B generator/output version reported
-  in diagnostics and included in complete regression signatures.
+- `GeneratorVersion = 3` is the current C0 generator/output version reported in diagnostics and
+  included in complete regression signatures.
 - `SeedCompatibilityVersion = 1` is intentionally retained for accepted massing. The root seed is
-  derived from this compatibility version, not from the diagnostic generator version, so reporting
-  Prototype B honestly as version 2 does not alter accepted output.
+  derived from this compatibility version, not from the diagnostic generator version, so C0
+  version reporting does not alter accepted raw Prototype B massing.
+- `TopologyRegularisationAlgorithmVersion = 1` is the current regularisation algorithm version.
 - `PositiveYUrbanSeedVersion`, `FaceUrbanAlgorithmVersion`, `EdgeAlgorithmVersion`, and
   `CornerAlgorithmVersion` are explicit version declarations for future intentional revisions.
 
 Diagnostics are published as a `SystemMessage` whenever a prototype is generated: station
-persistent identity, generator version/root seed, slice counts, grid cells, structural/urban
-occupied cells, urbanized face count, face/edge/corner occupied cells, total district count,
-maximum face depth, per-face summaries, per-edge profile summaries, per-corner extent summaries,
-connected components before validation, removed disconnected cells, sealed-cavity flag, exposed
-quads, triangles, vertices, mesh pages, and generation time.
+persistent identity, generator version/root seed, topology regularisation version, slice counts,
+grid cells, raw structural/urban occupied cells, regularised occupied cells, repair additions and
+removals, urbanized face count, face/edge/corner occupied cells, total district count, maximum
+face depth, per-face summaries, per-edge profile summaries, per-corner extent summaries, raw and
+regularised connected components, sealed-cavity state, edge/vertex critical counts before and
+after regularisation, exposed quads, triangles, vertices, mesh pages, and generation time.
 
 Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
 
@@ -113,10 +136,11 @@ Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` 
 | Default prototype | 41x28x36 | 41,328 | 8,100 | 12,003 | 6,326 | 5,375 | 302 | 49 | 11,678 | 23,356 | 46,712 | 283 ms |
 | Stress | 67x41x59 | 162,073 | 30,096 | 45,779 | 24,784 | 20,088 | 907 | 81 | 32,968 | 65,936 | 131,872 | 859 ms |
 
-Prototype B is visually accepted and frozen at the occupied-massing layer. Deferred by design:
-production chamfers, semantic module partitioning, windows, lights, greeble, pipes, tanks,
-antennas, attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges,
-overhangs, docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
+Prototype B is visually accepted and frozen at the raw occupied-massing layer. C0 is visually
+accepted and frozen as the topology-regularised baseline. Deferred by design: production
+chamfers, semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
+attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges, overhangs,
+docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
 
 ---
 
