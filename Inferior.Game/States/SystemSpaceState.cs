@@ -825,6 +825,7 @@ public sealed partial class SystemSpaceState : GameState
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);
+        UpdateZoneDebugInput(keys);
         UpdateSpecularInput(keys);
 
         // Animations always run, regardless of input mode

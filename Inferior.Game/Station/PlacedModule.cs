@@ -70,4 +70,13 @@ public sealed class PlacedModule
     // only replaces the albedo, so this must not be re-derived from TextureInstance.
     public          Texture2D?             MaterialInstance { get; set; }
     public          List<StationLightInfo>  GlowLights      { get; } = [];
+
+    // Brief D-Z2: pure observability, recorded by Decorate() at the moment zone assignment
+    // and per-zone content actually happen — never read by any decision-making code, and
+    // never recomputed for display. Only ever populated for a module with at least one
+    // multi-zone face (mirrors ModuleZoneBudget's own "never touched for an all-single-
+    // zone module" property); stays empty/null otherwise. Consumed by the zone-type debug
+    // overlay and the in-game per-zone content dump.
+    internal        List<StationDecorator.ZoneDebugRecord> DebugZones { get; } = [];
+    internal        StationDecorator.ModuleZoneBudget?      ZoneBudget { get; set; }
 }

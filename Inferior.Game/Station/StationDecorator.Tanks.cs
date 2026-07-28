@@ -429,22 +429,31 @@ public static partial class StationDecorator
     // Brief Z2 Part 2: sizeCap (default null = unlimited, unchanged behaviour) lets
     // CommsArray zones request "a small greeble tank or 5" — the SAME cluster-type/count/
     // probability logic, just with PickTankRadius clamped down the whole way through.
+    // Brief Z3 Fix B: guaranteed (default false, unchanged behaviour) mirrors GenerateWindows'
+    // F1 Fix 4 bypass — a zone allocated as TankFarm/Machinery is a commitment, not a
+    // suggestion, so it skips only the FIRST-cluster gate (does this zone get any tanks at
+    // all). The extra-cluster decay below stays untouched either way — that's density (how
+    // MANY clusters), explicitly deferred to the next brief, not "any at all."
     private static void GenerateTanks(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, float? sizeCap = null)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
+        float? sizeCap = null, bool guaranteed = false)
     {
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 12f) return;
 
-        float firstProb = mod.Definition.Category switch
+        if (!guaranteed)
         {
-            "fuel"     or "military"  => 0.97f,
-            "industrial"              => 0.90f,
-            "cargo"    or "core"      => 0.75f,
-            "science"  or "connector" => 0.45f,
-            "hab"                     => 0.28f,
-            _                         => 0.20f,
-        };
-        if (rng.NextDouble() > firstProb) return;
+            float firstProb = mod.Definition.Category switch
+            {
+                "fuel"     or "military"  => 0.97f,
+                "industrial"              => 0.90f,
+                "cargo"    or "core"      => 0.75f,
+                "science"  or "connector" => 0.45f,
+                "hab"                     => 0.28f,
+                _                         => 0.20f,
+            };
+            if (rng.NextDouble() > firstProb) return;
+        }
 
         int maxClusters = mod.Definition.Category switch
         {

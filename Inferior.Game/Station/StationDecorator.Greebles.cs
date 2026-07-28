@@ -130,23 +130,30 @@ public static partial class StationDecorator
         _                            => false,
     };
 
+    // Brief Z3 Fix B: guaranteed (default false, unchanged behaviour) mirrors GenerateWindows'
+    // F1 Fix 4 bypass — scoped to CommsArray only (its "equipment cabinets at mast bases"
+    // content), never Machinery/ServiceCore's own greeble calls, which keep today's
+    // category-probability behaviour exactly.
     private static void GenerateGreebles(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy,
-        List<PlacedGreebleInfo> placements)
+        List<PlacedGreebleInfo> placements, bool guaranteed = false)
     {
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 12f) return;
 
-        float prob = mod.Definition.Category switch
+        if (!guaranteed)
         {
-            "industrial" or "core" => 0.90f,
-            "cargo"      or "fuel" => 0.70f,
-            "science"              => 0.75f,
-            "connector"            => 0.55f,
-            "hab"                  => 0.60f,
-            _                      => 0.20f,
-        };
-        if (rng.NextDouble() > prob) return;
+            float prob = mod.Definition.Category switch
+            {
+                "industrial" or "core" => 0.90f,
+                "cargo"      or "fuel" => 0.70f,
+                "science"              => 0.75f,
+                "connector"            => 0.55f,
+                "hab"                  => 0.60f,
+                _                      => 0.20f,
+            };
+            if (rng.NextDouble() > prob) return;
+        }
 
         int count    = rng.Next(2, 7);
         int attempts = count * 5;

@@ -252,6 +252,52 @@ public sealed partial class SystemSpaceState
         _effect.VertexColorEnabled = false;
         _effect.LightingEnabled    = true;
 
+        // Brief D-Z2 Measurement 1: zone-type debug overlay (Ctrl+F4). Opaque, unlit,
+        // depth-tested against the real hull/decoration drawn above, so it reads as paint
+        // on the surface rather than a floating layer. Reuses the same per-module world
+        // transform (mod.Transform * scale * stationRot * translate) as every other pass in
+        // this method — the overlay sits exactly where the retained zone data says it does.
+        if (_showZoneTypeDebug)
+        {
+            _effect.LightingEnabled    = false;
+            _effect.VertexColorEnabled = true;
+            _effect.TextureEnabled     = false;
+
+            foreach (var (station, universePos) in _stationPositions)
+            {
+                Vector3 renderPos = _camera.ToRenderSpace(universePos);
+                if (renderPos.Length() > 30_000f) continue;
+                if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+
+                var sysQ   = station.GetOrientation(_gameTimeSeconds);
+                var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
+                Matrix stationRot = Matrix.CreateFromQuaternion(stRotQ);
+
+                foreach (var mod in modules)
+                {
+                    var built = BuildZoneDebugQuads(mod);
+                    if (built == null) continue;
+                    var (verts, indices) = built.Value;
+
+                    _effect.World = mod.Transform * Matrix.CreateScale(rs) * stationRot
+                                  * Matrix.CreateTranslation(renderPos);
+
+                    foreach (var pass in _effect.CurrentTechnique.Passes)
+                    {
+                        pass.Apply();
+                        _gd.DrawUserIndexedPrimitives(
+                            PrimitiveType.TriangleList,
+                            verts, 0, verts.Length,
+                            indices, 0, indices.Length / 3);
+                    }
+                }
+            }
+
+            _effect.TextureEnabled     = false;
+            _effect.VertexColorEnabled = false;
+            _effect.LightingEnabled    = true;
+        }
+
         // MeshRenderer's Draw() leaves rasterizer/depth state set for its own techniques;
         // restore what the rest of this frame's 3D passes expect (matches DrawContainers'
         // and ShipMeshRenderer.Draw's post-draw restore).

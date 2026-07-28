@@ -81,8 +81,10 @@ public static partial class StationDecorator
             // is still safe for wholly-ordinary (all-single-zone) modules.
             var moduleZoneBudget = new ModuleZoneBudget();
 
+            int faceIdx = -1;
             foreach (var face in faces)
             {
+                faceIdx++;
                 // Landing pad faces must be clear — markings and lights are added by
                 // GenerateLandingPads. Skip all decoration passes so nothing lands on them.
                 if (IsDockingPadFace(mod, face)) continue;
@@ -141,15 +143,32 @@ public static partial class StationDecorator
                     mesh.CurrentDecorClass = DecorClass.SurfacePipes;
                     GenerateSurfacePipes(mod, face, surfacePipeRng, mesh);
 
+                    // Brief Z3 Fix A': per-zone exposure — a coarse per-face IsExposed would
+                    // block every zone on a 238m wall because one 20m module touches it
+                    // somewhere. Recomputed from actual neighbour-footprint overlap; a no-op
+                    // (returns zones unchanged) whenever the parent face wasn't blocked at
+                    // all. Unzoned/single-zone faces above never call this — see the method's
+                    // own comment for why that already preserves ordinary modules.
+                    zones = RefineZoneExposure(mod, face, zones, modules);
+
                     var greeblePlacements = new List<PlacedGreebleInfo>();
                     var zoneTypes = AssignZoneTypes(mod.Definition.Category, zones, zoneRng, moduleZoneBudget);
 
                     for (int i = 0; i < zones.Length; i++)
                     {
                         var occupancy = new FaceOccupancy(); // zones don't overlap, so no cross-zone conflicts by construction
+                        // Brief D-Z2: recorded at the exact moment of production, not
+                        // recomputed later — faceCountBefore/occupancy.RegionCount are pure
+                        // observability, read after the real pass runs, never fed back into
+                        // any decision.
+                        int faceCountBefore = mesh.FaceCount;
                         RunZonePasses(mod, zones[i], zoneTypes[i], mesh, glassMesh, occupancy, greeblePlacements,
                             windowRng, hatchRng, antennaRng, dishRng, ventRng, greebleRng, tankRng, containerRng,
                             surfacePipeRng);
+                        mod.DebugZones.Add(new ZoneDebugRecord(
+                            faceIdx, i, zones[i], zoneTypes[i],
+                            RegionsClaimed: occupancy.RegionCount,
+                            FacesAdded: mesh.FaceCount - faceCountBefore));
                     }
 
                     // Cables still run per-face, collecting placements from every zone on
@@ -166,6 +185,14 @@ public static partial class StationDecorator
                     }
                 }
             }
+
+            // Brief D-Z2: retains the SAME budget object AssignZoneTypes mutated in place —
+            // its end state (Needs*/Remaining) is the real production result, not a
+            // recomputation. Left null for an all-single-zone module — moduleZoneBudget was
+            // constructed but AssignZoneTypes never ran, so it would only show the fresh,
+            // untouched initial state, not a meaningful "consumed" result.
+            if (mod.DebugZones.Count > 0)
+                mod.ZoneBudget = moduleZoneBudget;
 
             mesh.CurrentDecorClass = DecorClass.Pipes;
             GeneratePipes         (mod, faces, pipeRng,     mesh);

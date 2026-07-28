@@ -179,6 +179,16 @@ public static partial class StationDecorator
         public bool NeedsSignage      = true;
     }
 
+    // Brief D-Z2: pure observability record — retains exactly what Decorate() actually
+    // produced for one zone, recorded at the moment of production rather than recomputed
+    // later, so PlacedModule.DebugZones is provably "what the production assignment did,"
+    // not a re-simulation. Never read by any decision-making code; consumed only by the
+    // zone-type debug overlay and the in-game per-zone content dump.
+    internal sealed record ZoneDebugRecord(
+        int FaceIndex, int ZoneIndexOnFace,
+        FaceInfo Zone, ZoneType Type,
+        int RegionsClaimed, int FacesAdded);
+
     // Picks a uniformly random still-unclaimed zone index, or -1 if none remain. Marking
     // claimed[] as zones are picked makes repeated calls behave like sampling without
     // replacement — equivalent to a Fisher-Yates shuffle, just rebuilt each call (zone
@@ -428,8 +438,12 @@ public static partial class StationDecorator
                 break;
 
             case ZoneType.Machinery:
+                // Brief Z3 Fix B: guaranteed: true — Machinery is a tank-content zone type
+                // (Timo: tanks/pipes should dominate industrial/bay); the greeble call below
+                // stays at its normal per-category rate, unchanged (only TankFarm/Machinery's
+                // tank call and CommsArray's greeble call are named for the bypass).
                 mesh.CurrentDecorClass = DecorClass.Tanks;
-                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()));
+                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()), guaranteed: true);
                 mesh.CurrentDecorClass = DecorClass.VentGrilles;
                 GenerateVentGrilles(mod, zone, ventRng, mesh, occupancy);
                 mesh.CurrentDecorClass = DecorClass.Greebles;
@@ -437,8 +451,11 @@ public static partial class StationDecorator
                 break;
 
             case ZoneType.TankFarm:
+                // Brief Z3 Fix B: guaranteed: true — TankFarm's entire purpose is tank
+                // content; an allocated zone that rolls a miss on GenerateTanks' own
+                // category-probability gate is exactly Cause B from D-Z2.
                 mesh.CurrentDecorClass = DecorClass.Tanks;
-                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()));
+                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()), guaranteed: true);
                 break;
 
             case ZoneType.ServiceCore:
@@ -467,8 +484,12 @@ public static partial class StationDecorator
             // categories (DishCategories excludes docking-bay/industrial/hab/cargo
             // outright), so "shouldn't dominate" holds without any change here.
             case ZoneType.CommsArray:
+                // Brief Z3 Fix B: guaranteed: true on the greeble call only — "equipment
+                // cabinets at mast bases" is named as CommsArray's content. The tank call
+                // stays unguaranteed (Timo's own framing was "PERHAPS a small greeble tank
+                // or 5" — optional flavour, not a commitment like TankFarm/Machinery).
                 mesh.CurrentDecorClass = DecorClass.Greebles;
-                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements);
+                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements, guaranteed: true);
                 mesh.CurrentDecorClass = DecorClass.Tanks;
                 GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()), sizeCap: CommsArrayTankSizeCap);
                 break;
