@@ -83,10 +83,17 @@ Implementation:
   material addition only. It audits edge-diagonal and vertex-only contacts, preserves the raw
   occupancy separately, and records repair counts, critical configurations, connected components,
   sealed-cavity state, and owner-pair summaries.
-- `MegastationPrototypeMeshBuilder` emits an unchamfered exterior boundary mesh from
-  `RegularisedOccupancy` through `StationModuleMesh`; it uses the existing station hull
-  lighting/render path and does not add a prototype shader. Optional mesh colouring supports
-  structural-vs-urban, region-owner, and outward-normal debug modes.
+- `BoundaryTopologyBuilder` builds a canonical CPU-side boundary graph from exact integer grid
+  identities on `RegularisedOccupancy`: boundary faces, canonical edge segments, grid vertices,
+  edge classes, vertex classes, conservative chamfer eligibility, and per-edge clamp widths.
+- `BoundaryMeshValidator` validates sharp and final boundary meshes for finite vertices,
+  degenerate triangles, duplicate triangles, and manifold edge incidence.
+- `MegastationPrototypeMeshBuilder` consumes `BoundaryTopology` and emits the final exterior
+  boundary mesh through `StationModuleMesh`; it uses the existing station hull lighting/render
+  path and does not add a prototype shader. Optional mesh colouring supports structural-vs-urban,
+  region-owner, outward-normal, edge-classification, chamfer-eligibility, and vertex-complexity
+  debug modes. Current full megastation output is validated sharp fallback; simple non-tiled
+  synthetic topology can emit validated bevel quads and corner caps.
 - `MegastationMassingSignatureBuilder` computes GraphicsDevice-free SHA-256 regression
   signatures over canonical bytes, not GPU buffers. The long-lived raw massing signature covers
   seed compatibility, raw massing algorithm versions, slice widths, core ranges, station-wide
@@ -97,9 +104,10 @@ Authoritative megastation pipeline:
 
 ```text
 Raw deterministic urban massing
-→ topology regularisation
-→ regularised structural solid
-→ boundary extraction and mesh generation
+-> topology regularisation
+-> regularised structural solid
+-> boundary extraction and sharp mesh validation
+-> chamfer eligibility and final mesh validation
 ```
 
 Development controls:
@@ -112,22 +120,27 @@ Development controls:
 
 Versioning:
 
-- `GeneratorVersion = 3` is the current C0 generator/output version reported in diagnostics and
+- `GeneratorVersion = 4` is the current C2 generator/output version reported in diagnostics and
   included in complete regression signatures.
 - `SeedCompatibilityVersion = 1` is intentionally retained for accepted massing. The root seed is
   derived from this compatibility version, not from the diagnostic generator version, so C0
   version reporting does not alter accepted raw Prototype B massing.
 - `TopologyRegularisationAlgorithmVersion = 1` is the current regularisation algorithm version.
+- `BoundaryTopologyAlgorithmVersion = 1` is the current exact-grid boundary topology algorithm version.
+- `StructuralChamferAlgorithmVersion = 1` is the current conservative chamfer eligibility/final mesh algorithm version.
 - `PositiveYUrbanSeedVersion`, `FaceUrbanAlgorithmVersion`, `EdgeAlgorithmVersion`, and
   `CornerAlgorithmVersion` are explicit version declarations for future intentional revisions.
 
 Diagnostics are published as a `SystemMessage` whenever a prototype is generated: station
-persistent identity, generator version/root seed, topology regularisation version, slice counts,
-grid cells, raw structural/urban occupied cells, regularised occupied cells, repair additions and
-removals, urbanized face count, face/edge/corner occupied cells, total district count, maximum
-face depth, per-face summaries, per-edge profile summaries, per-corner extent summaries, raw and
-regularised connected components, sealed-cavity state, edge/vertex critical counts before and
-after regularisation, exposed quads, triangles, vertices, mesh pages, and generation time.
+persistent identity, generator version/root seed, topology regularisation, boundary topology, and
+chamfer algorithm versions, slice counts, grid cells, raw structural/urban occupied cells,
+regularised occupied cells, repair additions and removals, urbanized face count,
+face/edge/corner occupied cells, total district count, maximum face depth, per-face summaries,
+per-edge profile summaries, per-corner extent summaries, raw and regularised connected
+components, sealed-cavity state, edge/vertex critical counts before and after regularisation,
+boundary face/edge/vertex class counts, eligible/suppressed chamfer counts, bevel/corner-cap
+counts, topology signature, sharp/final validation reports, exposed quads, triangles, vertices,
+mesh pages, topology/mesh timings, and generation time.
 
 Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
 
@@ -137,8 +150,10 @@ Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` 
 | Stress | 67x41x59 | 162,073 | 30,096 | 45,779 | 24,784 | 20,088 | 907 | 81 | 32,968 | 65,936 | 131,872 | 859 ms |
 
 Prototype B is visually accepted and frozen at the raw occupied-massing layer. C0 is visually
-accepted and frozen as the topology-regularised baseline. Deferred by design: production
-chamfers, semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
+accepted and frozen as the topology-regularised baseline. C2 boundary topology is implemented
+and awaits visual confirmation; full megastation chamfer emission remains conservatively
+suppressed to validated sharp output until merged coplanar face topology exists. Deferred by
+design: broad production chamfers, semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
 attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges, overhangs,
 docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
 

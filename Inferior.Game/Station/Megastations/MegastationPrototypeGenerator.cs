@@ -10,6 +10,8 @@ public sealed record MegastationPrototypeDiagnostics(
     int GeneratorVersion,
     int SeedCompatibilityVersion,
     int TopologyRegularisationAlgorithmVersion,
+    int BoundaryTopologyAlgorithmVersion,
+    int StructuralChamferAlgorithmVersion,
     int PositiveYUrbanSeedVersion,
     int FaceUrbanAlgorithmVersion,
     int EdgeAlgorithmVersion,
@@ -47,6 +49,26 @@ public sealed record MegastationPrototypeDiagnostics(
     int TriangleCount,
     int VertexCount,
     int MeshPageCount,
+    int BoundaryFaceCount,
+    int CanonicalEdgeSegmentCount,
+    int FlatContinuationEdgeCount,
+    int ConvexExteriorEdgeCount,
+    int ConcaveExteriorEdgeCount,
+    int InvalidDiagonalEdgeCount,
+    int SimpleConvexVertexCount,
+    int StraightConvexContinuationVertexCount,
+    int SimpleConcaveVertexCount,
+    int ComplexVertexCount,
+    int NonManifoldVertexCount,
+    int EligibleChamferSegmentCount,
+    int SuppressedConvexSegmentCount,
+    int BevelQuadCount,
+    int CornerCapCount,
+    string BoundaryTopologySignature,
+    BoundaryMeshValidationReport SharpBoundaryValidation,
+    BoundaryMeshValidationReport ChamferedBoundaryValidation,
+    long BoundaryTopologyBuildMilliseconds,
+    long BoundaryMeshBuildMilliseconds,
     long GenerationMilliseconds);
 
 public sealed record MegastationPrototypeResult(
@@ -139,7 +161,7 @@ public static class MegastationPrototypeGenerator
             ? TopologyRegulariser.Regularise(occupancy, settings)
             : BuildDisabledRegularisationResult(occupancy, settings, validation);
         var mesh = new StationModuleMesh();
-        var meshStats = MegastationPrototypeMeshBuilder.Build(regularised.Occupancy, mesh);
+        var meshStats = MegastationPrototypeMeshBuilder.Build(regularised.Occupancy, mesh, settings: settings);
         stopwatch.Stop();
 
         int districtCount = faceResults.Sum(f => f.Districts.Count);
@@ -150,6 +172,8 @@ public static class MegastationPrototypeGenerator
             settings.GeneratorVersion,
             settings.SeedCompatibilityVersion,
             settings.TopologyRegularisationAlgorithmVersion,
+            settings.BoundaryTopologyAlgorithmVersion,
+            settings.StructuralChamferAlgorithmVersion,
             settings.PositiveYUrbanSeedVersion,
             settings.FaceUrbanAlgorithmVersion,
             settings.EdgeAlgorithmVersion,
@@ -187,6 +211,26 @@ public static class MegastationPrototypeGenerator
             meshStats.TriangleCount,
             meshStats.VertexCount,
             meshStats.MeshPageCount,
+            meshStats.BoundaryFaceCount,
+            meshStats.CanonicalEdgeSegmentCount,
+            meshStats.FlatContinuationCount,
+            meshStats.ConvexExteriorCount,
+            meshStats.ConcaveExteriorCount,
+            meshStats.InvalidDiagonalCount,
+            meshStats.SimpleConvexVertexCount,
+            meshStats.StraightConvexContinuationVertexCount,
+            meshStats.SimpleConcaveVertexCount,
+            meshStats.ComplexVertexCount,
+            meshStats.NonManifoldVertexCount,
+            meshStats.EligibleChamferSegmentCount,
+            meshStats.SuppressedConvexSegmentCount,
+            meshStats.BevelQuadCount,
+            meshStats.CornerCapCount,
+            meshStats.TopologySignature.Semantic,
+            meshStats.SharpValidation,
+            meshStats.ChamferedValidation,
+            meshStats.TopologyBuildMilliseconds,
+            meshStats.MeshBuildMilliseconds,
             stopwatch.ElapsedMilliseconds);
 
         return new MegastationPrototypeCpuResult(grid, occupancy, regularised.Occupancy, regularised.Report, patches, style, faceResults, edges, corners, mesh, meshStats, diag);

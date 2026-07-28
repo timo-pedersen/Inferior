@@ -63,14 +63,16 @@ public sealed partial class SystemSpaceState
         MegastationPrototypeSelectionMode mode)
     {
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
-            $"Megastation Prototype B.5/C0 [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; topoReg={d.TopologyRegularisationAlgorithmVersion}; " +
+            $"Megastation Prototype C2 [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; topoReg={d.TopologyRegularisationAlgorithmVersion}; boundary={d.BoundaryTopologyAlgorithmVersion}; chamfer={d.StructuralChamferAlgorithmVersion}; " +
             $"seed={d.RootSeed}; slices={d.XSliceCount}x{d.YSliceCount}x{d.ZSliceCount}; " +
             $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; rawUrban={d.UrbanOccupiedCellCount}; regularised={d.RegularisedOccupiedCellCount}; repairs+={d.TopologyRepairAddedCellCount}; " +
             $"faces={d.UrbanizedFaceCount}; faceCells={d.FaceRegionOccupiedCellCount}; edgeCells={d.EdgeRegionOccupiedCellCount}; cornerCells={d.CornerRegionOccupiedCellCount}; " +
             $"districts={d.DistrictCount}; maxDepth={d.MaximumUrbanDepth}; rawComponents={d.ConnectedComponentsBeforeValidation}; regComponents={d.RegularisedConnectedComponents}; " +
             $"edgeCritical={d.EdgeCriticalConfigurationsBeforeRegularisation}->{d.EdgeCriticalConfigurationsAfterRegularisation}; vertexCritical={d.VertexCriticalConfigurationsBeforeRegularisation}->{d.VertexCriticalConfigurationsAfterRegularisation}; " +
-            $"sealed={d.HasSealedCavity}->{d.RegularisedHasSealedCavity}; quads={d.ExposedQuadCount}; " +
-            $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; genMs={d.GenerationMilliseconds}",
+            $"sealed={d.HasSealedCavity}->{d.RegularisedHasSealedCavity}; boundaryFaces={d.BoundaryFaceCount}; edges flat/convex/concave/invalid={d.FlatContinuationEdgeCount}/{d.ConvexExteriorEdgeCount}/{d.ConcaveExteriorEdgeCount}/{d.InvalidDiagonalEdgeCount}; " +
+            $"vertices simple/straight/concave/complex/nonmanifold={d.SimpleConvexVertexCount}/{d.StraightConvexContinuationVertexCount}/{d.SimpleConcaveVertexCount}/{d.ComplexVertexCount}/{d.NonManifoldVertexCount}; " +
+            $"eligible={d.EligibleChamferSegmentCount}; suppressed={d.SuppressedConvexSegmentCount}; bevels={d.BevelQuadCount}; caps={d.CornerCapCount}; quads={d.ExposedQuadCount}; " +
+            $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; topoMs={d.BoundaryTopologyBuildMilliseconds}; meshMs={d.BoundaryMeshBuildMilliseconds}; genMs={d.GenerationMilliseconds}",
             SystemMessagePriority.NB));
     }
 

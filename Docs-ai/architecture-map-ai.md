@@ -419,12 +419,15 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 **Station/Megastations/** — occupancy-generated megastation prototype path
 
 - `ConnectivityValidation.cs` — GraphicsDevice-free validation of occupied-volume connected components and sealed empty cavities.
+- `BoundaryMeshValidation.cs` — CPU-side boundary mesh validation for finite vertices, degenerates, duplicate triangles, and manifold edge incidence.
+- `BoundaryTopology.cs` — exact-grid boundary face/edge/vertex topology classification and conservative chamfer eligibility.
+- `BoundaryTopologySignature.cs` — canonical semantic SHA-256 signature for boundary topology and chamfer eligibility.
 - `CornerRegionGenerator.cs` — plans and applies eight shared corner-region masses around the structural core.
 - `EdgeRegionGenerator.cs` — plans and applies twelve shared edge-region profiles plus face-region support shoulders.
 - `ExteriorSpace.cs` — flood-fills externally accessible empty cells and tests exposed structural faces.
 - `MegastationMassingSignature.cs` — canonical SHA-256 signatures for accepted megastation occupancy/massing regression fixtures.
-- `MegastationPrototypeGenerator.cs` — CPU/GPU entry point for Prototype B generation, diagnostics, and single-module station-model wrapping.
-- `MegastationPrototypeMeshBuilder.cs` — emits the current unchamfered exterior boundary mesh from final occupancy, with debug colour modes.
+- `MegastationPrototypeGenerator.cs` — CPU/GPU entry point for megastation generation, diagnostics, and single-module station-model wrapping.
+- `MegastationPrototypeMeshBuilder.cs` — consumes regularised occupancy boundary topology, validates sharp/final meshes, and emits the current render mesh with debug colour modes.
 - `MegastationPrototypeSettings.cs` — generation settings, development-selection source, and generator/seed compatibility version declarations.
 - `MegastationSeed.cs` — stable semantic FNV-style seed derivation for megastation subsystems.
 - `RegionPlans.cs` — stable region identities and edge/corner plan records.

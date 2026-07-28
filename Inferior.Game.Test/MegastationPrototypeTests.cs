@@ -151,7 +151,7 @@ public sealed class MegastationPrototypeTests
     public void PositiveYAcceptedFace_DepthMapMatchesPrototypeASeedPath()
     {
         var result = GenerateRawCpu(StationId);
-        Assert.Equal(3, result.Diagnostics.GeneratorVersion);
+        Assert.Equal(4, result.Diagnostics.GeneratorVersion);
         Assert.Equal(1, result.Diagnostics.SeedCompatibilityVersion);
         UrbanGrowthResult positiveY = PositiveYFace(result);
 
@@ -178,38 +178,42 @@ public sealed class MegastationPrototypeTests
             new MassingFixture(
                 "forced starter",
                 StarterStationId,
-                "39B64B7DD54133AC616FD829FA6D59A39BB600902B16F8B9833719B1975A6BAC",
+                "4C2603CB147B0DC3BF280D4D21558DDA6FEA75D572E1B73293335A1F7EEC2E5E",
                 "BDF65C8AA6211665A4538F136F6F04C0D6ACE2F0B16166FD6E0BBB7954549C43",
                 "CE435ACF5AF0BE63CC8CD60F724AA94EFCC557EE9166C7F367F3B935E8E1465B",
                 "E36C0EF1F4D190D1CB011F24A80B377CC8D0C9C33CE337F08ACF3D70B70933BF",
                 "3D9CC8EB3D43C72AB651FE59C7F21E1A282CF7E384F637D1D6DE8B0CBA5F14DB",
+                "733ED14AE0D25742A7C0C528670B65C7D0A7631B7ADD75014F0A5E691C222EB7",
                 7728, 6083, 5731, 482, 25, 25, 0, 0, 0, 1, false),
             new MassingFixture(
                 "representative",
                 StationId,
-                "F80B73D0397D67993DC8EEE6515296BFD3C417F95BDABEB27D0012074ACC1570",
+                "D507F9DCBF6EA8A0A39A30CA752FB52D83EEE1DB0A9451951E8A3FFD53CC6581",
                 "CA3560409FDA6B54281415730A84F77DF1EE66E2F7998C425612385AFDB73F5C",
                 "F2AC444329E4EE09E93EEF214E568BD7BA85FF282DF95280C3E1FB13A620752C",
                 "207D2E70186629E818AC6524BA31E0392A2BB47F0E6A70CB4EA1D7DA7DC77B9F",
                 "666EDB5EF626AF943533154BF7187BC2D27038473C9D7B760C7C145909FB53F6",
+                "BC714D42D83CEEDF74038CDCF642B006AAF20446AC3135FE5276969C310C28F2",
                 11200, 7344, 3412, 364, 63, 59, 0, 0, 0, 1, false),
             new MassingFixture(
                 "strong edge",
                 "Test Star:Test Parent:Edge Strong 0001",
-                "43AC8FC7EF57891649195731C9B04766B7370337991859CD45B503181D329AAF",
+                "74E544AD6B2AB243BB3130AECFF4F524DFB04E6AD2B84CBE3D01623E4DA74739",
                 "BB89097CC731B836DE9AA1909F644BA5E51B59BAD6F67BB7D21EC7126A45ED85",
                 "2631049EC90414E57CD073A7313BA95DB59278312C04310CA13EFCA38241B245",
                 "5B09F96CE77FE99324C8D435D20359D1AC5D9779A5FBF096A6BC878F7B099D5C",
                 "AC1FB670B5D9BDF53C9312F77F623052C68224CCC52D5A18893A7A6A8C4E5CEA",
+                "A74E8524E66856E0C22921935FA614E4208C593C7B3B20B258CF59B785F26ED7",
                 8550, 6517, 5027, 575, 48, 51, 0, 0, 0, 1, false),
             new MassingFixture(
                 "broken edge",
                 "Test Star:Test Parent:Broken Edge 0001",
-                "D5FC9D1A54E3076D1E12EAA935C3BC6C1B61768C9B82A5FAB2BAD5FD285CA256",
+                "5916392866F1FD8A694781F752B4DA246E4E6B22DB763D47A5453211F0431F5A",
                 "B11ED8D9B5D73068E8CEA7F81CC74AD600EAD1CCABCF1F4283D95A58DCD41B85",
                 "8C9F3040F0DADE91EF561F12B904EE707F8AB2F41D7C9202B9B45DBD915E0256",
                 "50C3A2EAB26308AF9B743BAF5CB7072F54F8B1D10C50B0241E5911DAF968AA85",
                 "68055B3D2327D89390953360907243F9CD5845CFD6428027930A489FB5D05AA2",
+                "2C4A4D56D8EA51AF210E1A8117C72806459774E3251A6A52AFCD144B139102B8",
                 9216, 5882, 1872, 121, 49, 51, 0, 0, 0, 1, false),
         };
 
@@ -220,13 +224,17 @@ public sealed class MegastationPrototypeTests
 
             var structuralSolidSignature = MegastationMassingSignatureBuilder.ComputeStructuralSolid(result);
 
-            Assert.Equal(3, result.Diagnostics.GeneratorVersion);
+            Assert.Equal(4, result.Diagnostics.GeneratorVersion);
             Assert.Equal(1, result.Diagnostics.SeedCompatibilityVersion);
+            Assert.Equal(1, result.Diagnostics.TopologyRegularisationAlgorithmVersion);
+            Assert.Equal(1, result.Diagnostics.BoundaryTopologyAlgorithmVersion);
+            Assert.Equal(1, result.Diagnostics.StructuralChamferAlgorithmVersion);
             Assert.Equal(fixture.CompleteSignature, signature.Complete);
             Assert.Equal(fixture.BodySignature, signature.Body);
             Assert.Equal(fixture.SliceGridSignature, signature.SliceGrid);
             Assert.Equal(fixture.PositiveYDepthMapSignature, signature.PositiveYDepthMap);
             Assert.Equal(fixture.StructuralSolidSignature, structuralSolidSignature.Body);
+            Assert.Equal(fixture.BoundaryTopologySignature, result.Diagnostics.BoundaryTopologySignature);
             Assert.Equal(fixture.StructuralCells, result.Occupancy.StructuralOccupiedCount);
             Assert.Equal(fixture.FaceCells, result.Occupancy.FaceRegionOccupiedCount);
             Assert.Equal(fixture.EdgeCells, result.Occupancy.EdgeRegionOccupiedCount);
@@ -246,7 +254,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
-    public void PrototypeC0Version3_UsesSeedCompatibilityVersion1ForAcceptedRawMassing()
+    public void PrototypeC2Version4_UsesSeedCompatibilityVersion1ForAcceptedRawMassing()
     {
         var current = GenerateRawCpu(StationId);
         var explicitCompatibility = MegastationPrototypeGenerator.GenerateCpu(
@@ -254,9 +262,9 @@ public sealed class MegastationPrototypeTests
             RawMassingSettings with { GeneratorVersion = 99, SeedCompatibilityVersion = 1 });
         var incompatibleSeed = MegastationPrototypeGenerator.GenerateCpu(
             StationId,
-            RawMassingSettings with { GeneratorVersion = 3, SeedCompatibilityVersion = 2 });
+            RawMassingSettings with { GeneratorVersion = 4, SeedCompatibilityVersion = 2 });
 
-        Assert.Equal(3, current.Diagnostics.GeneratorVersion);
+        Assert.Equal(4, current.Diagnostics.GeneratorVersion);
         Assert.Equal(1, current.Diagnostics.SeedCompatibilityVersion);
         Assert.Equal(MegastationMassingSignatureBuilder.Compute(current).Body,
             MegastationMassingSignatureBuilder.Compute(explicitCompatibility).Body);
@@ -293,7 +301,7 @@ public sealed class MegastationPrototypeTests
         string before = MegastationMassingSignatureBuilder.Compute(result).Body;
 
         foreach (MegastationDebugColorMode mode in Enum.GetValues<MegastationDebugColorMode>())
-            MegastationPrototypeMeshBuilder.Build(result.Occupancy, new StationModuleMesh(), mode);
+            MegastationPrototypeMeshBuilder.Build(result.Occupancy, new StationModuleMesh(), mode, RawMassingSettings);
 
         Assert.Equal(before, MegastationMassingSignatureBuilder.Compute(result).Body);
     }
@@ -366,6 +374,67 @@ public sealed class MegastationPrototypeTests
         Assert.False(result.TopologyRegularisation.SealedCavityAfter);
         Assert.Empty(TopologyRegulariser.FindCriticalContacts(result.RegularisedOccupancy));
         Assert.Equal(result.RegularisedOccupancy.TotalOccupiedCount, CountConnectedOccupied(result.RegularisedOccupancy));
+    }
+
+    [Fact]
+    public void BoundaryTopology_ClassifiesRegularisedFixtureAsValidManifoldInput()
+    {
+        var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
+
+        Assert.Equal(0, result.Diagnostics.EdgeCriticalConfigurationsAfterRegularisation);
+        Assert.Equal(0, result.Diagnostics.VertexCriticalConfigurationsAfterRegularisation);
+        Assert.Equal(0, result.Diagnostics.InvalidDiagonalEdgeCount);
+        Assert.Equal(0, result.Diagnostics.NonManifoldVertexCount);
+        Assert.True(result.Diagnostics.SharpBoundaryValidation.IsValid);
+        Assert.True(result.Diagnostics.ChamferedBoundaryValidation.IsValid);
+        Assert.Equal(result.Diagnostics.BoundaryFaceCount, result.Diagnostics.ExposedQuadCount);
+        Assert.Equal(result.Diagnostics.SharpBoundaryValidation.TriangleCount, result.Diagnostics.ChamferedBoundaryValidation.TriangleCount);
+    }
+
+    [Fact]
+    public void BoundaryTopologySignature_IsDeterministicAndIndependentOfRawMassingSignature()
+    {
+        var a = MegastationPrototypeGenerator.GenerateCpu(StationId);
+        var b = MegastationPrototypeGenerator.GenerateCpu(StationId);
+
+        Assert.Equal(a.Diagnostics.BoundaryTopologySignature, b.Diagnostics.BoundaryTopologySignature);
+        Assert.Equal(
+            MegastationMassingSignatureBuilder.Compute(a).Body,
+            MegastationMassingSignatureBuilder.Compute(b).Body);
+    }
+
+    [Fact]
+    public void BoundaryTopology_DetectsInvalidDiagonalBeforeRegularisation()
+    {
+        var grid = UnitGrid(2, 2, 1);
+        var occupancy = new StructuralOccupancy(grid);
+        occupancy.MarkUrban(0, 0, 0, MegacellOwner.FaceInterior, "a");
+        occupancy.MarkUrban(1, 1, 0, MegacellOwner.FaceInterior, "b");
+
+        var topology = BoundaryTopologyBuilder.Build(occupancy, MegastationPrototypeSettings.Default);
+
+        Assert.True(topology.Stats.InvalidDiagonalCount > 0);
+    }
+
+    [Fact]
+    public void SingleCellBoundary_EmitsValidatedChamfersAndCornerCaps()
+    {
+        var grid = UnitGrid(1, 1, 1);
+        var occupancy = new StructuralOccupancy(grid);
+        occupancy.MarkUrban(0, 0, 0, MegacellOwner.FaceInterior, "single");
+
+        var mesh = new StationModuleMesh();
+        var stats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
+
+        Assert.Equal(6, stats.BoundaryFaceCount);
+        Assert.Equal(12, stats.ConvexExteriorCount);
+        Assert.Equal(8, stats.SimpleConvexVertexCount);
+        Assert.Equal(12, stats.EligibleChamferSegmentCount);
+        Assert.Equal(12, stats.BevelQuadCount);
+        Assert.Equal(8, stats.CornerCapCount);
+        Assert.True(stats.SharpValidation.IsValid);
+        Assert.True(stats.ChamferedValidation.IsValid);
+        Assert.True(stats.ChamferedValidation.TriangleCount > stats.SharpValidation.TriangleCount);
     }
 
     [Fact]
@@ -538,6 +607,7 @@ public sealed class MegastationPrototypeTests
         string SliceGridSignature,
         string PositiveYDepthMapSignature,
         string StructuralSolidSignature,
+        string BoundaryTopologySignature,
         int StructuralCells,
         int FaceCells,
         int EdgeCells,

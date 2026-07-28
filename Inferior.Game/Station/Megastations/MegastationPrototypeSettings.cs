@@ -20,14 +20,19 @@ public sealed record MegastationPrototypeSettings
     public static MegastationDevelopmentSelection DevelopmentSelection { get; } =
         new(MegastationPrototypeSelectionMode.Frequent, MegastationProbability: 0.50, ForceStarterStation: true);
 
-    public int GeneratorVersion { get; init; } = 3;
+    public int GeneratorVersion { get; init; } = 4;
     public int SeedCompatibilityVersion { get; init; } = 1;
     public int TopologyRegularisationAlgorithmVersion { get; init; } = 1;
+    public int BoundaryTopologyAlgorithmVersion { get; init; } = 1;
+    public int StructuralChamferAlgorithmVersion { get; init; } = 1;
     public int PositiveYUrbanSeedVersion { get; init; } = 1;
     public int FaceUrbanAlgorithmVersion { get; init; } = 1;
     public int EdgeAlgorithmVersion { get; init; } = 1;
     public int CornerAlgorithmVersion { get; init; } = 1;
     public bool EnableTopologyRegularisation { get; init; } = true;
+    public float DesiredStructuralChamferMetres { get; init; } = 0.75f;
+    public float MinimumStructuralChamferMetres { get; init; } = 0.05f;
+    public float StructuralChamferSpanFraction { get; init; } = 0.10f;
 
     public Vector3 CoreDimensions { get; init; } = new(1400f, 520f, 900f);
     public IntRange CoreXSlices { get; init; } = new(26, 34);
