@@ -9,6 +9,7 @@ public sealed record MegastationPrototypeDiagnostics(
     string StationPersistenceId,
     int GeneratorVersion,
     int SeedCompatibilityVersion,
+    int TopologyRegularisationAlgorithmVersion,
     int PositiveYUrbanSeedVersion,
     int FaceUrbanAlgorithmVersion,
     int EdgeAlgorithmVersion,
@@ -20,6 +21,9 @@ public sealed record MegastationPrototypeDiagnostics(
     int GridCellCount,
     int StructuralOccupiedCellCount,
     int UrbanOccupiedCellCount,
+    int RegularisedOccupiedCellCount,
+    int TopologyRepairAddedCellCount,
+    int TopologyRepairRemovedCellCount,
     int UrbanizedFaceCount,
     int FaceRegionOccupiedCellCount,
     int EdgeRegionOccupiedCellCount,
@@ -32,6 +36,13 @@ public sealed record MegastationPrototypeDiagnostics(
     int ConnectedComponentsBeforeValidation,
     int RemovedDisconnectedCells,
     bool HasSealedCavity,
+    int EdgeCriticalConfigurationsBeforeRegularisation,
+    int EdgeCriticalConfigurationsAfterRegularisation,
+    int VertexCriticalConfigurationsBeforeRegularisation,
+    int VertexCriticalConfigurationsAfterRegularisation,
+    int RegularisedConnectedComponents,
+    bool RegularisedHasSealedCavity,
+    IReadOnlyList<string> TopologyDefectOwnerSummary,
     int ExposedQuadCount,
     int TriangleCount,
     int VertexCount,
@@ -46,6 +57,8 @@ public sealed record MegastationPrototypeResult(
 public sealed record MegastationPrototypeCpuResult(
     SliceGrid Grid,
     StructuralOccupancy Occupancy,
+    StructuralOccupancy RegularisedOccupancy,
+    TopologyRegularisationReport TopologyRegularisation,
     IReadOnlyList<SurfacePatch> Patches,
     MegastationUrbanStyle Style,
     IReadOnlyList<UrbanGrowthResult> Faces,
@@ -122,8 +135,11 @@ public static class MegastationPrototypeGenerator
         }
 
         var validation = MegastationConnectivity.Validate(occupancy);
+        var regularised = settings.EnableTopologyRegularisation
+            ? TopologyRegulariser.Regularise(occupancy, settings)
+            : BuildDisabledRegularisationResult(occupancy, settings, validation);
         var mesh = new StationModuleMesh();
-        var meshStats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
+        var meshStats = MegastationPrototypeMeshBuilder.Build(regularised.Occupancy, mesh);
         stopwatch.Stop();
 
         int districtCount = faceResults.Sum(f => f.Districts.Count);
@@ -133,6 +149,7 @@ public static class MegastationPrototypeGenerator
             persistenceId,
             settings.GeneratorVersion,
             settings.SeedCompatibilityVersion,
+            settings.TopologyRegularisationAlgorithmVersion,
             settings.PositiveYUrbanSeedVersion,
             settings.FaceUrbanAlgorithmVersion,
             settings.EdgeAlgorithmVersion,
@@ -144,6 +161,9 @@ public static class MegastationPrototypeGenerator
             grid.CellCount,
             occupancy.StructuralOccupiedCount,
             occupancy.UrbanOccupiedCount,
+            regularised.Occupancy.TotalOccupiedCount,
+            regularised.Report.RepairAddedCells,
+            regularised.Report.RepairRemovedCells,
             faceResults.Count(f => f.Districts.Count > 0),
             occupancy.FaceRegionOccupiedCount,
             occupancy.EdgeRegionOccupiedCount,
@@ -156,13 +176,20 @@ public static class MegastationPrototypeGenerator
             validation.ConnectedComponentsBeforeValidation,
             validation.RemovedDisconnectedCells,
             validation.HasSealedCavity,
+            regularised.Report.EdgeCriticalBefore,
+            regularised.Report.EdgeCriticalAfter,
+            regularised.Report.VertexCriticalBefore,
+            regularised.Report.VertexCriticalAfter,
+            regularised.Report.ConnectedComponentsAfter,
+            regularised.Report.SealedCavityAfter,
+            regularised.Report.DefectOwnerSummary,
             meshStats.ExposedQuadCount,
             meshStats.TriangleCount,
             meshStats.VertexCount,
             meshStats.MeshPageCount,
             stopwatch.ElapsedMilliseconds);
 
-        return new MegastationPrototypeCpuResult(grid, occupancy, patches, style, faceResults, edges, corners, mesh, meshStats, diag);
+        return new MegastationPrototypeCpuResult(grid, occupancy, regularised.Occupancy, regularised.Report, patches, style, faceResults, edges, corners, mesh, meshStats, diag);
     }
 
     private static Texture2D MakeFlat(GraphicsDevice gd, Color color)
@@ -170,5 +197,31 @@ public static class MegastationPrototypeGenerator
         var tex = new Texture2D(gd, 1, 1);
         tex.SetData([color]);
         return tex;
+    }
+
+    private static (StructuralOccupancy Occupancy, TopologyRegularisationReport Report) BuildDisabledRegularisationResult(
+        StructuralOccupancy occupancy,
+        MegastationPrototypeSettings settings,
+        MegastationConnectivityReport connectivity)
+    {
+        var contacts = TopologyRegulariser.FindCriticalContacts(occupancy);
+        var report = new TopologyRegularisationReport(
+            settings.TopologyRegularisationAlgorithmVersion,
+            0,
+            occupancy.TotalOccupiedCount,
+            occupancy.TotalOccupiedCount,
+            0,
+            0,
+            contacts.Count(c => c.Kind == TopologyContactKind.EdgeDiagonal),
+            contacts.Count(c => c.Kind == TopologyContactKind.EdgeDiagonal),
+            contacts.Count(c => c.Kind == TopologyContactKind.VertexOnly),
+            contacts.Count(c => c.Kind == TopologyContactKind.VertexOnly),
+            connectivity.ConnectedComponentsBeforeValidation,
+            connectivity.ConnectedComponentsBeforeValidation,
+            connectivity.HasSealedCavity,
+            connectivity.HasSealedCavity,
+            [],
+            contacts.Take(16).ToArray());
+        return (occupancy.Clone(), report);
     }
 }

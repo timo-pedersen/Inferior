@@ -63,11 +63,13 @@ public sealed partial class SystemSpaceState
         MegastationPrototypeSelectionMode mode)
     {
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
-            $"Megastation Prototype B [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; " +
+            $"Megastation Prototype B.5/C0 [{mode}] id={d.StationPersistenceId}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; topoReg={d.TopologyRegularisationAlgorithmVersion}; " +
             $"seed={d.RootSeed}; slices={d.XSliceCount}x{d.YSliceCount}x{d.ZSliceCount}; " +
-            $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; urban={d.UrbanOccupiedCellCount}; " +
+            $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; rawUrban={d.UrbanOccupiedCellCount}; regularised={d.RegularisedOccupiedCellCount}; repairs+={d.TopologyRepairAddedCellCount}; " +
             $"faces={d.UrbanizedFaceCount}; faceCells={d.FaceRegionOccupiedCellCount}; edgeCells={d.EdgeRegionOccupiedCellCount}; cornerCells={d.CornerRegionOccupiedCellCount}; " +
-            $"districts={d.DistrictCount}; maxDepth={d.MaximumUrbanDepth}; components={d.ConnectedComponentsBeforeValidation}; sealed={d.HasSealedCavity}; quads={d.ExposedQuadCount}; " +
+            $"districts={d.DistrictCount}; maxDepth={d.MaximumUrbanDepth}; rawComponents={d.ConnectedComponentsBeforeValidation}; regComponents={d.RegularisedConnectedComponents}; " +
+            $"edgeCritical={d.EdgeCriticalConfigurationsBeforeRegularisation}->{d.EdgeCriticalConfigurationsAfterRegularisation}; vertexCritical={d.VertexCriticalConfigurationsBeforeRegularisation}->{d.VertexCriticalConfigurationsAfterRegularisation}; " +
+            $"sealed={d.HasSealedCavity}->{d.RegularisedHasSealedCavity}; quads={d.ExposedQuadCount}; " +
             $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; genMs={d.GenerationMilliseconds}",
             SystemMessagePriority.NB));
     }

@@ -16,6 +16,7 @@ public enum MegacellOwner : byte
     FaceInterior,
     EdgeRegion,
     CornerRegion,
+    TopologyRegularisation,
 }
 
 public sealed class StructuralOccupancy
@@ -40,6 +41,7 @@ public sealed class StructuralOccupancy
     public int FaceRegionOccupiedCount => CountOwner(MegacellOwner.FaceInterior);
     public int EdgeRegionOccupiedCount => CountOwner(MegacellOwner.EdgeRegion);
     public int CornerRegionOccupiedCount => CountOwner(MegacellOwner.CornerRegion);
+    public int TopologyRegularisationOccupiedCount => CountOwner(MegacellOwner.TopologyRegularisation);
 
     public MegacellFlags this[int x, int y, int z]
     {
@@ -58,6 +60,19 @@ public sealed class StructuralOccupancy
 
     public MegacellOwner Owner(int x, int y, int z) => _owners[Grid.Index(x, y, z)];
     public string? RegionId(int x, int y, int z) => _regionIds[Grid.Index(x, y, z)];
+
+    public StructuralOccupancy Clone()
+    {
+        var clone = new StructuralOccupancy(Grid)
+        {
+            StructuralOccupiedCount = StructuralOccupiedCount,
+            UrbanOccupiedCount = UrbanOccupiedCount,
+        };
+        Array.Copy(_cells, clone._cells, _cells.Length);
+        Array.Copy(_owners, clone._owners, _owners.Length);
+        Array.Copy(_regionIds, clone._regionIds, _regionIds.Length);
+        return clone;
+    }
 
     public void FillCore()
     {
@@ -93,6 +108,9 @@ public sealed class StructuralOccupancy
         _owners[index] = owner;
         _regionIds[index] = regionId;
     }
+
+    public void MarkTopologyRegularisation(int x, int y, int z, string? regionId = null)
+        => MarkUrban(x, y, z, MegacellOwner.TopologyRegularisation, regionId ?? "topology-regularisation");
 
     public void ClearExternalFlags()
     {

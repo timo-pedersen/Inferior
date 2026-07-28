@@ -10,6 +10,8 @@ public sealed record MegastationMassingSignature(
     string SliceGrid,
     string PositiveYDepthMap);
 
+public sealed record MegastationStructuralSolidSignature(string Body);
+
 public static class MegastationMassingSignatureBuilder
 {
     private const int FormatVersion = 1;
@@ -22,6 +24,9 @@ public static class MegastationMassingSignatureBuilder
         string positiveY = Hash(WritePositiveYDepthMap(result));
         return new MegastationMassingSignature(complete, body, grid, positiveY);
     }
+
+    public static MegastationStructuralSolidSignature ComputeStructuralSolid(MegastationPrototypeCpuResult result)
+        => new(Hash(WriteStructuralSolid(result)));
 
     private static byte[] WriteComplete(MegastationPrototypeCpuResult result)
     {
@@ -68,6 +73,19 @@ public static class MegastationMassingSignatureBuilder
         writer.WriteInt32(result.Diagnostics.SeedCompatibilityVersion);
         writer.WriteInt32(result.Diagnostics.RootSeed);
         WriteDepthMap(writer, face);
+        return writer.ToArray();
+    }
+
+    private static byte[] WriteStructuralSolid(MegastationPrototypeCpuResult result)
+    {
+        var writer = new CanonicalWriter();
+        writer.WriteString("Inferior.Megastation.RegularisedStructuralSolidSignature");
+        writer.WriteInt32(FormatVersion);
+        writer.WriteInt32(result.Diagnostics.SeedCompatibilityVersion);
+        writer.WriteInt32(result.Diagnostics.RootSeed);
+        writer.WriteInt32(result.Diagnostics.TopologyRegularisationAlgorithmVersion);
+        WriteSliceGrid(writer, result.Grid);
+        WriteCells(writer, result.RegularisedOccupancy);
         return writer.ToArray();
     }
 
