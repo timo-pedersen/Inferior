@@ -292,7 +292,7 @@ public sealed partial class SystemSpaceState : GameState
                 Quaternion bodyOri  = QuatLookAt(bodyGalaxy - startPos);
                 _camera = new Camera3D(startPos, AspectRatio);
                 _camera.SetPose(startPos, bodyOri);
-                SpawnShip(startPos, bodyOri);
+                PlaceShipAtEntryPoint(startPos, bodyOri);
             }
             else if (p.StationArrival != null)
             {
@@ -302,7 +302,7 @@ public sealed partial class SystemSpaceState : GameState
                 var startOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
                 _camera = new Camera3D(startPos, AspectRatio);
                 _camera.SetPose(startPos, startOri);
-                SpawnShip(startPos, startOri);
+                EnsureShipExists(startPos, startOri);
             }
             else if (_simulation.ShipState is { } existingShip)
             {
@@ -329,7 +329,9 @@ public sealed partial class SystemSpaceState : GameState
             ComputeEclipticRotation();
             var fallbackPos = new DVec3(0, 0.5e11, 3e11);
             _camera  = new Camera3D(fallbackPos, AspectRatio);
-            SpawnShip(fallbackPos, Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f));
+            var fallbackOri = Quaternion.CreateFromYawPitchRoll(0f, -0.2f, 0f);
+            _camera.SetPose(fallbackPos, fallbackOri);
+            EnsureShipExists(fallbackPos, fallbackOri);
         }
 
         _simulation.InstallSystem(_star, _system);
