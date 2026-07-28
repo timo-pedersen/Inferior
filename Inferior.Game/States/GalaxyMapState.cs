@@ -169,6 +169,11 @@ public sealed class GalaxyMapState : GameState
 
         _prevMouseUI = Mouse.GetState();
         _prevKeysUI  = Keyboard.GetState();
+        // Seed the game-input history too, so a key still held down from the
+        // keypress that opened this state (e.g. N) isn't misread as a fresh
+        // press on the very first Update() and immediately closes the map.
+        _prevMouse = _prevMouseUI;
+        _prevKeys  = _prevKeysUI;
 
         _pendingTransition = null;
         UpdateScreenCentre();
