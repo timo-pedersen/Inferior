@@ -103,6 +103,21 @@ public sealed class StationRelocationTests
     }
 
     [Fact]
+    public void StationRelocationPreservesCurrentHullType()
+    {
+        var sample = FindStation(station => station.PersistenceId != null);
+
+        var result = RunRelocation(
+            sample.Star,
+            sample.System,
+            sample.Station.PersistenceId!,
+            OldShipPosition(),
+            hullTypeId: CosmoHullDefinitionFactory.HullId);
+
+        Assert.Equal(CosmoHullDefinitionFactory.HullId, result.Snapshot.HullTypeId);
+    }
+
+    [Fact]
     public void BodyArrivalPayloadRemainsBodyArrival()
     {
         var star = GalaxyGenerator.Generate().First();
@@ -207,6 +222,7 @@ public sealed class StationRelocationTests
         Assert.DoesNotContain("OrbitParent", arrivalBlock);
         Assert.DoesNotContain("QuatLookAt", arrivalBlock);
         Assert.DoesNotContain("TeleportShip", arrivalBlock);
+        Assert.DoesNotContain("SpawnShip", arrivalBlock);
         Assert.DoesNotContain("EclipticToGalaxy", arrivalBlock);
         Assert.DoesNotContain("stationGalaxy", arrivalBlock);
         Assert.DoesNotContain("spawnOri", arrivalBlock);
@@ -301,7 +317,8 @@ public sealed class StationRelocationTests
         string stationPersistenceId,
         DVec3 oldShipPosition,
         PlayerInput? input = null,
-        double preAdvanceSeconds = 0.0)
+        double preAdvanceSeconds = 0.0,
+        string hullTypeId = AriesHullDefinitionFactory.HullId)
     {
         GameClock.Reset();
         DataBus.Drain();
@@ -309,7 +326,7 @@ public sealed class StationRelocationTests
         var simulation = new SpaceSimulation();
         var ship = new Ship
         {
-            HullTypeId = AriesHullDefinitionFactory.HullId,
+            HullTypeId = hullTypeId,
             Position = oldShipPosition,
             Velocity = new DVec3(123.0, -456.0, 789.0),
         };

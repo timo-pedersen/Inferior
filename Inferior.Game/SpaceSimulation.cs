@@ -261,9 +261,14 @@ public sealed class SpaceSimulation : Simulation
     // ── Flight mode (sim-internal) ────────────────────────────────────────────
     private FlightMode _currentFlightMode = FlightMode.SystemNewtonian;
 
-    // ── Flight Assist (atmospheric only) ─────────────────────────────────────
+    // ── Flight Assist ────────────────────────────────────────────────────────
     private bool _flightAssistEnabled    = true;
     private bool _prevFlightAssistToggle = false;
+    private const double FlightAssistForceFactor = 1.0;
+    private const double FlightAssistTelemetryIntervalSeconds = 0.25;
+    private double _flightAssistTelemetryTimer;
+    private double _lastFlightAssistForceN;
+    private double _lastFlightAssistAccelerationMps2;
 
     // ── Atmospheric Slipstream state (used when _currentFlightMode == AtmosphericNewtonian) ─
     private bool   _slipstreamModeActive  = false;
@@ -386,6 +391,8 @@ public sealed class SpaceSimulation : Simulation
         if (ship == null) return;
         _lastPropulsionApplication = default;
         _lastTargetAngularVelocityLocalRadPerSec = DVec3.Zero;
+        _lastFlightAssistForceN = 0.0;
+        _lastFlightAssistAccelerationMps2 = 0.0;
         EngineVisualState engineVisualState = EngineVisualState.Idle;
 
         int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
@@ -488,7 +495,7 @@ public sealed class SpaceSimulation : Simulation
         {
             _flightAssistEnabled = !_flightAssistEnabled;
             DataBus.System.Publish(Topics.System.All,
-                new SystemMessage(_flightAssistEnabled ? "Flight Assist ON" : "Flight Assist OFF"));
+                new SystemMessage(_flightAssistEnabled ? "flight assist on" : "flight assist off"));
         }
         _prevFlightAssistToggle = input.FlightAssistToggle;
 
@@ -815,7 +822,7 @@ public sealed class SpaceSimulation : Simulation
             rotation.AvailableAngularAccelerationRadPerSec2,
             ship.AngularVelocityLocalRadPerSec,
             _lastTargetAngularVelocityLocalRadPerSec,
-            FlightAssistOn: true);
+            FlightAssistOn: _flightAssistEnabled);
     }
 
     private void TickAssistedRotation(
@@ -1094,12 +1101,73 @@ public sealed class SpaceSimulation : Simulation
             propulsion,
             allocation,
             forwardScale);
-        ApplyPropulsionForce(ship, propulsion, appliedForceLocal, dt, allocation);
+        DVec3 assistForceLocal = ResolveFlightAssistForceShipLocal(
+            ship,
+            propulsion,
+            relVel,
+            dt);
+        RecordFlightAssistApplication(propulsion, assistForceLocal);
+        ApplyPropulsionForce(ship, propulsion, appliedForceLocal + assistForceLocal, dt, allocation);
 
         ship.Position += ship.Velocity * dt;
     }
 
     // ── SystemSlipstream physics ──────────────────────────────────────────────
+
+    private DVec3 ResolveFlightAssistForceShipLocal(
+        Ship ship,
+        ShipPropulsionCapability propulsion,
+        DVec3 relativeVelocityWorld,
+        double dt)
+    {
+        if (!_flightAssistEnabled || dt <= 0.0 || propulsion.CurrentMassKg <= 0.0)
+            return DVec3.Zero;
+
+        DVec3 relativeVelocityLocal = WorldToShipLocal(ship, relativeVelocityWorld);
+        double lateralAccelerationLimit =
+            propulsion.AvailableLateralThrustN / propulsion.CurrentMassKg * FlightAssistForceFactor;
+        double liftAccelerationLimit =
+            propulsion.AvailableLiftThrustN / propulsion.CurrentMassKg * FlightAssistForceFactor;
+        if (lateralAccelerationLimit <= 0.0 && liftAccelerationLimit <= 0.0)
+            return DVec3.Zero;
+
+        double lateralAcceleration = ResolveAssistAxisAcceleration(
+            relativeVelocityLocal.X,
+            lateralAccelerationLimit,
+            dt);
+        double verticalAcceleration = ResolveAssistAxisAcceleration(
+            relativeVelocityLocal.Y,
+            relativeVelocityLocal.Y < 0.0 ? liftAccelerationLimit : lateralAccelerationLimit,
+            dt);
+
+        return new DVec3(
+            lateralAcceleration * propulsion.CurrentMassKg,
+            verticalAcceleration * propulsion.CurrentMassKg,
+            0.0);
+    }
+
+    private static double ResolveAssistAxisAcceleration(
+        double currentVelocity,
+        double accelerationLimit,
+        double dt)
+    {
+        if (dt <= 0.0 || accelerationLimit <= 0.0)
+            return 0.0;
+
+        double maxDeltaVelocity = accelerationLimit * dt;
+        double deltaVelocity = Math.Clamp(-currentVelocity, -maxDeltaVelocity, maxDeltaVelocity);
+        return deltaVelocity / dt;
+    }
+
+    private void RecordFlightAssistApplication(
+        ShipPropulsionCapability propulsion,
+        DVec3 assistForceShipLocalN)
+    {
+        _lastFlightAssistForceN = assistForceShipLocalN.Length;
+        _lastFlightAssistAccelerationMps2 = propulsion.CurrentMassKg > 0.0
+            ? _lastFlightAssistForceN / propulsion.CurrentMassKg
+            : 0.0;
+    }
 
     private void TickSystemSlipstreamPhysics(Ship ship, double dt)
     {
@@ -2281,6 +2349,16 @@ public sealed class SpaceSimulation : Simulation
             DataBus.Instruments.Publish(Topics.Flight.LkmZone,         (double)snap.LkmZone);
             DataBus.Instruments.Publish(Topics.Flight.LkmCompliance,   snap.LkmComplianceTimer);
             DataBus.Instruments.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);
+            DataBus.Instruments.Publish(Topics.Flight.FlightAssistActive, snap.FlightAssistOn ? 1.0 : 0.0);
+            _flightAssistTelemetryTimer -= _lastDt;
+            if (_flightAssistTelemetryTimer <= 0.0)
+            {
+                _flightAssistTelemetryTimer = FlightAssistTelemetryIntervalSeconds;
+                DataBus.Instruments.Publish(Topics.Flight.FlightAssistForceN, _lastFlightAssistForceN);
+                DataBus.Instruments.Publish(
+                    Topics.Flight.FlightAssistAccelerationMs2,
+                    _lastFlightAssistAccelerationMps2);
+            }
             DataBus.Instruments.Publish(Topics.Flight.RelativeSpeedMs,  snap.RelativeSpeedMs);
             DataBus.Instruments.Publish(Topics.Flight.ForwardSpeedMs,   snap.ForwardSpeedMs);
             DataBus.Instruments.Publish(Topics.Flight.AccelerationMs2,  snap.AccelerationMs2);

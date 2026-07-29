@@ -17,6 +17,12 @@ public sealed class StarterStationRelocationTests
     private static readonly DVec3 DefaultStarterSpawn = new(0, 0.5e11, 3e11);
 
     [Fact]
+    public void DefaultStarterHullIsCosmo()
+        => Assert.Equal(
+            CosmoHullDefinitionFactory.HullId,
+            SystemSpaceState.DefaultStarterHullTypeId);
+
+    [Fact]
     public void InitialNewGameStarterEntryQueuesStarterStationRelocation()
     {
         var (star, system, starterStation) = StarterSystemWithStarterStation();
