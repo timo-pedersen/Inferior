@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 namespace Inferior.Game.StationGen.Megastations;
 
 public sealed record MegastationMeshStats(
+    MegastationMeshPath MeshPath,
     int ExposedQuadCount,
     int TriangleCount,
     int VertexCount,
@@ -21,6 +22,8 @@ public sealed record MegastationMeshStats(
     int NonManifoldVertexCount,
     int EligibleChamferSegmentCount,
     int SuppressedConvexSegmentCount,
+    int ChamferRunCount,
+    int SuppressedChamferRunCount,
     int BevelQuadCount,
     int CornerCapCount,
     long TopologyBuildMilliseconds,
@@ -28,6 +31,13 @@ public sealed record MegastationMeshStats(
     BoundaryMeshValidationReport SharpValidation,
     BoundaryMeshValidationReport ChamferedValidation,
     BoundaryTopologySignature TopologySignature);
+
+public enum MegastationMeshPath
+{
+    SharpFallback,
+    Chamfered,
+    TopologyDebug,
+}
 
 public enum MegastationDebugColorMode
 {
@@ -37,6 +47,7 @@ public enum MegastationDebugColorMode
     EdgeClassification,
     ChamferEligibility,
     VertexComplexity,
+    RunValidation,
 }
 
 public static class MegastationPrototypeMeshBuilder
@@ -63,49 +74,41 @@ public static class MegastationPrototypeMeshBuilder
         if (requireValidStructuralBoundary && topology.Stats.InvalidDiagonalCount != 0)
             throw new InvalidOperationException($"Regularised megastation boundary still contains {topology.Stats.InvalidDiagonalCount} invalid diagonal edge configurations.");
 
+        Vector3 boundsHalf = new(
+            occupancy.Grid.Dimension(GridAxis.X) * 0.5f,
+            occupancy.Grid.Dimension(GridAxis.Y) * 0.5f,
+            occupancy.Grid.Dimension(GridAxis.Z) * 0.5f);
+        Vector3 boundsMin = -boundsHalf;
+        Vector3 boundsMax = boundsHalf;
+
         var sharpMesh = new StationModuleMesh();
         AddSharpStructuralFaces(topology, occupancy, sharpMesh, debugColorMode);
         sharpMesh.ApplyIlluminationFlags();
-        BoundaryMeshValidationReport sharpValidation = BoundaryMeshValidator.Validate(sharpMesh);
+        BoundaryMeshValidationReport sharpValidation = BoundaryMeshValidator.Validate(sharpMesh, boundsMin, boundsMax);
         if (requireValidStructuralBoundary && !sharpValidation.IsValid)
             throw new InvalidOperationException($"Sharp megastation boundary mesh is invalid: {sharpValidation.Summary}.");
 
         stopwatch.Restart();
-        bool attemptChamfer = topology.Stats.FlatContinuationCount == 0
-            && topology.Stats.EligibleChamferSegmentCount > 0;
-        int faceQuads;
-        int bevelQuads;
-        int cornerCaps;
-        BoundaryMeshValidationReport chamferedValidation;
-        if (attemptChamfer)
-        {
-            AddStructuralFaces(topology, occupancy, mesh, debugColorMode);
-            bevelQuads = AddBevels(topology, occupancy.Grid, mesh, debugColorMode);
-            cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode);
-            mesh.ApplyIlluminationFlags();
-            faceQuads = topology.Faces.Count;
-            chamferedValidation = BoundaryMeshValidator.Validate(mesh);
-            if (!chamferedValidation.IsValid)
-                throw new InvalidOperationException($"Chamfered megastation boundary mesh is invalid: {chamferedValidation.Summary}.");
-        }
-        else
-        {
-            AddSharpStructuralFaces(topology, occupancy, mesh, debugColorMode);
-            mesh.ApplyIlluminationFlags();
-            faceQuads = topology.Faces.Count;
-            bevelQuads = 0;
-            cornerCaps = 0;
-            chamferedValidation = BoundaryMeshValidator.Validate(mesh);
-            if (requireValidStructuralBoundary && !chamferedValidation.IsValid)
-                throw new InvalidOperationException($"Sharp fallback megastation boundary mesh is invalid: {chamferedValidation.Summary}.");
-        }
+        ChamferPlan chamferPlan = BuildChamferPlan(topology, occupancy.Grid, settings);
+        int faceQuads = AddStructuralFaces(topology, occupancy, mesh, debugColorMode, chamferPlan);
+        int bevelQuads = AddBevels(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
+        int cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
+        mesh.ApplyIlluminationFlags();
         stopwatch.Stop();
 
         var (_, indices) = mesh.ToIntArrays();
+        BoundaryMeshValidationReport finalValidation = BoundaryMeshValidator.Validate(mesh, boundsMin, boundsMax);
+        if (requireValidStructuralBoundary && !finalValidation.IsValid)
+            throw new InvalidOperationException($"Final megastation render mesh is invalid: {finalValidation.Summary}.");
+
+        MegastationMeshPath path = IsTopologyDebug(debugColorMode)
+            ? MegastationMeshPath.TopologyDebug
+            : bevelQuads > 0 || cornerCaps > 0 ? MegastationMeshPath.Chamfered : MegastationMeshPath.SharpFallback;
         return new MegastationMeshStats(
+            path,
             faceQuads,
             indices.Length / 3,
-            chamferedValidation.VertexCount,
+            finalValidation.VertexCount,
             1,
             topology.Stats.BoundaryFaceCount,
             topology.Stats.CanonicalEdgeSegmentCount,
@@ -118,14 +121,16 @@ public static class MegastationPrototypeMeshBuilder
             topology.Stats.SimpleConcaveVertexCount,
             topology.Stats.ComplexVertexCount,
             topology.Stats.NonManifoldVertexCount,
-            topology.Stats.EligibleChamferSegmentCount,
-            topology.Stats.SuppressedConvexSegmentCount,
+            chamferPlan.AcceptedEdges.Count,
+            topology.Stats.ConvexExteriorCount - chamferPlan.AcceptedEdges.Count,
+            chamferPlan.AcceptedRunCount,
+            chamferPlan.SuppressedRunCount,
             bevelQuads,
             cornerCaps,
             topologyMs,
             stopwatch.ElapsedMilliseconds,
             sharpValidation,
-            chamferedValidation,
+            finalValidation,
             BoundaryTopologySignatureBuilder.Compute(topology, settings));
     }
 
@@ -148,13 +153,14 @@ public static class MegastationPrototypeMeshBuilder
         BoundaryTopology topology,
         StructuralOccupancy occupancy,
         StationModuleMesh mesh,
-        MegastationDebugColorMode debugColorMode)
+        MegastationDebugColorMode debugColorMode,
+        ChamferPlan chamferPlan)
     {
         foreach (var face in topology.Faces)
         {
             var p = new Vector3[4];
             for (int i = 0; i < 4; i++)
-                p[i] = RetractedFaceVertex(topology, occupancy.Grid, face, face.Vertices[i]);
+                p[i] = RetractedFaceVertex(topology, occupancy.Grid, face, face.Vertices[i], chamferPlan);
 
             Color color = ColorFor(topology, occupancy, face, debugColorMode);
             AddQuad(mesh, p[0], p[1], p[2], p[3], BoundaryTopologyBuilder.Normal(face.Direction), color);
@@ -162,14 +168,14 @@ public static class MegastationPrototypeMeshBuilder
         return topology.Faces.Count;
     }
 
-    private static Vector3 Retraction(BoundaryTopology topology, BoundaryFace face, BoundaryEdgeKey edgeKey)
+    private static Vector3 Retraction(BoundaryTopology topology, BoundaryFace face, BoundaryEdgeKey edgeKey, ChamferPlan chamferPlan)
     {
+        if (!chamferPlan.AcceptedEdges.TryGetValue(edgeKey, out float width)) return Vector3.Zero;
         var edge = topology.EdgeByKey[edgeKey];
-        if (edge.ChamferEligibility != ChamferEligibility.Eligible) return Vector3.Zero;
         foreach (BoundaryFaceKey incident in edge.IncidentFaces)
         {
             if (incident == face.Key) continue;
-            return -BoundaryTopologyBuilder.Normal(incident.Direction) * edge.ChamferWidth;
+            return -BoundaryTopologyBuilder.Normal(incident.Direction) * width;
         }
         return Vector3.Zero;
     }
@@ -178,38 +184,49 @@ public static class MegastationPrototypeMeshBuilder
         BoundaryTopology topology,
         SliceGrid grid,
         BoundaryFace face,
-        GridVertexKey vertex)
+        GridVertexKey vertex,
+        ChamferPlan chamferPlan)
     {
         int index = Array.IndexOf(face.Vertices, vertex);
         if (index < 0)
             throw new ArgumentException("Vertex is not part of the face.", nameof(vertex));
+        if (chamferPlan.CollapsedEndpoints.Contains(vertex))
+            return BoundaryTopologyBuilder.Position(grid, vertex);
 
         BoundaryEdgeKey before = face.Edges[(index + 3) % 4];
         BoundaryEdgeKey after = face.Edges[index];
         return BoundaryTopologyBuilder.Position(grid, vertex)
-            + Retraction(topology, face, before)
-            + Retraction(topology, face, after);
+            + Retraction(topology, face, before, chamferPlan)
+            + Retraction(topology, face, after, chamferPlan);
     }
 
     private static int AddBevels(
         BoundaryTopology topology,
         SliceGrid grid,
         StationModuleMesh mesh,
-        MegastationDebugColorMode debugColorMode)
+        MegastationDebugColorMode debugColorMode,
+        ChamferPlan chamferPlan)
     {
         int count = 0;
-        foreach (var edge in topology.EdgeSegments.Where(e => e.ChamferEligibility == ChamferEligibility.Eligible))
+        foreach (var edge in topology.EdgeSegments.Where(e => chamferPlan.AcceptedEdges.ContainsKey(e.Key)))
         {
             BoundaryFaceKey aKey = edge.IncidentFaces[0];
             BoundaryFaceKey bKey = edge.IncidentFaces[1];
             BoundaryFace aFace = topology.FaceByKey[aKey];
             BoundaryFace bFace = topology.FaceByKey[bKey];
             Vector3 normal = Vector3.Normalize(BoundaryTopologyBuilder.Normal(aKey.Direction) + BoundaryTopologyBuilder.Normal(bKey.Direction));
-            Vector3 a0 = RetractedFaceVertex(topology, grid, aFace, edge.StartVertex);
-            Vector3 a1 = RetractedFaceVertex(topology, grid, aFace, edge.EndVertex);
-            Vector3 b1 = RetractedFaceVertex(topology, grid, bFace, edge.EndVertex);
-            Vector3 b0 = RetractedFaceVertex(topology, grid, bFace, edge.StartVertex);
-            AddQuad(mesh, a0, a1, b1, b0, normal, DebugColorForEdge(edge, debugColorMode, StructuralColor));
+            Vector3 a0 = RetractedFaceVertex(topology, grid, aFace, edge.StartVertex, chamferPlan);
+            Vector3 a1 = RetractedFaceVertex(topology, grid, aFace, edge.EndVertex, chamferPlan);
+            Vector3 b1 = RetractedFaceVertex(topology, grid, bFace, edge.EndVertex, chamferPlan);
+            Vector3 b0 = RetractedFaceVertex(topology, grid, bFace, edge.StartVertex, chamferPlan);
+            if (NearlySame(a0, b0) && NearlySame(a1, b1))
+                continue;
+            if (NearlySame(a0, b0))
+                AddTriangle(mesh, a0, a1, b1, normal, DebugColorForEdge(edge, debugColorMode, StructuralColor));
+            else if (NearlySame(a1, b1))
+                AddTriangle(mesh, a0, a1, b0, normal, DebugColorForEdge(edge, debugColorMode, StructuralColor));
+            else
+                AddQuad(mesh, a0, a1, b1, b0, normal, DebugColorForEdge(edge, debugColorMode, StructuralColor));
             count++;
         }
         return count;
@@ -219,7 +236,8 @@ public static class MegastationPrototypeMeshBuilder
         BoundaryTopology topology,
         SliceGrid grid,
         StationModuleMesh mesh,
-        MegastationDebugColorMode debugColorMode)
+        MegastationDebugColorMode debugColorMode,
+        ChamferPlan chamferPlan)
     {
         int count = 0;
         foreach (var vertex in topology.Vertices.Where(v => v.Classification == BoundaryVertexClass.SimpleConvexCorner))
@@ -232,7 +250,7 @@ public static class MegastationPrototypeMeshBuilder
             var normals = faces.Select(f => BoundaryTopologyBuilder.Normal(f.Direction)).ToArray();
             var edges = vertex.IncidentEdges
                 .Select(e => topology.EdgeByKey[e])
-                .Where(e => e.ChamferEligibility == ChamferEligibility.Eligible)
+                .Where(e => chamferPlan.AcceptedEdges.ContainsKey(e.Key))
                 .ToArray();
             if (normals.Length != 3 || edges.Length != 3) continue;
 
@@ -246,7 +264,7 @@ public static class MegastationPrototypeMeshBuilder
                 {
                     if (i == j) continue;
                     BoundaryEdgeSegment edge = edges.Single(e => faces[i].Edges.Contains(e.Key) && faces[j].Edges.Contains(e.Key));
-                    offset -= normals[j] * edge.ChamferWidth;
+                    offset -= normals[j] * chamferPlan.AcceptedEdges[edge.Key];
                 }
                 points[i] = p + offset;
             }
@@ -254,6 +272,229 @@ public static class MegastationPrototypeMeshBuilder
             count++;
         }
         return count;
+    }
+
+    private static int AddRunTerminationCaps(
+        BoundaryTopology topology,
+        SliceGrid grid,
+        StationModuleMesh mesh,
+        MegastationDebugColorMode debugColorMode,
+        ChamferPlan chamferPlan)
+    {
+        int count = 0;
+        var acceptedAtVertex = AcceptedEdgeCountsByVertex(topology, chamferPlan);
+        foreach (var run in chamferPlan.AcceptedRuns)
+        foreach (GridVertexKey endpoint in run.Endpoints)
+        {
+            if (acceptedAtVertex.GetValueOrDefault(endpoint) != 1) continue;
+            BoundaryEdgeSegment edge = run.Edges.First(e => e.StartVertex == endpoint || e.EndVertex == endpoint);
+            BoundaryFace aFace = topology.FaceByKey[edge.IncidentFaces[0]];
+            BoundaryFace bFace = topology.FaceByKey[edge.IncidentFaces[1]];
+            Vector3 p = BoundaryTopologyBuilder.Position(grid, endpoint);
+            Vector3 a = RetractedFaceVertex(topology, grid, aFace, endpoint, chamferPlan);
+            Vector3 b = RetractedFaceVertex(topology, grid, bFace, endpoint, chamferPlan);
+            GridVertexKey other = edge.StartVertex == endpoint ? edge.EndVertex : edge.StartVertex;
+            Vector3 expected = Vector3.Normalize(p - BoundaryTopologyBuilder.Position(grid, other));
+            AddTriangle(mesh, p, a, b, expected, DebugColorForVertex(topology.VertexByKey[endpoint], debugColorMode, CornerColor));
+            count++;
+        }
+        return count;
+    }
+
+    private static ChamferPlan BuildChamferPlan(
+        BoundaryTopology topology,
+        SliceGrid grid,
+        MegastationPrototypeSettings settings)
+    {
+        var candidates = topology.EdgeSegments
+            .Where(e => e.Classification == BoundaryEdgeClass.ConvexExterior && e.IncidentFaces.Count == 2)
+            .Select(e => new ChamferCandidate(e, RunKeyFor(topology, grid, settings, e), ResolveWidth(grid, settings, e)))
+            .Where(c => c.Width >= settings.MinimumStructuralChamferMetres)
+            .ToArray();
+
+        var candidatesByEdge = candidates.ToDictionary(c => c.Edge.Key);
+        var candidatesByVertex = new Dictionary<GridVertexKey, List<ChamferCandidate>>();
+        foreach (var candidate in candidates)
+        {
+            AddCandidate(candidatesByVertex, candidate.Edge.StartVertex, candidate);
+            AddCandidate(candidatesByVertex, candidate.Edge.EndVertex, candidate);
+        }
+
+        var seen = new HashSet<BoundaryEdgeKey>();
+        var runs = new List<ChamferRun>();
+        foreach (var candidate in candidates.OrderBy(c => c.Edge.Key))
+        {
+            if (!seen.Add(candidate.Edge.Key)) continue;
+            var edges = new List<BoundaryEdgeSegment>();
+            var q = new Queue<ChamferCandidate>();
+            q.Enqueue(candidate);
+            while (q.Count > 0)
+            {
+                var current = q.Dequeue();
+                edges.Add(current.Edge);
+                foreach (GridVertexKey vertex in new[] { current.Edge.StartVertex, current.Edge.EndVertex })
+                {
+                    if (!candidatesByVertex.TryGetValue(vertex, out var adjacent)) continue;
+                    foreach (var next in adjacent)
+                    {
+                        if (next.Key != candidate.Key) continue;
+                        if (!seen.Add(next.Edge.Key)) continue;
+                        q.Enqueue(next);
+                    }
+                }
+            }
+
+            GridVertexKey[] endpoints = EndpointsForRun(edges);
+            bool accepted = endpoints.Length == 2
+                && endpoints.All(e => EndpointSupportsCompleteRun(topology.VertexByKey[e].Classification));
+            float width = edges.Min(e => candidatesByEdge[e.Key].Width);
+            runs.Add(new ChamferRun(edges.OrderBy(e => e.Key).ToArray(), endpoints, width, accepted));
+        }
+
+        bool changed;
+        do
+        {
+            changed = false;
+            var currentlyAcceptedEdges = runs.Where(r => r.Accepted).SelectMany(r => r.Edges).ToDictionary(e => e.Key);
+            foreach (var vertex in topology.Vertices)
+            {
+                int acceptedAtVertex = vertex.IncidentEdges.Count(currentlyAcceptedEdges.ContainsKey);
+                if (VertexSupportsAcceptedEdgeCount(topology, vertex, currentlyAcceptedEdges, acceptedAtVertex)) continue;
+
+                foreach (var run in runs.Where(r => r.Accepted && r.Endpoints.Contains(vertex.Key)))
+                {
+                    run.Accepted = false;
+                    changed = true;
+                }
+            }
+        }
+        while (changed);
+
+        var acceptedEdges = new Dictionary<BoundaryEdgeKey, float>();
+        foreach (var run in runs.Where(r => r.Accepted))
+        foreach (var edge in run.Edges)
+            acceptedEdges[edge.Key] = run.Width;
+
+        return new ChamferPlan(
+            acceptedEdges,
+            runs.Where(r => r.Accepted).OrderBy(r => r.Edges[0].Key).ToArray(),
+            CollapsedEndpoints(topology, acceptedEdges),
+            runs.Count(r => r.Accepted),
+            runs.Count(r => !r.Accepted));
+    }
+
+    private static IReadOnlySet<GridVertexKey> CollapsedEndpoints(
+        BoundaryTopology topology,
+        IReadOnlyDictionary<BoundaryEdgeKey, float> acceptedEdges)
+        => topology.Vertices
+            .Where(v => v.Classification == BoundaryVertexClass.SimpleConvexCorner)
+            .Where(v =>
+            {
+                int count = v.IncidentEdges.Count(acceptedEdges.ContainsKey);
+                return count is 1 or 2;
+            })
+            .Select(v => v.Key)
+            .ToHashSet();
+
+    private static bool EndpointSupportsCompleteRun(BoundaryVertexClass classification)
+        => classification is BoundaryVertexClass.SimpleConvexCorner or BoundaryVertexClass.StraightConvexContinuation;
+
+    private static bool VertexSupportsAcceptedEdgeCount(
+        BoundaryTopology topology,
+        BoundaryVertex vertex,
+        IReadOnlyDictionary<BoundaryEdgeKey, BoundaryEdgeSegment> acceptedEdges,
+        int acceptedAtVertex)
+    {
+        if (acceptedAtVertex == 0) return true;
+        return vertex.Classification switch
+        {
+            BoundaryVertexClass.SimpleConvexCorner => acceptedAtVertex <= 3,
+            BoundaryVertexClass.StraightConvexContinuation => acceptedAtVertex == 2
+                && vertex.IncidentEdges.Where(acceptedEdges.ContainsKey).Select(e => e.Axis).Distinct().Count() == 1,
+            _ => false,
+        };
+    }
+
+    private static Dictionary<GridVertexKey, int> AcceptedEdgeCountsByVertex(BoundaryTopology topology, ChamferPlan plan)
+    {
+        var counts = new Dictionary<GridVertexKey, int>();
+        foreach (var edge in topology.EdgeSegments.Where(e => plan.AcceptedEdges.ContainsKey(e.Key)))
+        {
+            counts[edge.StartVertex] = counts.GetValueOrDefault(edge.StartVertex) + 1;
+            counts[edge.EndVertex] = counts.GetValueOrDefault(edge.EndVertex) + 1;
+        }
+        return counts;
+    }
+
+    private static void AddCandidate(Dictionary<GridVertexKey, List<ChamferCandidate>> map, GridVertexKey vertex, ChamferCandidate candidate)
+    {
+        if (!map.TryGetValue(vertex, out var list))
+        {
+            list = [];
+            map[vertex] = list;
+        }
+        list.Add(candidate);
+    }
+
+    private static GridVertexKey[] EndpointsForRun(IReadOnlyList<BoundaryEdgeSegment> edges)
+    {
+        var counts = new Dictionary<GridVertexKey, int>();
+        foreach (var edge in edges)
+        {
+            counts[edge.StartVertex] = counts.GetValueOrDefault(edge.StartVertex) + 1;
+            counts[edge.EndVertex] = counts.GetValueOrDefault(edge.EndVertex) + 1;
+        }
+        return counts.Where(kv => kv.Value == 1).Select(kv => kv.Key).Order().ToArray();
+    }
+
+    private static ChamferRunKey RunKeyFor(
+        BoundaryTopology topology,
+        SliceGrid grid,
+        MegastationPrototypeSettings settings,
+        BoundaryEdgeSegment edge)
+    {
+        var faces = edge.IncidentFaces
+            .Select(f => new IncidentSurfaceKey(f.Direction, PlaneIndex(f)))
+            .Order()
+            .ToArray();
+        return new ChamferRunKey(edge.Key.Axis, faces[0], faces[1]);
+    }
+
+    private static int PlaneIndex(BoundaryFaceKey face)
+        => face.Direction switch
+        {
+            GridDirection.PositiveX => face.X + 1,
+            GridDirection.NegativeX => face.X,
+            GridDirection.PositiveY => face.Y + 1,
+            GridDirection.NegativeY => face.Y,
+            GridDirection.PositiveZ => face.Z + 1,
+            _ => face.Z,
+        };
+
+    private static float ResolveWidth(SliceGrid grid, MegastationPrototypeSettings settings, BoundaryEdgeSegment edge)
+    {
+        float shortest = ShortestRelevantSpan(grid, edge);
+        return MathF.Min(settings.DesiredStructuralChamferMetres, shortest * settings.StructuralChamferSpanFraction);
+    }
+
+    private static float ShortestRelevantSpan(SliceGrid grid, BoundaryEdgeSegment edge)
+    {
+        float min = grid.GetCellSize(edge.Key.Axis, edge.Key.Start);
+        foreach (GridAxis axis in Enum.GetValues<GridAxis>())
+        {
+            if (axis == edge.Key.Axis) continue;
+            int vertexCoord = axis switch
+            {
+                GridAxis.X => edge.StartVertex.X,
+                GridAxis.Y => edge.StartVertex.Y,
+                _          => edge.StartVertex.Z,
+            };
+            if (vertexCoord > 0)
+                min = MathF.Min(min, grid.GetCellSize(axis, vertexCoord - 1));
+            if (vertexCoord < grid.Count(axis))
+                min = MathF.Min(min, grid.GetCellSize(axis, vertexCoord));
+        }
+        return min;
     }
 
     private static void AddQuad(StationModuleMesh mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 expectedNormal, Color color)
@@ -271,6 +512,9 @@ public static class MegastationPrototypeMeshBuilder
         else
             mesh.AddTriangle(a, b, c, color);
     }
+
+    private static bool NearlySame(Vector3 a, Vector3 b)
+        => Vector3.DistanceSquared(a, b) < 0.000001f;
 
     private static Color ColorFor(
         BoundaryTopology topology,
@@ -336,7 +580,7 @@ public static class MegastationPrototypeMeshBuilder
     private static Color DebugColorForEdge(BoundaryEdgeSegment? edge, MegastationDebugColorMode mode, Color fallback)
     {
         if (edge is null) return fallback;
-        if (mode == MegastationDebugColorMode.ChamferEligibility)
+        if (mode is MegastationDebugColorMode.ChamferEligibility or MegastationDebugColorMode.RunValidation)
             return edge.ChamferEligibility == ChamferEligibility.Eligible ? new Color(235, 210, 80) : new Color(80, 80, 80);
         if (mode != MegastationDebugColorMode.EdgeClassification)
             return fallback;
@@ -363,5 +607,50 @@ public static class MegastationPrototypeMeshBuilder
             BoundaryVertexClass.NonManifold => new Color(255, 0, 255),
             _ => new Color(80, 80, 80),
         };
+    }
+
+    private static bool IsTopologyDebug(MegastationDebugColorMode mode)
+        => mode is MegastationDebugColorMode.EdgeClassification
+            or MegastationDebugColorMode.ChamferEligibility
+            or MegastationDebugColorMode.VertexComplexity
+            or MegastationDebugColorMode.RunValidation;
+
+    private sealed record ChamferPlan(
+        IReadOnlyDictionary<BoundaryEdgeKey, float> AcceptedEdges,
+        IReadOnlyList<ChamferRun> AcceptedRuns,
+        IReadOnlySet<GridVertexKey> CollapsedEndpoints,
+        int AcceptedRunCount,
+        int SuppressedRunCount);
+
+    private sealed record ChamferCandidate(
+        BoundaryEdgeSegment Edge,
+        ChamferRunKey Key,
+        float Width);
+
+    private sealed class ChamferRun(
+        IReadOnlyList<BoundaryEdgeSegment> edges,
+        IReadOnlyList<GridVertexKey> endpoints,
+        float width,
+        bool accepted)
+    {
+        public IReadOnlyList<BoundaryEdgeSegment> Edges { get; } = edges;
+        public IReadOnlyList<GridVertexKey> Endpoints { get; } = endpoints;
+        public float Width { get; } = width;
+        public bool Accepted { get; set; } = accepted;
+    }
+
+    private readonly record struct ChamferRunKey(
+        GridAxis Axis,
+        IncidentSurfaceKey A,
+        IncidentSurfaceKey B);
+
+    private readonly record struct IncidentSurfaceKey(GridDirection Direction, int PlaneIndex)
+        : IComparable<IncidentSurfaceKey>
+    {
+        public int CompareTo(IncidentSurfaceKey other)
+        {
+            int c = Direction.CompareTo(other.Direction);
+            return c != 0 ? c : PlaneIndex.CompareTo(other.PlaneIndex);
+        }
     }
 }

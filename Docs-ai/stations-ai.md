@@ -86,14 +86,18 @@ Implementation:
 - `BoundaryTopologyBuilder` builds a canonical CPU-side boundary graph from exact integer grid
   identities on `RegularisedOccupancy`: boundary faces, canonical edge segments, grid vertices,
   edge classes, vertex classes, conservative chamfer eligibility, and per-edge clamp widths.
-- `BoundaryMeshValidator` validates sharp and final boundary meshes for finite vertices,
-  degenerate triangles, duplicate triangles, and manifold edge incidence.
+- `BoundaryMeshValidator` validates sharp and final boundary meshes from the exact rendered
+  vertex/index arrays for finite vertices, bounds, degenerate triangles, duplicate triangles,
+  open edges, non-manifold edge incidence, axis-aligned T-junctions, and isolated sliver
+  components.
 - `MegastationPrototypeMeshBuilder` consumes `BoundaryTopology` and emits the final exterior
   boundary mesh through `StationModuleMesh`; it uses the existing station hull lighting/render
   path and does not add a prototype shader. Optional mesh colouring supports structural-vs-urban,
-  region-owner, outward-normal, edge-classification, chamfer-eligibility, and vertex-complexity
-  debug modes. Current full megastation output is validated sharp fallback; simple non-tiled
-  synthetic topology can emit validated bevel quads and corner caps.
+  region-owner, outward-normal, edge-classification, chamfer-eligibility, vertex-complexity, and
+  run-validation debug modes. Complete convex runs are merged from canonical edge segments by
+  axis and incident surface pair, use the minimum safe clamped width across the run, and render
+  as continuous bevels with corner caps or tapered endpoints at deliberately sharp simple
+  corners. Complex/concave endpoints remain suppressed.
 - `MegastationMassingSignatureBuilder` computes GraphicsDevice-free SHA-256 regression
   signatures over canonical bytes, not GPU buffers. The long-lived raw massing signature covers
   seed compatibility, raw massing algorithm versions, slice widths, core ranges, station-wide
@@ -138,8 +142,9 @@ regularised occupied cells, repair additions and removals, urbanized face count,
 face/edge/corner occupied cells, total district count, maximum face depth, per-face summaries,
 per-edge profile summaries, per-corner extent summaries, raw and regularised connected
 components, sealed-cavity state, edge/vertex critical counts before and after regularisation,
-boundary face/edge/vertex class counts, eligible/suppressed chamfer counts, bevel/corner-cap
-counts, topology signature, sharp/final validation reports, exposed quads, triangles, vertices,
+boundary face/edge/vertex class counts, mesh path, rendered vertex/triangle counts,
+eligible/suppressed chamfer segment counts, accepted/suppressed run counts, rendered
+bevel/corner-cap counts, topology signature, sharp/final validation reports, exposed quads,
 mesh pages, topology/mesh timings, and generation time.
 
 Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
@@ -151,9 +156,9 @@ Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` 
 
 Prototype B is visually accepted and frozen at the raw occupied-massing layer. C0 is visually
 accepted and frozen as the topology-regularised baseline. C2 boundary topology is implemented
-and awaits visual confirmation; full megastation chamfer emission remains conservatively
-suppressed to validated sharp output until merged coplanar face topology exists. Deferred by
-design: broad production chamfers, semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
+and awaits visual confirmation; fixed fixtures now render through the chamfered path with
+non-zero bevel/cap counts and exact final-array validation clean. Deferred by design:
+semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
 attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges, overhangs,
 docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
 

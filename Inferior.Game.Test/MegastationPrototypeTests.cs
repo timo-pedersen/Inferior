@@ -388,7 +388,10 @@ public sealed class MegastationPrototypeTests
         Assert.True(result.Diagnostics.SharpBoundaryValidation.IsValid);
         Assert.True(result.Diagnostics.ChamferedBoundaryValidation.IsValid);
         Assert.Equal(result.Diagnostics.BoundaryFaceCount, result.Diagnostics.ExposedQuadCount);
-        Assert.Equal(result.Diagnostics.SharpBoundaryValidation.TriangleCount, result.Diagnostics.ChamferedBoundaryValidation.TriangleCount);
+        Assert.Equal(MegastationMeshPath.Chamfered, result.Diagnostics.MeshPath);
+        Assert.True(result.Diagnostics.BevelQuadCount > 0);
+        Assert.True(result.Diagnostics.CornerCapCount > 0);
+        Assert.True(result.Diagnostics.ChamferedBoundaryValidation.TriangleCount > result.Diagnostics.SharpBoundaryValidation.TriangleCount);
     }
 
     [Fact]
@@ -435,6 +438,66 @@ public sealed class MegastationPrototypeTests
         Assert.True(stats.SharpValidation.IsValid);
         Assert.True(stats.ChamferedValidation.IsValid);
         Assert.True(stats.ChamferedValidation.TriangleCount > stats.SharpValidation.TriangleCount);
+    }
+
+    [Fact]
+    public void BoundaryMeshValidator_CatchesOpenAndTJunctionGeometry()
+    {
+        var open = new StationModuleMesh();
+        open.AddTriangle(new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(0, 1, 0), Color.White);
+        var openReport = BoundaryMeshValidator.Validate(open);
+        Assert.False(openReport.IsValid);
+        Assert.True(openReport.OpenEdgeCount > 0);
+
+        var tJunction = new StationModuleMesh();
+        tJunction.AddTriangle(new Vector3(0, 0, 0), new Vector3(2, 0, 0), new Vector3(0, 1, 0), Color.White);
+        tJunction.AddTriangle(new Vector3(1, 0, 0), new Vector3(2, 1, 0), new Vector3(0, 1, 0), Color.White);
+        var tJunctionReport = BoundaryMeshValidator.Validate(tJunction);
+        Assert.False(tJunctionReport.IsValid);
+        Assert.True(tJunctionReport.TJunctionCount > 0);
+    }
+
+    [Fact]
+    public void TowerOnBase_KeepsRootConcaveSharpAndValidatesFinalMesh()
+    {
+        var grid = UnitGrid(5, 3, 5);
+        var occupancy = new StructuralOccupancy(grid);
+        for (int x = 0; x < 5; x++)
+        for (int z = 0; z < 5; z++)
+            occupancy.MarkUrban(x, 0, z, MegacellOwner.FaceInterior, "base");
+        occupancy.MarkUrban(2, 1, 2, MegacellOwner.FaceInterior, "tower");
+        occupancy.MarkUrban(2, 2, 2, MegacellOwner.FaceInterior, "tower");
+
+        var topology = BoundaryTopologyBuilder.Build(occupancy, MegastationPrototypeSettings.Default);
+        var mesh = new StationModuleMesh();
+        var stats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
+
+        Assert.True(topology.Stats.ConcaveExteriorCount > 0);
+        Assert.True(stats.BevelQuadCount > 0);
+        Assert.True(stats.ChamferedValidation.IsValid);
+        Assert.Equal(0, topology.Stats.InvalidDiagonalCount);
+    }
+
+    [Fact]
+    public void RoofInset_KeepsInnerConcavePerimeterSharpAndFinalMeshClosed()
+    {
+        var grid = UnitGrid(5, 1, 5);
+        var occupancy = new StructuralOccupancy(grid);
+        for (int x = 0; x < 5; x++)
+        for (int z = 0; z < 5; z++)
+        {
+            if (x is >= 1 and <= 3 && z is >= 1 and <= 3) continue;
+            occupancy.MarkUrban(x, 0, z, MegacellOwner.FaceInterior, "inset");
+        }
+
+        var topology = BoundaryTopologyBuilder.Build(occupancy, MegastationPrototypeSettings.Default);
+        var mesh = new StationModuleMesh();
+        var stats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
+
+        Assert.True(topology.Stats.ConcaveExteriorCount > 0);
+        Assert.True(stats.ChamferedValidation.IsValid);
+        Assert.Equal(0, stats.ChamferedValidation.OpenEdgeCount);
+        Assert.Equal(0, stats.ChamferedValidation.TJunctionCount);
     }
 
     [Fact]

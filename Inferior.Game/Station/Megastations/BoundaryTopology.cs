@@ -362,7 +362,7 @@ public static class BoundaryTopologyBuilder
             classification = BoundaryVertexClass.SimpleConvexCorner;
         else if (occupiedOctants == 7)
             classification = BoundaryVertexClass.SimpleConcaveCorner;
-        else if (!hasConcave && occupiedOctants == 2 && convexEdges.Length == 2 && convexEdges[0].Axis == convexEdges[1].Axis)
+        else if (occupiedOctants == 2 && OccupiedOctantsShareGridEdge(occupancy, key))
             classification = BoundaryVertexClass.StraightConvexContinuation;
         else if (faces.Length == 0)
             classification = BoundaryVertexClass.Empty;
@@ -381,6 +381,23 @@ public static class BoundaryTopologyBuilder
             if (occupancy.IsOccupied(vertex.X + dx, vertex.Y + dy, vertex.Z + dz))
                 count++;
         return count;
+    }
+
+    private static bool OccupiedOctantsShareGridEdge(StructuralOccupancy occupancy, GridVertexKey vertex)
+    {
+        var occupied = new List<(int dx, int dy, int dz)>(2);
+        for (int dx = -1; dx <= 0; dx++)
+        for (int dy = -1; dy <= 0; dy++)
+        for (int dz = -1; dz <= 0; dz++)
+            if (occupancy.IsOccupied(vertex.X + dx, vertex.Y + dy, vertex.Z + dz))
+                occupied.Add((dx, dy, dz));
+
+        if (occupied.Count != 2) return false;
+        int differingAxes = 0;
+        if (occupied[0].dx != occupied[1].dx) differingAxes++;
+        if (occupied[0].dy != occupied[1].dy) differingAxes++;
+        if (occupied[0].dz != occupied[1].dz) differingAxes++;
+        return differingAxes == 1;
     }
 
     private static ChamferEligibility ResolveEligibility(

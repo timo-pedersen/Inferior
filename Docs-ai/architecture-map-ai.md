@@ -419,7 +419,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 **Station/Megastations/** — occupancy-generated megastation prototype path
 
 - `ConnectivityValidation.cs` — GraphicsDevice-free validation of occupied-volume connected components and sealed empty cavities.
-- `BoundaryMeshValidation.cs` — CPU-side boundary mesh validation for finite vertices, degenerates, duplicate triangles, and manifold edge incidence.
+- `BoundaryMeshValidation.cs` — CPU-side final-array mesh validation for finite vertices, bounds, degenerates, duplicate triangles, open/non-manifold edges, T-junctions, and sliver components.
 - `BoundaryTopology.cs` — exact-grid boundary face/edge/vertex topology classification and conservative chamfer eligibility.
 - `BoundaryTopologySignature.cs` — canonical semantic SHA-256 signature for boundary topology and chamfer eligibility.
 - `CornerRegionGenerator.cs` — plans and applies eight shared corner-region masses around the structural core.

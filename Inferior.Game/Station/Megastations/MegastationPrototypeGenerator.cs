@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using Inferior.Galaxy;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -7,6 +8,7 @@ namespace Inferior.Game.StationGen.Megastations;
 
 public sealed record MegastationPrototypeDiagnostics(
     string StationPersistenceId,
+    string BuildIdentifier,
     int GeneratorVersion,
     int SeedCompatibilityVersion,
     int TopologyRegularisationAlgorithmVersion,
@@ -62,8 +64,11 @@ public sealed record MegastationPrototypeDiagnostics(
     int NonManifoldVertexCount,
     int EligibleChamferSegmentCount,
     int SuppressedConvexSegmentCount,
+    int ChamferRunCount,
+    int SuppressedChamferRunCount,
     int BevelQuadCount,
     int CornerCapCount,
+    MegastationMeshPath MeshPath,
     string BoundaryTopologySignature,
     BoundaryMeshValidationReport SharpBoundaryValidation,
     BoundaryMeshValidationReport ChamferedBoundaryValidation,
@@ -169,6 +174,7 @@ public static class MegastationPrototypeGenerator
 
         var diag = new MegastationPrototypeDiagnostics(
             persistenceId,
+            BuildIdentifier(),
             settings.GeneratorVersion,
             settings.SeedCompatibilityVersion,
             settings.TopologyRegularisationAlgorithmVersion,
@@ -224,8 +230,11 @@ public static class MegastationPrototypeGenerator
             meshStats.NonManifoldVertexCount,
             meshStats.EligibleChamferSegmentCount,
             meshStats.SuppressedConvexSegmentCount,
+            meshStats.ChamferRunCount,
+            meshStats.SuppressedChamferRunCount,
             meshStats.BevelQuadCount,
             meshStats.CornerCapCount,
+            meshStats.MeshPath,
             meshStats.TopologySignature.Semantic,
             meshStats.SharpValidation,
             meshStats.ChamferedValidation,
@@ -242,6 +251,12 @@ public static class MegastationPrototypeGenerator
         tex.SetData([color]);
         return tex;
     }
+
+    private static string BuildIdentifier()
+        => typeof(MegastationPrototypeGenerator).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        ?? typeof(MegastationPrototypeGenerator).Assembly.GetName().Version?.ToString()
+        ?? "unknown";
 
     private static (StructuralOccupancy Occupancy, TopologyRegularisationReport Report) BuildDisabledRegularisationResult(
         StructuralOccupancy occupancy,
