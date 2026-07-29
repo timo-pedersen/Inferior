@@ -20,9 +20,14 @@ public static partial class StationDecorator
     // the existing pass toward antennas/masts — heavily": skips the 35% placement gate
     // (near-certain instead of occasional) and rolls more instances per call. Nothing else
     // about antenna placement/appearance changes — same colours, same Yagi/spike mix.
+    // Brief Z4 Fix 2: explicitCount (only ever set alongside heavy, from RunZonePasses'
+    // CommsArray case) replaces the flat rng.Next(2,5) with an area-scaled count so a large
+    // CommsArray zone reads as more than a fixed 2-4 masts. Non-CommsArray/non-heavy callers
+    // are entirely unaffected — the parameter defaults to null and old behaviour is unchanged.
     private static void GenerateAntennas(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, List<StationLightInfo> lights,
-        FaceOccupancy occupancy, List<PlacedGreebleInfo> placements, bool heavy = false)
+        FaceOccupancy occupancy, List<PlacedGreebleInfo> placements, bool heavy = false,
+        int? explicitCount = null)
     {
         if (!face.IsExposed)           return;
         if (face.LocalNormal.Y < -0.3f) return;
@@ -36,7 +41,7 @@ public static partial class StationDecorator
         bool faceIsWhite = rng.NextDouble() < 0.25;
         if (faceIsWhite) antennaCol = new Color(228, 232, 230);
 
-        int count = heavy ? rng.Next(2, 5) : rng.Next(1, 3);
+        int count = explicitCount ?? (heavy ? rng.Next(2, 5) : rng.Next(1, 3));
         for (int i = 0; i < count; i++)
         {
             float u = (float)(rng.NextDouble() - 0.5) * face.Width  * 0.5f;

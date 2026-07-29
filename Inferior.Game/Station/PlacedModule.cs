@@ -79,4 +79,10 @@ public sealed class PlacedModule
     // overlay and the in-game per-zone content dump.
     internal        List<StationDecorator.ZoneDebugRecord> DebugZones { get; } = [];
     internal        StationDecorator.ModuleZoneBudget?      ZoneBudget { get; set; }
+
+    // Brief Z4 Fix 3: pure observability, incremented at the moment GenerateTankFarmContent
+    // rolls and places each cluster — same "never read by decision-making code" contract as
+    // DebugZones above. Feeds the requested-vs-produced-by-size report the brief's
+    // verification section asks for.
+    internal int TankFarmLargeRequested, TankFarmLargeProduced, TankFarmSmallRequested, TankFarmSmallProduced;
 }

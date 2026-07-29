@@ -247,15 +247,36 @@ public static partial class StationDecorator
         return cap.HasValue ? MathF.Min(r, cap.Value) : r;
     }
 
+    // Brief Z4 Fix 3: dedicated "large tank" radius range for TankFarm's explicit size mix —
+    // distinct from PickTankRadius's own natural "rare" 2.50-5.00m tier (left completely
+    // untouched, still reachable by ordinary/Machinery/CommsArray tanks exactly as before).
+    // TankFarm explicitly ROLLS a fraction of its clusters into this range rather than
+    // relying on the natural tier's low (7%) probability. Centred on Timo's own "~5m
+    // diameter" starting size (2.0-3.2m radius = 4.0-6.4m diameter).
+    private static float PickLargeTankRadius(System.Random rng) => 2.0f + (float)rng.NextDouble() * 1.2f;
+
+    // Brief Z4 Fix 3: tessellation tracks world size. A 5m tank with the same 8-sided
+    // cross-section as a 1m tank reads as a puffed-up small tank — silhouette smoothness is
+    // itself a size cue. Linear in radius, clamped to a sane range: small/medium tanks
+    // (0.3-0.85m) land at 7-9 sides, close to today's flat 8 (a deliberate near-match, not a
+    // coincidence — this mapping is only ever used where Z4 opts in, never on the ordinary
+    // per-face path, so nothing here needs to reproduce the old constant exactly); the new
+    // large tier (2.0-3.2m) reads at 14-19 sides; PickTankRadius's own rare ceiling (5.0m)
+    // caps at 24.
+    private static int TankSidesForRadius(float radius)
+        => Math.Clamp((int)MathF.Round(6f + radius * 4f), 6, 24);
+
+    // Brief Z4 Fix 3: sides is now a parameter (was a hardcoded local const) so tessellation
+    // can track world size — callers not opting into that (every pre-Z4 call site) pass the
+    // same literal 8 the constant used to be, so their geometry is unchanged.
     private static void AddTank(StationModuleMesh mesh,
         Vector3 start, Vector3 end, float bodyRadius,
         Color bodyColor, Color stripeColor, int stripeCount,
         Color pipeColor, Vector3 attachPoint,
         Vector3 labelNormal, Vector3 labelUp,
         string substanceName, int tankId,
-        System.Random rng)
+        System.Random rng, int sides = 8)
     {
-        const int sides = 8;
         mesh.AddPrismPipe(start, end, bodyRadius, sides, bodyColor);
 
         var (startRing, endRing) = GetPrismRings(start, end, bodyRadius, sides);
@@ -295,13 +316,18 @@ public static partial class StationDecorator
         AddTankGreebles(mesh, start, end, bodyRadius, labelNormal, bodyColor, stripeColor, rng);
     }
 
-    private static void PlaceTankRow(PlacedModule mod, FaceInfo face,
+    // Brief Z4 Fix 3: scaledTessellation/preferLarge (both default false, unchanged
+    // behaviour) and a bool return (whether anything was actually placed) — see
+    // GenerateTanks' and GenerateTankFarmContent's own comments for how these are used.
+    private static bool PlaceTankRow(PlacedModule mod, FaceInfo face,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
-        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap)
+        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap,
+        bool scaledTessellation = false, bool preferLarge = false)
     {
         int   maxCount = mod.Definition.Category is "fuel" or "industrial" or "military" ? 6 : 4;
         int   count    = 2 + rng.Next(maxCount - 1);
-        float radius   = PickTankRadius(rng, sizeCap);
+        float radius   = preferLarge ? PickLargeTankRadius(rng) : PickTankRadius(rng, sizeCap);
+        int   sides    = scaledTessellation ? TankSidesForRadius(radius) : 8;
         float length   = radius * 2.0f + (float)rng.NextDouble() * radius * 2.5f;
         float gap      = radius * 0.14f;
         float step     = radius * 2 + gap;
@@ -310,10 +336,10 @@ public static partial class StationDecorator
         int maxFit = Math.Max(2, (int)((face.Width * 0.88f + gap) / step));
         count = Math.Min(count, maxFit);
         float totalU = count * step - gap;
-        if (totalU > face.Width) return;
+        if (totalU > face.Width) return false;
 
         float vOff = -face.Height * 0.5f + radius + 0.8f;
-        if (!occupancy.TryOccupy(0, vOff, totalU * 0.5f + 0.3f, radius + 0.4f)) return;
+        if (!occupancy.TryOccupy(0, vOff, totalU * 0.5f + 0.3f, radius + 0.4f)) return false;
 
         Color pipeColor  = DarkenColor(stripeColor, 0.75f);
         Color strutColor = new Color(80, 75, 70);
@@ -331,7 +357,7 @@ public static partial class StationDecorator
                     bodyColor, stripeColor, stripes, pipeColor,
                     LocalPointAbs(face, cu, vOff, 0),
                     face.LocalNormal, face.LocalUp,
-                    substance, i + 1, rng);
+                    substance, i + 1, rng, sides);
         }
 
         // Banding straps across the whole row (top and bottom)
@@ -354,18 +380,21 @@ public static partial class StationDecorator
                 mesh.AddPrismPipe(topA, botB, radius * 0.032f, 4, strutColor);
             }
         }
+        return true;
     }
 
-    private static void PlaceSingleTank(PlacedModule mod, FaceInfo face,
+    private static bool PlaceSingleTank(PlacedModule mod, FaceInfo face,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
-        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap)
+        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap,
+        bool scaledTessellation = false, bool preferLarge = false)
     {
-        float radius = MathF.Max(0.80f, PickTankRadius(rng, sizeCap));
+        float radius = preferLarge ? PickLargeTankRadius(rng) : MathF.Max(0.80f, PickTankRadius(rng, sizeCap));
+        int   sides  = scaledTessellation ? TankSidesForRadius(radius) : 8;
         float length = radius * 1.8f + (float)rng.NextDouble() * radius * 3f;
         float cu     = ((float)rng.NextDouble() - 0.5f) * MathF.Max(0.1f, face.Width  - radius * 2.5f);
         float cv     = ((float)rng.NextDouble() - 0.5f) * MathF.Max(0.1f, face.Height - radius * 2.5f);
 
-        if (!occupancy.TryOccupy(cu, cv, radius * 1.3f, radius * 1.3f)) return;
+        if (!occupancy.TryOccupy(cu, cv, radius * 1.3f, radius * 1.3f)) return false;
 
         Color pipeColor = DarkenColor(stripeColor, 0.75f);
         AddTank(mesh,
@@ -374,19 +403,22 @@ public static partial class StationDecorator
                 radius, bodyColor, stripeColor, stripes, pipeColor,
                 LocalPointAbs(face, cu, cv, 0),
                 face.LocalRight, face.LocalUp,            // label on the side of the silo
-                substance, 1, rng);
+                substance, 1, rng, sides);
+        return true;
     }
 
-    private static void PlaceTankPair(PlacedModule mod, FaceInfo face,
+    private static bool PlaceTankPair(PlacedModule mod, FaceInfo face,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng,
-        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap)
+        string substance, Color bodyColor, Color stripeColor, int stripes, float? sizeCap,
+        bool scaledTessellation = false, bool preferLarge = false)
     {
-        float radius  = PickTankRadius(rng, sizeCap);
+        float radius  = preferLarge ? PickLargeTankRadius(rng) : PickTankRadius(rng, sizeCap);
+        int   sides   = scaledTessellation ? TankSidesForRadius(radius) : 8;
         float length  = radius * 2.5f + (float)rng.NextDouble() * radius * 2.5f;
         float spacing = radius * 2.4f;
 
-        if (spacing + radius > face.Width * 0.5f) return;
-        if (!occupancy.TryOccupy(0, 0, spacing * 0.5f + radius + 0.3f, length * 0.5f + 0.4f)) return;
+        if (spacing + radius > face.Width * 0.5f) return false;
+        if (!occupancy.TryOccupy(0, 0, spacing * 0.5f + radius + 0.3f, length * 0.5f + 0.4f)) return false;
 
         Color pipeColor = DarkenColor(stripeColor, 0.75f);
 
@@ -400,7 +432,7 @@ public static partial class StationDecorator
                     radius, bodyColor, stripeColor, stripes, pipeColor,
                     LocalPointAbs(face, cu, 0, 0),
                     face.LocalNormal, face.LocalUp,
-                    substance, side < 0 ? 1 : 2, rng);
+                    substance, side < 0 ? 1 : 2, rng, sides);
         }
 
         // Cross-pipe in stripe colour between the two tanks
@@ -408,10 +440,16 @@ public static partial class StationDecorator
             LocalPointAbs(face, -spacing * 0.5f, 0, radius),
             LocalPointAbs(face, +spacing * 0.5f, 0, radius),
             radius * 0.14f, 6, stripeColor);
+        return true;
     }
 
-    private static void PlaceTankCluster(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, int clusterIdx, float? sizeCap)
+    // Brief Z4 Fix 3: scaledTessellation/preferLarge threaded through to whichever
+    // arrangement gets rolled; returns whether the cluster actually placed anything (the
+    // occupancy check inside Row/Single/Pair can silently reject a cluster) — consumed by
+    // GenerateTankFarmContent's requested-vs-produced tracking.
+    private static bool PlaceTankCluster(PlacedModule mod, FaceInfo face,
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, int clusterIdx, float? sizeCap,
+        bool scaledTessellation = false, bool preferLarge = false)
     {
         int paletteSeed = mod.Seed ^ (0xAB12 + clusterIdx * 0x2F1B);
         var (bodyColor, stripeColor, stripes, paletteIdx) = TankPalette(paletteSeed);
@@ -419,11 +457,11 @@ public static partial class StationDecorator
 
         double typeRoll = rng.NextDouble();
         if (face.Width * face.Height > 100f && typeRoll < 0.28)
-            PlaceSingleTank(mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap);
+            return PlaceSingleTank(mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap, scaledTessellation, preferLarge);
         else if (typeRoll < 0.65)
-            PlaceTankRow   (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap);
+            return PlaceTankRow   (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap, scaledTessellation, preferLarge);
         else
-            PlaceTankPair  (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap);
+            return PlaceTankPair  (mod, face, mesh, occupancy, rng, substance, bodyColor, stripeColor, stripes, sizeCap, scaledTessellation, preferLarge);
     }
 
     // Brief Z2 Part 2: sizeCap (default null = unlimited, unchanged behaviour) lets
@@ -463,15 +501,56 @@ public static partial class StationDecorator
             _                         => 1,
         };
 
-        PlaceTankCluster(mod, face, mesh, occupancy, rng, 0, sizeCap);
+        // Brief Z4 Fix 3: scaledTessellation follows guaranteed — zone-committed tank
+        // content (Machinery/TankFarm) is also properly tessellated for whatever radius it
+        // happens to roll; the ordinary per-face path and CommsArray's unguaranteed tank
+        // call (guaranteed stays false there) keep the old flat 8-sided look, unchanged.
+        PlaceTankCluster(mod, face, mesh, occupancy, rng, 0, sizeCap, scaledTessellation: guaranteed);
 
         float nextProb = 0.55f;
         for (int extra = 1; extra < maxClusters; extra++)
         {
             if (rng.NextDouble() > nextProb) break;
             nextProb *= 0.65f;
-            PlaceTankCluster(mod, face, mesh, occupancy, rng, extra, sizeCap);
+            PlaceTankCluster(mod, face, mesh, occupancy, rng, extra, sizeCap, scaledTessellation: guaranteed);
         }
+    }
+
+    // Brief Z4 Fix 2+3: TankFarm's dedicated composition — differs from Machinery's generic
+    // GenerateTanks call in KIND, not just amount (Timo: "TankFarm and Machinery differ in
+    // kind, not only amount"). Cluster count scales with zone area (ZoneContentDensity.
+    // TankFarmClustersPerSqm); each cluster independently rolls "large" (~5m diameter,
+    // properly tessellated) vs "small" (today's normal PickTankRadius range) — the SIZE MIX
+    // is what reads as a farm, not cluster count alone. A light, fixed-odds pass of
+    // supporting vents/greebles reads as "a few small pipes, cables, and boxes" without
+    // competing hard with tanks for occupancy the way a second guaranteed pass would.
+    // Tracks requested/produced-by-size on the module for the D-Z2-style dump (Brief Z4
+    // verification: "report requested-vs-produced... broken down by tank size").
+    private static void GenerateTankFarmContent(PlacedModule mod, FaceInfo zone,
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
+    {
+        if (!zone.IsExposed) return;
+        if (zone.Width * zone.Height < 12f) return;
+
+        float area = zone.Width * zone.Height;
+        int targetClusters = Math.Clamp(
+            (int)MathF.Round(area * ZoneContentDensity.TankFarmClustersPerSqm),
+            1, ZoneContentDensity.TankFarmMaxClusters);
+
+        for (int i = 0; i < targetClusters; i++)
+        {
+            bool large = rng.NextDouble() < ZoneContentDensity.TankFarmLargeClusterFraction;
+            bool placed = PlaceTankCluster(mod, zone, mesh, occupancy, rng, i, sizeCap: null,
+                scaledTessellation: true, preferLarge: large);
+
+            if (large) { mod.TankFarmLargeRequested++; if (placed) mod.TankFarmLargeProduced++; }
+            else       { mod.TankFarmSmallRequested++; if (placed) mod.TankFarmSmallProduced++; }
+        }
+
+        // Supporting hardware — deliberately NOT guaranteed: "a few" small pipes/cables/
+        // boxes, not a second dense pass competing with tanks for the same occupancy.
+        GenerateVentGrilles(mod, zone, rng, mesh, occupancy);
+        GenerateGreebles(mod, zone, rng, mesh, occupancy, []);
     }
 
     // Build a transform matrix with Z aligned to face.LocalNormal, positioned at `center`.

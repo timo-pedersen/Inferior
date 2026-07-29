@@ -28,34 +28,49 @@ public static partial class StationDecorator
         new Color(100, 55,  55),   // dark red
     ];
 
+    // Brief Z4 Fix 1: guaranteed (default false, unchanged behaviour) — Storage's whole
+    // purpose is containers ("container yard... containers scaled by area"), so an
+    // allocated Storage zone must not lose them to docking-bay falling to this switch's
+    // 0.12 default (note: the "docking" entry here is docking-arm's category, a distinct
+    // string from docking-bay's own — the two have never shared a table row).
     private static void GenerateContainers(PlacedModule mod, FaceInfo face,
-        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
+        StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng, bool guaranteed = false)
     {
         if (!face.IsExposed) return;
         // Need at least enough space for one container laid on its smallest footprint
         if (face.Width < ContainerS + 0.6f || face.Height < ContainerS + 0.6f) return;
 
-        float prob = mod.Definition.Category switch
+        if (!guaranteed)
         {
-            "cargo"      => 0.85f,
-            "docking"    => 0.70f,
-            "industrial" => 0.60f,
-            "core"       => 0.40f,
-            "military"   => 0.35f,
-            "fuel"       => 0.20f,
-            "hab"        => 0.15f,
-            "connector"  => 0.08f,
-            _            => 0.12f,
-        };
-        if (rng.NextDouble() > prob) return;
+            float prob = mod.Definition.Category switch
+            {
+                "cargo"      => 0.85f,
+                "docking"    => 0.70f,
+                "industrial" => 0.60f,
+                "core"       => 0.40f,
+                "military"   => 0.35f,
+                "fuel"       => 0.20f,
+                "hab"        => 0.15f,
+                "connector"  => 0.08f,
+                _            => 0.12f,
+            };
+            if (rng.NextDouble() > prob) return;
+        }
 
-        int maxContainers = (face.Width * face.Height) switch
-        {
-            >= 60f => 4,
-            >= 30f => 3,
-            >= 15f => 2,
-            _      => 1,
-        };
+        // Brief Z4 Fix 2: guaranteed (Storage-zone) calls scale count with area via the
+        // named density constant; ordinary/other-category calls keep the original fixed
+        // area-tier switch unchanged.
+        int maxContainers = guaranteed
+            ? Math.Clamp(
+                (int)MathF.Round(face.Width * face.Height * ZoneContentDensity.StorageContainersPerSqm),
+                1, ZoneContentDensity.StorageMaxContainers)
+            : (face.Width * face.Height) switch
+            {
+                >= 60f => 4,
+                >= 30f => 3,
+                >= 15f => 2,
+                _      => 1,
+            };
 
         // Pick 2–3 colours from the palette so containers on the same face have variety
         Color[] palette = PickContainerPalette(mod.Seed, rng);

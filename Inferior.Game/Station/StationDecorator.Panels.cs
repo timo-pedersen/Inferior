@@ -213,20 +213,28 @@ public static partial class StationDecorator
         _      => VentStyle.ScreenMesh,
     };
 
+    // Brief Z4 Fix 1: guaranteed (default false, unchanged behaviour) — Machinery and
+    // ServiceCore both name vents as part of their committed character ("work areas...
+    // greebles, vents, work/storage clutter" / hatches+vents+greebles being ServiceCore's
+    // whole purpose by name), so an allocated zone of either type must not lose vents to
+    // docking-bay falling to this category switch's 0.20 default.
     private static void GenerateVentGrilles(PlacedModule mod, FaceInfo face,
-        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy)
+        System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy, bool guaranteed = false)
     {
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 15f) return;
 
-        float prob = mod.Definition.Category switch
+        if (!guaranteed)
         {
-            "industrial" or "core" => 0.65f,
-            "cargo"      or "fuel" => 0.45f,
-            "connector"            => 0.35f,
-            _                      => 0.20f,
-        };
-        if (rng.NextDouble() > prob) return;
+            float prob = mod.Definition.Category switch
+            {
+                "industrial" or "core" => 0.65f,
+                "cargo"      or "fuel" => 0.45f,
+                "connector"            => 0.35f,
+                _                      => 0.20f,
+            };
+            if (rng.NextDouble() > prob) return;
+        }
 
         int remaining = rng.Next(1, 4);
         int attempts  = remaining * 4;
