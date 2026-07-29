@@ -516,35 +516,127 @@ public static partial class StationDecorator
         }
     }
 
-    // Brief Z4 Fix 2+3: TankFarm's dedicated composition — differs from Machinery's generic
-    // GenerateTanks call in KIND, not just amount (Timo: "TankFarm and Machinery differ in
-    // kind, not only amount"). Cluster count scales with zone area (ZoneContentDensity.
-    // TankFarmClustersPerSqm); each cluster independently rolls "large" (~5m diameter,
-    // properly tessellated) vs "small" (today's normal PickTankRadius range) — the SIZE MIX
-    // is what reads as a farm, not cluster count alone. A light, fixed-odds pass of
-    // supporting vents/greebles reads as "a few small pipes, cables, and boxes" without
-    // competing hard with tanks for occupancy the way a second guaranteed pass would.
-    // Tracks requested/produced-by-size on the module for the D-Z2-style dump (Brief Z4
-    // verification: "report requested-vs-produced... broken down by tank size").
+    // Brief Z5 Fix 1: representative radii used ONLY to size how many parallel rows fit
+    // across a TankFarm zone's short axis, before any row's actual size is rolled — "compute
+    // run count... from zone dimensions and item size, rather than rolling a count and hoping
+    // it fits." Centres of PickLargeTankRadius's 2.0-3.2m range and PickTankRadius's common
+    // small/medium blend respectively; not exact, just representative enough to size runs
+    // sensibly regardless of which sizes actually land.
+    private const float TankFarmSmallReprRadius = 0.58f;
+    private const float TankFarmLargeReprRadius = 2.6f;
+
+    // Walkway/clearance gap between adjacent tank rows, and a cap on run count so a truly
+    // enormous zone (measured: real TankFarm zones range from ~80m² slivers to 8000m²+
+    // corridors) doesn't produce an unreasonable number of rows. Brief Z5 Fix 3: raised
+    // 12->24 — a real measured Nova Anchorage zone (55.5m across-span x 148m long) already
+    // computes a raw run count of ~16 from its own geometry, which the old cap of 12 would
+    // have clipped; 24 gives headroom above the largest zone actually measured this brief.
+    private const float TankFarmRunGapMetres = 1.0f;
+    private const int   TankFarmMaxRuns      = 24;
+
+    // Brief Z5 Fix 1: TankFarm's structured arrangement — replaces Z4's independent
+    // PlaceTankCluster calls (which scattered rows/pairs/singles at random positions and
+    // collided with each other, since every PlaceTankRow call reserved the same fixed
+    // near-bottom band regardless of cluster index) with planned parallel runs aligned to
+    // the zone's own dominant axis. Within a run: one uniform radius/orientation, tanks
+    // spaced evenly along the run — this is what creates "rhythm" instead of clutter.
+    // Between runs: size may vary (a row of large tanks beside a row of small ones reads as
+    // organised; mixed sizes WITHIN a row reads as scrap, so size is rolled once per run,
+    // never per tank). Run count and run length are both computed from zone geometry, not
+    // rolled and hoped to fit — see TankFarmMaxRuns' own comment for measured zone-size range.
     private static void GenerateTankFarmContent(PlacedModule mod, FaceInfo zone,
         StationModuleMesh mesh, FaceOccupancy occupancy, System.Random rng)
     {
         if (!zone.IsExposed) return;
         if (zone.Width * zone.Height < 12f) return;
 
-        float area = zone.Width * zone.Height;
-        int targetClusters = Math.Clamp(
-            (int)MathF.Round(area * ZoneContentDensity.TankFarmClustersPerSqm),
-            1, ZoneContentDensity.TankFarmMaxClusters);
+        bool    horizontal = zone.Width >= zone.Height;
+        Vector3 alongDir   = horizontal ? zone.LocalRight : zone.LocalUp;
+        Vector3 acrossDir  = horizontal ? zone.LocalUp    : zone.LocalRight;
+        float   alongSpan  = horizontal ? zone.Width      : zone.Height;
+        float   acrossSpan = horizontal ? zone.Height     : zone.Width;
 
-        for (int i = 0; i < targetClusters; i++)
+        (float u, float v) ToUV(float along, float across)
+            => horizontal ? (along, across) : (across, along);
+
+        float reprRadius = ZoneContentDensity.TankFarmLargeClusterFraction * TankFarmLargeReprRadius
+                          + (1f - ZoneContentDensity.TankFarmLargeClusterFraction) * TankFarmSmallReprRadius;
+        float rowPitch = reprRadius * 2f + TankFarmRunGapMetres;
+        int   runCount = Math.Clamp((int)MathF.Round(acrossSpan / rowPitch), 1, TankFarmMaxRuns);
+
+        float acrossPitch = acrossSpan / runCount;
+
+        for (int i = 0; i < runCount; i++)
         {
             bool large = rng.NextDouble() < ZoneContentDensity.TankFarmLargeClusterFraction;
-            bool placed = PlaceTankCluster(mod, zone, mesh, occupancy, rng, i, sizeCap: null,
-                scaledTessellation: true, preferLarge: large);
+            if (large) mod.TankFarmLargeRequested++; else mod.TankFarmSmallRequested++;
 
-            if (large) { mod.TankFarmLargeRequested++; if (placed) mod.TankFarmLargeProduced++; }
-            else       { mod.TankFarmSmallRequested++; if (placed) mod.TankFarmSmallProduced++; }
+            int paletteSeed = mod.Seed ^ (0xAB12 + i * 0x2F1B);
+            var (bodyColor, stripeColor, stripes, paletteIdx) = TankPalette(paletteSeed);
+            string substance = PickSubstanceName(paletteIdx, new System.Random(paletteSeed ^ 0x5C3A));
+
+            float radius = large ? PickLargeTankRadius(rng) : PickTankRadius(rng, null);
+            int   sides  = TankSidesForRadius(radius);
+            float length = radius * 2.0f + (float)rng.NextDouble() * radius * 2.5f;
+            float gap    = radius * 0.14f;
+            float step   = radius * 2f + gap;
+
+            int itemsInRun = Math.Max(1, (int)((alongSpan * 0.88f + gap) / step));
+            float totalAlong = itemsInRun * step - gap;
+
+            float acrossPos = -acrossSpan * 0.5f + (i + 0.5f) * acrossPitch;
+            var (cu0, cv0) = ToUV(0f, acrossPos);
+            var (halfU, halfV) = ToUV(totalAlong * 0.5f + 0.3f, radius + 0.4f);
+
+            bool placed = occupancy.TryOccupy(cu0, cv0, MathF.Abs(halfU), MathF.Abs(halfV));
+            if (!placed) continue;
+
+            if (large) mod.TankFarmLargeProduced++; else mod.TankFarmSmallProduced++;
+
+            Color pipeColor  = DarkenColor(stripeColor, 0.75f);
+            Color strutColor = new Color(80, 75, 70);
+            float startAlong = -totalAlong * 0.5f + radius;
+
+            var alongArr = new float[itemsInRun];
+            for (int j = 0; j < itemsInRun; j++)
+            {
+                float along = startAlong + j * step;
+                alongArr[j] = along;
+                var (u, v) = ToUV(along, acrossPos);
+                Vector3 centre    = LocalPointAbs(zone, u, v, radius * 0.5f);
+                Vector3 tankStart = centre - alongDir * (length * 0.5f);
+                Vector3 tankEnd   = centre + alongDir * (length * 0.5f);
+                AddTank(mesh, tankStart, tankEnd, radius,
+                        bodyColor, stripeColor, stripes, pipeColor,
+                        LocalPointAbs(zone, u, v, 0),
+                        zone.LocalNormal, acrossDir,
+                        substance, j + 1, rng, sides);
+            }
+
+            // Banding straps across the whole run, one on each side (offset across the run's
+            // OWN axis, same as the original per-cluster row's top/bottom straps).
+            foreach (float strapOffset in new[] { radius * 0.62f, -radius * 0.62f })
+            {
+                var (su0, sv0) = ToUV(alongArr[0]             - radius, acrossPos + strapOffset);
+                var (su1, sv1) = ToUV(alongArr[itemsInRun - 1] + radius, acrossPos + strapOffset);
+                mesh.AddPrismPipe(
+                    LocalPointAbs(zone, su0, sv0, radius + 0.04f),
+                    LocalPointAbs(zone, su1, sv1, radius + 0.04f),
+                    radius * 0.042f, 4, strutColor);
+            }
+
+            // Diagonal cross-braces between adjacent tanks for longer runs.
+            if (itemsInRun >= 3 && radius >= 0.55f)
+            {
+                for (int j = 0; j < itemsInRun - 1; j++)
+                {
+                    var (tuA, tvA) = ToUV(alongArr[j],     acrossPos + radius * 0.58f);
+                    var (tuB, tvB) = ToUV(alongArr[j + 1],  acrossPos - radius * 0.58f);
+                    Vector3 topA = LocalPointAbs(zone, tuA, tvA, radius + 0.05f);
+                    Vector3 botB = LocalPointAbs(zone, tuB, tvB, radius + 0.05f);
+                    mesh.AddPrismPipe(topA, botB, radius * 0.032f, 4, strutColor);
+                }
+            }
         }
 
         // Supporting hardware — deliberately NOT guaranteed: "a few" small pipes/cables/

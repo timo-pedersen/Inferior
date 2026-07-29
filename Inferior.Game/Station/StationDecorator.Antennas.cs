@@ -42,10 +42,41 @@ public static partial class StationDecorator
         if (faceIsWhite) antennaCol = new Color(228, 232, 230);
 
         int count = explicitCount ?? (heavy ? rng.Next(2, 5) : rng.Next(1, 3));
+
+        // Brief Z5 Fix 1: CommsArray (the only caller that ever sets explicitCount) gets a
+        // loose grid instead of fully-random scatter — masts land near evenly-spaced cells,
+        // jittered within each cell, reading as "a rough array" without being rigidly ranked
+        // like TankFarm's planned rows (Timo: "use judgment... should not be rigidly ranked
+        // like tanks"). Every other caller (the unguaranteed background pass on every other
+        // zone type, and any future heavy-without-explicitCount caller) keeps the original
+        // fully-random (u, v) roll, byte-for-byte.
+        int   gridCols = 1, gridRows = 1;
+        float cellW = face.Width, cellH = face.Height;
+        if (explicitCount.HasValue)
+        {
+            gridCols = Math.Max(1, (int)MathF.Round(MathF.Sqrt(count * face.Width / MathF.Max(0.01f, face.Height))));
+            gridRows = Math.Max(1, (int)MathF.Ceiling(count / (float)gridCols));
+            cellW = face.Width  / gridCols;
+            cellH = face.Height / gridRows;
+        }
+
         for (int i = 0; i < count; i++)
         {
-            float u = (float)(rng.NextDouble() - 0.5) * face.Width  * 0.5f;
-            float v = (float)(rng.NextDouble() - 0.5) * face.Height * 0.5f;
+            float u, v;
+            if (explicitCount.HasValue)
+            {
+                int col = i % gridCols;
+                int row = i / gridCols;
+                float baseU = -face.Width  * 0.5f + (col + 0.5f) * cellW;
+                float baseV = -face.Height * 0.5f + (row + 0.5f) * cellH;
+                u = baseU + (float)(rng.NextDouble() - 0.5) * cellW * 0.5f;
+                v = baseV + (float)(rng.NextDouble() - 0.5) * cellH * 0.5f;
+            }
+            else
+            {
+                u = (float)(rng.NextDouble() - 0.5) * face.Width  * 0.5f;
+                v = (float)(rng.NextDouble() - 0.5) * face.Height * 0.5f;
+            }
 
             Vector3 basePos = face.LocalCenter
                 + face.LocalRight * u

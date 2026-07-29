@@ -394,39 +394,44 @@ public static partial class StationDecorator
     // the underlying roll landed on.
     private const float CommsArrayTankSizeCap = 0.85f;
 
-    // Brief Z4 Fix 2: content density per zone type, one named table (mirrors
-    // DecorCastingPolicy's single-table pattern) — starting values, tunable by eye, not
-    // correctness. Machinery is deliberately absent: per Timo, "1-3 small tanks is fine —
-    // roughly today's tank behaviour, not area-scaled" (unchanged from Z3's GenerateTanks
-    // call). Only the zone types whose composition genuinely differs by area are here.
+    // Brief Z4 Fix 2, revised by Brief Z5 Fix 3: content density per zone type, one named
+    // table (mirrors DecorCastingPolicy's single-table pattern) — starting values, tunable
+    // by eye, not correctness. Machinery is deliberately absent: per Timo, "1-3 small tanks
+    // is fine — roughly today's tank behaviour, not area-scaled" (unchanged from Z3's
+    // GenerateTanks call). Only the zone types whose composition genuinely differs by area
+    // are here. TankFarm's own former per-sqm/max-cluster pair (Z4) is gone — Z5 Fix 1
+    // replaced independent clusters with planned parallel runs, whose count is now derived
+    // from zone geometry directly in GenerateTankFarmContent (StationDecorator.Tanks.cs);
+    // TankFarmMaxRuns lives there, next to the run-sizing math it bounds.
     internal static class ZoneContentDensity
     {
-        // TankFarm: cluster count (a cluster is one tank, a row, or a pair — see
-        // PlaceTankCluster) per square metre. Reference point from the brief: a ~1200m²
-        // zone should read as 8-15 clusters; 0.0083/m² gives ~10 at 1200m², inside that
-        // range. Capped so a truly enormous zone doesn't produce an unreasonable count.
-        public const float TankFarmClustersPerSqm = 0.0083f;
-        public const int   TankFarmMaxClusters     = 20;
-
-        // Fraction of TankFarm clusters that deliberately roll "large" (~5m diameter, via
+        // Fraction of TankFarm runs that deliberately roll "large" (~5m diameter, via
         // PickLargeTankRadius) rather than the normal small/medium/rare PickTankRadius
         // range — Timo: "several large tanks... with smaller ones around them," the size
-        // MIX is what reads as a farm, not cluster count alone.
+        // MIX is what reads as a farm, not run count alone.
         public const float TankFarmLargeClusterFraction = 0.35f;
 
         // CommsArray: antenna/mast count per square metre — "a large comms zone should
-        // read as an array, not two masts."
+        // read as an array, not two masts." Brief Z5 Fix 3: max raised 14->30 — the old cap
+        // bound at just 280m² (0.05/sqm), well inside the range of real CommsArray zones;
+        // masts stay less dense than tanks/containers per zone area, so the per-sqm rate is
+        // unchanged, only the ceiling for genuinely large zones moved.
         public const float CommsArrayAntennasPerSqm = 0.05f;
         public const int   CommsArrayMinAntennas    = 2;
-        public const int   CommsArrayMaxAntennas    = 14;
+        public const int   CommsArrayMaxAntennas    = 30;
 
         // Storage: container count per square metre — a yard, not a couple of crates.
+        // Brief Z5 Fix 3: max raised 16->48 — the old cap bound at just 320m² (0.05/sqm);
+        // measured real zones reach ~1200m²+, where Fix 1's grid-capacity ceiling (actual
+        // containers that physically fit, computed in PlaceContainerYard) is now the
+        // binding limit for the largest zones, not this constant.
         public const float StorageContainersPerSqm = 0.05f;
-        public const int   StorageMaxContainers     = 16;
+        public const int   StorageMaxContainers     = 48;
 
         // PipeCorridor: one parallel run per this many metres of the zone's PERPENDICULAR
         // span (length already tracks the zone's long axis via runHalfLen; this is about
-        // how many parallel lines fit side-by-side across the short axis).
+        // how many parallel lines fit side-by-side across the short axis). Not touched by
+        // Z5 Fix 3 — not named in that brief's clamp table.
         public const float PipeCorridorRunSpacingMetres = 4.0f;
         public const int   PipeCorridorMinRuns          = 3;
         public const int   PipeCorridorMaxRuns          = 12;
