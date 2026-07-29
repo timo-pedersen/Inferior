@@ -30,7 +30,40 @@ public sealed record MegastationMeshStats(
     long MeshBuildMilliseconds,
     BoundaryMeshValidationReport SharpValidation,
     BoundaryMeshValidationReport ChamferedValidation,
-    BoundaryTopologySignature TopologySignature);
+    BoundaryTopologySignature TopologySignature,
+    ChamferSemanticValidationReport ChamferSemanticValidation,
+    IReadOnlyList<ChamferRunDiagnostics> ChamferRuns);
+
+public sealed record ChamferSemanticValidationReport(
+    int TaperOnlyRenderedRunCount,
+    int NearZeroAreaRenderedRunCount,
+    int MissingFaceRetractionRunCount)
+{
+    public bool IsValid => TaperOnlyRenderedRunCount == 0
+        && NearZeroAreaRenderedRunCount == 0
+        && MissingFaceRetractionRunCount == 0;
+}
+
+public sealed record ChamferRunDiagnostics(
+    string Identity,
+    GridAxis EdgeAxis,
+    GridDirection IncidentNormalA,
+    GridDirection IncidentNormalB,
+    int CanonicalSegmentCount,
+    float PhysicalRunLength,
+    float ResolvedChamferWidth,
+    BoundaryVertexClass StartEndpointClassification,
+    BoundaryVertexClass EndEndpointClassification,
+    float StartTaperLength,
+    float EndTaperLength,
+    float FullWidthCentreLength,
+    float FaceAMaximumRetraction,
+    float FaceBMaximumRetraction,
+    int BevelQuadCount,
+    int BevelTriangleCount,
+    float BevelSurfaceArea,
+    bool Rendered,
+    string SuppressedReason);
 
 public enum MegastationMeshPath
 {
@@ -100,6 +133,10 @@ public static class MegastationPrototypeMeshBuilder
         BoundaryMeshValidationReport finalValidation = BoundaryMeshValidator.Validate(mesh, boundsMin, boundsMax);
         if (requireValidStructuralBoundary && !finalValidation.IsValid)
             throw new InvalidOperationException($"Final megastation render mesh is invalid: {finalValidation.Summary}.");
+        ChamferSemanticValidationReport chamferValidation = ValidateChamferSemantics(chamferPlan);
+        if (requireValidStructuralBoundary && !chamferValidation.IsValid)
+            throw new InvalidOperationException(
+                $"Final megastation chamfer semantics are invalid: taperOnly={chamferValidation.TaperOnlyRenderedRunCount}, nearZeroArea={chamferValidation.NearZeroAreaRenderedRunCount}, missingRetraction={chamferValidation.MissingFaceRetractionRunCount}.");
 
         MegastationMeshPath path = IsTopologyDebug(debugColorMode)
             ? MegastationMeshPath.TopologyDebug
@@ -131,7 +168,9 @@ public static class MegastationPrototypeMeshBuilder
             stopwatch.ElapsedMilliseconds,
             sharpValidation,
             finalValidation,
-            BoundaryTopologySignatureBuilder.Compute(topology, settings));
+            BoundaryTopologySignatureBuilder.Compute(topology, settings),
+            chamferValidation,
+            chamferPlan.Diagnostics);
     }
 
     private static int AddSharpStructuralFaces(
@@ -345,10 +384,23 @@ public static class MegastationPrototypeMeshBuilder
             }
 
             GridVertexKey[] endpoints = EndpointsForRun(edges);
-            bool accepted = endpoints.Length == 2
-                && endpoints.All(e => EndpointSupportsCompleteRun(topology.VertexByKey[e].Classification));
             float width = edges.Min(e => candidatesByEdge[e.Key].Width);
-            runs.Add(new ChamferRun(edges.OrderBy(e => e.Key).ToArray(), endpoints, width, accepted));
+            float physicalLength = RunPhysicalLength(grid, edges);
+            float taper = MathF.Min(width, physicalLength * 0.25f);
+            float fullWidthCentreLength = physicalLength - taper - taper;
+            string suppressedReason = SuppressionReason(topology, endpoints, fullWidthCentreLength, settings);
+            bool accepted = suppressedReason.Length == 0;
+            runs.Add(new ChamferRun(
+                candidate.Key,
+                edges.OrderBy(e => e.Key).ToArray(),
+                endpoints,
+                width,
+                physicalLength,
+                taper,
+                taper,
+                fullWidthCentreLength,
+                accepted,
+                suppressedReason));
         }
 
         bool changed;
@@ -364,6 +416,7 @@ public static class MegastationPrototypeMeshBuilder
                 foreach (var run in runs.Where(r => r.Accepted && r.Endpoints.Contains(vertex.Key)))
                 {
                     run.Accepted = false;
+                    run.SuppressedReason = "vertex-conflict";
                     changed = true;
                 }
             }
@@ -375,10 +428,17 @@ public static class MegastationPrototypeMeshBuilder
         foreach (var edge in run.Edges)
             acceptedEdges[edge.Key] = run.Width;
 
+        var acceptedRuns = runs.Where(r => r.Accepted).OrderBy(r => r.Edges[0].Key).ToArray();
+        var diagnostics = runs
+            .OrderBy(r => r.Edges[0].Key)
+            .Select(r => BuildRunDiagnostics(topology, r))
+            .ToArray();
+
         return new ChamferPlan(
             acceptedEdges,
-            runs.Where(r => r.Accepted).OrderBy(r => r.Edges[0].Key).ToArray(),
+            acceptedRuns,
             CollapsedEndpoints(topology, acceptedEdges),
+            diagnostics,
             runs.Count(r => r.Accepted),
             runs.Count(r => !r.Accepted));
     }
@@ -395,6 +455,21 @@ public static class MegastationPrototypeMeshBuilder
             })
             .Select(v => v.Key)
             .ToHashSet();
+
+    private static string SuppressionReason(
+        BoundaryTopology topology,
+        IReadOnlyList<GridVertexKey> endpoints,
+        float fullWidthCentreLength,
+        MegastationPrototypeSettings settings)
+    {
+        if (endpoints.Count != 2)
+            return "not-a-complete-open-run";
+        if (fullWidthCentreLength <= settings.MinimumStructuralChamferMetres)
+            return "taper-only-or-too-short";
+        if (!endpoints.All(e => EndpointSupportsCompleteRun(topology.VertexByKey[e].Classification)))
+            return "complex-endpoint";
+        return string.Empty;
+    }
 
     private static bool EndpointSupportsCompleteRun(BoundaryVertexClass classification)
         => classification is BoundaryVertexClass.SimpleConvexCorner or BoundaryVertexClass.StraightConvexContinuation;
@@ -453,23 +528,12 @@ public static class MegastationPrototypeMeshBuilder
         MegastationPrototypeSettings settings,
         BoundaryEdgeSegment edge)
     {
-        var faces = edge.IncidentFaces
-            .Select(f => new IncidentSurfaceKey(f.Direction, PlaneIndex(f)))
+        var normals = edge.IncidentFaces
+            .Select(f => f.Direction)
             .Order()
             .ToArray();
-        return new ChamferRunKey(edge.Key.Axis, faces[0], faces[1]);
+        return new ChamferRunKey(edge.Key.Axis, edge.Key.A, edge.Key.B, normals[0], normals[1]);
     }
-
-    private static int PlaneIndex(BoundaryFaceKey face)
-        => face.Direction switch
-        {
-            GridDirection.PositiveX => face.X + 1,
-            GridDirection.NegativeX => face.X,
-            GridDirection.PositiveY => face.Y + 1,
-            GridDirection.NegativeY => face.Y,
-            GridDirection.PositiveZ => face.Z + 1,
-            _ => face.Z,
-        };
 
     private static float ResolveWidth(SliceGrid grid, MegastationPrototypeSettings settings, BoundaryEdgeSegment edge)
     {
@@ -495,6 +559,58 @@ public static class MegastationPrototypeMeshBuilder
                 min = MathF.Min(min, grid.GetCellSize(axis, vertexCoord));
         }
         return min;
+    }
+
+    private static float RunPhysicalLength(SliceGrid grid, IReadOnlyList<BoundaryEdgeSegment> edges)
+        => edges.Sum(e => grid.GetCellSize(e.Key.Axis, e.Key.Start));
+
+    private static ChamferRunDiagnostics BuildRunDiagnostics(BoundaryTopology topology, ChamferRun run)
+    {
+        BoundaryEdgeSegment first = run.Edges[0];
+        var normals = first.IncidentFaces.Select(f => f.Direction).Order().ToArray();
+        float surfaceArea = run.Accepted
+            ? run.Edges.Sum(e => SegmentLength(run, e) * run.Width * MathF.Sqrt(2f))
+            : 0f;
+        return new ChamferRunDiagnostics(
+            RunIdentity(run),
+            first.Key.Axis,
+            normals[0],
+            normals[1],
+            run.Edges.Count,
+            run.PhysicalLength,
+            run.Width,
+            run.Endpoints.Count > 0 ? topology.VertexByKey[run.Endpoints[0]].Classification : BoundaryVertexClass.Empty,
+            run.Endpoints.Count > 1 ? topology.VertexByKey[run.Endpoints[^1]].Classification : BoundaryVertexClass.Empty,
+            run.Accepted ? 0f : run.StartTaperLength,
+            run.Accepted ? 0f : run.EndTaperLength,
+            run.Accepted ? run.PhysicalLength : run.FullWidthCentreLength,
+            run.Accepted ? run.Width : 0f,
+            run.Accepted ? run.Width : 0f,
+            run.Accepted ? run.Edges.Count : 0,
+            0,
+            surfaceArea,
+            run.Accepted,
+            run.Accepted ? string.Empty : run.SuppressedReason);
+    }
+
+    private static float SegmentLength(ChamferRun run, BoundaryEdgeSegment edge)
+        => run.PhysicalLength <= 0f ? 0f : run.PhysicalLength / run.Edges.Count;
+
+    private static string RunIdentity(ChamferRun run)
+    {
+        BoundaryEdgeSegment first = run.Edges[0];
+        BoundaryEdgeSegment last = run.Edges[^1];
+        return $"{first.Key.Axis}:{first.Key.A}:{first.Key.B}:{first.Key.Start}-{last.Key.Start + 1}:{run.Key.NormalA}/{run.Key.NormalB}";
+    }
+
+    private static ChamferSemanticValidationReport ValidateChamferSemantics(ChamferPlan plan)
+    {
+        int taperOnly = plan.Diagnostics.Count(r => r.Rendered && r.FullWidthCentreLength <= 0.0001f);
+        int nearZeroArea = plan.Diagnostics.Count(r => r.Rendered && r.BevelSurfaceArea <= 0.0001f);
+        int missingRetraction = plan.Diagnostics.Count(r => r.Rendered
+            && (r.FaceAMaximumRetraction < r.ResolvedChamferWidth - 0.0001f
+                || r.FaceBMaximumRetraction < r.ResolvedChamferWidth - 0.0001f));
+        return new ChamferSemanticValidationReport(taperOnly, nearZeroArea, missingRetraction);
     }
 
     private static void AddQuad(StationModuleMesh mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 expectedNormal, Color color)
@@ -619,6 +735,7 @@ public static class MegastationPrototypeMeshBuilder
         IReadOnlyDictionary<BoundaryEdgeKey, float> AcceptedEdges,
         IReadOnlyList<ChamferRun> AcceptedRuns,
         IReadOnlySet<GridVertexKey> CollapsedEndpoints,
+        IReadOnlyList<ChamferRunDiagnostics> Diagnostics,
         int AcceptedRunCount,
         int SuppressedRunCount);
 
@@ -628,29 +745,33 @@ public static class MegastationPrototypeMeshBuilder
         float Width);
 
     private sealed class ChamferRun(
+        ChamferRunKey key,
         IReadOnlyList<BoundaryEdgeSegment> edges,
         IReadOnlyList<GridVertexKey> endpoints,
         float width,
-        bool accepted)
+        float physicalLength,
+        float startTaperLength,
+        float endTaperLength,
+        float fullWidthCentreLength,
+        bool accepted,
+        string suppressedReason)
     {
+        public ChamferRunKey Key { get; } = key;
         public IReadOnlyList<BoundaryEdgeSegment> Edges { get; } = edges;
         public IReadOnlyList<GridVertexKey> Endpoints { get; } = endpoints;
         public float Width { get; } = width;
+        public float PhysicalLength { get; } = physicalLength;
+        public float StartTaperLength { get; } = startTaperLength;
+        public float EndTaperLength { get; } = endTaperLength;
+        public float FullWidthCentreLength { get; } = fullWidthCentreLength;
         public bool Accepted { get; set; } = accepted;
+        public string SuppressedReason { get; set; } = suppressedReason;
     }
 
     private readonly record struct ChamferRunKey(
         GridAxis Axis,
-        IncidentSurfaceKey A,
-        IncidentSurfaceKey B);
-
-    private readonly record struct IncidentSurfaceKey(GridDirection Direction, int PlaneIndex)
-        : IComparable<IncidentSurfaceKey>
-    {
-        public int CompareTo(IncidentSurfaceKey other)
-        {
-            int c = Direction.CompareTo(other.Direction);
-            return c != 0 ? c : PlaneIndex.CompareTo(other.PlaneIndex);
-        }
-    }
+        int LineA,
+        int LineB,
+        GridDirection NormalA,
+        GridDirection NormalB);
 }

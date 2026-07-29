@@ -441,6 +441,95 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    public void LongSubdividedPrism_GroupsStraightNonUniformEdgesIntoCompleteRuns()
+    {
+        var grid = new SliceGrid(
+            [8f, 11f, 9f, 13f, 10f, 12f, 8.5f, 14f, 9.5f, 15f],
+            [20f],
+            [20f],
+            0..10,
+            0..1,
+            0..1);
+        var occupancy = new StructuralOccupancy(grid);
+        for (int x = 0; x < 10; x++)
+            occupancy.MarkUrban(x, 0, 0, MegacellOwner.FaceInterior, $"cell-{x}");
+
+        var mesh = new StationModuleMesh();
+        var stats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
+        var xRuns = stats.ChamferRuns
+            .Where(r => r.Rendered && r.EdgeAxis == GridAxis.X && r.CanonicalSegmentCount == 10)
+            .ToArray();
+
+        Assert.Equal(4, xRuns.Length);
+        Assert.All(xRuns, run =>
+        {
+            Assert.Equal(0.75f, run.ResolvedChamferWidth, 3);
+            Assert.True(run.PhysicalRunLength > 100f);
+            Assert.True(run.FullWidthCentreLength > 100f);
+            Assert.Equal(0f, run.StartTaperLength);
+            Assert.Equal(0f, run.EndTaperLength);
+            Assert.Equal(10, run.BevelQuadCount);
+            Assert.True(run.BevelSurfaceArea > 100f);
+            Assert.Equal(run.ResolvedChamferWidth, run.FaceAMaximumRetraction, 3);
+            Assert.Equal(run.ResolvedChamferWidth, run.FaceBMaximumRetraction, 3);
+        });
+        Assert.True(stats.ChamferSemanticValidation.IsValid);
+        Assert.True(stats.ChamferedValidation.IsValid);
+    }
+
+    [Fact]
+    public void ChamferRunGrouping_IgnoresOwnerAndRegionMetadataAlongStraightEdge()
+    {
+        var grid = new SliceGrid(
+            [10f, 12f, 11f, 13f, 9f, 14f, 10f, 15f, 12f, 11f],
+            [20f],
+            [20f],
+            0..10,
+            0..1,
+            0..1);
+        var occupancy = new StructuralOccupancy(grid);
+        for (int x = 0; x < 10; x++)
+        {
+            var owner = x % 2 == 0 ? MegacellOwner.FaceInterior : MegacellOwner.EdgeRegion;
+            occupancy.MarkUrban(x, 0, 0, owner, $"region-{x % 3}");
+        }
+
+        var mesh = new StationModuleMesh();
+        var stats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh);
+
+        Assert.Equal(4, stats.ChamferRuns.Count(r => r.Rendered && r.EdgeAxis == GridAxis.X && r.CanonicalSegmentCount == 10));
+        Assert.True(stats.ChamferSemanticValidation.IsValid);
+        Assert.True(stats.ChamferedValidation.IsValid);
+    }
+
+    [Fact]
+    public void ShortRun_SuppressesTaperOnlyChamfersAndKeepsSharpMeshValid()
+    {
+        var settings = MegastationPrototypeSettings.Default with { StructuralChamferSpanFraction = 1f };
+        var grid = new SliceGrid(
+            [0.08f],
+            [20f],
+            [20f],
+            0..1,
+            0..1,
+            0..1);
+        var occupancy = new StructuralOccupancy(grid);
+        occupancy.MarkUrban(0, 0, 0, MegacellOwner.FaceInterior, "short");
+
+        var mesh = new StationModuleMesh();
+        var stats = MegastationPrototypeMeshBuilder.Build(occupancy, mesh, settings: settings);
+
+        Assert.DoesNotContain(stats.ChamferRuns, r => r.Rendered && r.FullWidthCentreLength <= settings.MinimumStructuralChamferMetres);
+        Assert.All(stats.ChamferRuns.Where(r => r.EdgeAxis == GridAxis.X), r =>
+        {
+            Assert.False(r.Rendered);
+            Assert.Equal("taper-only-or-too-short", r.SuppressedReason);
+        });
+        Assert.True(stats.ChamferSemanticValidation.IsValid);
+        Assert.True(stats.ChamferedValidation.IsValid);
+    }
+
+    [Fact]
     public void BoundaryMeshValidator_CatchesOpenAndTJunctionGeometry()
     {
         var open = new StationModuleMesh();
