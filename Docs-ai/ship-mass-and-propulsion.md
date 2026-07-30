@@ -88,8 +88,10 @@ implementation preserves the ship-local forward component of reference-relative
 velocity and damps only ship-local lateral and vertical velocity toward zero. The
 assist force is clamped per axis by current installed-engine maneuvering authority:
 sideways and downward correction use lateral thrust, while upward correction uses the
-stronger lift thrust. The current tuning factor is 1.0. X-Stop remains separate and
-takes precedence when active. Flight Assist publishes `Flight.Assist`,
+stronger lift thrust. Pilot lateral/vertical input has priority; assist only uses
+per-axis authority left after the current pilot command, so full strafe/vertical input
+is not cancelled by assist. The current tuning factor is 1.0. X-Stop remains separate
+and takes precedence when active. Flight Assist publishes `Flight.Assist`,
 `Flight.AssistForce`, and `Flight.AssistAcceleration`; applied force/acceleration
 telemetry is throttled to roughly 250 ms for pilot-facing instruments.
 

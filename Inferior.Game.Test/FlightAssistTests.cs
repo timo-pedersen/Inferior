@@ -107,6 +107,32 @@ public sealed class FlightAssistTests
     }
 
     [Fact]
+    public void FlightAssistDoesNotCancelFullLateralPilotInput()
+    {
+        var simulation = CreateSimulation(out Ship ship);
+        ship.Velocity = ship.Right * 100.0;
+        double initialLateralSpeed = DVec3.Dot(ship.Velocity, ship.Right);
+
+        simulation.DebugTickPhysics(PlayerInput.Zero with { ThrustLateral = 1.0 }, Dt);
+
+        double finalLateralSpeed = DVec3.Dot(ship.Velocity, ship.Right);
+        Assert.True(finalLateralSpeed > initialLateralSpeed);
+    }
+
+    [Fact]
+    public void FlightAssistDoesNotCancelFullVerticalPilotInput()
+    {
+        var simulation = CreateSimulation(out Ship ship);
+        ship.Velocity = ship.Up * 100.0;
+        double initialVerticalSpeed = DVec3.Dot(ship.Velocity, ship.Up);
+
+        simulation.DebugTickPhysics(PlayerInput.Zero with { ThrustVertical = 1.0 }, Dt);
+
+        double finalVerticalSpeed = DVec3.Dot(ship.Velocity, ship.Up);
+        Assert.True(finalVerticalSpeed > initialVerticalSpeed);
+    }
+
+    [Fact]
     public void FlightAssistPublishesAppliedForceAndAccelerationTelemetry()
     {
         var simulation = CreateSimulation(out Ship ship);
