@@ -1105,6 +1105,7 @@ public sealed class SpaceSimulation : Simulation
             ship,
             propulsion,
             relVel,
+            allocation,
             dt);
         RecordFlightAssistApplication(propulsion, assistForceLocal);
         ApplyPropulsionForce(ship, propulsion, appliedForceLocal + assistForceLocal, dt, allocation);
@@ -1118,17 +1119,30 @@ public sealed class SpaceSimulation : Simulation
         Ship ship,
         ShipPropulsionCapability propulsion,
         DVec3 relativeVelocityWorld,
+        EngineTranslationAllocation pilotAllocation,
         double dt)
     {
         if (!_flightAssistEnabled || dt <= 0.0 || propulsion.CurrentMassKg <= 0.0)
             return DVec3.Zero;
 
         DVec3 relativeVelocityLocal = WorldToShipLocal(ship, relativeVelocityWorld);
+        double lateralAuthorityFraction = Math.Clamp(1.0 - Math.Abs(pilotAllocation.Lateral), 0.0, 1.0);
+        double verticalAuthorityFraction = Math.Clamp(1.0 - Math.Abs(pilotAllocation.Vertical), 0.0, 1.0);
         double lateralAccelerationLimit =
-            propulsion.AvailableLateralThrustN / propulsion.CurrentMassKg * FlightAssistForceFactor;
+            propulsion.AvailableLateralThrustN / propulsion.CurrentMassKg
+            * FlightAssistForceFactor
+            * lateralAuthorityFraction;
         double liftAccelerationLimit =
-            propulsion.AvailableLiftThrustN / propulsion.CurrentMassKg * FlightAssistForceFactor;
-        if (lateralAccelerationLimit <= 0.0 && liftAccelerationLimit <= 0.0)
+            propulsion.AvailableLiftThrustN / propulsion.CurrentMassKg
+            * FlightAssistForceFactor
+            * verticalAuthorityFraction;
+        double downAccelerationLimit =
+            propulsion.AvailableLateralThrustN / propulsion.CurrentMassKg
+            * FlightAssistForceFactor
+            * verticalAuthorityFraction;
+        if (lateralAccelerationLimit <= 0.0
+            && liftAccelerationLimit <= 0.0
+            && downAccelerationLimit <= 0.0)
             return DVec3.Zero;
 
         double lateralAcceleration = ResolveAssistAxisAcceleration(
@@ -1137,7 +1151,7 @@ public sealed class SpaceSimulation : Simulation
             dt);
         double verticalAcceleration = ResolveAssistAxisAcceleration(
             relativeVelocityLocal.Y,
-            relativeVelocityLocal.Y < 0.0 ? liftAccelerationLimit : lateralAccelerationLimit,
+            relativeVelocityLocal.Y < 0.0 ? liftAccelerationLimit : downAccelerationLimit,
             dt);
 
         return new DVec3(
