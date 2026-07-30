@@ -398,30 +398,19 @@ public sealed partial class CockpitUI : IDisposable
         };
 
         _warnLed = new LedIndicator(
-            Topics.Ship.WarnLevel,
+            Topics.Flight.FlightAssistActive,
             DataBus.Instruments,
             _gd,
             _font)
         {
-            LabelText         = "WARN",
+            LabelText         = "ASST",
             LabelAnchor       = LabelAnchor.Bottom,
             LabelFontScale    = 0.8f,
             Shape             = LedShape.Round,
             LampSize          = 28,
-            MainColor         = new Color(200, 50, 50),
+            MainColor         = new Color(40, 180, 75),
             OnRangeMin        = 0.5,
             OnRangeMax        = double.PositiveInfinity,
-            ColorRanges       = new List<LedColorRange>
-            {
-                new(0.5, 1.5, new Color( 40, 110,  55)),
-                new(1.5, 2.5, new Color(220, 175,   0)),
-                new(2.5, 3.5, new Color(210,  45,  45)),
-                new(3.5, double.PositiveInfinity, new Color(210, 45, 45)),
-            },
-            BlinkRangeMin     = 3.5,
-            BlinkRangeMax     = double.PositiveInfinity,
-            MinBlinkFrequency = 2.0,
-            MaxBlinkFrequency = 2.0,
         };
 
         if (_cockpitRail != null)

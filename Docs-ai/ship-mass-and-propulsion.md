@@ -83,6 +83,16 @@ Atmospheric translation uses the same engine aggregation. Atmospheric Flight Ass
 add positive vertical force up to the available lateral authority. Gravity,
 aerodynamic lift, and drag remain separate external forces.
 
+System Newtonian Flight Assist is default-on and toggled with `V`. Its first
+implementation preserves the ship-local forward component of reference-relative
+velocity and damps only ship-local lateral and vertical velocity toward zero. The
+assist force is clamped per axis by current installed-engine maneuvering authority:
+sideways and downward correction use lateral thrust, while upward correction uses the
+stronger lift thrust. The current tuning factor is 1.0. X-Stop remains separate and
+takes precedence when active. Flight Assist publishes `Flight.Assist`,
+`Flight.AssistForce`, and `Flight.AssistAcceleration`; applied force/acceleration
+telemetry is throttled to roughly 250 ms for pilot-facing instruments.
+
 ## Provisional configured results at maximum harmony
 
 All masses include the current 1,200 kg default reactor contribution.
