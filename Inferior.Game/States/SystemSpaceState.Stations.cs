@@ -94,9 +94,35 @@ public sealed partial class SystemSpaceState
         _                         =>  250f,
     };
 
+    private IEnumerable<(Galaxy.Station station, DVec3 universePosition)> ResidentStationEntries()
+    {
+        if (TryGetResidentStation(out _, out Galaxy.Station station, out DVec3 position))
+            yield return (station, position);
+    }
+
+    private bool ResidentVisualIntersectsDepthTier(DetailLevel level)
+    {
+        if (!TryGetResidentStation(
+            out StationVisualPackage visual,
+            out _,
+            out DVec3 stationPosition))
+            return false;
+
+        double centre = (stationPosition - _camera.UniversePosition).Length;
+        double nearest = Math.Max(centre - visual.RenderBoundsRadiusMeters, 0.0);
+        double farthest = centre + visual.RenderBoundsRadiusMeters;
+        return level switch
+        {
+            DetailLevel.Full => nearest <= NearTierFar && farthest >= NearTierNear,
+            DetailLevel.Medium => nearest <= MidTierFar && farthest >= MidTierNear,
+            _ => farthest >= MidTierFar,
+        };
+    }
+
     private void DrawStations(DetailLevel level)
     {
         if (_stationPositions.Count == 0 || _meshRenderer == null) return;
+        if (!ResidentVisualIntersectsDepthTier(level)) return;
 
         float rs = (float)Camera3D.RenderScale;
         Matrix view = _effect.View;
@@ -114,11 +140,11 @@ public sealed partial class SystemSpaceState
         // entry for every module, box or MeshFactory alike (see the OnEnter rebuild in
         // SystemSpaceState.cs), so a docking-bay's hull draws through the exact same path
         // as a hab-block's, material map (gloss/bump) included.
-        foreach (var (station, universePos) in _stationPositions)
+        foreach (var (station, universePos) in ResidentStationEntries())
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+            IReadOnlyList<PlacedModule> modules = ResidentStationVisual!.Modules;
 
             bool useShadow = _stationShadowContext != null
                 && ReferenceEquals(_stationShadowContext.Station, station)
@@ -188,12 +214,12 @@ public sealed partial class SystemSpaceState
         // same principle already established for containers and station decoration.
         var decoMeshesForLevel = level == DetailLevel.Full ? _decoMeshes : _decoMeshesFlat;
 
-        foreach (var (station, universePos) in _stationPositions)
+        foreach (var (station, universePos) in ResidentStationEntries())
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
 
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+            IReadOnlyList<PlacedModule> modules = ResidentStationVisual!.Modules;
 
             bool useShadow = _stationShadowContext != null
                 && ReferenceEquals(_stationShadowContext.Station, station)
@@ -219,10 +245,10 @@ public sealed partial class SystemSpaceState
                              * Matrix.CreateTranslation(renderPos);
 
                 // StationTextureRegistry.Get(SurfaceTexture) fallback removed (Brief S2b-1,
-                // Report S2a §5): AssignTextures unconditionally assigns TextureInstance to
+                // Report S2a §5): the upload step assigns TextureInstance to
                 // every module, so this branch was provably dead. Kept a defensive null
                 // fallback (not a crash) in case a future module kind ever skips
-                // AssignTextures — White reads as a flat unlit panel, not a missing-texture
+                // texture upload — White reads as a flat unlit panel, not a missing-texture
                 // artifact.
                 Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.White;
 
@@ -260,12 +286,12 @@ public sealed partial class SystemSpaceState
         _effect.TextureEnabled     = true;
         _effect.Texture            = StationTextureRegistry.White;
 
-        foreach (var (station, universePos) in _stationPositions)
+        foreach (var (station, universePos) in ResidentStationEntries())
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
 
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+            IReadOnlyList<PlacedModule> modules = ResidentStationVisual!.Modules;
 
             var sysQ   = station.GetOrientation(_gameTimeSeconds);
             var stRotQ = new Quaternion(sysQ.X, sysQ.Y, sysQ.Z, sysQ.W);
@@ -434,7 +460,7 @@ public sealed partial class SystemSpaceState
     // visible geometry and depth-tests against it correctly.
     private void DrawStationGlows(SpriteBatch sb, float nearBoundReal, float farBoundReal)
     {
-        if (_stationPositions.Count == 0) return;
+        if (ResidentStationVisual == null) return;
 
         // Active pass's projection (_effect.Projection), not camera.ProjectionMatrix —
         // that's only a representative mid-tier projection now that rendering uses three
@@ -447,9 +473,9 @@ public sealed partial class SystemSpaceState
         // read-only depth test (DepthBufferEnable=true, DepthBufferWriteEnable=false),
         // since they're a 2D overlay, not real geometry that should write new depth.
         sb.Begin(SpriteSortMode.Deferred, BlendState.Additive, null, DepthStencilState.DepthRead);
-        foreach (var (station, universePos) in _stationPositions)
+        foreach (var (station, universePos) in ResidentStationEntries())
         {
-            if (!_stationGeometry.TryGetValue(station, out var modules)) continue;
+            IReadOnlyList<PlacedModule> modules = ResidentStationVisual!.Modules;
             Vector3 stationRel = (universePos - _camera.UniversePosition).ToVector3(); // metres
 
             var sysQ   = station.GetOrientation(_gameTimeSeconds);

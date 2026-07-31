@@ -169,23 +169,26 @@ public sealed partial class SystemSpaceState
         => CoordinateTransforms.GalaxyToEcliptic(
             pos, _system.EclipticTiltAzimuthRadians, _system.EclipticTiltRadians);
 
-    // Enters a different star system, re-using OnEnter logic without a full state transition.
-    //
-    // Known gap (pre-existing, not introduced here): this does not rebuild station
-    // geometry at all (_stationGeometry/_hullMeshes/_decoMeshes stay whatever they were
-    // for the previous system) — see _current-state.md. Brief S2b-1's
-    // _stationPanelTextures inherits the exact same gap for the exact same reason: it's
-    // populated/disposed alongside those dictionaries in OnEnter/OnExit only, so a
-    // mid-session EnterSystem leaves it stale too, not newly leaking beyond what already
-    // doesn't refresh here. When station-rebuild-on-EnterSystem lands, disposing and
-    // repopulating _stationPanelTextures belongs in that same fix, not a separate one.
+    // Enters a different star system without a full state transition. The old resident
+    // package is invalidated before the system changes, then the new lightweight visual
+    // catalogue is built; proximity can request a new package on a later update.
     private void EnterSystem(Star star, DVec3 spawnPos, Quaternion spawnOri, FlightMode mode)
     {
+        ResetStationVisualResidency("system change");
+        foreach (var container in _containers)
+        {
+            container.Vb.Dispose();
+            container.Ib.Dispose();
+        }
+        _containers.Clear();
+        _stationPositions.Clear();
+
         _star   = star;
         _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
         _stationCycle.Reset();
         ComputeEclipticRotation();
         _simulation.InstallSystem(_star, _system);
+        BuildStationVisualCatalog();
 
         // Rebuild skybox for new star
         var (skyPoints, skyGlow, targetable) = SkyboxRenderer.Build(_star, GalaxyGenerator.Generate());

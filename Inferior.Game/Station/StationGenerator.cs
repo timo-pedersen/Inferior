@@ -8,17 +8,32 @@ using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
 
-// Brief S2b-1: Generate()'s panel textures are now per-station-owned (see AssignTextures),
-// not the old shared static cache — PanelTextures is every distinct Texture2D this
-// generation pass created, for the caller to dispose when the station unloads
-// (SystemSpaceState's _stationPanelTextures, alongside _hullMeshes/_decoMeshes). Modules
-// is unchanged; PanelTextures is purely a disposal manifest, not something callers need
-// to index — every module's own PlacedModule.TextureInstance already points at the right
-// element.
+// Uploaded panel textures are package-owned rather than globally cached. PanelTextures is
+// the disposal manifest installed into the resident StationVisualPackage; modules point
+// directly at the corresponding entries.
 public sealed record StationGenerationResult(
     List<PlacedModule> Modules,
     IReadOnlyList<Texture2D> PanelTextures,
     MegastationPrototypeDiagnostics? MegastationDiagnostics = null);
+
+public sealed record StationMeshCpuData(
+    VertexPositionNormalColorTexture[] Vertices,
+    int[] Indices);
+
+public sealed record PreparedStationTexture(int Width, int Height, Color[] Pixels);
+
+public sealed record StationTextureAssignment(
+    PlacedModule Module,
+    int AlbedoTextureIndex,
+    int MaterialTextureIndex);
+
+public sealed record StationGenerationCpuResult(
+    List<PlacedModule> Modules,
+    IReadOnlyList<PreparedStationTexture> Textures,
+    IReadOnlyList<StationTextureAssignment> TextureAssignments,
+    IReadOnlyDictionary<PlacedModule, StationMeshCpuData> FlatDecorationMeshes,
+    MegastationPrototypeDiagnostics? MegastationDiagnostics,
+    double GenerationMilliseconds);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -31,7 +46,7 @@ public sealed class StationGenerator
     private readonly List<PlacedModule> _placed = [];
 
     // Reserved approach corridor in front of a docking bay's door — kept separate from _placed
-    // so every pass that iterates _placed expecting real modules (AssignTextures, BakeLighting,
+    // so every pass that iterates _placed expecting real modules (PrepareTextures, BakeLighting,
     // ValidatePlacement, PopulateLandingPads) needs no changes. Only IntersectsAny checks it.
     private readonly List<(Vector3 min, Vector3 max)> _reservedVolumes = [];
 
@@ -51,45 +66,132 @@ public sealed class StationGenerator
     // used for its N.L bake, which is gone now that the sun term is computed per frame in
     // LitSurface.fx (Docs/station-lighting-pipeline-spec.md Phase A). Kept on the signature
     // rather than touching this public entry point's call site for a lighting-only brief.
-    public static StationGenerationResult Generate(Galaxy.Station station, GraphicsDevice gd,
+    public static StationGenerationResult Generate(
+                                               Galaxy.Station station, GraphicsDevice gd,
                                                double gameTime = 0.0,
                                                bool useMegastationPrototype = false)
     {
+        StationGenerationCpuResult prepared = PrepareCpu(station, useMegastationPrototype);
+        StationGenerationResult result = UploadPrepared(station, prepared, gd);
+        PopulateLandingPads(station, result.Modules);
+        return result;
+    }
+
+    public static StationGenerationCpuResult PrepareCpu(
+        Galaxy.Station station,
+        bool useMegastationPrototype = false,
+        CancellationToken cancellationToken = default)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         if (useMegastationPrototype)
         {
-            var prototype = MegastationPrototypeGenerator.Generate(station, gd);
-            return new StationGenerationResult(
-                prototype.Modules,
-                prototype.PanelTextures,
-                prototype.Diagnostics);
+            string identity = station.PersistenceId ?? station.Name;
+            MegastationPrototypeCpuResult cpu = MegastationPrototypeGenerator.GenerateCpu(
+                identity,
+                stopwatch: stopwatch,
+                cancellationToken: cancellationToken);
+            PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
+            return new StationGenerationCpuResult(
+                [module],
+                [
+                    new PreparedStationTexture(1, 1, [Color.White]),
+                    new PreparedStationTexture(1, 1, [new Color(128, 255, 0, 0)]),
+                ],
+                [new StationTextureAssignment(module, 0, 1)],
+                new Dictionary<PlacedModule, StationMeshCpuData>(),
+                cpu.Diagnostics,
+                stopwatch.Elapsed.TotalMilliseconds);
         }
 
         int seed = NameHash(station.Name);
-        var gen  = new StationGenerator(seed);
-
+        var generator = new StationGenerator(seed);
         StationScale scale = station.Size switch
         {
-            StationSize.Small  => StationScale.Outpost,
+            StationSize.Small => StationScale.Outpost,
             StationSize.Medium => StationScale.Station,
-            StationSize.Large  => StationScale.Port,
-            _                  => StationScale.Outpost,
+            StationSize.Large => StationScale.Port,
+            _ => StationScale.Outpost,
         };
 
-        var modules = gen.Run(station);
+        var modules = generator.Run(station);
         ValidatePlacement(modules);
-        PopulateLandingPads(station, modules);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var profile = StationProfile.Generate(seed, scale);
         var palette = TexturePalette.From(profile);
-        var panelTextures = AssignTextures(modules, gd, palette, profile, station);
-
         StationDecorator.Decorate(modules);
         BakeLighting(modules);
-        // ApplyAmbientOcclusion intentionally NOT called here — the caller (SystemSpaceState)
-        // builds a flat GPU snapshot first, then calls it, then builds the graded snapshot,
-        // so both DetailLevel variants exist from one generation pass.
-        return new StationGenerationResult(modules, panelTextures);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var flatMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+        foreach (PlacedModule module in modules)
+        {
+            if (module.Mesh is not { IsEmpty: false } mesh)
+                continue;
+            var (vertices, indices) = mesh.ToIntArrays();
+            flatMeshes[module] = new StationMeshCpuData(vertices, indices);
+        }
+
+        StationDecorator.ApplyAmbientOcclusion(modules);
+        var (textures, assignments) = PrepareTextures(
+            modules,
+            palette,
+            profile,
+            station,
+            cancellationToken);
+        stopwatch.Stop();
+        return new StationGenerationCpuResult(
+            modules,
+            textures,
+            assignments,
+            flatMeshes,
+            null,
+            stopwatch.Elapsed.TotalMilliseconds);
     }
+
+    public static StationGenerationResult UploadPrepared(
+        Galaxy.Station station,
+        StationGenerationCpuResult prepared,
+        GraphicsDevice gd)
+    {
+        var uploaded = new List<Texture2D>(prepared.Textures.Count);
+        try
+        {
+            foreach (PreparedStationTexture texture in prepared.Textures)
+            {
+                var gpu = new Texture2D(gd, texture.Width, texture.Height);
+                gpu.SetData(texture.Pixels);
+                uploaded.Add(gpu);
+            }
+
+            foreach (StationTextureAssignment assignment in prepared.TextureAssignments)
+            {
+                assignment.Module.TextureInstance = uploaded[assignment.AlbedoTextureIndex];
+                assignment.Module.MaterialInstance = uploaded[assignment.MaterialTextureIndex];
+            }
+
+            return new StationGenerationResult(
+                prepared.Modules,
+                uploaded,
+                prepared.MegastationDiagnostics);
+        }
+        catch
+        {
+            foreach (Texture2D texture in uploaded)
+                texture.Dispose();
+            foreach (PlacedModule module in prepared.Modules)
+            {
+                module.TextureInstance = null;
+                module.MaterialInstance = null;
+            }
+            throw;
+        }
+    }
+
+    public static void ApplyPreparedLandingPads(
+        Galaxy.Station station,
+        List<PlacedModule> modules)
+        => PopulateLandingPads(station, modules);
 
     // Brief S2b-2 item 5: certain module categories get a fixed, economy-independent
     // look instead of the hosting station's own economy roll — riding on the SAME
@@ -127,106 +229,127 @@ public sealed class StationGenerator
     // Both textures of both pair elements go into `owned` for disposal — no separate
     // material dictionary, since SystemSpaceState's disposal loop doesn't care about the
     // albedo/material distinction, only that every Texture2D this pass created gets freed.
-    private static IReadOnlyList<Texture2D> AssignTextures(
+    private static (
+        IReadOnlyList<PreparedStationTexture> Textures,
+        IReadOnlyList<StationTextureAssignment> Assignments) PrepareTextures(
         List<PlacedModule> modules,
-        GraphicsDevice     gd,
-        TexturePalette     palette,
-        StationProfile     profile,
-        Galaxy.Station     station)
+        TexturePalette palette,
+        StationProfile profile,
+        Galaxy.Station station,
+        CancellationToken cancellationToken)
     {
-        var variantSets = new Dictionary<(SurfaceTexture surface, StationEconomy economy), (Texture2D Albedo, Texture2D Material)[]>();
-        var owned       = new List<Texture2D>();
+        var variantSets =
+            new Dictionary<(SurfaceTexture surface, StationEconomy economy), (int Albedo, int Material)[]>();
+        var prepared = new List<PreparedStationTexture>();
+        var assignments = new List<StationTextureAssignment>(modules.Count);
 
-        (Texture2D Albedo, Texture2D Material)[] VariantsFor(SurfaceTexture surface, StationEconomy economy, TexturePalette economyPalette, float colourSpread)
+        (int Albedo, int Material)[] VariantsFor(
+            SurfaceTexture surface,
+            StationEconomy economy,
+            TexturePalette economyPalette,
+            float colourSpread)
         {
             var key = (surface, economy);
-            if (variantSets.TryGetValue(key, out var existing)) return existing;
-            var set = StationTextureRegistry.GenerateVariantSet(gd, surface, economyPalette, station.PersistenceId!, colourSpread);
-            variantSets[key] = set;
-            foreach (var (albedo, material) in set)
+            if (variantSets.TryGetValue(key, out var existing))
+                return existing;
+
+            StationTextureRegistry.TexturePixels[] pixels =
+                StationTextureRegistry.GenerateVariantPixels(
+                    surface,
+                    economyPalette,
+                    station.PersistenceId ?? station.Name,
+                    colourSpread,
+                    cancellationToken: cancellationToken);
+            var set = new (int Albedo, int Material)[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++)
             {
-                owned.Add(albedo);
-                owned.Add(material);
+                int albedo = prepared.Count;
+                prepared.Add(new PreparedStationTexture(512, 512, pixels[i].Albedo));
+                int material = prepared.Count;
+                prepared.Add(new PreparedStationTexture(512, 512, pixels[i].Material));
+                set[i] = (albedo, material);
             }
+            variantSets[key] = set;
             return set;
         }
 
-        foreach (var mod in modules)
+        foreach (PlacedModule module in modules)
         {
-            var surface = SurfaceFor(mod.Definition.Category);
-            var economy = EconomyForModule(mod.Definition.Category, profile.Economy);
-
-            // Age still comes from the real hosting station — wear is a property of the
-            // physical module, not of whichever colour family it's rendered in.
+            cancellationToken.ThrowIfCancellationRequested();
+            SurfaceTexture surface = SurfaceFor(module.Definition.Category);
+            StationEconomy economy = EconomyForModule(module.Definition.Category, profile.Economy);
             TexturePalette economyPalette = economy == profile.Economy
                 ? palette
                 : TexturePalette.From(new StationProfile
-                  {
-                      Economy = economy, Age = profile.Age, Wealth = profile.Wealth, Population = profile.Population,
-                  });
+                {
+                    Economy = economy,
+                    Age = profile.Age,
+                    Wealth = profile.Wealth,
+                    Population = profile.Population,
+                });
 
-            var variance = StationEconomyVariance.Profiles[economy];
+            StationVarianceProfile variance = StationEconomyVariance.Profiles[economy];
             var variants = VariantsFor(surface, economy, economyPalette, variance.ColourSpread);
-            var selected = variants[StationTextureRegistry.SelectVariantIndex(mod.Seed, variants.Length, variance.BaseShareRatio)];
-            mod.TextureInstance  = selected.Albedo;
-            mod.MaterialInstance = selected.Material;
+            var selected = variants[
+                StationTextureRegistry.SelectVariantIndex(
+                    module.Seed,
+                    variants.Length,
+                    variance.BaseShareRatio)];
+            assignments.Add(new StationTextureAssignment(
+                module,
+                selected.Albedo,
+                selected.Material));
         }
 
-        // Overlay the station name on the core module's face texture — a genuinely new
-        // per-station texture (reads the core's assigned variant, draws over a copy), not
-        // a member of any variant set, so it must be tracked here too or it leaks. Only
-        // the albedo changes — MaterialInstance (gloss) stays whatever the core's
-        // originally-assigned variant already set; the name overlay is a printed marking
-        // on the albedo, not a change to the physical material.
         if (modules.Count > 0)
         {
-            var nameTex = GenerateNameFaceTexture(gd, modules[0].TextureInstance, station.Name, palette);
-            modules[0].TextureInstance = nameTex;
-            owned.Add(nameTex);
+            StationTextureAssignment core = assignments[0];
+            Color[] namePixels = GenerateNameFacePixels(
+                prepared[core.AlbedoTextureIndex].Pixels,
+                station.Name,
+                palette);
+            int nameIndex = prepared.Count;
+            prepared.Add(new PreparedStationTexture(512, 512, namePixels));
+            assignments[0] = core with { AlbedoTextureIndex = nameIndex };
         }
 
-        return owned;
+        return (prepared, assignments);
     }
 
-    private static Texture2D GenerateNameFaceTexture(
-        GraphicsDevice gd,
-        Texture2D?     baseTex,
-        string         name,
+    private static Color[] GenerateNameFacePixels(
+        Color[] basePixels,
+        string name,
         TexturePalette palette)
     {
         const int Size = 512;
-        var pixels = new Color[Size * Size];
-
-        if (baseTex != null)
-            baseTex.GetData(pixels);
-        else
-            Array.Fill(pixels, palette.BaseColour);
-
-        // Render name in two font scales: large centred, with a backing bar.
-        int scale  = 4;
-        int textW  = TextPainter.MeasureText(name, scale);
-        int textH  = TextPainter.MeasureHeight(scale);
+        var pixels = basePixels.ToArray();
+        int scale = 4;
+        int textW = TextPainter.MeasureText(name, scale);
+        int textH = TextPainter.MeasureHeight(scale);
         int startX = Math.Clamp((Size - textW) / 2, 4, Size - textW - 4);
         int startY = (Size - textH) / 2;
-
-        // Dark backing strip
         Color barColor = TexturePalette.LerpColor(palette.BaseColour, Color.Black, 0.45f);
-        int pad = 8;
+        const int pad = 8;
         for (int y = startY - pad; y < startY + textH + pad; y++)
         for (int x = 0; x < Size; x++)
             if ((uint)y < Size)
-                pixels[y * Size + x] = TexturePalette.LerpColor(pixels[y * Size + x], barColor, 0.70f);
-
-        // Name text
-        TextPainter.DrawText(pixels, Size, Size, name, startX, startY, palette.TextColour, scale, alpha: 0.90f);
-
-        var tex = new Texture2D(gd, Size, Size);
-        tex.SetData(pixels);
-        return tex;
+                pixels[y * Size + x] =
+                    TexturePalette.LerpColor(pixels[y * Size + x], barColor, 0.70f);
+        TextPainter.DrawText(
+            pixels,
+            Size,
+            Size,
+            name,
+            startX,
+            startY,
+            palette.TextColour,
+            scale,
+            alpha: 0.90f);
+        return pixels;
     }
 
     // internal, not private: GenerateModulesForDiagnostics-based tests need this to group
-    // modules by surface the same way AssignTextures does.
+    // modules by surface the same way PrepareTextures does.
     internal static SurfaceTexture SurfaceFor(string category) => category switch
     {
         "hab" or "luxury"                    => SurfaceTexture.CleanPanel,
@@ -336,7 +459,7 @@ public sealed class StationGenerator
 
     // Diagnostic-only, no GraphicsDevice: exposes the growth loop's real PlacedModule
     // list (with real per-module Seed values) so tests can inspect variant-index
-    // distribution (Brief S2b-1 gate diagnosis) without needing AssignTextures' actual
+    // distribution (Brief S2b-1 gate diagnosis) without needing PrepareTextures' actual
     // texture creation. Same GD-free split as FindDockingBay, one step further.
     internal static List<PlacedModule> GenerateModulesForDiagnostics(Galaxy.Station station)
     {

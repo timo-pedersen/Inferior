@@ -6,6 +6,8 @@ namespace Inferior.Game.StationGen;
 
 public static class StationTextureRegistry
 {
+    public sealed record TexturePixels(Color[] Albedo, Color[] Material);
+
     private static bool _initialized;
 
     public static Texture2D White { get; private set; } = null!;
@@ -24,9 +26,9 @@ public static class StationTextureRegistry
     // Replaces the old process-lifetime GetOrCreate/_cache (Report S2a §1/§6: shared
     // across every module of a (surface, economy) pair, galaxy-wide, ~24 textures total,
     // ever — mod.Seed threaded in and ignored by the cache key). Each station now owns
-    // its own N-texture variant set per surface it actually uses; the caller
-    // (StationGenerator.AssignTextures) is responsible for disposal (see
-    // SystemSpaceState's _stationPanelTextures) — these are NOT cached here.
+    // its own N-texture variant set per surface it actually uses. Prepared pixels are
+    // uploaded on the render thread and the resident StationVisualPackage owns disposal;
+    // these are NOT cached here.
     //
     // Gate-fix history: the first cut of this method passed the SAME TexturePalette to
     // every Generate() call — all N variants converged to the same mean colour, only
@@ -65,10 +67,8 @@ public static class StationTextureRegistry
     /// a (albedo, material) pair (Brief S2c-1: material is the RGBA gloss/height carrier,
     /// same size as albedo, same UV). Not cached or shared — the caller owns every
     /// returned texture (both elements of both pair) and must dispose them all when the
-    /// station unloads (see SystemSpaceState's _stationPanelTextures dictionary, disposed
-    /// alongside _hullMeshes/_decoMeshes in OnEnter/OnExit — material maps are folded
-    /// into that same disposal list, not a second dictionary, since disposal doesn't care
-    /// about the albedo/material distinction). colourSpread bounds how far each variant's
+    /// station unloads. The residency path folds them into its package disposal manifest.
+    /// colourSpread bounds how far each variant's
     /// seeded colour offset may wander from palette.BaseColour (Brief S2b-2:
     /// StationEconomyVariance.Profiles, economy-keyed).
     /// </summary>
@@ -76,14 +76,51 @@ public static class StationTextureRegistry
         GraphicsDevice gd, SurfaceTexture surface, TexturePalette palette,
         string persistenceId, float colourSpread, int count = DefaultVariantCount)
     {
+        var prepared = GenerateVariantPixels(
+            surface, palette, persistenceId, colourSpread, count);
+        var variants = new (Texture2D, Texture2D)[prepared.Length];
+        for (int i = 0; i < prepared.Length; i++)
+            variants[i] = Upload(gd, prepared[i]);
+        return variants;
+    }
+
+    public static TexturePixels[] GenerateVariantPixels(
+        SurfaceTexture surface,
+        TexturePalette palette,
+        string persistenceId,
+        float colourSpread,
+        int count = DefaultVariantCount,
+        CancellationToken cancellationToken = default)
+    {
         var seeds = RollVariantSeeds(persistenceId, surface, count);
-        var variants = new (Texture2D, Texture2D)[count];
+        var variants = new TexturePixels[count];
         for (int i = 0; i < count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var variantPalette = OffsetPaletteForVariant(palette, seeds[i], colourSpread);
-            variants[i] = Generate(gd, surface, variantPalette, seeds[i]);
+            variants[i] = GeneratePixels(surface, variantPalette, seeds[i]);
         }
         return variants;
+    }
+
+    public static (Texture2D Albedo, Texture2D Material) Upload(
+        GraphicsDevice gd,
+        TexturePixels pixels)
+    {
+        var albedo = new Texture2D(gd, Size, Size);
+        var material = new Texture2D(gd, Size, Size);
+        try
+        {
+            albedo.SetData(pixels.Albedo);
+            material.SetData(pixels.Material);
+            return (albedo, material);
+        }
+        catch
+        {
+            albedo.Dispose();
+            material.Dispose();
+            throw;
+        }
     }
 
     // Brief S2b-2 item 1: biases mod.Seed's variant pick so the dominant variant (index
@@ -227,8 +264,7 @@ public static class StationTextureRegistry
     private const float OxidationRaiseAmount = 0.06f;
     private const float OxidationNoiseAmount = 0.03f;
 
-    private static (Texture2D Albedo, Texture2D Material) Generate(
-        GraphicsDevice gd,
+    private static TexturePixels GeneratePixels(
         SurfaceTexture surface,
         TexturePalette palette,
         int            seed)
@@ -348,9 +384,6 @@ public static class StationTextureRegistry
             }
         }
 
-        var albedoTex = new Texture2D(gd, Size, Size);
-        albedoTex.SetData(pixels);
-
         // Gate-fix (aliased/pixelated bump lines): every height pass above wrote a hard
         // 1-2px edge (seam grooves, sub-panel steps, scratch incisions) — a near-
         // discontinuous height step differentiates to a near-discontinuous gradient,
@@ -368,10 +401,7 @@ public static class StationTextureRegistry
             byte g = (byte)Math.Clamp(MathF.Round(gloss[i] * 255f), 0f, 255f);
             materialPixels[i] = new Color(h, g, (byte)0, (byte)255);
         }
-        var materialTex = new Texture2D(gd, Size, Size);
-        materialTex.SetData(materialPixels);
-
-        return (albedoTex, materialTex);
+        return new TexturePixels(pixels, materialPixels);
     }
 
     // ── Pipeline steps ────────────────────────────────────────────────────────

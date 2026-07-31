@@ -155,12 +155,42 @@ Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` 
 | Stress | 67x41x59 | 162,073 | 30,096 | 45,779 | 24,784 | 20,088 | 907 | 81 | 32,968 | 65,936 | 131,872 | 859 ms |
 
 Prototype B is visually accepted and frozen at the raw occupied-massing layer. C0 is visually
-accepted and frozen as the topology-regularised baseline. C2 boundary topology is implemented
-and awaits visual confirmation; fixed fixtures now render through the chamfered path with
-non-zero bevel/cap counts and exact final-array validation clean. Deferred by design:
+accepted and frozen as the topology-regularised baseline. Prototypes A, B, C0, and C2 are merged
+and pushed to `mega-stations`. C2's exact-grid boundary topology, deterministic signatures,
+sharp/final-array validation, and chamfer diagnostics are retained. Its rendered chamfers were
+visually rejected as sparse and tapering into sharp vertices. Production therefore uses the
+clean sharp manifold mesh. Complete visual edge treatment is deferred, and chamfers must not be
+reopened without an explicit new brief. Deferred by design:
 semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
 attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges, overhangs,
 docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
+
+### Detailed visual residency
+
+Station identity, orbit, map/radar/targeting data, and distant-dot presentation are lightweight
+system data and remain available for every station. Detailed visual data is proximity-resident
+presentation state: `SystemSpaceState` owns zero or one `StationVisualPackage`.
+
+`StationVisualResidencyPolicy` is the single threshold owner. Its defaults are a 100,000 m load
+distance and 150,000 m unload distance, measured from a conservative station visual envelope.
+The policy is keyed by `StationVisualClassification`, so megastations and future visual classes
+can receive larger overrides without checking station identity, name, category strings, or
+persistence ids.
+
+When no visual is resident, the nearest eligible surface/envelope distance wins, with ordinal
+persistent identity as the final tie-breaker. A resident remains until its unload boundary,
+system change, state exit, generation failure, or an explicit starter/system-map/debug-cycle
+arrival supersedes it. A nearer station does not displace a valid resident. Normal navigation
+target selection does not request a mesh.
+
+`StationGenerator.PrepareCpu` prepares module/decor geometry, megastation geometry, AO variants,
+and procedural texture pixels away from the render thread. `GraphicsDevice` texture/buffer
+creation and disposal happen only on the game/render thread. Request sequences prevent stale
+preparation results from uploading or installing. The installed package owns modules, CPU mesh
+references, station textures, hull/deco/flat/glass GPU buffers, shadow casters/bounds, the
+station-specific shadow target/context, generation diagnostics, and actual bounds through one
+idempotent disposal path. Detailed draw and shadow passes read only this package; actual bounds
+gate which depth tiers can intersect it. Dots and orbital positions do not consult the package.
 
 ---
 

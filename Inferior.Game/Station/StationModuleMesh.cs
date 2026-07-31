@@ -65,6 +65,8 @@ public sealed class StationModuleMesh
     private readonly List<(int indexStart, int indexCount, DecorClass decorClass)> _classRanges = [];
 
     public bool           IsEmpty       => _verts.Count == 0;
+    public int            VertexCount   => _verts.Count;
+    public int            IndexCount    => _idx.Count;
     public List<AnimTag>  AnimTags      { get; } = [];
     public SurfaceTexture Texture       { get; set; } = SurfaceTexture.CleanPanel;
 

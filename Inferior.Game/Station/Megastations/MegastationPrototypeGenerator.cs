@@ -105,27 +105,7 @@ public static class MegastationPrototypeGenerator
         var sw = Stopwatch.StartNew();
         string id = station.PersistenceId ?? station.Name;
         MegastationPrototypeCpuResult cpu = GenerateCpu(id, settings, sw);
-
-        Vector3 bounds = new(cpu.Grid.Dimension(GridAxis.X), cpu.Grid.Dimension(GridAxis.Y), cpu.Grid.Dimension(GridAxis.Z));
-        var def = new StationModuleDefinition
-        {
-            Id = "megastation-prototype-b",
-            Category = "megastation-prototype",
-            BoundingBox = bounds,
-            MinScale = StationScale.Outpost,
-            Ports = [],
-            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
-        };
-        var module = new PlacedModule
-        {
-            Definition = def,
-            Transform = Matrix.Identity,
-            Seed = cpu.Diagnostics.RootSeed,
-            ChamferDepth = 0f,
-            AabbMin = bounds * -0.5f,
-            AabbMax = bounds * 0.5f,
-            HullMesh = cpu.Mesh,
-        };
+        PlacedModule module = CreatePlacedModule(cpu);
 
         var albedo = MakeFlat(gd, Color.White);
         var material = MakeFlat(gd, new Color(128, 255, 0, 0));
@@ -137,25 +117,29 @@ public static class MegastationPrototypeGenerator
     public static MegastationPrototypeCpuResult GenerateCpu(
         string persistenceId,
         MegastationPrototypeSettings? settings = null,
-        Stopwatch? stopwatch = null)
+        Stopwatch? stopwatch = null,
+        CancellationToken cancellationToken = default)
     {
         settings ??= MegastationPrototypeSettings.Default;
         stopwatch ??= Stopwatch.StartNew();
         int rootSeed = MegastationSeed.Root(persistenceId, settings.SeedCompatibilityVersion);
 
         var grid = SliceGrid.Create(settings, MegastationSeed.Derive(rootSeed, "slice-grid layout"));
+        cancellationToken.ThrowIfCancellationRequested();
         var occupancy = new CuboidStructuralVolumeGenerator().Generate(grid);
         ExteriorSpace.ClassifyExternallyAccessibleEmpty(occupancy);
         var patches = SurfacePatchFinder.FindPatches(occupancy);
         var style = MegastationUrbanStyle.Generate(rootSeed);
         var corners = CornerRegionGenerator.PlanCorners(grid, settings, style, rootSeed);
         CornerRegionGenerator.Apply(occupancy, corners);
+        cancellationToken.ThrowIfCancellationRequested();
         var edges = EdgeRegionGenerator.PlanEdges(grid, settings, style, corners, rootSeed);
         EdgeRegionGenerator.Apply(occupancy, edges);
 
         var faceResults = new List<UrbanGrowthResult>(6);
         foreach (var patch in patches.OrderBy(p => p.Id, StringComparer.Ordinal))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var faceSettings = MegastationFaceSettings.ForPatch(settings, style, grid, patch, rootSeed);
             int faceSeed = patch.Direction == settings.UrbanPatchNormal
                 ? MegastationSeed.Derive(rootSeed, "district layout")
@@ -164,11 +148,13 @@ public static class MegastationPrototypeGenerator
         }
 
         var validation = MegastationConnectivity.Validate(occupancy);
+        cancellationToken.ThrowIfCancellationRequested();
         var regularised = settings.EnableTopologyRegularisation
             ? TopologyRegulariser.Regularise(occupancy, settings)
             : BuildDisabledRegularisationResult(occupancy, settings, validation);
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(regularised.Occupancy, mesh, settings: settings);
+        cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
 
         int districtCount = faceResults.Sum(f => f.Districts.Count);
@@ -247,6 +233,48 @@ public static class MegastationPrototypeGenerator
             stopwatch.ElapsedMilliseconds);
 
         return new MegastationPrototypeCpuResult(grid, occupancy, regularised.Occupancy, regularised.Report, patches, style, faceResults, edges, corners, mesh, meshStats, diag);
+    }
+
+    public static PlacedModule CreatePlacedModule(MegastationPrototypeCpuResult cpu)
+    {
+        Vector3 bounds = new(
+            cpu.Grid.Dimension(GridAxis.X),
+            cpu.Grid.Dimension(GridAxis.Y),
+            cpu.Grid.Dimension(GridAxis.Z));
+        var def = new StationModuleDefinition
+        {
+            Id = "megastation-prototype-b",
+            Category = "megastation-prototype",
+            BoundingBox = bounds,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+        return new PlacedModule
+        {
+            Definition = def,
+            Transform = Matrix.Identity,
+            Seed = cpu.Diagnostics.RootSeed,
+            ChamferDepth = 0f,
+            AabbMin = bounds * -0.5f,
+            AabbMax = bounds * 0.5f,
+            HullMesh = cpu.Mesh,
+        };
+    }
+
+    public static double EstimateConservativeEnvelopeRadius(
+        string persistenceId,
+        MegastationPrototypeSettings? settings = null)
+    {
+        settings ??= MegastationPrototypeSettings.Default;
+        int rootSeed = MegastationSeed.Root(persistenceId, settings.SeedCompatibilityVersion);
+        SliceGrid grid = SliceGrid.Create(
+            settings,
+            MegastationSeed.Derive(rootSeed, "slice-grid layout"));
+        double x = grid.Dimension(GridAxis.X) * 0.5;
+        double y = grid.Dimension(GridAxis.Y) * 0.5;
+        double z = grid.Dimension(GridAxis.Z) * 0.5;
+        return Math.Sqrt(x * x + y * y + z * z);
     }
 
     private static Texture2D MakeFlat(GraphicsDevice gd, Color color)
