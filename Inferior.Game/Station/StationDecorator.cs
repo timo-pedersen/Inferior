@@ -30,7 +30,7 @@ public static partial class StationDecorator
             var cableRng        = new System.Random(baseRng.Next());
 
             // Brief U1: a custom hull factory now returns two meshes — Hull (load-bearing,
-            // never AO'd, drawn DynamicLit like a box module's BuildHullMesh output) and
+            // never AO'd, drawn DynamicLit like a box module's prepared hull output) and
             // Deco (this module's mod.Mesh from here on, exactly like a box module's:
             // starts either empty or pre-seeded with the factory's own structural-but-
             // decoration content, and StationDecorator's passes build it up the same way
@@ -271,7 +271,7 @@ public static partial class StationDecorator
     // Call after BakeLighting so lighting colours are already baked in.
     // Brief U1: AO's rule is the simple pre-factory form again — it runs on the decoration
     // mesh (mod.Mesh) only, starting at face 0, for both module kinds uniformly. Hull
-    // geometry (a box module's BuildHullMesh output, or a MeshFactory module's mod.HullMesh)
+    // geometry (a box module's prepared hull output, or a MeshFactory module's mod.HullMesh)
     // is never in mod.Mesh at all, so there's no range to exclude any more.
     public static void ApplyAmbientOcclusion(IReadOnlyList<PlacedModule> modules)
     {

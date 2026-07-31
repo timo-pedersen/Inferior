@@ -16,12 +16,12 @@ public class StationShadowCasterMeshTests
             ChamferDepth = StationGenerator.ChamferDepthForSeed(seed),
         };
 
-    // Regression test: BuildStationShadowCasterMeshes used to special-case
+    // Regression test: station shadow preparation used to special-case
     // Category == "docking-bay" instead of the general "any MeshFactory module" condition,
     // so every other MeshFactory module (hab-block-octagonal, science-block-octagonal, ...)
     // silently got no hull caster while its decoration still composed — floating greeble
     // shadows with nothing underneath. HasMeshFactoryHull is the exact decision
-    // BuildStationShadowCasterMeshes uses to pick the hull caster; this exercises it
+    // the upload plan uses to pick the hull caster; this exercises it
     // directly against real octagonal modules, no GraphicsDevice required
     // (StationDecorator.Decorate is pure CPU-side geometry accumulation). Brief U1: reads
     // mod.HullMesh (a separate mesh) instead of a face range within mod.Mesh — same

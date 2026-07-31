@@ -19,6 +19,35 @@ public sealed partial class SystemSpaceState
         double ConservativeEnvelopeRadiusMeters,
         bool UseMegastationPrototype);
 
+    private sealed record PreparedStationVisualCpuResult(
+        StationGenerationCpuResult Generation,
+        Vector3 BoundsMin,
+        Vector3 BoundsMax,
+        double RenderBoundsRadiusMeters);
+
+    private sealed class PendingStationVisualUpload(
+        StationVisualDescriptor descriptor,
+        long requestSequence,
+        PreparedStationVisualCpuResult prepared,
+        StationVisualPackage package,
+        StationVisualUploadScheduler scheduler)
+    {
+        public StationVisualDescriptor Descriptor { get; } = descriptor;
+        public long RequestSequence { get; } = requestSequence;
+        public PreparedStationVisualCpuResult Prepared { get; } = prepared;
+        public StationVisualPackage Package { get; } = package;
+        public StationVisualUploadScheduler Scheduler { get; } = scheduler;
+        public Stopwatch WallStopwatch { get; } = Stopwatch.StartNew();
+        public string CancellationReason { get; set; } = "request invalidated";
+        public StationVisualUploadResourceKind? CancellationPhase { get; set; }
+    }
+
+    private sealed class DelegateDisposable(Action dispose) : IDisposable
+    {
+        private Action? _dispose = dispose;
+        public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke();
+    }
+
     private sealed class StationVisualPackage : IDisposable
     {
         private bool _disposed;
@@ -51,6 +80,8 @@ public sealed partial class SystemSpaceState
         public MegastationPrototypeDiagnostics? MegastationDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
+        public double UploadWallMilliseconds { get; set; }
+        public double FinalCommitMilliseconds { get; set; }
         public Vector3 BoundsMin { get; }
         public Vector3 BoundsMax { get; }
         public double EnvelopeRadiusMeters { get; }
@@ -191,11 +222,12 @@ public sealed partial class SystemSpaceState
         new(StringComparer.Ordinal);
     private readonly Dictionary<string, DVec3> _stationPositionByIdentity =
         new(StringComparer.Ordinal);
-    private Task<StationGenerationCpuResult>? _stationPreparationTask;
+    private StationPreparationTask<PreparedStationVisualCpuResult>? _stationPreparationTask;
     private CancellationTokenSource? _stationPreparationCancellation;
     private string? _stationPreparationIdentity;
     private long _stationPreparationSequence;
     private StationVisualResidencyAction? _deferredStationPreparationAction;
+    private PendingStationVisualUpload? _stationUploadSession;
 
     private StationVisualPackage? ResidentStationVisual => _stationVisualSlot.Current;
     private Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes
@@ -264,6 +296,7 @@ public sealed partial class SystemSpaceState
         CompleteStationPreparationIfReady();
         ApplyStationResidencyActions(
             _stationVisualResidency.Evaluate(BuildResidencyCandidates(observerPosition)));
+        PumpStationVisualUpload();
     }
 
     private void RequestExplicitStationVisual(string identity, string reason)
@@ -280,7 +313,7 @@ public sealed partial class SystemSpaceState
     private void ResetStationVisualResidency(string reason)
     {
         ApplyStationResidencyActions(_stationVisualResidency.Reset(reason));
-        CancelStationPreparation();
+        CancelStationPreparation(reason);
         _stationVisualSlot.Clear();
         _stationVisualCatalog.Clear();
         _stationPositionByIdentity.Clear();
@@ -325,6 +358,7 @@ public sealed partial class SystemSpaceState
                     break;
                 case StationVisualResidencyActionKind.CancelPreparation:
                     _stationPreparationCancellation?.Cancel();
+                    CancelStationUpload(action.Reason);
                     LogStationResidencyChange(action, null, stale: true);
                     break;
                 case StationVisualResidencyActionKind.RequestLoad:
@@ -339,9 +373,10 @@ public sealed partial class SystemSpaceState
         if (!_stationVisualCatalog.TryGetValue(action.Identity, out StationVisualDescriptor? descriptor))
             return;
 
-        if (_stationPreparationTask != null)
+        if (_stationPreparationTask != null || _stationUploadSession != null)
         {
             _stationPreparationCancellation?.Cancel();
+            CancelStationUpload("superseded by newer request");
             _deferredStationPreparationAction = action;
             return;
         }
@@ -350,24 +385,46 @@ public sealed partial class SystemSpaceState
         CancellationToken token = _stationPreparationCancellation.Token;
         _stationPreparationIdentity = descriptor.Identity;
         _stationPreparationSequence = action.RequestSequence;
-        _stationPreparationTask = Task.Run(
-            () => StationGenerator.PrepareCpu(
-                descriptor.Station,
-                descriptor.UseMegastationPrototype,
-                token),
+        HashSet<DecorClass> enabledShadowCasters = ClassesForStage(_casterStage).ToHashSet();
+        _stationPreparationTask = StationPreparationTask<PreparedStationVisualCpuResult>.Start(
+            workerToken => PrepareStationVisualCpu(
+                descriptor,
+                enabledShadowCasters,
+                workerToken),
             token);
         LogStationResidencyChange(action, null, stale: false);
     }
 
+    private static PreparedStationVisualCpuResult PrepareStationVisualCpu(
+        StationVisualDescriptor descriptor,
+        IReadOnlySet<DecorClass> enabledShadowCasters,
+        CancellationToken cancellationToken)
+    {
+        StationGenerationCpuResult generation = StationGenerator.PrepareCpu(
+            descriptor.Station,
+            descriptor.UseMegastationPrototype,
+            cancellationToken,
+            enabledShadowCasters);
+        cancellationToken.ThrowIfCancellationRequested();
+        ComputeStationBounds(
+            generation.Modules,
+            out Vector3 boundsMin,
+            out Vector3 boundsMax,
+            out double renderBoundsRadius);
+        return new(generation, boundsMin, boundsMax, renderBoundsRadius);
+    }
+
     private void CompleteStationPreparationIfReady()
     {
-        Task<StationGenerationCpuResult>? task = _stationPreparationTask;
+        StationPreparationTask<PreparedStationVisualCpuResult>? task = _stationPreparationTask;
         if (task == null || !task.IsCompleted)
             return;
 
         string identity = _stationPreparationIdentity ?? "";
         long sequence = _stationPreparationSequence;
         StationVisualResidencyAction? deferred = _deferredStationPreparationAction;
+        StationPreparationOutcome<PreparedStationVisualCpuResult> outcome =
+            task.ObserveCompleted();
         _deferredStationPreparationAction = null;
         _stationPreparationTask = null;
         _stationPreparationIdentity = null;
@@ -375,15 +432,15 @@ public sealed partial class SystemSpaceState
         _stationPreparationCancellation?.Dispose();
         _stationPreparationCancellation = null;
 
-        if (task.IsCanceled)
+        if (outcome.Kind == StationPreparationOutcomeKind.Cancelled)
         {
             PublishStalePreparation(identity, sequence, "CPU preparation cancelled");
             StartDeferredPreparation(deferred);
             return;
         }
-        if (task.IsFaulted)
+        if (outcome.Kind == StationPreparationOutcomeKind.Faulted)
         {
-            Exception exception = task.Exception?.GetBaseException()
+            Exception exception = outcome.Exception
                 ?? new InvalidOperationException("Unknown station preparation failure.");
             if (_stationVisualResidency.ReportGenerationFailure(identity, sequence))
                 PublishStationResidencyMessage(
@@ -396,50 +453,35 @@ public sealed partial class SystemSpaceState
             return;
         }
 
-        StationGenerationCpuResult prepared = task.Result;
+        PreparedStationVisualCpuResult prepared = outcome.Result
+            ?? throw new InvalidOperationException("Successful station preparation returned no result.");
         if (!_stationVisualResidency.CanUpload(identity, sequence)
             || !_stationVisualCatalog.TryGetValue(identity, out StationVisualDescriptor? descriptor))
         {
+            ReleasePreparedStationCpu(prepared.Generation);
             PublishStalePreparation(identity, sequence, "request no longer current");
             StartDeferredPreparation(deferred);
             return;
         }
 
-        var uploadStopwatch = Stopwatch.StartNew();
-        StationVisualPackage? package = null;
         try
         {
-            package = CreateStationVisualPackage(descriptor, prepared);
-            uploadStopwatch.Stop();
-            package.UploadMilliseconds = uploadStopwatch.Elapsed.TotalMilliseconds;
-            StationGenerator.ApplyPreparedLandingPads(
-                descriptor.Station,
-                package.Modules);
-            if (!_stationVisualResidency.TryInstall(identity, sequence))
-            {
-                package.Dispose();
-                PublishStalePreparation(identity, sequence, "request invalidated before install");
-                StartDeferredPreparation(deferred);
-                return;
-            }
-
-            _stationVisualSlot.Install(package);
-            if (package.MegastationDiagnostics is { } diagnostics)
-                PublishMegastationPrototypeDiagnostics(
-                    diagnostics,
-                    MegastationPrototypeSettings.DevelopmentSelection.Mode);
-            PublishInstalledStationVisual(package, sequence);
+            _stationUploadSession = CreateStationUploadSession(
+                descriptor,
+                sequence,
+                prepared);
+            PublishStationUploadStarted(_stationUploadSession);
         }
         catch (Exception exception)
         {
-            package?.Dispose();
+            ReleasePreparedStationCpu(prepared.Generation);
             _stationVisualResidency.ReportGenerationFailure(identity, sequence);
             PublishStationResidencyMessage(
-                $"[StationResidency] GPU upload failed id={identity}; token={sequence}; " +
+                $"[StationUpload] session creation failed id={identity}; token={sequence}; " +
                 $"error={exception.Message}; livePackages={_stationVisualSlot.LiveCount}; staleDiscarded=false",
                 SystemMessagePriority.Warning);
+            StartDeferredPreparation(deferred);
         }
-        StartDeferredPreparation(deferred);
     }
 
     private void StartDeferredPreparation(StationVisualResidencyAction? deferred)
@@ -450,87 +492,313 @@ public sealed partial class SystemSpaceState
         StartStationPreparation(action);
     }
 
-    private StationVisualPackage CreateStationVisualPackage(
+    private PendingStationVisualUpload CreateStationUploadSession(
         StationVisualDescriptor descriptor,
-        StationGenerationCpuResult prepared)
+        long sequence,
+        PreparedStationVisualCpuResult prepared)
     {
-        StationGenerationResult uploaded = StationGenerator.UploadPrepared(
-            descriptor.Station,
-            prepared,
-            _gd);
-        ComputeStationBounds(
-            uploaded.Modules,
-            out Vector3 boundsMin,
-            out Vector3 boundsMax,
-            out double actualBoundsRadius);
+        StationGenerationCpuResult generation = prepared.Generation;
         double envelopeRadius = Math.Max(
-            actualBoundsRadius,
+            prepared.RenderBoundsRadiusMeters,
             descriptor.ConservativeEnvelopeRadiusMeters);
         var package = new StationVisualPackage(
             descriptor,
-            uploaded.Modules,
-            uploaded.PanelTextures,
-            uploaded.MegastationDiagnostics,
-            prepared.GenerationMilliseconds,
-            boundsMin,
-            boundsMax,
+            generation.Modules,
+            [],
+            generation.MegastationDiagnostics,
+            generation.GenerationMilliseconds,
+            prepared.BoundsMin,
+            prepared.BoundsMax,
             envelopeRadius,
-            actualBoundsRadius);
+            prepared.RenderBoundsRadiusMeters);
+        var work = new List<StationVisualUploadWorkItem>(generation.UploadPlan.Count);
+        foreach (StationVisualUploadPlanItem item in generation.UploadPlan)
+        {
+            work.Add(new(
+                item.Kind,
+                item.ResourceIdentity,
+                item.EstimatedBytes,
+                () => UploadStationVisualResource(package, item)));
+        }
+        return new(
+            descriptor,
+            sequence,
+            prepared,
+            package,
+            new StationVisualUploadScheduler(work));
+    }
+
+    private IDisposable UploadStationVisualResource(
+        StationVisualPackage package,
+        StationVisualUploadPlanItem item)
+    {
+        if (item.Texture is { } preparedTexture)
+        {
+            var texture = new Texture2D(
+                _gd,
+                preparedTexture.Width,
+                preparedTexture.Height);
+            try
+            {
+                texture.SetData(preparedTexture.Pixels);
+                package.Textures.Add(texture);
+            }
+            catch
+            {
+                texture.Dispose();
+                throw;
+            }
+            return new DelegateDisposable(() =>
+            {
+                package.Textures.Remove(texture);
+                texture.Dispose();
+            });
+        }
+
+        if (item.Module == null || item.Mesh == null)
+            throw new InvalidOperationException($"Upload item '{item.ResourceIdentity}' has no resource data.");
+
+        PlacedModule module = item.Module;
+        (VertexBuffer vb, IndexBuffer ib, int triCount) gpu = BuildGpuMesh(item.Mesh);
+        Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> target = item.Kind switch
+        {
+            StationVisualUploadResourceKind.HullMesh => package.HullMeshes,
+            StationVisualUploadResourceKind.DecorationMesh => package.DecoMeshes,
+            StationVisualUploadResourceKind.FlatDecorationMesh => package.FlatDecoMeshes,
+            StationVisualUploadResourceKind.GlassMesh => package.GlassMeshes,
+            StationVisualUploadResourceKind.ShadowHullMesh => package.ShadowCasterMeshes,
+            StationVisualUploadResourceKind.ShadowDecorationMesh => package.DecoCasterMeshes,
+            _ => throw new InvalidOperationException($"Unsupported mesh upload type {item.Kind}.")
+        };
         try
         {
-            foreach (PlacedModule module in package.Modules)
-            {
-                if (prepared.FlatDecorationMeshes.TryGetValue(module, out StationMeshCpuData? flat))
-                    package.FlatDecoMeshes[module] = BuildGpuMesh(flat);
-
-                var deco = module.Mesh?.Build(_gd);
-                if (deco.HasValue)
-                    package.DecoMeshes[module] = deco.Value;
-                var glass = module.GlassMesh?.Build(_gd);
-                if (glass.HasValue)
-                    package.GlassMeshes[module] = glass.Value;
-                if (module.Definition.MeshFactory == null)
-                    package.HullMeshes[module] = BuildHullMesh(_gd, module);
-                else
-                {
-                    var hull = module.HullMesh?.Build(_gd);
-                    if (hull.HasValue)
-                        package.HullMeshes[module] = hull.Value;
-                }
-            }
-            BuildStationShadowCasterMeshes(package);
-            return package;
+            target.Add(module, gpu);
+            if (item.Kind == StationVisualUploadResourceKind.ShadowHullMesh
+                && item.Bounds is { } hullBounds)
+                package.ShadowCasterHullBounds[module] = (hullBounds.Min, hullBounds.Max);
+            else if (item.Kind == StationVisualUploadResourceKind.ShadowDecorationMesh
+                && item.Bounds is { } decoBounds)
+                package.ShadowCasterDecoBounds[module] = (decoBounds.Min, decoBounds.Max);
         }
         catch
         {
-            package.Dispose();
+            gpu.vb.Dispose();
+            gpu.ib.Dispose();
             throw;
         }
+
+        return new DelegateDisposable(() =>
+        {
+            target.Remove(module);
+            if (item.Kind == StationVisualUploadResourceKind.ShadowHullMesh)
+                package.ShadowCasterHullBounds.Remove(module);
+            else if (item.Kind == StationVisualUploadResourceKind.ShadowDecorationMesh)
+                package.ShadowCasterDecoBounds.Remove(module);
+            gpu.vb.Dispose();
+            gpu.ib.Dispose();
+        });
+    }
+
+    private void PumpStationVisualUpload()
+    {
+        PendingStationVisualUpload? session = _stationUploadSession;
+        if (session == null)
+            return;
+
+        if (session.Scheduler.State == StationVisualUploadSchedulerState.Uploading
+            && !_stationVisualResidency.CanUpload(
+                session.Descriptor.Identity,
+                session.RequestSequence))
+        {
+            CancelStationUpload("request no longer current");
+        }
+
+        StationVisualUploadResourceKind? phaseBeforePump = session.Scheduler.CurrentPhase;
+        session.Scheduler.Pump();
+        if (session.Scheduler.State == StationVisualUploadSchedulerState.CleaningFailed)
+            session.CancellationPhase = phaseBeforePump;
+        if (!session.Scheduler.IsResolved)
+            return;
+
+        _stationUploadSession = null;
+        session.WallStopwatch.Stop();
+        if (session.Scheduler.State == StationVisualUploadSchedulerState.Completed)
+            CompleteStationVisualUpload(session);
+        else
+            ResolveAbortedStationUpload(session);
+    }
+
+    private void CompleteStationVisualUpload(PendingStationVisualUpload session)
+    {
+        StationVisualPackage package = session.Package;
+        var commitStopwatch = Stopwatch.StartNew();
+        bool installed = false;
+        try
+        {
+            if (!_stationVisualResidency.CanUpload(
+                    session.Descriptor.Identity,
+                    session.RequestSequence))
+            {
+                session.Scheduler.Cancel();
+                session.Scheduler.DisposeImmediately();
+                package.Dispose();
+                PublishStalePreparation(
+                    session.Descriptor.Identity,
+                    session.RequestSequence,
+                    "request invalidated before install");
+                StartDeferredPreparation(TakeDeferredStationPreparation());
+                return;
+            }
+
+            foreach (StationTextureAssignment assignment in session.Prepared.Generation.TextureAssignments)
+            {
+                assignment.Module.TextureInstance = package.Textures[assignment.AlbedoTextureIndex];
+                assignment.Module.MaterialInstance = package.Textures[assignment.MaterialTextureIndex];
+            }
+            StationGenerator.ApplyPreparedLandingPads(
+                session.Descriptor.Station,
+                package.Modules);
+            if (!_stationVisualResidency.TryInstall(
+                    session.Descriptor.Identity,
+                    session.RequestSequence))
+                throw new InvalidOperationException("Residency transition rejected completed upload.");
+
+            _stationVisualSlot.Install(package);
+            session.Scheduler.ReleaseCompletedResources();
+            commitStopwatch.Stop();
+            package.FinalCommitMilliseconds = commitStopwatch.Elapsed.TotalMilliseconds;
+            package.UploadMilliseconds = session.Scheduler.TotalUploadMilliseconds;
+            package.UploadWallMilliseconds = session.WallStopwatch.Elapsed.TotalMilliseconds;
+            installed = true;
+        }
+        catch (Exception exception)
+        {
+            session.Scheduler.DisposeImmediately();
+            package.Dispose();
+            _stationVisualResidency.ReportGenerationFailure(
+                session.Descriptor.Identity,
+                session.RequestSequence);
+            PublishStationResidencyMessage(
+                $"[StationUpload] final commit failed id={session.Descriptor.Identity}; " +
+                $"token={session.RequestSequence}; commitMs={commitStopwatch.Elapsed.TotalMilliseconds:F1}; " +
+                $"error={exception.Message}; livePackages={_stationVisualSlot.LiveCount}",
+                SystemMessagePriority.Warning);
+        }
+        if (installed)
+        {
+            if (package.MegastationDiagnostics is { } diagnostics)
+                PublishMegastationPrototypeDiagnostics(
+                    diagnostics,
+                    MegastationPrototypeSettings.DevelopmentSelection.Mode);
+            PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
+            PublishMissingStationHullCasterWarnings(package);
+        }
+        StartDeferredPreparation(TakeDeferredStationPreparation());
+    }
+
+    private static void PublishMissingStationHullCasterWarnings(StationVisualPackage package)
+    {
+        foreach (PlacedModule module in package.Modules)
+        {
+            if (package.ShadowCasterMeshes.ContainsKey(module))
+                continue;
+            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+                $"Station shadow: module '{module.Definition.Id}' (category '{module.Definition.Category}') " +
+                "has no hull shadow caster — its decoration may cast unattached shadows.",
+                SystemMessagePriority.NB));
+        }
+    }
+
+    private void ResolveAbortedStationUpload(PendingStationVisualUpload session)
+    {
+        session.Package.Dispose();
+        StationVisualUploadScheduler scheduler = session.Scheduler;
+        string oversized = scheduler.LargestOversizedOperation is { } operation
+            ? $"; oversizedType={operation.Kind}; oversizedId={operation.ResourceIdentity}; " +
+              $"oversizedBytes={operation.EstimatedBytes}; oversizedMs={operation.ElapsedMilliseconds:F1}"
+            : "; oversizedType=none";
+        if (scheduler.State == StationVisualUploadSchedulerState.Failed)
+        {
+            string failedOperation = scheduler.FailedOperation is { } failed
+                ? $"; failedType={failed.Kind}; failedId={failed.ResourceIdentity}; " +
+                  $"failedBytes={failed.EstimatedBytes}; failedMs={failed.ElapsedMilliseconds:F1}"
+                : "; failedType=cleanup";
+            _stationVisualResidency.ReportGenerationFailure(
+                session.Descriptor.Identity,
+                session.RequestSequence);
+            PublishStationResidencyMessage(
+                $"[StationUpload] failed id={session.Descriptor.Identity}; token={session.RequestSequence}; " +
+                $"phase={session.CancellationPhase}; resources={scheduler.CompletedResourceCount}/{scheduler.TotalResourceCount}; " +
+                $"bytes={scheduler.CompletedEstimatedBytes}/{scheduler.TotalEstimatedBytes}; " +
+                $"uploadWallMs={session.WallStopwatch.Elapsed.TotalMilliseconds:F1}; " +
+                $"gameThreadUploadMs={scheduler.TotalUploadMilliseconds:F1}; " +
+                $"maxUploadFrameMs={scheduler.MaximumUploadFrameMilliseconds:F1}; " +
+                $"maxUploadOperationMs={scheduler.MaximumOperationMilliseconds:F1}; " +
+                $"uploadFrames={scheduler.UploadFrameCount}; budgetOverruns={scheduler.FrameBudgetOverrunCount}; " +
+                $"cleanupMs={scheduler.CleanupMilliseconds:F1}; error={scheduler.Failure?.Message}; " +
+                $"livePackages={_stationVisualSlot.LiveCount}{failedOperation}{oversized}",
+                SystemMessagePriority.Warning);
+        }
+        else
+        {
+            PublishStationResidencyMessage(
+                $"[StationUpload] cancelled id={session.Descriptor.Identity}; token={session.RequestSequence}; " +
+                $"reason={session.CancellationReason}; phase={session.CancellationPhase}; " +
+                $"resources={scheduler.CompletedResourceCount}/{scheduler.TotalResourceCount}; " +
+                $"bytes={scheduler.CompletedEstimatedBytes}/{scheduler.TotalEstimatedBytes}; " +
+                $"uploadWallMs={session.WallStopwatch.Elapsed.TotalMilliseconds:F1}; " +
+                $"gameThreadUploadMs={scheduler.TotalUploadMilliseconds:F1}; " +
+                $"maxUploadFrameMs={scheduler.MaximumUploadFrameMilliseconds:F1}; " +
+                $"maxUploadOperationMs={scheduler.MaximumOperationMilliseconds:F1}; " +
+                $"uploadFrames={scheduler.UploadFrameCount}; budgetOverruns={scheduler.FrameBudgetOverrunCount}; " +
+                $"cleanupMs={scheduler.CleanupMilliseconds:F1}; livePackages={_stationVisualSlot.LiveCount}{oversized}",
+                SystemMessagePriority.NB);
+        }
+        StartDeferredPreparation(TakeDeferredStationPreparation());
+    }
+
+    private void CancelStationUpload(string reason)
+    {
+        PendingStationVisualUpload? session = _stationUploadSession;
+        if (session == null)
+            return;
+        session.CancellationReason = reason;
+        session.CancellationPhase = session.Scheduler.CurrentPhase;
+        session.Scheduler.Cancel();
+    }
+
+    private StationVisualResidencyAction? TakeDeferredStationPreparation()
+    {
+        StationVisualResidencyAction? deferred = _deferredStationPreparationAction;
+        _deferredStationPreparationAction = null;
+        return deferred;
     }
 
     private (VertexBuffer vb, IndexBuffer ib, int triCount) BuildGpuMesh(
         StationMeshCpuData mesh)
     {
-        var vb = new VertexBuffer(
-            _gd,
-            VertexPositionNormalColorTexture.VertexDeclaration,
-            mesh.Vertices.Length,
-            BufferUsage.WriteOnly);
-        var ib = new IndexBuffer(
-            _gd,
-            IndexElementSize.ThirtyTwoBits,
-            mesh.Indices.Length,
-            BufferUsage.WriteOnly);
+        VertexBuffer? vb = null;
+        IndexBuffer? ib = null;
         try
         {
+            vb = new VertexBuffer(
+                _gd,
+                VertexPositionNormalColorTexture.VertexDeclaration,
+                mesh.Vertices.Length,
+                BufferUsage.WriteOnly);
+            ib = new IndexBuffer(
+                _gd,
+                IndexElementSize.ThirtyTwoBits,
+                mesh.Indices.Length,
+                BufferUsage.WriteOnly);
             vb.SetData(mesh.Vertices);
             ib.SetData(mesh.Indices);
             return (vb, ib, mesh.Indices.Length / 3);
         }
         catch
         {
-            vb.Dispose();
-            ib.Dispose();
+            vb?.Dispose();
+            ib?.Dispose();
             throw;
         }
     }
@@ -593,45 +861,99 @@ public sealed partial class SystemSpaceState
         }
     }
 
-    private void CancelStationPreparation()
+    private void CancelStationPreparation(string reason)
     {
         _stationPreparationCancellation?.Cancel();
-        Task<StationGenerationCpuResult>? abandoned = _stationPreparationTask;
+        StationPreparationTask<PreparedStationVisualCpuResult>? abandoned =
+            _stationPreparationTask;
         if (abandoned != null)
         {
-            _ = abandoned.ContinueWith(
-                completed => _ = completed.Exception,
-                CancellationToken.None,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-                TaskScheduler.Default);
+            _ = abandoned.ObserveOnCompletion(
+                prepared => ReleasePreparedStationCpu(prepared.Generation));
         }
         _stationPreparationTask = null;
         _stationPreparationIdentity = null;
         _stationPreparationSequence = 0;
         _stationPreparationCancellation?.Dispose();
         _stationPreparationCancellation = null;
+        if (_stationUploadSession is { } upload)
+        {
+            var cleanupStopwatch = Stopwatch.StartNew();
+            upload.CancellationPhase = upload.Scheduler.CurrentPhase;
+            upload.Scheduler.Cancel();
+            upload.Scheduler.DisposeImmediately();
+            upload.Package.Dispose();
+            cleanupStopwatch.Stop();
+            PublishStationResidencyMessage(
+                $"[StationUpload] cancelled id={upload.Descriptor.Identity}; " +
+                $"token={upload.RequestSequence}; reason={reason}; phase={upload.CancellationPhase}; " +
+                $"resources={upload.Scheduler.CompletedResourceCount}/{upload.Scheduler.TotalResourceCount}; " +
+                $"bytes={upload.Scheduler.CompletedEstimatedBytes}/{upload.Scheduler.TotalEstimatedBytes}; " +
+                $"cleanupMs={cleanupStopwatch.Elapsed.TotalMilliseconds:F1}; forcedCleanup=true; " +
+                $"livePackages={_stationVisualSlot.LiveCount}",
+                SystemMessagePriority.NB);
+            _stationUploadSession = null;
+        }
         _deferredStationPreparationAction = null;
+    }
+
+    private static void ReleasePreparedStationCpu(StationGenerationCpuResult prepared)
+    {
+        foreach (PlacedModule module in prepared.Modules)
+        {
+            module.Mesh = null;
+            module.HullMesh = null;
+            module.GlassMesh = null;
+            module.TextureInstance = null;
+            module.MaterialInstance = null;
+            module.OpenPorts.Clear();
+            module.ChildPorts.Clear();
+            module.GlowLights.Clear();
+        }
+        prepared.Modules.Clear();
+    }
+
+    private static void PublishStationUploadStarted(PendingStationVisualUpload session)
+    {
+        StationVisualUploadScheduler scheduler = session.Scheduler;
+        PublishStationResidencyMessage(
+            $"[StationUpload] started id={session.Descriptor.Identity}; token={session.RequestSequence}; " +
+            $"phase={scheduler.CurrentPhase}; resources=0/{scheduler.TotalResourceCount}; " +
+            $"bytes=0/{scheduler.TotalEstimatedBytes}; budgetMs={scheduler.FrameBudgetMilliseconds:F1}; " +
+            $"pendingVisible=false",
+            SystemMessagePriority.NB);
     }
 
     private void PublishInstalledStationVisual(
         StationVisualPackage package,
-        long sequence)
+        long sequence,
+        StationVisualUploadScheduler scheduler)
     {
         StationVisualResidencyCandidate candidate = BuildResidencyCandidate(
             package.Descriptor,
             _frameShipSnap?.Position ?? _camera.UniversePosition);
         StationVisualDistanceRange range = _stationVisualPolicy.For(
             package.Descriptor.Classification);
+        string oversized = scheduler.LargestOversizedOperation is { } operation
+            ? $"; oversizedType={operation.Kind}; oversizedId={operation.ResourceIdentity}; " +
+              $"oversizedBytes={operation.EstimatedBytes}; oversizedMs={operation.ElapsedMilliseconds:F1}"
+            : "; oversizedType=none";
         PublishStationResidencyMessage(
             $"[StationResidency] installed id={package.Descriptor.Identity}; " +
             $"class={package.Descriptor.Classification}; reason=preparation complete; " +
             $"centre={candidate.CentreDistanceMeters:F1}m; surface={candidate.SurfaceDistanceMeters:F1}m; " +
             $"load={range.LoadDistanceMeters:F0}m; unload={range.UnloadDistanceMeters:F0}m; token={sequence}; " +
-            $"generationMs={package.GenerationMilliseconds:F1}; uploadMs={package.UploadMilliseconds:F1}; " +
+            $"generationMs={package.GenerationMilliseconds:F1}; gameThreadUploadMs={package.UploadMilliseconds:F1}; " +
+            $"uploadWallMs={package.UploadWallMilliseconds:F1}; uploadFrames={scheduler.UploadFrameCount}; " +
+            $"maxUploadFrameMs={scheduler.MaximumUploadFrameMilliseconds:F1}; " +
+            $"maxUploadOperationMs={scheduler.MaximumOperationMilliseconds:F1}; " +
+            $"budgetOverruns={scheduler.FrameBudgetOverrunCount}; finalCommitMs={package.FinalCommitMilliseconds:F1}; " +
+            $"uploadedResources={scheduler.CompletedResourceCount}/{scheduler.TotalResourceCount}; " +
+            $"uploadedBytes={scheduler.CompletedEstimatedBytes}/{scheduler.TotalEstimatedBytes}; " +
             $"vertices={package.VertexCount}; triangles={package.TriangleCount}; " +
             $"livePackages={_stationVisualSlot.LiveCount}; gpuBuffers={package.OwnedGpuBufferCount}; " +
             $"textures={package.OwnedTextureCount}; cpuMeshBytes={package.EstimatedCpuMeshBytes}; " +
-            $"gpuBytes={package.EstimatedGpuBytes}; staleDiscarded=false",
+            $"gpuBytes={package.EstimatedGpuBytes}; staleDiscarded=false{oversized}",
             SystemMessagePriority.NB);
     }
 
@@ -662,7 +984,7 @@ public sealed partial class SystemSpaceState
             $"surface={action.Candidate.SurfaceDistanceMeters:F1}m; load={range.LoadDistanceMeters:F0}m; " +
             $"unload={range.UnloadDistanceMeters:F0}m; token={action.RequestSequence}; " +
             $"generationMs={(package?.GenerationMilliseconds ?? 0):F1}; " +
-            $"uploadMs={(package?.UploadMilliseconds ?? 0):F1}; vertices={package?.VertexCount ?? 0}; " +
+            $"gameThreadUploadMs={(package?.UploadMilliseconds ?? 0):F1}; vertices={package?.VertexCount ?? 0}; " +
             $"triangles={package?.TriangleCount ?? 0}; livePackages={livePackagesAfterChange}; " +
             $"gpuBuffers={package?.OwnedGpuBufferCount ?? 0}; textures={package?.OwnedTextureCount ?? 0}; " +
             $"cpuMeshBytes={package?.EstimatedCpuMeshBytes ?? 0}; gpuBytes={package?.EstimatedGpuBytes ?? 0}; " +

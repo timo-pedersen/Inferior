@@ -32,6 +32,7 @@ public sealed record StationGenerationCpuResult(
     IReadOnlyList<PreparedStationTexture> Textures,
     IReadOnlyList<StationTextureAssignment> TextureAssignments,
     IReadOnlyDictionary<PlacedModule, StationMeshCpuData> FlatDecorationMeshes,
+    IReadOnlyList<StationVisualUploadPlanItem> UploadPlan,
     MegastationPrototypeDiagnostics? MegastationDiagnostics,
     double GenerationMilliseconds);
 
@@ -80,9 +81,14 @@ public sealed class StationGenerator
     public static StationGenerationCpuResult PrepareCpu(
         Galaxy.Station station,
         bool useMegastationPrototype = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlySet<DecorClass>? enabledShadowCasterClasses = null)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        enabledShadowCasterClasses ??= StationDecorator.DecorCastingPolicy
+            .Where(pair => pair.Value)
+            .Select(pair => pair.Key)
+            .ToHashSet();
         if (useMegastationPrototype)
         {
             string identity = station.PersistenceId ?? station.Name;
@@ -91,14 +97,27 @@ public sealed class StationGenerator
                 stopwatch: stopwatch,
                 cancellationToken: cancellationToken);
             PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
+            List<PlacedModule> megaModules = [module];
+            PreparedStationTexture[] megaTextures =
+            [
+                new(1, 1, [Color.White]),
+                new(1, 1, [new Color(128, 255, 0, 0)]),
+            ];
+            StationTextureAssignment[] megaAssignments = [new(module, 0, 1)];
+            var megaFlatMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+            IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
+                megaModules,
+                megaTextures,
+                megaAssignments,
+                megaFlatMeshes,
+                enabledShadowCasterClasses,
+                cancellationToken);
             return new StationGenerationCpuResult(
-                [module],
-                [
-                    new PreparedStationTexture(1, 1, [Color.White]),
-                    new PreparedStationTexture(1, 1, [new Color(128, 255, 0, 0)]),
-                ],
-                [new StationTextureAssignment(module, 0, 1)],
-                new Dictionary<PlacedModule, StationMeshCpuData>(),
+                megaModules,
+                megaTextures,
+                megaAssignments,
+                megaFlatMeshes,
+                megaUploadPlan,
                 cpu.Diagnostics,
                 stopwatch.Elapsed.TotalMilliseconds);
         }
@@ -139,14 +158,213 @@ public sealed class StationGenerator
             profile,
             station,
             cancellationToken);
+        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
+            modules,
+            textures,
+            assignments,
+            flatMeshes,
+            enabledShadowCasterClasses,
+            cancellationToken);
         stopwatch.Stop();
         return new StationGenerationCpuResult(
             modules,
             textures,
             assignments,
             flatMeshes,
+            uploadPlan,
             null,
             stopwatch.Elapsed.TotalMilliseconds);
+    }
+
+    private static IReadOnlyList<StationVisualUploadPlanItem> BuildUploadPlan(
+        IReadOnlyList<PlacedModule> modules,
+        IReadOnlyList<PreparedStationTexture> textures,
+        IReadOnlyList<StationTextureAssignment> assignments,
+        IReadOnlyDictionary<PlacedModule, StationMeshCpuData> flatDecorationMeshes,
+        IReadOnlySet<DecorClass> enabledShadowCasterClasses,
+        CancellationToken cancellationToken)
+    {
+        var plan = new List<StationVisualUploadPlanItem>();
+        var albedoIndices = assignments.Select(a => a.AlbedoTextureIndex).ToHashSet();
+        var materialIndices = assignments.Select(a => a.MaterialTextureIndex).ToHashSet();
+
+        for (int i = 0; i < textures.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            PreparedStationTexture texture = textures[i];
+            StationVisualUploadResourceKind kind = materialIndices.Contains(i)
+                && !albedoIndices.Contains(i)
+                    ? StationVisualUploadResourceKind.MaterialTexture
+                    : StationVisualUploadResourceKind.PanelAlbedoTexture;
+            plan.Add(new(
+                kind,
+                $"texture[{i}]",
+                (long)texture.Width * texture.Height * 4,
+                Texture: texture));
+        }
+
+        var hullMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StationMeshCpuData? mesh = module.Definition.MeshFactory == null
+                ? PrepareBoxHullMesh(module)
+                : PrepareMesh(module.HullMesh);
+            if (mesh == null)
+                continue;
+            hullMeshes[module] = mesh;
+            plan.Add(MeshItem(
+                StationVisualUploadResourceKind.HullMesh,
+                module,
+                index,
+                mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StationMeshCpuData? mesh = PrepareMesh(module.Mesh);
+            if (mesh != null)
+                plan.Add(MeshItem(
+                    StationVisualUploadResourceKind.DecorationMesh,
+                    module,
+                    index,
+                    mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (flatDecorationMeshes.TryGetValue(module, out StationMeshCpuData? mesh))
+                plan.Add(MeshItem(
+                    StationVisualUploadResourceKind.FlatDecorationMesh,
+                    module,
+                    index,
+                    mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StationMeshCpuData? mesh = PrepareMesh(module.GlassMesh);
+            if (mesh != null)
+                plan.Add(MeshItem(
+                    StationVisualUploadResourceKind.GlassMesh,
+                    module,
+                    index,
+                    mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!hullMeshes.TryGetValue(module, out StationMeshCpuData? mesh))
+                continue;
+            (Vector3 Min, Vector3 Max)? bounds = module.Definition.MeshFactory == null
+                ? (-module.Definition.BoundingBox * 0.5f, module.Definition.BoundingBox * 0.5f)
+                : module.HullMesh?.ComputeFaceRangeBounds(0, module.HullMesh.FaceCount);
+            plan.Add(MeshItem(
+                StationVisualUploadResourceKind.ShadowHullMesh,
+                module,
+                index,
+                mesh,
+                bounds));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (module.Mesh == null || enabledShadowCasterClasses.Count == 0)
+                continue;
+            var ranges = module.Mesh.DecorClassRanges
+                .Where(range => enabledShadowCasterClasses.Contains(range.decorClass))
+                .Select(range => (range.indexStart, range.indexCount))
+                .ToList();
+            StationMeshCpuData? mesh = module.Mesh.PrepareIndexRanges(ranges);
+            if (mesh == null)
+                continue;
+            plan.Add(MeshItem(
+                StationVisualUploadResourceKind.ShadowDecorationMesh,
+                module,
+                index,
+                mesh,
+                module.Mesh.ComputeIndexRangeBounds(ranges)));
+        }
+
+        return plan;
+
+        static StationVisualUploadPlanItem MeshItem(
+            StationVisualUploadResourceKind kind,
+            PlacedModule module,
+            int index,
+            StationMeshCpuData mesh,
+            (Vector3 Min, Vector3 Max)? bounds = null)
+            => new(
+                kind,
+                $"module[{index}]/{module.Definition.Id}",
+                (long)mesh.Vertices.Length * 36 + (long)mesh.Indices.Length * 4,
+                module,
+                Mesh: mesh,
+                Bounds: bounds);
+
+        static StationMeshCpuData? PrepareMesh(StationModuleMesh? mesh)
+        {
+            if (mesh is not { IsEmpty: false })
+                return null;
+            var (vertices, indices) = mesh.ToIntArrays();
+            return new StationMeshCpuData(vertices, indices);
+        }
+    }
+
+    internal static StationMeshCpuData PrepareBoxHullMesh(PlacedModule module)
+    {
+        const float UvScale = 5.0f;
+        float chamferInset = module.ChamferDepth * 0.707f;
+        Vector3 h = module.Definition.BoundingBox * 0.5f;
+        float si = chamferInset;
+        var vertices = new VertexPositionNormalColorTexture[24];
+        var indices = new int[36];
+
+        static void AddFace(
+            VertexPositionNormalColorTexture[] vertices,
+            int[] indices,
+            int face,
+            Vector3 v0,
+            Vector3 v1,
+            Vector3 v2,
+            Vector3 v3,
+            Vector3 normal,
+            Vector3 uAxis,
+            Vector3 vAxis)
+        {
+            int vertexBase = face * 4;
+            vertices[vertexBase] = new(v0, normal, Color.White, Vector2.Zero);
+            vertices[vertexBase + 1] = new(v1, normal, Color.White, new Vector2(
+                Vector3.Dot(v1 - v0, uAxis) / UvScale,
+                Vector3.Dot(v1 - v0, vAxis) / UvScale));
+            vertices[vertexBase + 2] = new(v2, normal, Color.White, new Vector2(
+                Vector3.Dot(v2 - v0, uAxis) / UvScale,
+                Vector3.Dot(v2 - v0, vAxis) / UvScale));
+            vertices[vertexBase + 3] = new(v3, normal, Color.White, new Vector2(
+                Vector3.Dot(v3 - v0, uAxis) / UvScale,
+                Vector3.Dot(v3 - v0, vAxis) / UvScale));
+
+            int indexBase = face * 6;
+            indices[indexBase] = vertexBase;
+            indices[indexBase + 1] = vertexBase + 2;
+            indices[indexBase + 2] = vertexBase + 1;
+            indices[indexBase + 3] = vertexBase;
+            indices[indexBase + 4] = vertexBase + 3;
+            indices[indexBase + 5] = vertexBase + 2;
+        }
+
+        AddFace(vertices, indices, 0, new(-h.X+si,-h.Y+si,+h.Z), new(+h.X-si,-h.Y+si,+h.Z), new(+h.X-si,+h.Y-si,+h.Z), new(-h.X+si,+h.Y-si,+h.Z),  Vector3.UnitZ,  Vector3.UnitX,  Vector3.UnitY);
+        AddFace(vertices, indices, 1, new(+h.X-si,-h.Y+si,-h.Z), new(-h.X+si,-h.Y+si,-h.Z), new(-h.X+si,+h.Y-si,-h.Z), new(+h.X-si,+h.Y-si,-h.Z), -Vector3.UnitZ, -Vector3.UnitX,  Vector3.UnitY);
+        AddFace(vertices, indices, 2, new(-h.X,-h.Y+si,-h.Z+si), new(-h.X,-h.Y+si,+h.Z-si), new(-h.X,+h.Y-si,+h.Z-si), new(-h.X,+h.Y-si,-h.Z+si), -Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY);
+        AddFace(vertices, indices, 3, new(+h.X,-h.Y+si,+h.Z-si), new(+h.X,-h.Y+si,-h.Z+si), new(+h.X,+h.Y-si,-h.Z+si), new(+h.X,+h.Y-si,+h.Z-si),  Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY);
+        AddFace(vertices, indices, 4, new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,-h.Z+si), new(-h.X+si,+h.Y,-h.Z+si),  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);
+        AddFace(vertices, indices, 5, new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);
+        return new StationMeshCpuData(vertices, indices);
     }
 
     public static StationGenerationResult UploadPrepared(

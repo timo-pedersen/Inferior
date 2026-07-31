@@ -23,7 +23,7 @@ public sealed class StationModuleDefinition
     // factory itself needs to seed, e.g. DockingBayHull's door frame/chamfer/interior
     // walls — StationDecorator.Decorate's own passes append to this the same way they
     // build up a box module's mod.Mesh from nothing). This mirrors the box-module shape
-    // exactly: a separate hull (SystemSpaceState.BuildHullMesh for box modules, this
+    // exactly: a separate hull (StationGenerator.PrepareBoxHullMesh for box modules, this
     // factory's Hull for MeshFactory modules), drawn DynamicLit, never AO'd; a decoration
     // mesh (mod.Mesh either way), drawn BakedColorLit, AO'd. Deco may be empty (the
     // octagonal hull factories return a fresh, empty one — their entire mesh is hull).

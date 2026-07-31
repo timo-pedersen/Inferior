@@ -335,63 +335,6 @@ public sealed partial class SystemSpaceState
         _gd.DepthStencilState = DepthStencilState.Default;
     }
 
-    // Builds a VertexPositionNormalColorTexture hull mesh for one module (6 box faces, 24
-    // verts). Colour is baked White — this pass draws through LitSurface.fx's DynamicLit
-    // technique with MaterialColor left at its default White too (matches the old
-    // BasicEffect.DiffuseColor = Vector3.One), all tint coming from the panel texture.
-    // Normals are local-space outward per face; the shader transforms them at draw time.
-    // UV uses the same tangent-frame projection as StationModuleMesh.AddQuad (5 m/tile).
-    private static (VertexBuffer vb, IndexBuffer ib, int triCount) BuildHullMesh(
-        GraphicsDevice gd, PlacedModule mod)
-    {
-        const float UvScale = 5.0f;
-        float ChamferInset  = mod.ChamferDepth * 0.707f;  // single source of truth: mod.ChamferDepth
-        var h  = mod.Definition.BoundingBox * 0.5f;
-        float si = ChamferInset;
-
-        var verts = new VertexPositionNormalColorTexture[24];
-        var idx   = new int[36];
-
-        // Per-face UV axes chosen so that U and V are always positive (0→4 for a 20 m face).
-        // Cross(normal, arb) produces negative U on several faces of a standard box,
-        // making texture V=0.5 (the name text) only partially sampled. Hardcoded axes avoid this.
-        static void AddFace(VertexPositionNormalColorTexture[] v, int[] idx, int face,
-                            Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 n,
-                            Vector3 uAxis, Vector3 vAxis)
-        {
-            int b = face * 4;
-            v[b    ] = new VertexPositionNormalColorTexture(v0, n, Color.White, Vector2.Zero);
-            v[b + 1] = new VertexPositionNormalColorTexture(v1, n, Color.White, new Vector2(
-                Vector3.Dot(v1 - v0, uAxis) / UvScale, Vector3.Dot(v1 - v0, vAxis) / UvScale));
-            v[b + 2] = new VertexPositionNormalColorTexture(v2, n, Color.White, new Vector2(
-                Vector3.Dot(v2 - v0, uAxis) / UvScale, Vector3.Dot(v2 - v0, vAxis) / UvScale));
-            v[b + 3] = new VertexPositionNormalColorTexture(v3, n, Color.White, new Vector2(
-                Vector3.Dot(v3 - v0, uAxis) / UvScale, Vector3.Dot(v3 - v0, vAxis) / UvScale));
-
-            int i = face * 6;
-            idx[i    ] = b;     idx[i + 1] = b + 2; idx[i + 2] = b + 1;
-            idx[i + 3] = b;     idx[i + 4] = b + 3; idx[i + 5] = b + 2;
-        }
-
-        // Each face panel is inset by ChamferInset in its two lateral axes so that
-        // the chamfer strip running along each edge is not hidden behind the panel.
-        // The face-normal axis stays at the full surface depth (±h.N unchanged).
-        //                                                                             n               uAxis              vAxis
-        AddFace(verts, idx, 0, new(-h.X+si,-h.Y+si,+h.Z), new(+h.X-si,-h.Y+si,+h.Z), new(+h.X-si,+h.Y-si,+h.Z), new(-h.X+si,+h.Y-si,+h.Z),  Vector3.UnitZ,  Vector3.UnitX,  Vector3.UnitY);  // +Z
-        AddFace(verts, idx, 1, new(+h.X-si,-h.Y+si,-h.Z), new(-h.X+si,-h.Y+si,-h.Z), new(-h.X+si,+h.Y-si,-h.Z), new(+h.X-si,+h.Y-si,-h.Z), -Vector3.UnitZ, -Vector3.UnitX,  Vector3.UnitY);  // -Z
-        AddFace(verts, idx, 2, new(-h.X,-h.Y+si,-h.Z+si), new(-h.X,-h.Y+si,+h.Z-si), new(-h.X,+h.Y-si,+h.Z-si), new(-h.X,+h.Y-si,-h.Z+si), -Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY);  // -X
-        AddFace(verts, idx, 3, new(+h.X,-h.Y+si,+h.Z-si), new(+h.X,-h.Y+si,-h.Z+si), new(+h.X,+h.Y-si,-h.Z+si), new(+h.X,+h.Y-si,+h.Z-si),  Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY);  // +X
-        AddFace(verts, idx, 4, new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,-h.Z+si), new(-h.X+si,+h.Y,-h.Z+si),  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);  // +Y
-        AddFace(verts, idx, 5, new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);  // -Y
-
-        var vb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
-                                  24, BufferUsage.WriteOnly);
-        vb.SetData(verts);
-        var ib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, 36, BufferUsage.WriteOnly);
-        ib.SetData(idx);
-        return (vb, ib, 12);
-    }
-
     private void DrawStationOrbitRings()
     {
         _effect.LightingEnabled    = false;

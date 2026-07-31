@@ -184,13 +184,43 @@ arrival supersedes it. A nearer station does not displace a valid resident. Norm
 target selection does not request a mesh.
 
 `StationGenerator.PrepareCpu` prepares module/decor geometry, megastation geometry, AO variants,
-and procedural texture pixels away from the render thread. `GraphicsDevice` texture/buffer
-creation and disposal happen only on the game/render thread. Request sequences prevent stale
-preparation results from uploading or installing. The installed package owns modules, CPU mesh
-references, station textures, hull/deco/flat/glass GPU buffers, shadow casters/bounds, the
-station-specific shadow target/context, generation diagnostics, and actual bounds through one
-idempotent disposal path. Detailed draw and shadow passes read only this package; actual bounds
-gate which depth tiers can intersect it. Dots and orbital positions do not consult the package.
+procedural texture pixels, final mesh arrays, selected shadow-caster arrays/bounds, and an ordered
+upload plan away from the render thread. `GraphicsDevice` texture/buffer creation and disposal
+happen only on the game/render thread.
+
+CPU completion starts one hidden pending upload session rather than constructing a resident
+package synchronously. `StationVisualUploadScheduler.DefaultFrameBudgetMilliseconds` is the
+single initial budget source (2 ms). Each operation uploads one existing texture or one existing
+hull/deco/flat/glass/shadow-caster mesh resource. A frame always makes at least one operation's
+worth of progress when possible, then stops before starting another operation after its
+cooperative budget is exhausted. An indivisible operation may overrun; its resource type,
+identity, estimated bytes, and measured duration are retained for bounded diagnostics. Phase 1
+does not page or range-upload a large megastation mesh.
+
+The pending package is inaccessible to drawing and shadows. After all operations finish, a small
+final commit revalidates identity/token, assigns prepared textures and landing pads, performs the
+residency transition, transfers GPU ownership, and publishes the complete package atomically.
+Cancellation and upload failure stop new work and dispose already-created resources under the
+same cooperative scheduler; system reset and state exit force immediate complete cleanup because
+no later frame is guaranteed. Deferred superseding requests start only after the previous chain
+is resolved. Request sequences prevent stale preparation or upload results from installing, and
+the failed-eligibility no-retry rule remains unchanged.
+
+`StationPreparationTask<T>` is the sole asynchronous preparation boundary. It catches
+`OperationCanceledException` only when the request token is cancelled and matches the exception's
+token, converting that expected lifecycle event into a successful task carrying a cancelled
+outcome. Non-cancellation exceptions, cancellation exceptions while the request token is live,
+and exceptions from another token remain genuine fault outcomes. The main-thread polling path or
+the reset/state-exit detachment path claims observation exactly once. A detached successful result
+releases its CPU references; cancelled and faulted tasks are explicitly observed. Expected
+cancellation does not report generation failure, set retry suppression, upload, or install.
+
+The installed package owns modules, CPU mesh references, station textures,
+hull/deco/flat/glass GPU buffers, shadow casters/bounds, the station-specific shadow
+target/context, generation diagnostics, and actual bounds through one idempotent disposal path.
+Detailed draw and shadow passes read only this package; actual bounds gate which depth tiers can
+intersect it. Dots and orbital positions do not consult the package. Shadow resolution,
+frequency, fitting, shaders, sampling, bias, and caster policy are unchanged.
 
 ---
 

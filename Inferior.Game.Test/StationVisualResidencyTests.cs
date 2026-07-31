@@ -138,6 +138,19 @@ public sealed class StationVisualResidencyTests
     }
 
     [Fact]
+    public void SystemResetInvalidatesPendingUploadSequence()
+    {
+        var state = new StationVisualResidencyState(Policy);
+        StationVisualResidencyAction request =
+            Assert.Single(state.Evaluate([Candidate("a", 5_000)]));
+
+        Assert.Single(state.Reset("system change"));
+
+        Assert.False(state.CanUpload("a", request.RequestSequence));
+        Assert.Null(state.PendingIdentity);
+    }
+
+    [Fact]
     public void PackageSlotAllowsAtMostOneInstalledPackage()
     {
         using var slot = new StationVisualPackageSlot<FakePackage>();

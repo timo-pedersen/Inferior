@@ -113,7 +113,7 @@ public sealed partial class SystemSpaceState
     // Definition.BoundingBox — computed once from the actual caster vertex data (not the
     // approximate envelope box) so the fit is exact for MeshFactory hulls too, and grows to
     // cover whichever decoration is currently casting. Hull bounds are set alongside the hull
-    // caster in BuildStationShadowCasterMeshes (stage-independent); deco bounds are set
+    // caster by the station upload plan (stage-independent); deco bounds are set
     // alongside the deco caster in BuildModuleDecoCasterMesh (rebuilt on stage change).
     private bool _showStationShadowOverlay;
     private bool _freezeStationShadowMap;
@@ -203,55 +203,6 @@ public sealed partial class SystemSpaceState
     // now a whole separate mesh, same shape a box module's hull already had.
     internal static bool HasMeshFactoryHull(PlacedModule mod)
         => mod.Definition.MeshFactory != null && mod.HullMesh != null && !mod.HullMesh.IsEmpty;
-
-    private void BuildStationShadowCasterMeshes(StationVisualPackage visual)
-    {
-        var enabled = new HashSet<DecorClass>(ClassesForStage(_casterStage));
-        IReadOnlyList<PlacedModule> moduleList = visual.Modules;
-
-        foreach (var mod in moduleList)
-        {
-            if (mod.Definition.MeshFactory == null)
-            {
-                visual.ShadowCasterMeshes[mod] = BuildHullMesh(_gd, mod);
-                // BuildHullMesh's chamfered panel geometry recovers exactly
-                // Definition.BoundingBox's extents (every face-normal axis is reached
-                // un-inset by the opposite face's panel) — exact, not an approximation.
-                var h = mod.Definition.BoundingBox * 0.5f;
-                visual.ShadowCasterHullBounds[mod] = (-h, h);
-            }
-            else if (HasMeshFactoryHull(mod))
-            {
-                // Generalized MeshFactory hull caster — docking-bay is one example of this,
-                // not a special case of it. Decoration appended separately (below) now
-                // casts too, per the enabled DecorClass set.
-                var hull = mod.HullMesh!.Build(_gd);
-                if (hull.HasValue)
-                    visual.ShadowCasterMeshes[mod] = hull.Value;
-
-                // Real vertex bounds, not the definition's approximate envelope box — a
-                // MeshFactory hull's true extent doesn't always exactly match the nominal
-                // envelope used to size it (e.g. docking-bay's wall thickness/door frame).
-                var bounds = mod.HullMesh.ComputeFaceRangeBounds(0, mod.HullMesh.FaceCount);
-                if (bounds.HasValue)
-                    visual.ShadowCasterHullBounds[mod] = bounds.Value;
-            }
-
-            BuildModuleDecoCasterMesh(visual, mod, enabled);
-        }
-
-        // Safety net: a module with decoration casting but no hull caster produces floating
-        // shadows with nothing underneath them — exactly the bug this fix addresses. Warn
-        // loudly instead of silently missing it again for some future module shape.
-        foreach (var mod in moduleList)
-        {
-            if (visual.ShadowCasterMeshes.ContainsKey(mod)) continue;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
-                $"Station shadow: module '{mod.Definition.Id}' (category '{mod.Definition.Category}') " +
-                "has no hull shadow caster — its decoration may cast unattached shadows.",
-                SystemMessagePriority.NB));
-        }
-    }
 
     // Composes one caster index buffer for a module's decoration from the ranges of
     // whichever DecorClass values are in `enabled` (Phase C). Separate draw from the hull

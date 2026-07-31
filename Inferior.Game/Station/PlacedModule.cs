@@ -55,8 +55,8 @@ public sealed class PlacedModule
     public          List<StationPort>       ChildPorts     { get; } = [];
     public          StationModuleMesh?      Mesh            { get; set; }
     // Brief U1: only ever set for MeshFactory modules (a box module's hull is built
-    // procedurally and on-demand by SystemSpaceState.BuildHullMesh from Definition/
-    // ChamferDepth alone, so it never needs storing here). Load-bearing hull geometry
+    // procedurally by StationGenerator.PrepareBoxHullMesh from Definition/ChamferDepth
+    // alone, so it never needs storing here). Load-bearing hull geometry
     // only — drawn DynamicLit, never AO'd. Decoration (including any structural content
     // the factory itself seeds, e.g. a docking bay's door frame/chamfer/interior walls)
     // lives in Mesh, same as a box module's.

@@ -110,7 +110,7 @@ public sealed class StationModuleMesh
     // ApplyAmbientOcclusion processes faces 0..BaseFaceCount-1. Brief U1: this mesh never
     // contains hull geometry for either module kind (a MeshFactory module's hull lives in
     // its own separate mesh, PlacedModule.HullMesh, exactly like a box module's
-    // SystemSpaceState.BuildHullMesh output does) — so this is always simply "how many
+    // StationGenerator.PrepareBoxHullMesh output does) — so this is always simply "how many
     // seam-decoration faces exist so far," no special-casing by module kind.
     public int BaseFaceCount { get; set; } = 0;
 
@@ -438,6 +438,22 @@ public sealed class StationModuleMesh
     public (VertexBuffer vb, IndexBuffer ib, int triCount)? BuildIndexRanges(
         GraphicsDevice gd, IReadOnlyList<(int indexStart, int indexCount)> ranges)
     {
+        StationMeshCpuData? prepared = PrepareIndexRanges(ranges);
+        if (prepared == null)
+            return null;
+
+        var ivb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
+                                  prepared.Vertices.Length, BufferUsage.WriteOnly);
+        ivb.SetData(prepared.Vertices);
+        var iib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits,
+                                  prepared.Indices.Length, BufferUsage.WriteOnly);
+        iib.SetData(prepared.Indices);
+        return (ivb, iib, prepared.Indices.Length / 3);
+    }
+
+    public StationMeshCpuData? PrepareIndexRanges(
+        IReadOnlyList<(int indexStart, int indexCount)> ranges)
+    {
         if (ranges.Count == 0) return null;
 
         var verts = new List<VertexPositionNormalColorTexture>();
@@ -460,15 +476,9 @@ public sealed class StationModuleMesh
             }
         }
 
-        if (verts.Count == 0 || idx.Count == 0)
-            return null;
-
-        var ivb = new VertexBuffer(gd, VertexPositionNormalColorTexture.VertexDeclaration,
-                                  verts.Count, BufferUsage.WriteOnly);
-        ivb.SetData(verts.ToArray());
-        var iib = new IndexBuffer(gd, IndexElementSize.ThirtyTwoBits, idx.Count, BufferUsage.WriteOnly);
-        iib.SetData(idx.ToArray());
-        return (ivb, iib, idx.Count / 3);
+        return verts.Count == 0 || idx.Count == 0
+            ? null
+            : new StationMeshCpuData(verts.ToArray(), idx.ToArray());
     }
 
     // Module-local AABB over a face range — same face-range selection as BuildFaceRange, but
