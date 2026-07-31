@@ -7,13 +7,22 @@ public sealed class StationVisualResidencyTests
 {
     private static readonly StationVisualResidencyPolicy Policy =
         StationVisualResidencyPolicy.Default;
+    private static readonly StationVisualDistanceRange DefaultRange =
+        Policy.For(StationVisualClassification.Standard);
+
+    [Fact]
+    public void DefaultPolicyUsesRequestedStreamingDistances()
+    {
+        Assert.Equal(200_000, DefaultRange.LoadDistanceMeters);
+        Assert.Equal(250_000, DefaultRange.UnloadDistanceMeters);
+    }
 
     [Fact]
     public void NoStationLoadsOutsideDefaultBoundary()
     {
         var state = new StationVisualResidencyState(Policy);
 
-        Assert.Empty(state.Evaluate([Candidate("a", 100_001)]));
+        Assert.Empty(state.Evaluate([Candidate("a", DefaultRange.LoadDistanceMeters + 1)]));
         Assert.Null(state.PendingIdentity);
     }
 
@@ -23,7 +32,7 @@ public sealed class StationVisualResidencyTests
         var state = new StationVisualResidencyState(Policy);
 
         StationVisualResidencyAction action =
-            Assert.Single(state.Evaluate([Candidate("a", 100_000)]));
+            Assert.Single(state.Evaluate([Candidate("a", DefaultRange.LoadDistanceMeters)]));
 
         Assert.Equal(StationVisualResidencyActionKind.RequestLoad, action.Kind);
         Assert.Equal("a", state.PendingIdentity);
@@ -32,19 +41,21 @@ public sealed class StationVisualResidencyTests
     [Fact]
     public void ResidentRemainsLoadedBetweenBoundaries()
     {
-        var state = Installed("a", 100_000);
+        var state = Installed("a", DefaultRange.LoadDistanceMeters);
 
-        Assert.Empty(state.Evaluate([Candidate("a", 125_000)]));
+        Assert.Empty(state.Evaluate([Candidate(
+            "a",
+            (DefaultRange.LoadDistanceMeters + DefaultRange.UnloadDistanceMeters) / 2)]));
         Assert.Equal("a", state.ResidentIdentity);
     }
 
     [Fact]
     public void ResidentUnloadsAtExactUnloadBoundary()
     {
-        var state = Installed("a", 100_000);
+        var state = Installed("a", DefaultRange.LoadDistanceMeters);
 
         StationVisualResidencyAction action =
-            Assert.Single(state.Evaluate([Candidate("a", 150_000)]));
+            Assert.Single(state.Evaluate([Candidate("a", DefaultRange.UnloadDistanceMeters)]));
 
         Assert.Equal(StationVisualResidencyActionKind.Unload, action.Kind);
         Assert.Null(state.ResidentIdentity);
@@ -53,11 +64,11 @@ public sealed class StationVisualResidencyTests
     [Fact]
     public void MovementAroundLoadBoundaryDoesNotThrashResident()
     {
-        var state = Installed("a", 100_000);
+        var state = Installed("a", DefaultRange.LoadDistanceMeters);
 
-        Assert.Empty(state.Evaluate([Candidate("a", 100_001)]));
-        Assert.Empty(state.Evaluate([Candidate("a", 99_999)]));
-        Assert.Empty(state.Evaluate([Candidate("a", 100_002)]));
+        Assert.Empty(state.Evaluate([Candidate("a", DefaultRange.LoadDistanceMeters + 1)]));
+        Assert.Empty(state.Evaluate([Candidate("a", DefaultRange.LoadDistanceMeters - 1)]));
+        Assert.Empty(state.Evaluate([Candidate("a", DefaultRange.LoadDistanceMeters + 2)]));
         Assert.Equal("a", state.ResidentIdentity);
     }
 
@@ -164,7 +175,7 @@ public sealed class StationVisualResidencyTests
 
         Assert.True(state.ReportGenerationFailure("a", request.RequestSequence));
         Assert.Empty(state.Evaluate([Candidate("a", 10_000)]));
-        Assert.Empty(state.Evaluate([Candidate("a", 150_000)]));
+        Assert.Empty(state.Evaluate([Candidate("a", DefaultRange.UnloadDistanceMeters)]));
         Assert.Single(state.Evaluate([Candidate("a", 10_000)]));
     }
 
@@ -174,13 +185,13 @@ public sealed class StationVisualResidencyTests
         var policy = new StationVisualResidencyPolicy(
             overrides: new Dictionary<StationVisualClassification, StationVisualDistanceRange>
             {
-                [StationVisualClassification.Megastation] = new(200_000, 300_000),
+                [StationVisualClassification.Megastation] = new(300_000, 350_000),
             });
         var state = new StationVisualResidencyState(policy);
 
         StationVisualResidencyAction action = Assert.Single(state.Evaluate([
-            Candidate("ordinary", 150_000),
-            Candidate("any-mega-id", 200_000, StationVisualClassification.Megastation),
+            Candidate("ordinary", DefaultRange.LoadDistanceMeters + 1),
+            Candidate("any-mega-id", 300_000, StationVisualClassification.Megastation),
         ]));
 
         Assert.Equal("any-mega-id", action.Identity);

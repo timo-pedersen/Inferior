@@ -412,7 +412,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `StationPort.cs` — attachment point on a module: size, category filters, terminal/docking flags.
 - `StationProfile.cs` — generated station attributes: economy, age, wealth, population.
 - `StationTextureRegistry.cs` — deterministic procedural panel texture-pixel preparation plus render-thread upload helpers; station variants are package-owned, not globally cached.
-- `StationVisualResidency.cs` — GraphicsDevice-free `StationVisualResidencyPolicy` (default 100 km load / 150 km unload with visual-class overrides), deterministic hysteresis/request-sequence state machine, and the zero-or-one disposable package slot used by `SystemSpaceState`.
+- `StationVisualResidency.cs` — GraphicsDevice-free `StationVisualResidencyPolicy` (default 200 km load / 250 km unload with visual-class overrides), deterministic hysteresis/request-sequence state machine, and the zero-or-one disposable package slot used by `SystemSpaceState`.
 - `StationYagiAntenna.cs` — Yagi antenna element builder: randomized geometry and placement.
 - `SurfaceTexture.cs` — enum of surface types (CleanPanel, TechPanel, Glass, etc.).
 - `TexturePainter.cs` — CPU pixel-buffer text drawing using `BitmapFonts`.

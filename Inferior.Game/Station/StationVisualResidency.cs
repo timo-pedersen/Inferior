@@ -22,8 +22,8 @@ internal readonly record struct StationVisualDistanceRange(
 
 internal sealed class StationVisualResidencyPolicy
 {
-    public const double DefaultLoadDistanceMeters = 100_000.0;
-    public const double DefaultUnloadDistanceMeters = 150_000.0;
+    public const double DefaultLoadDistanceMeters = 200_000.0;
+    public const double DefaultUnloadDistanceMeters = 250_000.0;
 
     private readonly IReadOnlyDictionary<StationVisualClassification, StationVisualDistanceRange> _overrides;
     private readonly StationVisualDistanceRange _defaultRange;

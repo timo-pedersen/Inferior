@@ -171,8 +171,8 @@ Station identity, orbit, map/radar/targeting data, and distant-dot presentation 
 system data and remain available for every station. Detailed visual data is proximity-resident
 presentation state: `SystemSpaceState` owns zero or one `StationVisualPackage`.
 
-`StationVisualResidencyPolicy` is the single threshold owner. Its defaults are a 100,000 m load
-distance and 150,000 m unload distance, measured from a conservative station visual envelope.
+`StationVisualResidencyPolicy` is the single threshold owner. Its defaults are a 200,000 m load
+distance and 250,000 m unload distance, measured from a conservative station visual envelope.
 The policy is keyed by `StationVisualClassification`, so megastations and future visual classes
 can receive larger overrides without checking station identity, name, category strings, or
 persistence ids.
