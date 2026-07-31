@@ -412,6 +412,10 @@ public sealed partial class SystemSpaceState : GameState
             Vector3 srp = _camera.ToRenderSpace(DVec3.Zero);
             Vector3 ld  = srp == Vector3.Zero ? -Vector3.UnitZ : Vector3.Normalize(-srp);
             SceneLighting.SunDirection = -ld;
+            // Brief B1 Fix 2: pre-set here too, same reasoning as SunDirection above —
+            // BakeLighting (inside Generate(), below) needs the real per-system colour, not
+            // whatever the previous system left behind.
+            SceneLighting.SunColour = SceneLighting.SunColourForStar(_star.LightColor);
         }
         _stationGeometry.Clear();
         foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
@@ -1076,6 +1080,9 @@ public sealed partial class SystemSpaceState : GameState
 
         // SunDirection = from scene toward star = opposite of "light travels" direction
         SceneLighting.SunDirection = -lightDir;
+        // Brief B1 Fix 2: per-frame, same as SunDirection — the active star can change
+        // (EnterSystem/hyperspace), so this can't be a one-time OnEnter-only set.
+        SceneLighting.SunColour = SceneLighting.SunColourForStar(_star.LightColor);
         RenderStationShadowMap();
 
         // Three render passes — far, mid, near — each with its own independently

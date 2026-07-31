@@ -43,6 +43,26 @@ public sealed class CelestialBodyRenderer : IDisposable
     private const float PlanetMaxBoostDist = 4500f; // ~30 AU — no boost beyond this
     private const float PlanetVisualScale  = 1f;
 
+    // Brief B1 Fix 1: the glare stack — additive billboards sharing one Gaussian-falloff
+    // texture, radius multiples of the disc's own apparent radius. D-Bright measured the
+    // pre-B1 stack (14x/6x/2.5x/1.1x at alpha 0.07/0.28/0.65/0.90) as "spatially present but
+    // far too faint" — the 14x/outermost layer at 7% is what should sell "blinding" and
+    // barely registered. Raised substantially across the board (roughly 2-3x per layer) and
+    // a fifth, much larger, very faint layer added beyond the old outermost for a long
+    // falloff tail, per the brief's own suggestion. Tuned as a STACK, not layer-by-layer
+    // (additive blending compounds every layer's contribution at any given screen radius) —
+    // report the actual numbers, not a derivation, since "reads as intense bloom" is a
+    // visual judgement Timo's own gate confirms, not something derivable from the numbers
+    // alone. Colour split is unchanged from pre-B1 (already correct per D-Bright): outer
+    // layers carry star.GlowColor (the hue), the innermost stays plain white (the near-core
+    // read) — Timo's own framing ("white-hot centre, coloured surround") was already how
+    // this was built, the magnitudes were just too low to register.
+    private const float GlareLayer0Radius = 1.1f;   private const float GlareLayer0Alpha = 0.95f; // white, innermost
+    private const float GlareLayer1Radius = 2.5f;   private const float GlareLayer1Alpha = 0.80f; // coloured
+    private const float GlareLayer2Radius = 6f;     private const float GlareLayer2Alpha = 0.45f; // coloured
+    private const float GlareLayer3Radius = 14f;    private const float GlareLayer3Alpha = 0.22f; // coloured — was the "primary offender" at 0.07
+    private const float GlareLayer4Radius = 30f;    private const float GlareLayer4Alpha = 0.06f; // coloured, NEW — long falloff tail
+
     private static readonly Color ColOrbitRing = new(25, 35, 55, 180);
 
     public CelestialBodyRenderer(
@@ -85,7 +105,7 @@ public sealed class CelestialBodyRenderer : IDisposable
     public void DrawStar(Camera3D camera, Star star, DetailLevel level)
     {
         Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
-        float   radius    = StarApparentRadius(renderPos);
+        float   radius    = StarApparentRadius(renderPos, star.RadiusMeters);
         _effect.LightingEnabled    = false;
         _effect.VertexColorEnabled = false;
         // Star surface colour — white base tinted toward LightColor by a per-class factor.
@@ -138,7 +158,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         if (Vector4.Transform(new Vector4(renderPos, 1f),
                               camera.ViewMatrix * camera.ProjectionMatrix).W <= 0f) return;
 
-        float baseRU = StarApparentRadius(renderPos);
+        float baseRU = StarApparentRadius(renderPos, star.RadiusMeters);
         var   right  = camera.Right;
         var   up     = camera.Up;
 
@@ -148,10 +168,11 @@ public sealed class CelestialBodyRenderer : IDisposable
         _effect.Texture            = _starGlowTex;
         _effect.World              = Matrix.Identity;
 
-        DrawGlowBillboard(renderPos, baseRU * 14f,  right, up, star.GlowColor * 0.07f);
-        DrawGlowBillboard(renderPos, baseRU * 6f,   right, up, star.GlowColor * 0.28f);
-        DrawGlowBillboard(renderPos, baseRU * 2.5f, right, up, star.GlowColor * 0.65f);
-        DrawGlowBillboard(renderPos, baseRU * 1.1f, right, up, Color.White    * 0.90f);
+        DrawGlowBillboard(renderPos, baseRU * GlareLayer4Radius, right, up, star.GlowColor * GlareLayer4Alpha);
+        DrawGlowBillboard(renderPos, baseRU * GlareLayer3Radius, right, up, star.GlowColor * GlareLayer3Alpha);
+        DrawGlowBillboard(renderPos, baseRU * GlareLayer2Radius, right, up, star.GlowColor * GlareLayer2Alpha);
+        DrawGlowBillboard(renderPos, baseRU * GlareLayer1Radius, right, up, star.GlowColor * GlareLayer1Alpha);
+        DrawGlowBillboard(renderPos, baseRU * GlareLayer0Radius, right, up, Color.White    * GlareLayer0Alpha);
 
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
@@ -213,14 +234,19 @@ public sealed class CelestialBodyRenderer : IDisposable
     }
 
     /// <summary>
-    /// Minimum render-space radius that keeps the star at least <see cref="StarMinPixels"/>
-    /// pixels across at any distance. Grows with distance so the star is always visible;
-    /// never shrinks below StarVisualRadius when close.
+    /// Brief B1 Fix 3: true angular-size render-space radius derived from the star's actual
+    /// RadiusMeters, replacing the old flat StarVisualRadius constant that rendered every
+    /// star class at the same size (a red giant and a dwarf looked identical — D-Bright's
+    /// own finding). Still floored to a minimum <see cref="StarMinPixels"/> screen size so a
+    /// distant or genuinely tiny star doesn't vanish — the floor is pixel-based (grows with
+    /// distance), not the old fixed render-space constant, so a small star up close still
+    /// shows its true small size rather than being inflated to match a bigger class.
     /// </summary>
-    private float StarApparentRadius(Vector3 renderPos)
+    private float StarApparentRadius(Vector3 renderPos, double radiusMeters)
     {
-        float dist = renderPos.Length();
-        if (dist < 0.001f) return StarVisualRadius;
+        float physRadius = (float)(radiusMeters * Camera3D.RenderScale);
+        float dist        = renderPos.Length();
+        if (dist < 0.001f) return physRadius;
 
         // projScale converts render-space size at unit distance to screen pixels.
         // For a symmetric frustum: projScale = screenHeight / (2 * tan(halfFov))
@@ -228,7 +254,7 @@ public sealed class CelestialBodyRenderer : IDisposable
                         / (2f * MathF.Tan(MathHelper.ToRadians(60f))); // half of 60°
 
         float minRenderRadius = StarMinPixels * dist / projScale;
-        return System.Math.Max(StarVisualRadius, minRenderRadius);
+        return System.Math.Max(physRadius, minRenderRadius);
     }
 
     public void DrawAtmosphere(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)
