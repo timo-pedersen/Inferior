@@ -64,6 +64,17 @@ public sealed partial class SystemSpaceState
         int  h        = _gd.Viewport.Height;
         var  hypColor = new Color(80, 160, 255);  // matches dirball "hyp" colour
 
+        if (_uiMouseMode)
+        {
+            foreach (var (_, star) in _targetableStars)
+            {
+                if (_lockedSkyboxStar?.GalaxyIndex == star.GalaxyIndex) continue;
+                Vector2? screen = SkyboxProject(star, viewProj, w, h);
+                if (screen.HasValue)
+                    DrawSkyboxSquare(sb, screen.Value, 6f, hypColor * 0.75f);
+            }
+        }
+
         // Locked star — persistent ring + name in all flight modes
         if (_lockedSkyboxStar != null)
         {
@@ -129,6 +140,18 @@ public sealed partial class SystemSpaceState
             float y  = centre.Y + MathF.Sin(a) * radius;
             sb.Draw(_pixel, new Rectangle((int)x, (int)y, 2, 2), color);
         }
+    }
+
+    private void DrawSkyboxSquare(SpriteBatch sb, Vector2 centre, float halfSize, Color color)
+    {
+        var topLeft = centre + new Vector2(-halfSize, -halfSize);
+        var topRight = centre + new Vector2(halfSize, -halfSize);
+        var bottomRight = centre + new Vector2(halfSize, halfSize);
+        var bottomLeft = centre + new Vector2(-halfSize, halfSize);
+        DrawSkyboxLine(sb, topLeft, topRight, color);
+        DrawSkyboxLine(sb, topRight, bottomRight, color);
+        DrawSkyboxLine(sb, bottomRight, bottomLeft, color);
+        DrawSkyboxLine(sb, bottomLeft, topLeft, color);
     }
 
     private void DrawStarDiamond(SpriteBatch sb, Vector2 centre, float radius, Color color)
