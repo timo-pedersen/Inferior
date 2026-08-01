@@ -239,7 +239,97 @@ Do not build an unbounded queue that can grow forever because one consumer is sl
 
 ---
 
-## 13. Scope discipline for coding agents
+## 13. Instrumentation, commands, and bus integrity
+
+Ship instrumentation follows one authoritative data path:
+
+```text
+simulation-owned state / SensorData provider
+    -> sensor or module-owned instrumentation point
+    -> DataBus/message bus
+    -> Inferior-specific binding
+    -> value-driven UI control
+```
+
+Do not bypass this path for convenience.
+
+### Sensor and telemetry rules
+
+- `SensorData` providers may query, simulate, or calculate raw physical/environmental
+  data. They do not reach into HUD controls or become a second presentation system.
+- Sensors consume `SensorData` and other simulation-owned inputs, apply sensor-specific
+  behaviour such as noise, damage, range, timing, and power cost, then publish their
+  observable result to the appropriate message bus.
+- Modules/components publish their observable status and telemetry to message buses.
+  A HUD instrument must not inspect a live component, world object, targeting object, or
+  simulation object to reconstruct a value that belongs to a sensor/module publication.
+- A sensor or module may publish every tick, at a bounded lower rate, on state change, or
+  only after a command. Publication cadence is part of that producer's contract, not a
+  reason for the UI to query around it.
+- Active sensors run their charge/power/work/result lifecycle on the simulation side.
+  Their results are published only after that lifecycle completes; the UI must not
+  calculate or predict the result itself.
+- Topic names and payload meanings are shared contracts. Define them at an authoritative
+  topic/contract site; do not scatter duplicate string literals or incompatible units.
+- Tests for an instrument path should cover the producer, bus contract, subscription
+  lifetime, and at least one consumer binding. A class existing without being installed,
+  ticked, published, and consumed is not an implemented instrument path.
+
+### Command rules
+
+- Discrete simulation-affecting UI actions for sensors, modules, and components flow
+  through `CommandBus` and are handled by the simulation owner.
+- Do not replace a command with a direct callback, direct mutation, ad-hoc atomic request
+  field, or main-thread method call merely because it is easier to wire.
+- A sent command is a request, not confirmation. UI pending/confirmed state must be driven
+  by a returned state/message publication; do not announce success before the simulation
+  has accepted and applied the command.
+- Continuous pilot input may use the established immutable `PlayerInput` snapshot path.
+  Purely local UI actions such as opening a panel, moving focus, or changing layout do not
+  require `CommandBus` because they do not mutate simulation state.
+
+### HUD and snapshot boundary
+
+- Presentation snapshots remain valid for rendering facts such as camera pose, transforms,
+  visibility, and geometry needed to project known data onto the screen.
+- Presentation snapshots are not an alternate instrumentation bus. Do not read speed,
+  acceleration, temperature, pressure, power, damage, sensor results, or module state from
+  a snapshot when that value belongs to a sensor/module message contract.
+- Screen projection of an already-published direction/contact is presentation work;
+  discovering the contact or calculating the physical measurement on the UI thread is not.
+- Rendering/UI must never generate authoritative radar contacts, landing geometry, sensor
+  readings, or module state from its own mutable view of the world.
+
+### Generic UI boundary and lifetimes
+
+- The extractable generic UI project must not reference Inferior simulation/domain types,
+  global `DataBus` instances, `Topics`, or `CommandBus`.
+- Generic controls are value-driven through properties, methods, events, or generic binding
+  interfaces. Inferior-specific adapters/compositions own topic selection, unit conversion,
+  commands, and domain payload translation.
+- Inferior-specific controls may inherit from or compose generic controls, but game-specific
+  dependencies must remain on the Inferior-specific side of the project boundary.
+- Every bus or command subscription has an explicit owner and lifetime. Teardown must
+  unsubscribe deterministically when a control, sensor, component, ship, or game state is
+  replaced or disposed. Static buses must not retain abandoned instances.
+
+### Exceptions
+
+A bypass is allowed only when an active brief or explicit instruction approves a concrete
+exception, normally for a measured performance or ownership reason. The exception must:
+
+- identify the authoritative owner and data direction;
+- explain why the standard bus/snapshot path is inadequate;
+- be documented at the bypass call site and in the relevant active architecture reference;
+- have narrowly scoped tests that prevent it from becoming a second general authority.
+
+Existing hard-wiring, convenience, legacy code, or an unused bus subscription is not an
+exception. When code violates these rules, report and remove the bypass rather than extending
+it into new instruments or modules.
+
+---
+
+## 14. Scope discipline for coding agents
 
 - Read the relevant code before proposing architecture changes.
 - Prefer the smallest coherent change that solves the actual problem.
@@ -274,7 +364,7 @@ Rules:
 
 ---
 
-## 14. Verification and honesty
+## 15. Verification and honesty
 
 - Never mark visual behaviour verified unless Timo has seen it in-engine or a deterministic automated test proves the relevant property.
 - Distinguish: implemented, compiled, test-passing, inspected, and visually confirmed.
