@@ -14,9 +14,9 @@ namespace Inferior.Game.States;
 /// Galaxy map — top level view of all 20480 stars.
 /// Left-click        — select star / show info
 /// Double-click      — enter system view
-/// Right-click       — set jump target
+/// Right-click       — set hyperspace target
 /// Click empty space — deselect
-/// Escape            — clear jump target, then selection
+/// Escape            — return to flight
 /// Mouse wheel       — zoom
 /// Middle drag       — pan
 /// </summary>
@@ -136,6 +136,7 @@ public sealed class GalaxyMapState : GameState
             _spawnOrientation = gmp.SpawnOrientation;
             _navBody          = gmp.NavBody;
             _navStation       = gmp.NavStation;
+            _jumpTarget       = gmp.HyperspaceTarget;
             _visitedSystems.Add(_currentSystem.GalaxyIndex);
             _cameraPos = new Vector2(
                 (float)_currentSystem.GalacticPos.X,
@@ -405,7 +406,7 @@ public sealed class GalaxyMapState : GameState
         }
 
         _jumpTarget = hit;
-        // deliberately not changing _selectedStar — right-click only sets jump target
+        // deliberately not changing _selectedStar — right-click only sets hyperspace target
     }
 
     private void HandleKeyboard(KeyboardState keys)
@@ -418,8 +419,7 @@ public sealed class GalaxyMapState : GameState
         {
             // Esc or N = back to flight (N toggles the galaxy map)
             _pendingTransition = StateTransition.To(GameStateId.SystemSpace,
-                new SystemSpacePayload(_currentSystem, null, _storedGameTime, null, _spawnPos, _spawnOrientation,
-                    _navBody, _navStation));
+                new SystemSpaceResumePayload(_jumpTarget));
         }
         else if (mPressed)
         {
@@ -672,7 +672,7 @@ public sealed class GalaxyMapState : GameState
 
         bool isTarget = _jumpTarget?.GalaxyIndex == display.GalaxyIndex;
         if (isTarget)
-            DrawText(sb, "[ JUMP TARGET ]", new Vector2(tx, ty), ColJumpTarget);
+            DrawText(sb, "[ HYPERSPACE TARGET ]", new Vector2(tx, ty), ColJumpTarget);
         else if (isCurrent)
             DrawText(sb, "[ CURRENT SYSTEM ]", new Vector2(tx, ty), Color.White);
     }
@@ -699,7 +699,7 @@ public sealed class GalaxyMapState : GameState
 
         DrawText(sb, "Left-click    select",        new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Double-click  system map",    new Vector2(x, y), ColTextDim, 0.72f); y += 18;
-        DrawText(sb, "Right-click   jump target",   new Vector2(x, y), ColTextDim, 0.72f); y += 18;
+        DrawText(sb, "Right-click   hyperspace target", new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Scroll        zoom",           new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "M             current system", new Vector2(x, y), ColTextDim, 0.72f); y += 18;
         DrawText(sb, "Esc           back to flight", new Vector2(x, y), ColTextDim, 0.72f);
