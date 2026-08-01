@@ -28,3 +28,6 @@ public record SystemSpacePayload(
     Station?       NavStation       = null,
     StationArrivalTarget? StationArrival = null,
     bool           InitialNewGameStarterEntry = false);
+
+public record SystemSpaceResumePayload(
+    Star? HyperspaceTarget = null);

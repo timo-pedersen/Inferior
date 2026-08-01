@@ -15,4 +15,5 @@ public record GalaxyMapPayload(
     DVec3?        SpawnPos         = null,
     Quaternion?   SpawnOrientation = null,
     OrbitalBody?  NavBody          = null,
-    Station?      NavStation       = null);
+    Station?      NavStation       = null,
+    Star?         HyperspaceTarget = null);
