@@ -38,30 +38,66 @@ public sealed class CelestialBodyRenderer : IDisposable
     // ── Visual constants (duplicated from SystemSpaceState — plain constants,
     // cheap to duplicate rather than plumb through as parameters) ───────────────
     private const float StarVisualRadius   = 8f;
+    // Brief B1a Fix 1: KEPT at 1, not raised to the brief's illustrative "~2px at 37 AU."
+    // D-Bright/B1 measured the disc's floor CROSSOVER (where true angular size stops
+    // dominating and the floor locks in) at ~1.5 AU for a G-class star with this 1px floor —
+    // meaning most of the 1-37+ AU range Timo actually flies in was already floor-bound at a
+    // CONSTANT pixel size, which is why "the same star renders at the same size at 1 AU and
+    // 37 AU": cause (2) from the brief, the floor binding at both distances, not (1) distance
+    // going unused — StarApparentRadius's math already derives true angular size from live
+    // distance every frame (confirmed by direct read), it's just that a realistic star's true
+    // angular size is only ~1-2px at typical in-system range under this camera's FOV, so the
+    // floor dominates almost everywhere except close approach or genuinely large (giant)
+    // stars. Verified directly, not assumed: raising this to 2 (matching the brief's literal
+    // "~2px" text) was tried and measured — it makes the defect WORSE for common classes, not
+    // better, because a 2px floor exceeds a G-class star's true 1AU size (1.49px), pulling
+    // 1 AU ITSELF into floor-bound territory (both distances then read as an identical,
+    // flat 2px — zero shrink). Kept at the brief's own stated LOWER bound ("never below
+    // ~1px") instead, which preserves the real (if modest, ~1.5x) shrink for common classes;
+    // see StarApparentRadius's own comment for the full per-class numbers this produces, and
+    // GlareOuterRadius for how Fix 2 carries the primary "how far away" signal instead.
     private const float StarMinPixels      = 1f;
     private const float PlanetMinPixels    = 1f;
     private const float PlanetMaxBoostDist = 4500f; // ~30 AU — no boost beyond this
     private const float PlanetVisualScale  = 1f;
 
-    // Brief B1 Fix 1: the glare stack — additive billboards sharing one Gaussian-falloff
-    // texture, radius multiples of the disc's own apparent radius. D-Bright measured the
-    // pre-B1 stack (14x/6x/2.5x/1.1x at alpha 0.07/0.28/0.65/0.90) as "spatially present but
-    // far too faint" — the 14x/outermost layer at 7% is what should sell "blinding" and
-    // barely registered. Raised substantially across the board (roughly 2-3x per layer) and
-    // a fifth, much larger, very faint layer added beyond the old outermost for a long
-    // falloff tail, per the brief's own suggestion. Tuned as a STACK, not layer-by-layer
-    // (additive blending compounds every layer's contribution at any given screen radius) —
-    // report the actual numbers, not a derivation, since "reads as intense bloom" is a
-    // visual judgement Timo's own gate confirms, not something derivable from the numbers
-    // alone. Colour split is unchanged from pre-B1 (already correct per D-Bright): outer
-    // layers carry star.GlowColor (the hue), the innermost stays plain white (the near-core
-    // read) — Timo's own framing ("white-hot centre, coloured surround") was already how
-    // this was built, the magnitudes were just too low to register.
+    // Brief B1 Fix 1 (superseded by B1a Fix 2 below): the glare stack's per-layer relative
+    // size, radius multiples of a shared brightness-driven base rather than the disc's own
+    // apparent radius. D-Bright measured the pre-B1 stack (14x/6x/2.5x/1.1x at alpha
+    // 0.07/0.28/0.65/0.90) as "spatially present but far too faint" — B1 raised every layer's
+    // alpha substantially and added a fifth, much larger, very faint layer for a long
+    // falloff tail. B1a found the glare was STILL negligible despite that, because tying
+    // glare radius to disc radius means a physically tiny disc (true angular size, ~1-2px at
+    // typical range) gets a proportionally tiny glare too — real glare is a property of
+    // source brightness and the optical system, not how large the source APPEARS, which is
+    // why a star light-years away still shows a point of glare rather than nothing. B1a Fix
+    // 2 decouples these radii entirely (see DrawStarGlow) — these five constants now express
+    // each layer's SIZE as a fraction of the outermost (GlareLayer4Radius), and ALPHA is
+    // unchanged from B1 (already correct: near-white core, star-class hue in the halo).
     private const float GlareLayer0Radius = 1.1f;   private const float GlareLayer0Alpha = 0.95f; // white, innermost
     private const float GlareLayer1Radius = 2.5f;   private const float GlareLayer1Alpha = 0.80f; // coloured
     private const float GlareLayer2Radius = 6f;     private const float GlareLayer2Alpha = 0.45f; // coloured
     private const float GlareLayer3Radius = 14f;    private const float GlareLayer3Alpha = 0.22f; // coloured — was the "primary offender" at 0.07
-    private const float GlareLayer4Radius = 30f;    private const float GlareLayer4Alpha = 0.06f; // coloured, NEW — long falloff tail
+    private const float GlareLayer4Radius = 30f;    private const float GlareLayer4Alpha = 0.06f; // coloured, outermost — long falloff tail
+
+    // Brief B1a Fix 2: glare size driven by the star's own apparent brightness
+    // (Luminosity/distanceAU^2), NOT disc size — see DrawStarGlow/GlareOuterRadiusPixels.
+    // sqrt compression (chosen over log or raw): sqrt(Luminosity/distAU^2) =
+    // sqrt(Luminosity)/distAU, turning inverse-SQUARE brightness falloff into inverse-LINEAR
+    // radius falloff — smoother/less aggressive than log at extreme ranges, preserves
+    // ordering (closer is always bigger), and is simple to reason about and tune. Reference:
+    // a Sol-like G star (Luminosity~1) at 1 AU gives brightnessFactor=1, so
+    // GlareOuterScale IS the outermost layer's radius in pixels at that reference point —
+    // chosen (500px) for a dramatic near-approach halo per the brief's own ask ("a small
+    // disc inside an enormous halo"). At 37 AU the same star's brightnessFactor is 1/37, so
+    // outer radius would be ~13.5px unfloored — GlareFloorPixels (20px radius = 40px
+    // diameter) takes over there, matching the brief's explicit "~40px across at 37 AU"
+    // starting target. GlareMaxPixels is a safety cap only reachable at extreme luminosity
+    // (O-class, Luminosity in the tens of thousands) or extreme close proximity — not a
+    // tuned value, just a guard against a pathologically huge billboard.
+    private const float GlareOuterScale  = 500f;
+    private const float GlareFloorPixels = 20f;
+    private const float GlareMaxPixels   = 2000f;
 
     private static readonly Color ColOrbitRing = new(25, 35, 55, 180);
 
@@ -158,9 +194,9 @@ public sealed class CelestialBodyRenderer : IDisposable
         if (Vector4.Transform(new Vector4(renderPos, 1f),
                               camera.ViewMatrix * camera.ProjectionMatrix).W <= 0f) return;
 
-        float baseRU = StarApparentRadius(renderPos, star.RadiusMeters);
-        var   right  = camera.Right;
-        var   up     = camera.Up;
+        float outerRU = GlareOuterRadius(renderPos, star.Luminosity);
+        var   right   = camera.Right;
+        var   up      = camera.Up;
 
         _effect.TextureEnabled     = true;
         _effect.VertexColorEnabled = true;
@@ -168,14 +204,45 @@ public sealed class CelestialBodyRenderer : IDisposable
         _effect.Texture            = _starGlowTex;
         _effect.World              = Matrix.Identity;
 
-        DrawGlowBillboard(renderPos, baseRU * GlareLayer4Radius, right, up, star.GlowColor * GlareLayer4Alpha);
-        DrawGlowBillboard(renderPos, baseRU * GlareLayer3Radius, right, up, star.GlowColor * GlareLayer3Alpha);
-        DrawGlowBillboard(renderPos, baseRU * GlareLayer2Radius, right, up, star.GlowColor * GlareLayer2Alpha);
-        DrawGlowBillboard(renderPos, baseRU * GlareLayer1Radius, right, up, star.GlowColor * GlareLayer1Alpha);
-        DrawGlowBillboard(renderPos, baseRU * GlareLayer0Radius, right, up, Color.White    * GlareLayer0Alpha);
+        // Brief B1a Fix 2: each layer is a fixed fraction of the outermost (GlareLayer4Radius
+        // is the normalising denominator, not a disc-relative multiplier any more) — same
+        // relative shape as B1's stack, now scaled as a whole by brightness/distance instead
+        // of by disc size.
+        DrawGlowBillboard(renderPos, outerRU,                                          right, up, star.GlowColor * GlareLayer4Alpha);
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer3Radius / GlareLayer4Radius), right, up, star.GlowColor * GlareLayer3Alpha);
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer2Radius / GlareLayer4Radius), right, up, star.GlowColor * GlareLayer2Alpha);
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer1Radius / GlareLayer4Radius), right, up, star.GlowColor * GlareLayer1Alpha);
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer0Radius / GlareLayer4Radius), right, up, Color.White    * GlareLayer0Alpha);
 
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
+    }
+
+    /// <summary>
+    /// Brief B1a Fix 2: the outermost glare layer's render-space radius, driven by the
+    /// star's apparent brightness (Luminosity/distanceAU^2, sqrt-compressed to
+    /// sqrt(Luminosity)/distanceAU) rather than disc size — decoupled entirely from
+    /// <see cref="StarApparentRadius"/>. Floored in PIXELS (converted to render-space via the
+    /// same distance/projScale technique StarApparentRadius uses, so it doesn't drift with
+    /// resolution or FOV) so the sun always carries a halo distinctly larger than a
+    /// background starfield point regardless of class or distance; capped as a safety net
+    /// against extreme luminosity or extreme proximity.
+    /// </summary>
+    private float GlareOuterRadius(Vector3 renderPos, double luminosity)
+    {
+        float distRU = renderPos.Length();
+        double distAU = distRU / (Units.AU * Camera3D.RenderScale);
+        double brightnessFactor = luminosity > 0.0
+            ? System.Math.Sqrt(luminosity) / System.Math.Max(distAU, 0.001)
+            : 0.0;
+
+        float outerPixels = System.Math.Clamp(
+            GlareOuterScale * (float)brightnessFactor, GlareFloorPixels, GlareMaxPixels);
+
+        if (distRU < 0.001f) return outerPixels; // camera essentially at the star; pixels ~= RU here, degenerate case
+
+        float projScale = _gd.Viewport.Height / (2f * MathF.Tan(MathHelper.ToRadians(60f)));
+        return outerPixels * distRU / projScale;
     }
 
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
@@ -241,6 +308,25 @@ public sealed class CelestialBodyRenderer : IDisposable
     /// distant or genuinely tiny star doesn't vanish — the floor is pixel-based (grows with
     /// distance), not the old fixed render-space constant, so a small star up close still
     /// shows its true small size rather than being inflated to match a bigger class.
+    ///
+    /// Brief B1a: this formula was already distance-live and resolution/FOV-independent —
+    /// confirmed by direct read, not assumed — the "doesn't shrink" defect B1a diagnosed was
+    /// that the FLOOR's crossover point (where physRadius stops exceeding the floor and locks
+    /// flat) sits at only ~1.5 AU for a G-class star, and even closer for dimmer M/K classes
+    /// — so most of the 1-37+ AU range a player actually flies in was floor-locked at a
+    /// constant pixel size regardless of distance. This is a real consequence of a realistic
+    /// star's true angular size being only ~1-2px at typical in-system range under this
+    /// camera's FOV, not a bug in the live-distance math itself. Measured crossover
+    /// distances (StarMinPixels=1 — raising it to the brief's illustrative "~2px" was tried
+    /// and measured to make things WORSE for common classes, see StarMinPixels' own comment):
+    /// M-dwarf crosses over at ~0.23 AU, K at ~1.13 AU, G at ~1.49 AU — all effectively
+    /// floor-locked by 37 AU, but each still shows a real (if modest, ~1.1-1.5x) shrink
+    /// between 1 AU and 37 AU rather than none; a large O-class giant crosses over at
+    /// ~22.5 AU, giving an 11x difference between 1 AU (22.5px) and 37 AU (1px) — giants read
+    /// as giants over a materially wider range, though every class eventually converges to
+    /// the same 1px floor far enough out. This asymmetry, and the small absolute pixel counts
+    /// even at 1 AU for common classes, is exactly why Brief B1a's Fix 2 makes GLARE (not
+    /// disc) carry the primary "how far away, and how bright" signal — see GlareOuterRadius.
     /// </summary>
     private float StarApparentRadius(Vector3 renderPos, double radiusMeters)
     {
