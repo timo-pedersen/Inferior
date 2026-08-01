@@ -22,6 +22,11 @@ internal static class CockpitLightDebugInput
 
         bool shiftDown =
             current.IsKeyDown(Keys.LeftShift) || current.IsKeyDown(Keys.RightShift);
+        bool ctrlDown =
+            current.IsKeyDown(Keys.LeftControl) || current.IsKeyDown(Keys.RightControl);
+        if (!shiftDown && !ctrlDown)
+            return CockpitLightDebugAction.None;
+
         return shiftDown
             ? CockpitLightDebugAction.ToggleInternal
             : CockpitLightDebugAction.ToggleCanopy;

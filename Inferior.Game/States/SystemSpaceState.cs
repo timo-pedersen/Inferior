@@ -151,6 +151,10 @@ public sealed partial class SystemSpaceState : GameState
     // ── Targeting ─────────────────────────────────────────────────────────────
     private readonly TargetingSystem _targeting       = new();
     private readonly HashSet<string> _radarContactIds = [];   // IDs fed this session; cleared on exit
+    private const double TargetKeyLongPressSeconds = 0.45;
+    private double? _targetKeyDownSinceSeconds;
+    private double? _navTargetKeyDownSinceSeconds;
+    private bool _hudMarkersVisible = true;
 
     // Pad target — world position and bearing recomputed each frame
     private DVec3  _padWorldPos;
@@ -242,6 +246,19 @@ public sealed partial class SystemSpaceState : GameState
 
     public override void OnEnter(object? payload)
     {
+        if (payload is SystemSpaceResumePayload resume)
+        {
+            _pendingTransition = null;
+            _prevMouse = Mouse.GetState();
+            _prevKeys = Keyboard.GetState();
+            if (resume.HyperspaceTarget != null)
+            {
+                _targeting.SetHyperspaceTarget(resume.HyperspaceTarget);
+                _lockedSkyboxStar = resume.HyperspaceTarget;
+            }
+            return;
+        }
+
         SystemSpacePayload? initialStarterRelocationPayload = null;
         StationArrivalTarget? stationArrivalPayload = null;
 
@@ -709,6 +726,7 @@ public sealed partial class SystemSpaceState : GameState
             PublishCameraMessage("Chase camera unavailable outside Newtonian flight.");
 
         bool tabJustPressed = keys.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab);
+        bool f1JustPressed  = keys.IsKeyDown(Keys.F1)  && !_prevKeys.IsKeyDown(Keys.F1);
         bool f10JustPressed = keys.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10);
         bool f11JustPressed = keys.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11);
         bool ctrlDown = keys.IsKeyDown(Keys.LeftControl) || keys.IsKeyDown(Keys.RightControl);
@@ -738,6 +756,12 @@ public sealed partial class SystemSpaceState : GameState
         {
             _uiMouseMode = !_uiMouseMode;
             _cockpitUI.ApplyUiMode(_uiMouseMode);
+        }
+        if (f1JustPressed && !ctrlDown && !shiftDown && !altDown)
+        {
+            _hudMarkersVisible = !_hudMarkersVisible;
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage($"HUD markers {(_hudMarkersVisible ? "on" : "off")}", SystemMessagePriority.Info));
         }
         if (f10JustPressed)
             RequestStationProximityDiagnostic();
@@ -1000,6 +1024,8 @@ public sealed partial class SystemSpaceState : GameState
         _targeting.Update(shipPosForTargeting, galPosForTargeting, _bodyPositions, _stationPositions);
         if (!_targeting.HasHyperspaceTarget)
             _lockedSkyboxStar = null;
+        else if (_lockedSkyboxStar == null && _targeting.HyperspaceTargetStar != null)
+            _lockedSkyboxStar = _targeting.HyperspaceTargetStar;
         UpdatePadTargetPosition();
         _cockpitUI.UpdateTargetingAndRadar(_camera, shipPosForTargeting, _frameShipSnap,
             _padWorldPos, _padDistance, _padDirection);
@@ -1132,8 +1158,9 @@ public sealed partial class SystemSpaceState : GameState
             _frameShipSnap, _gameTimeSeconds, _uiMouseMode, _hyperspace.Mode, _camera.MoveSpeedMs,
             _engineModuleDebug);
         DrawStationDots(sb);
-        _cockpitUI.DrawTargetingHud(sb, _camera, _effect.View, _padWorldPos, _padDistance);
-        DrawSkyboxStarOverlay(sb);
+        _cockpitUI.DrawTargetingHud(sb, _camera, _effect.View, _padWorldPos, _padDistance,
+            _hudMarkersVisible, _star.Name, _bodyPositions, _stationPositions);
+        DrawSkyboxStarOverlay(sb, _hudMarkersVisible);
         _hyperspace.DrawOverlay(sb);
         DrawStationShadowOverlay(sb);
         sb.End();
@@ -1251,7 +1278,10 @@ public sealed partial class SystemSpaceState : GameState
     {
         bool mPressed    = keys.IsKeyDown(Keys.M)    && !_prevKeys.IsKeyDown(Keys.M);
         bool nPressed    = keys.IsKeyDown(Keys.N)    && !_prevKeys.IsKeyDown(Keys.N);
-        bool tPressed    = keys.IsKeyDown(Keys.T)    && !_prevKeys.IsKeyDown(Keys.T);
+        bool tDown       = keys.IsKeyDown(Keys.T);
+        bool prevTDown   = _prevKeys.IsKeyDown(Keys.T);
+        bool yDown       = keys.IsKeyDown(Keys.Y);
+        bool prevYDown   = _prevKeys.IsKeyDown(Keys.Y);
         // Keys.C is reserved for future "align ship to target" (docking assist)
         bool lPressed    = keys.IsKeyDown(Keys.L)    && !_prevKeys.IsKeyDown(Keys.L);
         bool hPressed    = keys.IsKeyDown(Keys.H)    && !_prevKeys.IsKeyDown(Keys.H);
@@ -1260,10 +1290,36 @@ public sealed partial class SystemSpaceState : GameState
         if (hPressed && !(_frameShipSnap?.AfterburnerActive ?? false))
             _hyperspace.HandleKey(_camera, _star, _frameShipSnap);
 
-        if (tPressed)
+        if (tDown && !prevTDown)
+            _targetKeyDownSinceSeconds = _gameTimeSeconds;
+        if (!tDown && prevTDown)
         {
             var vp = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
-            _targeting.SelectClosestToReticle(vp, _gd.Viewport);
+            double held = _gameTimeSeconds - (_targetKeyDownSinceSeconds ?? _gameTimeSeconds);
+            if (held >= TargetKeyLongPressSeconds)
+                _targeting.ClearRadarTarget();
+            else
+                _targeting.SelectClosestObjectToReticle(vp, _gd.Viewport);
+            _targetKeyDownSinceSeconds = null;
+        }
+
+        if (yDown && !prevYDown)
+            _navTargetKeyDownSinceSeconds = _gameTimeSeconds;
+        if (!yDown && prevYDown)
+        {
+            var vp = Matrix.Multiply(_effect.View, _camera.ProjectionMatrix);
+            double held = _gameTimeSeconds - (_navTargetKeyDownSinceSeconds ?? _gameTimeSeconds);
+            if (held >= TargetKeyLongPressSeconds)
+                _targeting.ClearNavTarget();
+            else
+                _targeting.SelectClosestNavToReticle(
+                    vp,
+                    _gd.Viewport,
+                    _camera.UniversePosition,
+                    _star,
+                    _bodyPositions,
+                    _stationPositions);
+            _navTargetKeyDownSinceSeconds = null;
         }
 
         if (lPressed)
@@ -1284,10 +1340,12 @@ public sealed partial class SystemSpaceState : GameState
         if (nPressed)
         {
             var (pos, ori) = CaptureShipState();
-            _pendingTransition = StateTransition.To(GameStateId.GalaxyMap,
+            _simulation.SetInput(PlayerInput.Zero);
+            _pendingTransition = StateTransition.SuspendTo(GameStateId.GalaxyMap,
                 new GalaxyMapPayload(_star, _gameTimeSeconds, pos, ori,
                     _targeting.NavBodyTarget,
-                    _targeting.NavStationTarget));
+                    _targeting.NavStationTarget,
+                    _targeting.HyperspaceTargetStar));
         }
 
         int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;

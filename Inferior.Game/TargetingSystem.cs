@@ -25,7 +25,11 @@ public sealed class TargetingSystem
 
     // Called from DataBus.Radar subscriber — keep contact list current
     public void OnContactUpdated(RadarContact contact)
-        => _contacts[contact.Id] = contact;
+    {
+        _contacts[contact.Id] = contact;
+        if (_radarTarget?.Id == contact.Id)
+            _radarTarget = contact;
+    }
 
     // Called from DataBus.RadarLost subscriber
     public void OnContactLost(string id)
@@ -36,7 +40,7 @@ public sealed class TargetingSystem
     }
 
     // 'T' key — select the contact whose screen projection is closest to screen centre
-    public void SelectClosestToReticle(Matrix viewProjection, Viewport viewport)
+    public void SelectClosestObjectToReticle(Matrix viewProjection, Viewport viewport)
     {
         var     centre   = new Vector2(viewport.Width * 0.5f, viewport.Height * 0.5f);
         float   bestDist = float.MaxValue;
@@ -50,6 +54,70 @@ public sealed class TargetingSystem
             if (d < bestDist) { bestDist = d; best = contact; }
         }
         SetRadarTarget(best);
+    }
+
+    public void SelectClosestNavToReticle(
+        Matrix viewProjection,
+        Viewport viewport,
+        DVec3 cameraPos,
+        Star star,
+        IReadOnlyList<(OrbitalBody body, DVec3 galaxyPos)> bodyPositions,
+        IReadOnlyList<(Station station, DVec3 galaxyPos)> stationPositions)
+    {
+        var centre = new Vector2(viewport.Width * 0.5f, viewport.Height * 0.5f);
+        float bestDist = float.MaxValue;
+        OrbitalBody? bestBody = null;
+        Station? bestStation = null;
+        bool bestIsStar = false;
+
+        TryCandidate(DVec3.Zero, screenDistance =>
+        {
+            if (screenDistance >= bestDist) return;
+            bestDist = screenDistance;
+            bestBody = null;
+            bestStation = null;
+            bestIsStar = true;
+        });
+
+        foreach (var (body, pos) in bodyPositions)
+        {
+            TryCandidate(pos, screenDistance =>
+            {
+                if (screenDistance >= bestDist) return;
+                bestDist = screenDistance;
+                bestBody = body;
+                bestStation = null;
+                bestIsStar = false;
+            });
+        }
+
+        foreach (var (station, pos) in stationPositions)
+        {
+            TryCandidate(pos, screenDistance =>
+            {
+                if (screenDistance >= bestDist) return;
+                bestDist = screenDistance;
+                bestBody = null;
+                bestStation = station;
+                bestIsStar = false;
+            });
+        }
+
+        if (bestIsStar)
+            SetNavTargetStar(star);
+        else if (bestBody != null)
+            SetNavTarget(bestBody);
+        else if (bestStation != null)
+            SetNavTarget(bestStation);
+
+        void TryCandidate(DVec3 targetPos, Action<float> accept)
+        {
+            DVec3 relative = targetPos - cameraPos;
+            var rel3 = new Vector3((float)relative.X, (float)relative.Y, (float)relative.Z);
+            Vector2? screen = ProjectToScreen(rel3, viewProjection, viewport);
+            if (screen == null) return;
+            accept(Vector2.Distance(screen.Value, centre));
+        }
     }
 
     // Left-click in UI mode — select contact nearest to cursor within snap radius
@@ -90,8 +158,10 @@ public sealed class TargetingSystem
     {
         _navBody    = body;
         _navStation = null;
+        _navStationPersistenceId = null;
         _navIsStar  = false;
         NavTargetName = overrideName ?? body.Name;
+        DataBus.System.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
     }
 
     public void SetNavTarget(Station station)
@@ -101,14 +171,17 @@ public sealed class TargetingSystem
         _navStationPersistenceId = station.PersistenceId;
         _navIsStar               = false;
         NavTargetName            = station.Name;
+        DataBus.System.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
     }
 
     public void SetNavTargetStar(Star star)
     {
         _navBody    = null;
         _navStation = null;
+        _navStationPersistenceId = null;
         _navIsStar  = true;
         NavTargetName = star.Name;
+        DataBus.System.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
     }
 
     public void ClearNavTarget()
@@ -121,25 +194,30 @@ public sealed class TargetingSystem
         NavTargetPosition        = DVec3.Zero;
         NavTargetDistance        = 0;
         NavTargetDirection       = DVec3.Zero;
+        DataBus.System.Publish(Topics.System.All, new("Nav target cleared"));
     }
 
     // ── Hyperspace target (galaxy star selection) ──────────────────────────────
 
     private DVec3? _hypGalPos;
+    private Star?  _hypStar;
 
     public string  HyperspaceTargetName       { get; private set; } = "";
+    public Star?   HyperspaceTargetStar       => _hypStar;
     public bool    HasHyperspaceTarget        => _hypGalPos.HasValue;
     public double  HyperspaceTargetDistanceLY { get; private set; }
     public DVec3   HyperspaceTargetDirection  { get; private set; }
 
     public void SetHyperspaceTarget(Star star)
     {
+        _hypStar             = star;
         _hypGalPos           = star.GalacticPos;
         HyperspaceTargetName = star.Name;
     }
 
     public void ClearHyperspaceTarget()
     {
+        _hypStar                   = null;
         _hypGalPos                 = null;
         HyperspaceTargetName       = "";
         HyperspaceTargetDistanceLY = 0;
