@@ -5,11 +5,11 @@ namespace Inferior.Gameplay.Sensors;
 
 /// <summary>
 /// Passive gravity field sensor. Measures net gravitational acceleration at the
-/// ship's current position and publishes it to DataBus.Instruments.
+/// ship's current position and publishes it to DataBus.ScalarTelemetry.
 ///
 /// Topics:
 ///   "GravitySensor.Strength"    m/s² — net gravitational acceleration (noised)
-///   "GravitySensor.DirectionX/Y/Z" — normalised gravity vector, no noise applied
+///   "GravitySensor.Direction" — normalised gravity vector, no noise applied
 ///                                    (direction noise would be physically wrong)
 ///
 /// Noise model (strength only):
@@ -18,10 +18,15 @@ namespace Inferior.Gameplay.Sensors;
 /// </summary>
 public sealed class GravitySensor
 {
+    private const string DeviceId = "GravitySensor";
+    private static readonly string DirectionTopic = $"{DeviceId}.{Topics.GravitySensor.Direction}";
+
     private readonly PassiveSensor _sensor = new()
     {
         TopicPrefix = "GravitySensor",
         ValueName   = Topics.GravitySensor.Strength,
+        Quantity    = PhysicalQuantity.Acceleration,
+        PublishDeviceInfo = false,
         MaxValue    = 100.0,  // m/s² — covers all bodies from asteroids to neutron stars
         Seed        = (double)HashCode.Combine("GravitySensor"),
         NoiseWhite  = 0.005,  // ±0.5% baseline jitter
@@ -30,6 +35,26 @@ public sealed class GravitySensor
 
     /// <summary>Access the underlying sensor to attach ExternalNoiseSources.</summary>
     public PassiveSensor Sensor => _sensor;
+
+    public GravitySensor()
+    {
+        DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = DirectionTopic,
+            DeviceId = DeviceId,
+            ValueKind = TelemetryValueKind.Vector,
+            Quantity = PhysicalQuantity.Direction,
+            ReferenceFrame = TelemetryReferenceFrame.SystemEcliptic,
+            Publication = new PublicationInfo(PublicationMode.EveryTick),
+            TopicPolicy = TopicPolicy.LatestState,
+        });
+        DataBus.DeviceInfo.Publish(DeviceId, new DeviceInfo
+        {
+            DeviceId = DeviceId,
+            PublishedTopics = [$"{DeviceId}.{Topics.GravitySensor.Strength}", DirectionTopic],
+            Power = new PowerProfile(0.0, 0.0),
+        });
+    }
 
     /// <summary>
     /// Read gravitational vector from Environment and publish strength + direction.
@@ -47,9 +72,7 @@ public sealed class GravitySensor
         if (strength > 1e-10)
         {
             var norm = vec / strength;
-            DataBus.Instruments.Publish($"GravitySensor.{Topics.GravitySensor.DirectionX}", norm.X);
-            DataBus.Instruments.Publish($"GravitySensor.{Topics.GravitySensor.DirectionY}", norm.Y);
-            DataBus.Instruments.Publish($"GravitySensor.{Topics.GravitySensor.DirectionZ}", norm.Z);
+            DataBus.VectorTelemetry.Publish(DirectionTopic, norm);
         }
     }
 }

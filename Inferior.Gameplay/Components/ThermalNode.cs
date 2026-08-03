@@ -31,7 +31,7 @@ public sealed class ThermalNode
     /// </summary>
     public double LastHeatInputW { get; private set; }
 
-    /// <summary>Physical temperature in Kelvin — published to DataBus.Instruments for display.</summary>
+    /// <summary>Physical temperature in Kelvin — published to DataBus.ScalarTelemetry for display.</summary>
     public double Temperature => CurrentHeat / HeatCapacity;
 
     /// <summary>Normalised 0–1 — used for damage thresholds and gauge colour ranges.</summary>

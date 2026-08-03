@@ -6,23 +6,21 @@ namespace Inferior.Core.DataBus;
 /// </summary>
 public sealed class BusSubscription<T> : IDisposable
 {
-    private readonly Bus<T>    _bus;
-    private readonly string    _topic;
-    private readonly Action<T> _handler;
-    private bool _disposed;
+    private readonly IDisposable _subscription;
 
-    public BusSubscription(Bus<T> bus, string topic, Action<T> handler)
-    {
-        _bus     = bus;
-        _topic   = topic;
-        _handler = handler;
-        _bus.Subscribe(_topic, _handler);
-    }
+    public BusSubscription(
+        Bus<T> bus,
+        string topic,
+        Action<T> handler,
+        ReplayMode replay = ReplayMode.None)
+        => _subscription = bus.Subscribe(topic, handler, replay);
 
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _bus.Unsubscribe(_topic, _handler);
-    }
+    public BusSubscription(
+        TelemetryChannel<T> channel,
+        string topic,
+        Action<T> handler,
+        ReplayMode replay = ReplayMode.Latest)
+        => _subscription = channel.Subscribe(topic, handler, replay);
+
+    public void Dispose() => _subscription.Dispose();
 }

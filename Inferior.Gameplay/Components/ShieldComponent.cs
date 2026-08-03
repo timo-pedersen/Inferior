@@ -98,7 +98,7 @@ public sealed class ShieldComponent : ShipComponent
 
     protected override void OnInitializationStarted()
     {
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging"));
         _progressCooldown = 5.0;
     }
@@ -107,7 +107,7 @@ public sealed class ShieldComponent : ShipComponent
     {
         _capacitor.Charge(_deliveredWatts, dt);
         ThermalNode?.Update(_deliveredWatts * (1.0 - EffectiveEfficiency), dt);
-        DataBus.Instruments.Publish($"{Topics.Shield.Name}.{Topics.Shield.Capacitor}", _capacitor.FillFraction);
+        DataBus.ScalarTelemetry.Publish($"{Topics.Shield.Name}.{Topics.Shield.Capacitor}", _capacitor.FillFraction);
 
         if (_capacitor.FillFraction >= 1.0)
         {
@@ -118,7 +118,7 @@ public sealed class ShieldComponent : ShipComponent
         _progressCooldown -= dt;
         if (_progressCooldown <= 0.0)
         {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new($"{Name}: capacitor at {_capacitor.FillFraction:P0} — charging"));
             _progressCooldown = 5.0;
         }
@@ -126,8 +126,8 @@ public sealed class ShieldComponent : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {MaxShieldJ / 1e6:F1} MJ shield ready"));
     }
 
@@ -159,13 +159,15 @@ public sealed class ShieldComponent : ShipComponent
             $"{Name}.{Topics.Shield.Capacitor}",
             () => _capacitor.FillFraction,
             safeRange:  new RangeValue(0.5, 1.0),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.Shield.DamagePercent}",
             () => Damage,
             safeRange:  new RangeValue(0.0, 0.2),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         if (ThermalNode != null)
         {
@@ -175,7 +177,8 @@ public sealed class ShieldComponent : ShipComponent
                 $"{Name}.Temperature",
                 () => ThermalNode.Temperature,
                 safeRange:  new RangeValue(0, safeTempK),
-                totalRange: new RangeValue(0, maxTempK)));
+                totalRange: new RangeValue(0, maxTempK),
+                quantity: PhysicalQuantity.Temperature));
         }
     }
 }

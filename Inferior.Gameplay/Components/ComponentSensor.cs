@@ -3,41 +3,73 @@ using Inferior.Core.DataBus;
 namespace Inferior.Gameplay.Components;
 
 /// <summary>
-/// A single named measurement on a ship component.
-/// Publishes its value every sim tick via DataBus.Instruments and its operating
-/// envelopes via DataBus.InstrumentRanges at startup (and on query).
+/// A single named scalar measurement on a ship component. Values publish through
+/// ScalarTelemetry; retained metadata publishes through TelemetryInfo.
 ///
-/// Topic convention: "ComponentName.Property"  e.g. "Reactor.Output", "Reactor.Temperature"
-/// Range topics:     "ComponentName.Property"        → total operating range
-///                   "ComponentName.Property.Safe"   → safe operating range
-/// Query command:    "ComponentName.Property.Query"  → re-publishes ranges on demand
+/// Topic convention: "ComponentName.Property", e.g. "Reactor.Output".
+/// Query command: "ComponentName.Property.Query" republishes the metadata.
 /// </summary>
 public sealed class ComponentSensor
 {
-    public string     Topic      { get; }
+    public string Topic { get; }
     public RangeValue TotalRange { get; }
-    public RangeValue SafeRange  { get; }
+    public RangeValue SafeRange { get; }
+    public PhysicalQuantity Quantity { get; }
+    public string QueryCommandTopic => Topic + ".Query";
 
     private readonly Func<double> _read;
+    private IDisposable? _querySubscription;
 
-    public ComponentSensor(string topic, Func<double> read, RangeValue safeRange, RangeValue totalRange)
+    public ComponentSensor(
+        string topic,
+        Func<double> read,
+        RangeValue safeRange,
+        RangeValue totalRange,
+        PhysicalQuantity quantity = PhysicalQuantity.Unspecified)
     {
-        Topic      = topic;
-        _read      = read;
-        SafeRange  = safeRange;
+        Topic = topic;
+        _read = read;
+        SafeRange = safeRange;
         TotalRange = totalRange;
+        Quantity = quantity;
 
-        // Self-register: re-publish ranges whenever a Query command arrives for this topic
-        CommandBus.Subscribe(topic + ".Query", _ => PublishRanges());
     }
 
-    /// <summary>Publish operating envelopes. Called at component startup and on query.</summary>
-    public void PublishRanges()
+    internal void ActivateBus()
     {
-        DataBus.InstrumentRanges.Publish(Topic,           TotalRange);
-        DataBus.InstrumentRanges.Publish(Topic + ".Safe", SafeRange);
+        // A query is an explicit refresh, not the normal UI bootstrap path. New UI
+        // subscribers receive the retained TelemetryInfo directly from its bus.
+        _querySubscription ??= CommandBus.Subscribe(QueryCommandTopic, _ => PublishInfo());
     }
 
-    /// <summary>Read current value and publish to Instruments bus. Called every sim tick.</summary>
-    public void Tick() => DataBus.Instruments.Publish(Topic, _read());
+    internal void DeactivateBus()
+    {
+        _querySubscription?.Dispose();
+        _querySubscription = null;
+    }
+
+    public void PublishInfo()
+    {
+        var bands = new List<TelemetryBand>(2);
+        if (TotalRange.Low < SafeRange.Low)
+            bands.Add(new(new RangeValue(TotalRange.Low, SafeRange.Low), TelemetryBandSeverity.Warning));
+        if (SafeRange.High < TotalRange.High)
+            bands.Add(new(new RangeValue(SafeRange.High, TotalRange.High), TelemetryBandSeverity.Warning));
+
+        string deviceId = Topic.Split('.', 2)[0];
+        DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = Topic,
+            DeviceId = deviceId,
+            ValueKind = TelemetryValueKind.Scalar,
+            Quantity = Quantity,
+            OperatingRange = TotalRange,
+            SuggestedDisplayRange = TotalRange,
+            Bands = [.. bands],
+            Publication = new PublicationInfo(PublicationMode.EveryTick),
+            TopicPolicy = TopicPolicy.LatestState,
+        });
+    }
+
+    public void Tick() => DataBus.ScalarTelemetry.Publish(Topic, _read());
 }

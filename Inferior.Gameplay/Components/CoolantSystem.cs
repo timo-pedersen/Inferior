@@ -88,8 +88,8 @@ public sealed class CoolantSystem : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {HeatFlowPerComponent / 1e3:F0} kW/node, {Level:P0} coolant"));
     }
 
@@ -99,7 +99,7 @@ public sealed class CoolantSystem : ShipComponent
         if (Level <= 0.0 && !_sentDepleted)
         {
             _sentDepleted = true;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new($"{Name}: coolant depleted — thermal runaway imminent",
                     SystemMessagePriority.Critical));
         }
@@ -109,7 +109,7 @@ public sealed class CoolantSystem : ShipComponent
         if (Level < 0.10 && !_sentNearDepleted)
         {
             _sentNearDepleted = true;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new($"{Name}: coolant critically low ({Level:P0})",
                     SystemMessagePriority.ImportantWarning));
         }
@@ -119,7 +119,7 @@ public sealed class CoolantSystem : ShipComponent
         if (Level < 0.25 && !_sentCritical)
         {
             _sentCritical = true;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new($"{Name}: coolant low ({Level:P0})",
                     SystemMessagePriority.Warning));
         }
@@ -129,7 +129,7 @@ public sealed class CoolantSystem : ShipComponent
         if (Level < 0.50 && !_sentLow)
         {
             _sentLow = true;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new($"{Name}: coolant below 50 %", SystemMessagePriority.NB));
         }
         else if (Level >= 0.50) _sentLow = false;
@@ -141,12 +141,14 @@ public sealed class CoolantSystem : ShipComponent
             $"{Name}.{Topics.CoolantSystem.Level}",
             () => Level,
             safeRange:  new RangeValue(0.2, 1.0),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.CoolantSystem.FlowRate}",
             () => _lastFlowRate,
             safeRange:  new RangeValue(0, HeatFlowPerComponent * _nodes.Count),
-            totalRange: new RangeValue(0, HeatFlowPerComponent * Math.Max(1, _nodes.Count))));
+            totalRange: new RangeValue(0, HeatFlowPerComponent * Math.Max(1, _nodes.Count)),
+            quantity: PhysicalQuantity.Power));
     }
 }

@@ -191,7 +191,7 @@ public sealed class StationRelocationTests
         void Handler(SystemMessage message) => messages.Add(message);
 
         DataBus.Drain();
-        DataBus.System.Subscribe(Topics.System.All, Handler);
+        DataBus.SystemMessages.Subscribe(Topics.System.All, Handler);
         try
         {
             RunRelocation(sample.Star, sample.System, sample.Station.PersistenceId!, OldShipPosition());
@@ -199,7 +199,7 @@ public sealed class StationRelocationTests
         }
         finally
         {
-            DataBus.System.Unsubscribe(Topics.System.All, Handler);
+            DataBus.SystemMessages.Unsubscribe(Topics.System.All, Handler);
         }
 
         Assert.DoesNotContain(messages, message => message.Text == "X-Stop complete");

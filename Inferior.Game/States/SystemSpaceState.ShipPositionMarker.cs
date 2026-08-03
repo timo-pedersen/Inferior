@@ -106,7 +106,7 @@ public sealed partial class SystemSpaceState
 
         string path = Path.Combine(AppContext.BaseDirectory, "ship_chase_camera_diagnostic.log");
         File.AppendAllText(path, $"{DateTimeOffset.Now:O}\n{log}\n");
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage($"Ship chase diagnostic written: {path}", SystemMessagePriority.Info));
     }
 
@@ -171,7 +171,7 @@ public sealed partial class SystemSpaceState
         Console.WriteLine(log);
         string path = Path.Combine(AppContext.BaseDirectory, "ship_render_transform_diagnostic.log");
         File.AppendAllText(path, $"{DateTimeOffset.Now:O}\n{log}\n");
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage($"Ship render diagnostic written: {path}", SystemMessagePriority.Info));
     }
 

@@ -36,7 +36,7 @@ public sealed class ExhaustSystem : ShipComponent
     {
         double removed = BuildUp;
         BuildUp = 0.0;
-        DataBus.System.Publish(Topics.System.All, new($"{Name}: exhaust cleaned"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"{Name}: exhaust cleaned"));
         return removed;
     }
 
@@ -57,6 +57,7 @@ public sealed class ExhaustSystem : ShipComponent
             $"{Name}.{Topics.Exhaust.BuildUp}",
             () => BuildUp,
             safeRange:  new RangeValue(0, 0.5),
-            totalRange: new RangeValue(0, 1.0)));
+            totalRange: new RangeValue(0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
     }
 }

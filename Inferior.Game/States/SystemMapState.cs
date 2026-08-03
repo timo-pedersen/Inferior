@@ -342,7 +342,7 @@ public sealed class SystemMapState : GameState
             {
                 if (string.IsNullOrWhiteSpace(hitStation.PersistenceId))
                 {
-                    DataBus.System.Publish(Topics.System.All,
+                    DataBus.SystemMessages.Publish(Topics.System.All,
                         new SystemMessage(
                             $"Station arrival rejected: {hitStation.Name} has no stable persistence id.",
                             SystemMessagePriority.ImportantWarning));

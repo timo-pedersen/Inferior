@@ -29,11 +29,31 @@ public sealed class MagneticFieldSensor
         {
             TopicPrefix = name,
             ValueName   = Topics.MagneticField.Strength,
+            Quantity    = PhysicalQuantity.MagneticFluxDensity,
+            PublishDeviceInfo = false,
             MaxValue    = 1e9,    // Tesla — neutron star surface field order of magnitude
             Seed        = (double)HashCode.Combine(name + ".Mag"),
             NoiseWhite  = 0.004,
             NoisePink   = 0.005,
         };
+
+        string directionTopic = $"{name}.{Topics.MagneticField.Direction}";
+        DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = directionTopic,
+            DeviceId = name,
+            ValueKind = TelemetryValueKind.Vector,
+            Quantity = PhysicalQuantity.Direction,
+            ReferenceFrame = TelemetryReferenceFrame.SystemEcliptic,
+            Publication = new PublicationInfo(PublicationMode.EveryTick),
+            TopicPolicy = TopicPolicy.LatestState,
+        });
+        DataBus.DeviceInfo.Publish(name, new DeviceInfo
+        {
+            DeviceId = name,
+            PublishedTopics = [$"{name}.{Topics.MagneticField.Strength}", directionTopic],
+            Power = new PowerProfile(0.0, 0.0),
+        });
     }
 
     public PassiveSensor StrengthSensor => _strengthSensor;
@@ -48,9 +68,7 @@ public sealed class MagneticFieldSensor
         if (strength > 1e-10)
         {
             var norm = vec / strength;
-            DataBus.Instruments.Publish($"{_name}.{Topics.MagneticField.X}", norm.X);
-            DataBus.Instruments.Publish($"{_name}.{Topics.MagneticField.Y}", norm.Y);
-            DataBus.Instruments.Publish($"{_name}.{Topics.MagneticField.Z}", norm.Z);
+            DataBus.VectorTelemetry.Publish($"{_name}.{Topics.MagneticField.Direction}", norm);
         }
     }
 }

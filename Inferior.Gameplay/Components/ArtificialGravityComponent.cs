@@ -32,6 +32,7 @@ public sealed class ArtificialGravityComponent : ShipComponent
             $"{Name}.{Topics.ArtificialGravity.Power}",
             () => Status == ComponentStatus.Running ? PowerConsumption : 0.0,
             safeRange:  new RangeValue(0, PowerConsumption),
-            totalRange: new RangeValue(0, PowerConsumption)));
+            totalRange: new RangeValue(0, PowerConsumption),
+            quantity: PhysicalQuantity.Power));
     }
 }

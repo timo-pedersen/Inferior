@@ -54,6 +54,7 @@ public sealed class Ship
     public void Install(ShipComponent component)
     {
         _components.Add(component);
+        component.ActivateBus();
         ComponentMass += component is PowerReactor r ? r.MaxPower * 0.00001 : 0; // stub
         component.PowerOn = true;
         component.NotifyPowerAvailable();

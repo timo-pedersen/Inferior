@@ -1,5 +1,18 @@
 The system has solid foundations, builds cleanly, and is partially playable—but the documented “sensors/modules → buses → instruments” architecture is only partly connected.
 
+> **Implementation update (2026-08-02):** The bus findings below describe the baseline
+> before the instrumentation-bus refactor. The current code now exposes
+> `ScalarTelemetry`, `VectorTelemetry`, `SpectrumTelemetry`, `TelemetryInfo`,
+> `DeviceInfo`, `DeviceState`, and `SystemMessages`. Topic policies independently define
+> ordered vs latest-per-drain dispatch and none/latest/bounded-history retention;
+> subscriptions independently select no replay, latest replay, or bounded-history replay.
+> Telemetry carries session-local simulation time and sequence metadata. Component sensors,
+> passive sensors, solar spectrum, planetary coordinates, landing support, flight telemetry,
+> and component device lifecycle state publish through the new contracts. Gravity and
+> magnetic directions are atomic `DVec3` system-ecliptic vectors. Static hub ownership,
+> Universe Time, save persistence, radar migration, and the generic/Inferior-specific UI
+> project split remain later work.
+
 Debug and Release builds succeed with zero warnings. All 649 tests pass. No files were changed.
 
 ## Current runtime system

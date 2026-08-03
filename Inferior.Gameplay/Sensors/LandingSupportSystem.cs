@@ -8,15 +8,15 @@ namespace Inferior.Gameplay.Sensors;
 /// Computes and publishes landing approach geometry relative to the targeted pad.
 /// Standalone sensor — not a ShipComponent. Driven from SpaceSimulation.Publish().
 ///
-/// Published topics (DataBus.Instruments, double):
+/// Published topics (DataBus.ScalarTelemetry, double):
 ///   LandingSupport.PadTargeted        — 1.0 when active, 0.0 otherwise
 ///   LandingSupport.PadSizeClass       — 0.0 = Small, 1.0 = Large
 ///   LandingSupport.PadDistance        — metres, Euclidean
 ///   LandingSupport.HeightAbovePad     — metres along pad normal; positive = correct approach side
 ///   LandingSupport.LateralOffset      — metres along pad short axis
 ///   LandingSupport.LongitudinalOffset — metres along pad forward axis
-///   LandingSupport.HeadingDeviation   — degrees; 0 = aligned with pad forward
-///   LandingSupport.PitchDeviation     — degrees; 0 = face-on to pad
+///   LandingSupport.HeadingDeviation   — radians; 0 = aligned with pad forward
+///   LandingSupport.PitchDeviation     — radians; 0 = face-on to pad
 ///   LandingSupport.UpsideDown         — 1.0 when ship is inverted relative to pad
 ///
 /// Noise model (keyed on Damage 0..1):
@@ -27,14 +27,54 @@ namespace Inferior.Gameplay.Sensors;
 /// </summary>
 public sealed class LandingSupportSystem
 {
+    private const string DeviceId = "LandingSupport";
+
     // Written and read on sim thread (via SelectPad in SpaceSimulation.Publish).
     // Volatile is a safety net in case SelectPad is ever called cross-thread.
     private volatile LandingPadData? _activePad;
     private bool _wasActive;
+    private double _publishedDamage = double.NaN;
 
     public double Damage { get; set; }
 
     private const double ApproachNotifyRange = 2000.0;  // metres
+
+    public LandingSupportSystem()
+    {
+        Register(Topics.LandingSupport.PadTargeted, PhysicalQuantity.Boolean,
+            new RangeValue(0.0, 1.0));
+        Register(Topics.LandingSupport.PadSizeClass, PhysicalQuantity.Count,
+            new RangeValue(0.0, 1.0));
+        Register(Topics.LandingSupport.PadDistance, PhysicalQuantity.Distance);
+        Register(Topics.LandingSupport.HeightAbovePad, PhysicalQuantity.Distance);
+        Register(Topics.LandingSupport.LateralOffset, PhysicalQuantity.Distance);
+        Register(Topics.LandingSupport.LongitudinalOffset, PhysicalQuantity.Distance);
+        Register(Topics.LandingSupport.HeadingDeviation, PhysicalQuantity.Angle,
+            new RangeValue(-Math.PI, Math.PI));
+        Register(Topics.LandingSupport.PitchDeviation, PhysicalQuantity.Angle,
+            new RangeValue(0.0, Math.PI / 2.0));
+        Register(Topics.LandingSupport.UpsideDown, PhysicalQuantity.Boolean,
+            new RangeValue(0.0, 1.0));
+
+        DataBus.DeviceInfo.Publish(DeviceId, new DeviceInfo
+        {
+            DeviceId = DeviceId,
+            PublishedTopics =
+            [
+                FullTopic(Topics.LandingSupport.PadTargeted),
+                FullTopic(Topics.LandingSupport.PadSizeClass),
+                FullTopic(Topics.LandingSupport.PadDistance),
+                FullTopic(Topics.LandingSupport.HeightAbovePad),
+                FullTopic(Topics.LandingSupport.LateralOffset),
+                FullTopic(Topics.LandingSupport.LongitudinalOffset),
+                FullTopic(Topics.LandingSupport.HeadingDeviation),
+                FullTopic(Topics.LandingSupport.PitchDeviation),
+                FullTopic(Topics.LandingSupport.UpsideDown),
+            ],
+            Power = new PowerProfile(0.0, 0.0),
+        });
+        PublishState();
+    }
 
     public void SelectPad(LandingPadData? data) => _activePad = data;
 
@@ -44,13 +84,16 @@ public sealed class LandingSupportSystem
     /// </summary>
     public void Tick(DVec3 shipPosition, DVec3 shipForward, DVec3 shipUp)
     {
+        if (!_publishedDamage.Equals(Damage))
+            PublishState();
+
         var pad = _activePad;
 
         if (pad == null || Damage > 0.9)
         {
-            DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
+            DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
             if (_wasActive && pad == null)
-                DataBus.System.Publish(Topics.System.All, new("Landing support: approach aborted", SystemMessagePriority.NB));
+                DataBus.SystemMessages.Publish(Topics.System.All, new("Landing support: approach aborted", SystemMessagePriority.NB));
             _wasActive = false;
             return;
         }
@@ -85,12 +128,12 @@ public sealed class LandingSupportSystem
             shipFwdOnPad = shipFwdOnPad / shipFwdLen;
             double cosH = DVec3.Dot(shipFwdOnPad, fwd);
             double sinH = DVec3.Dot(DVec3.Cross(shipFwdOnPad, fwd), n);  // sign = CW vs CCW around normal
-            headingDev  = System.Math.Atan2(sinH, cosH) * (180.0 / System.Math.PI);
+            headingDev  = System.Math.Atan2(sinH, cosH);
         }
 
         // Pitch deviation: 0 = face-on (ship forward parallel to pad normal); 90 = sideways
         double dotFwdN  = System.Math.Clamp(DVec3.Dot(shipForward, n), -1.0, 1.0);
-        double pitchDev = System.Math.Asin(System.Math.Abs(dotFwdN)) * (180.0 / System.Math.PI);
+        double pitchDev = System.Math.Asin(System.Math.Abs(dotFwdN));
 
         // Upside-down: ship up dot pad normal < 0 means inverted
         double upsideDown = DVec3.Dot(shipUp, n) < 0.0 ? 1.0 : 0.0;
@@ -113,7 +156,7 @@ public sealed class LandingSupportSystem
         if (!_wasActive)
         {
             if (dist <= ApproachNotifyRange)
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new($"Landing support: approach initiated — {pad.BayId} on {pad.StationName}"));
         }
         _wasActive = true;
@@ -122,15 +165,15 @@ public sealed class LandingSupportSystem
 
         double sizeClass = pad.PadSize == Inferior.Galaxy.PadSize.Large ? 1.0 : 0.0;
 
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}",        1.0);
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadSizeClass}",       sizeClass);
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadDistance}",        Apply(dist,                0.1));
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.HeightAbovePad}",     Apply(heightAbovePad,      0.2));
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.LateralOffset}",      Apply(lateralOffset,       0.3));
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.LongitudinalOffset}", Apply(longitudinalOffset,  0.4));
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.HeadingDeviation}",   Apply(headingDev,          0.5));
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PitchDeviation}",     Apply(pitchDev,            0.6));
-        DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.UpsideDown}",         upsideDown);
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.PadTargeted}",        1.0);
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.PadSizeClass}",       sizeClass);
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.PadDistance}",        Apply(dist,                0.1));
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.HeightAbovePad}",     Apply(heightAbovePad,      0.2));
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.LateralOffset}",      Apply(lateralOffset,       0.3));
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.LongitudinalOffset}", Apply(longitudinalOffset,  0.4));
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.HeadingDeviation}",   Apply(headingDev,          0.5));
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.PitchDeviation}",     Apply(pitchDev,            0.6));
+        DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.UpsideDown}",         upsideDown);
     }
 
     // ── Noise helpers ─────────────────────────────────────────────────────────────
@@ -149,5 +192,37 @@ public sealed class LandingSupportSystem
         // Intermittent dropouts: white noise sample — drop out ~20% of ticks
         double sample = Noise.White(t * 7.3 + Damage * 31.1);
         return (sample > 0.8) ? 1.0 : 0.0;
+    }
+
+    private static string FullTopic(string valueName) => $"Ship.{valueName}";
+
+    private static void Register(
+        string valueName,
+        PhysicalQuantity quantity,
+        RangeValue? operatingRange = null)
+    {
+        string topic = FullTopic(valueName);
+        DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = topic,
+            DeviceId = DeviceId,
+            ValueKind = TelemetryValueKind.Scalar,
+            Quantity = quantity,
+            OperatingRange = operatingRange,
+            SuggestedDisplayRange = operatingRange,
+            Publication = new PublicationInfo(PublicationMode.EveryTick),
+            TopicPolicy = TopicPolicy.LatestState,
+        });
+    }
+
+    private void PublishState()
+    {
+        _publishedDamage = Damage;
+        DataBus.DeviceState.Publish(DeviceId, new DeviceState(
+            DeviceId,
+            Damage > 0.9 ? DeviceOperationalStatus.Faulted : DeviceOperationalStatus.Running,
+            Damage,
+            Efficiency: 1.0 - Damage,
+            SimulationTime: GameClock.SimTime));
     }
 }

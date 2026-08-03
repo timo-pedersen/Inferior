@@ -56,7 +56,7 @@ public sealed class HyperspaceHeatSink : ShipComponent
         OnSaturation += () =>
         {
             StoredHeatJ = 0.0;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new($"{Name}: SATURATION — thermal dump to realspace",
                     SystemMessagePriority.Critical));
         };
@@ -92,8 +92,8 @@ public sealed class HyperspaceHeatSink : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {CapacityJ / 1e6:F0} MJ capacity, {HeatDissipation / 1e3:F0} kW dissipation"));
     }
 
@@ -103,12 +103,14 @@ public sealed class HyperspaceHeatSink : ShipComponent
             $"{Name}.{Topics.HeatSink.Fill}",
             () => StoredHeatJ / CapacityJ,
             safeRange:  new RangeValue(0.0, 0.7),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.HeatSink.Dissipation}",
             () => CurrentDissipationRate,
             safeRange:  new RangeValue(0.0, HeatDissipation),
-            totalRange: new RangeValue(0.0, HeatDissipation)));
+            totalRange: new RangeValue(0.0, HeatDissipation),
+            quantity: PhysicalQuantity.Power));
     }
 }

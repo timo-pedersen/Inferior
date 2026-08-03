@@ -35,7 +35,7 @@ public sealed partial class SystemSpaceState
 
         _specularPreset = (DynamicLitSpecularPreset)(((int)_specularPreset + 1) % 5);
         var (strength, shininess) = SpecularParamsFor(_specularPreset);
-        DataBus.System.Publish(Topics.System.All, new SystemMessage(
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
             $"Specular: {_specularPreset} (strength {strength:F2}, shininess {shininess:F0})",
             SystemMessagePriority.NB));
     }

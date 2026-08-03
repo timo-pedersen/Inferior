@@ -14,7 +14,7 @@ namespace Inferior.Game.UI;
 /// Data sourced from DataBus Topics.Flight.* — no snapshot reference needed.
 /// Add to CockpitRail.RightWing; bounds updated by SystemSpaceState each frame.
 /// </summary>
-public sealed class DriveInstrumentPanel : Control
+public sealed class DriveInstrumentPanel : Control, IDisposable
 {
     // ── DataBus subscriptions ─────────────────────────────────────────────────
 
@@ -33,6 +33,7 @@ public sealed class DriveInstrumentPanel : Control
 
     // Handlers stored to allow future unsubscription if needed
     private readonly Action<double>[] _handlers;
+    private readonly List<IDisposable> _subscriptions = [];
 
     public DriveInstrumentPanel()
     {
@@ -51,18 +52,25 @@ public sealed class DriveInstrumentPanel : Control
             v => _fwdSpeedMs    = v,
             v => _accelMs2      = v,
         ];
-        DataBus.Instruments.Subscribe(Topics.Flight.Mode,            _handlers[0]);
-        DataBus.Instruments.Subscribe(Topics.Flight.Gear,            _handlers[1]);
-        DataBus.Instruments.Subscribe(Topics.Flight.GearCount,       _handlers[2]);
-        DataBus.Instruments.Subscribe(Topics.Flight.GearCeilingMs,   _handlers[3]);
-        DataBus.Instruments.Subscribe(Topics.Flight.MaxGear,         _handlers[4]);
-        DataBus.Instruments.Subscribe(Topics.Flight.HarmonicIndex,   _handlers[5]);
-        DataBus.Instruments.Subscribe(Topics.Flight.HarmonicCount,   _handlers[6]);
-        DataBus.Instruments.Subscribe(Topics.Flight.LkmZone,         _handlers[7]);
-        DataBus.Instruments.Subscribe(Topics.Flight.XStopActive,     _handlers[8]);
-        DataBus.Instruments.Subscribe(Topics.Flight.RelativeSpeedMs, _handlers[9]);
-        DataBus.Instruments.Subscribe(Topics.Flight.ForwardSpeedMs,  _handlers[10]);
-        DataBus.Instruments.Subscribe(Topics.Flight.AccelerationMs2, _handlers[11]);
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.Mode,            _handlers[0]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.Gear,            _handlers[1]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.GearCount,       _handlers[2]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.GearCeilingMs,   _handlers[3]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.MaxGear,         _handlers[4]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.HarmonicIndex,   _handlers[5]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.HarmonicCount,   _handlers[6]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.LkmZone,         _handlers[7]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.XStopActive,     _handlers[8]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.RelativeSpeedMs, _handlers[9]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.ForwardSpeedMs,  _handlers[10]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe(Topics.Flight.AccelerationMs2, _handlers[11]));
+    }
+
+    public void Dispose()
+    {
+        foreach (IDisposable subscription in _subscriptions)
+            subscription.Dispose();
+        _subscriptions.Clear();
     }
 
     // ── Draw ──────────────────────────────────────────────────────────────────

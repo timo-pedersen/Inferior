@@ -200,7 +200,7 @@ public sealed partial class SystemSpaceState
         };
 
     private void PublishCameraMessage(string text)
-        => DataBus.System.Publish(
+        => DataBus.SystemMessages.Publish(
             Topics.System.All,
             new SystemMessage(text, SystemMessagePriority.NB));
 
@@ -217,13 +217,13 @@ public sealed partial class SystemSpaceState
         switch (result.Kind)
         {
             case StationCycleResultKind.NoStations:
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage("Station cycle: current system has no stations.",
                         SystemMessagePriority.ImportantWarning));
                 break;
 
             case StationCycleResultKind.InvalidStation:
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage(
                         $"Station cycle rejected: {result.StationName ?? "<unnamed>"} has no stable persistence id.",
                         SystemMessagePriority.ImportantWarning));
@@ -231,7 +231,7 @@ public sealed partial class SystemSpaceState
 
             case StationCycleResultKind.Requested:
                 StationCycleRequest request = result.Request!.Value;
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage(
                         $"Station cycle: {request.StationName} ({request.OneBasedIndex}/{request.TotalCount})",
                         SystemMessagePriority.NB));

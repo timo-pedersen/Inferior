@@ -551,15 +551,16 @@ public sealed partial class SystemSpaceState : GameState
         _cockpitUI.ApplyUiMode(false);
 
         // Gravity-direction subscriptions stay here for cockpit direction balls.
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            $"GravitySensor.{Topics.GravitySensor.DirectionX}", v => _gravDirX = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            $"GravitySensor.{Topics.GravitySensor.DirectionY}", v => _gravDirY = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            $"GravitySensor.{Topics.GravitySensor.DirectionZ}", v => _gravDirZ = v));
+        _subscriptions.Add(new BusSubscription<DVec3>(DataBus.VectorTelemetry,
+            $"GravitySensor.{Topics.GravitySensor.Direction}", v =>
+            {
+                _gravDirX = v.X;
+                _gravDirY = v.Y;
+                _gravDirZ = v.Z;
+            }));
 
         // First system message — confirms state entry
-        DataBus.System.Publish(Topics.System.All, new($"Entered {_star.Name}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Entered {_star.Name}"));
     }
 
     public override void OnExit()
@@ -679,7 +680,7 @@ public sealed partial class SystemSpaceState : GameState
                     $"offset={_calibrationCubeOffset} (|offset|={_calibrationCubeOffset.Length:F1} m " +
                     $"from station centre); distance from ship at capture = {distanceFromShip:F2} m.";
                 System.Console.WriteLine(diagnostic);
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage(diagnostic, SystemMessagePriority.NB));
 
                 // Sanity guard: the offset should be roughly stationRadius + 100m (the
@@ -694,7 +695,7 @@ public sealed partial class SystemSpaceState : GameState
                         $"station radius ({stationRadius:F0} m) + 2 km sanity bound — station position and " +
                         "ship snapshot were likely evaluated at different sim times.";
                     System.Console.WriteLine(warning);
-                    DataBus.System.Publish(Topics.System.All,
+                    DataBus.SystemMessages.Publish(Topics.System.All,
                         new SystemMessage(warning, SystemMessagePriority.Warning));
                 }
             }
@@ -756,7 +757,7 @@ public sealed partial class SystemSpaceState : GameState
         if (f1JustPressed && !ctrlDown && !shiftDown && !altDown)
         {
             _hudMarkersVisible = !_hudMarkersVisible;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"HUD markers {(_hudMarkersVisible ? "on" : "off")}", SystemMessagePriority.Info));
         }
         if (f10JustPressed)

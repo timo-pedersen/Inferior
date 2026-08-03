@@ -94,7 +94,7 @@ public sealed partial class SystemSpaceState
         var plan = CreateInitialStarterStationRelocationPlan(payload, _system.Stations);
 
         if (plan.Diagnostic != null)
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(plan.Diagnostic, SystemMessagePriority.ImportantWarning));
 
         if (!plan.ShouldRelocate)
@@ -126,7 +126,7 @@ public sealed partial class SystemSpaceState
     {
         if (string.IsNullOrWhiteSpace(target.PersistenceId))
         {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(
                     "Station arrival rejected: destination has no stable persistence id.",
                     SystemMessagePriority.ImportantWarning));
@@ -136,7 +136,7 @@ public sealed partial class SystemSpaceState
         if (!double.IsFinite(target.SurfaceStandOffMeters) || target.SurfaceStandOffMeters < 0.0)
         {
             string name = target.DisplayName ?? target.PersistenceId;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(
                     $"Station arrival rejected: {name} has invalid stand-off {target.SurfaceStandOffMeters:R} m.",
                     SystemMessagePriority.ImportantWarning));
@@ -196,7 +196,7 @@ public sealed partial class SystemSpaceState
         _simulation.TeleportShip(spawnPos, spawnOri);
         _simulation.SetFlightMode(mode);
 
-        DataBus.System.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
     }
 
     // ── 3-tier render passes ─────────────────────────────────────────────────

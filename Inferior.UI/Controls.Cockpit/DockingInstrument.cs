@@ -16,9 +16,9 @@ namespace Inferior.UI.Controls.Cockpit;
 /// Upside-down → ship circle is greyed out, no position shown.
 ///
 /// Inactive when PadTargeted = 0 or outside activation range.
-/// Data driven via DataBus.Instruments subscriptions (topic prefix "Ship.LandingSupport.*").
+/// Data driven via DataBus.ScalarTelemetry subscriptions (topic prefix "Ship.LandingSupport.*").
 /// </summary>
-public sealed class DockingInstrument : Control
+public sealed class DockingInstrument : Control, IDisposable
 {
     // ── Incoming data (from DataBus subscriptions, updated on drain) ──────────
     private double _padTargeted;
@@ -34,6 +34,7 @@ public sealed class DockingInstrument : Control
     // ── Subscriptions ─────────────────────────────────────────────────────────
 
     private readonly Action<double>[] _handlers;
+    private readonly List<IDisposable> _subscriptions = [];
 
     public DockingInstrument()
     {
@@ -46,20 +47,27 @@ public sealed class DockingInstrument : Control
             v => _heightAbovePad     = v,
             v => _lateralOffset      = v,
             v => _longitudinalOffset = v,
-            v => _headingDev         = v,
-            v => _pitchDev           = v,
+            v => _headingDev         = v * (180.0 / Math.PI),
+            v => _pitchDev           = v * (180.0 / Math.PI),
             v => _upsideDown         = v,
         ];
 
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.PadTargeted}",        _handlers[0]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.PadSizeClass}",       _handlers[1]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.PadDistance}",        _handlers[2]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.HeightAbovePad}",     _handlers[3]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.LateralOffset}",      _handlers[4]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.LongitudinalOffset}", _handlers[5]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.HeadingDeviation}",   _handlers[6]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.PitchDeviation}",     _handlers[7]);
-        DataBus.Instruments.Subscribe($"Ship.{Topics.LandingSupport.UpsideDown}",         _handlers[8]);
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.PadTargeted}",        _handlers[0]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.PadSizeClass}",       _handlers[1]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.PadDistance}",        _handlers[2]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.HeightAbovePad}",     _handlers[3]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.LateralOffset}",      _handlers[4]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.LongitudinalOffset}", _handlers[5]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.HeadingDeviation}",   _handlers[6]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.PitchDeviation}",     _handlers[7]));
+        _subscriptions.Add(DataBus.ScalarTelemetry.Subscribe($"Ship.{Topics.LandingSupport.UpsideDown}",         _handlers[8]));
+    }
+
+    public void Dispose()
+    {
+        foreach (IDisposable subscription in _subscriptions)
+            subscription.Dispose();
+        _subscriptions.Clear();
     }
 
     // ── Draw ──────────────────────────────────────────────────────────────────

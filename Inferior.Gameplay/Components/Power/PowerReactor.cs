@@ -21,6 +21,8 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerReactor : ShipComponent
 {
+    protected override IReadOnlyList<string> DeviceCommandTopics => [$"{Name}.Throttle.Set"];
+
     public double MaxPower      { get; }
     public double Throttle      { get; private set; } = 1.0;
     public double CurrentOutput { get; private set; }
@@ -73,8 +75,8 @@ public sealed class PowerReactor : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {MaxPower / 1e6:F0} MW reactor, " +
                 $"{OutputCapacitor.MaxJ / 1e6:F1} MJ capacitor"));
     }
@@ -91,42 +93,48 @@ public sealed class PowerReactor : ShipComponent
             $"{Name}.Output",
             () => CurrentOutput,                           // watts — ScaleFactor=1e-6 for MW display
             safeRange:  new RangeValue(0, MaxPower * 0.85),
-            totalRange: new RangeValue(0, MaxPower)));
+            totalRange: new RangeValue(0, MaxPower),
+            quantity: PhysicalQuantity.Power));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Drawn",
             () => DrawnWatts,                              // watts — ScaleFactor=1e-6 for MW display
             safeRange:  new RangeValue(0, MaxPower * 0.85),
-            totalRange: new RangeValue(0, MaxPower)));
+            totalRange: new RangeValue(0, MaxPower),
+            quantity: PhysicalQuantity.Power));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Capacitor",
             () => OutputCapacitor.FillFraction,
             safeRange:  new RangeValue(0.1, 1.0),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Temperature",
             () => ThermalNode?.Temperature ?? 0.0,         // Kelvin
             safeRange:  new RangeValue(0, safeTempK),
-            totalRange: new RangeValue(0, maxTempK)));
+            totalRange: new RangeValue(0, maxTempK),
+            quantity: PhysicalQuantity.Temperature));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Efficiency",
             () => Efficiency,
             safeRange:  new RangeValue(0.75, 1.0),
-            totalRange: new RangeValue(0.0,  1.0)));
+            totalRange: new RangeValue(0.0,  1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Damage",
             () => Damage,
             safeRange:  new RangeValue(0.0, 0.2),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
     }
 
     private void RegisterCommands()
     {
-        CommandBus.Subscribe($"{Name}.Throttle.Set",
+        RegisterCommand($"{Name}.Throttle.Set",
             cmd => Throttle = Math.Clamp(cmd.Value, 0.0, 1.0));
     }
 }

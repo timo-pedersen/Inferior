@@ -161,7 +161,7 @@ public sealed class TargetingSystem
         _navStationPersistenceId = null;
         _navIsStar  = false;
         NavTargetName = overrideName ?? body.Name;
-        DataBus.System.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
     }
 
     public void SetNavTarget(Station station)
@@ -171,7 +171,7 @@ public sealed class TargetingSystem
         _navStationPersistenceId = station.PersistenceId;
         _navIsStar               = false;
         NavTargetName            = station.Name;
-        DataBus.System.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
     }
 
     public void SetNavTargetStar(Star star)
@@ -181,7 +181,7 @@ public sealed class TargetingSystem
         _navStationPersistenceId = null;
         _navIsStar  = true;
         NavTargetName = star.Name;
-        DataBus.System.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Nav target: {NavTargetName}"));
     }
 
     public void ClearNavTarget()
@@ -194,7 +194,7 @@ public sealed class TargetingSystem
         NavTargetPosition        = DVec3.Zero;
         NavTargetDistance        = 0;
         NavTargetDirection       = DVec3.Zero;
-        DataBus.System.Publish(Topics.System.All, new("Nav target cleared"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new("Nav target cleared"));
     }
 
     // ── Hyperspace target (galaxy star selection) ──────────────────────────────
@@ -238,7 +238,7 @@ public sealed class TargetingSystem
         _padTargetStation = station;
         _padTarget        = pad;
         string label = $"PAD {pad.PadIndex + 1:D2} [{pad.PadSize}]";
-        DataBus.System.Publish(Topics.System.All, new($"Pad targeted: {label}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Pad targeted: {label}"));
     }
 
     public void ClearPadTarget()
@@ -246,7 +246,7 @@ public sealed class TargetingSystem
         if (_padTarget == null) return;
         _padTargetStation = null;
         _padTarget        = null;
-        DataBus.System.Publish(Topics.System.All, new("Pad target cleared"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new("Pad target cleared"));
     }
 
     // L-key: cycles through pads of the nearest station with populated geometry.
@@ -332,12 +332,12 @@ public sealed class TargetingSystem
         if (contact.HasValue)
         {
             DataBus.Target.Publish(Topics.Target.Changed, contact.Value);
-            DataBus.System.Publish(Topics.System.All, new($"Target: {contact.Value.DisplayName}"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new($"Target: {contact.Value.DisplayName}"));
         }
         else
         {
             DataBus.Target.Publish(Topics.Target.Changed, default);
-            DataBus.System.Publish(Topics.System.All, new("Target cleared"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new("Target cleared"));
         }
     }
 

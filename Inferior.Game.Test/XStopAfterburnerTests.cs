@@ -35,7 +35,7 @@ public sealed class XStopAfterburnerTests
         double published = -1;
         void Handler(double v) => published = v;
         DataBus.Drain();
-        DataBus.Instruments.Subscribe(Topics.Flight.XStopActive, Handler);
+        DataBus.ScalarTelemetry.Subscribe(Topics.Flight.XStopActive, Handler);
         try
         {
             EngageAfterburner(sim);
@@ -49,7 +49,7 @@ public sealed class XStopAfterburnerTests
         }
         finally
         {
-            DataBus.Instruments.Unsubscribe(Topics.Flight.XStopActive, Handler);
+            DataBus.ScalarTelemetry.Unsubscribe(Topics.Flight.XStopActive, Handler);
         }
     }
 
@@ -80,7 +80,7 @@ public sealed class XStopAfterburnerTests
         var messages = new List<string>();
         void Handler(SystemMessage msg) => messages.Add(msg.Text);
         DataBus.Drain();
-        DataBus.System.Subscribe(Topics.System.All, Handler);
+        DataBus.SystemMessages.Subscribe(Topics.System.All, Handler);
         try
         {
             EngageAfterburner(sim);
@@ -92,7 +92,7 @@ public sealed class XStopAfterburnerTests
         }
         finally
         {
-            DataBus.System.Unsubscribe(Topics.System.All, Handler);
+            DataBus.SystemMessages.Unsubscribe(Topics.System.All, Handler);
         }
     }
 
@@ -169,7 +169,7 @@ public sealed class XStopAfterburnerTests
             if (msg.Text == "X-Stop complete") completeCount++;
         }
         DataBus.Drain();
-        DataBus.System.Subscribe(Topics.System.All, Handler);
+        DataBus.SystemMessages.Subscribe(Topics.System.All, Handler);
         try
         {
             sim.DebugTickPhysics(XStopEvent(1), Dt);
@@ -182,7 +182,7 @@ public sealed class XStopAfterburnerTests
         }
         finally
         {
-            DataBus.System.Unsubscribe(Topics.System.All, Handler);
+            DataBus.SystemMessages.Unsubscribe(Topics.System.All, Handler);
         }
     }
 

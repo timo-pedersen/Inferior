@@ -21,7 +21,7 @@ public sealed class FlightAssistTests
         void Handler(double value) => active = value;
 
         DataBus.Drain();
-        DataBus.Instruments.Subscribe(Topics.Flight.FlightAssistActive, Handler);
+        DataBus.ScalarTelemetry.Subscribe(Topics.Flight.FlightAssistActive, Handler);
         try
         {
             simulation.DebugTickPhysics(PlayerInput.Zero, Dt);
@@ -30,7 +30,7 @@ public sealed class FlightAssistTests
         }
         finally
         {
-            DataBus.Instruments.Unsubscribe(Topics.Flight.FlightAssistActive, Handler);
+            DataBus.ScalarTelemetry.Unsubscribe(Topics.Flight.FlightAssistActive, Handler);
         }
 
         Assert.True(simulation.ShipState!.FlightAssistOn);
@@ -45,7 +45,7 @@ public sealed class FlightAssistTests
         void Handler(SystemMessage message) => messages.Add(message.Text);
 
         DataBus.Drain();
-        DataBus.System.Subscribe(Topics.System.All, Handler);
+        DataBus.SystemMessages.Subscribe(Topics.System.All, Handler);
         try
         {
             simulation.DebugTickPhysics(PlayerInput.Zero with { FlightAssistToggle = true }, Dt);
@@ -55,7 +55,7 @@ public sealed class FlightAssistTests
         }
         finally
         {
-            DataBus.System.Unsubscribe(Topics.System.All, Handler);
+            DataBus.SystemMessages.Unsubscribe(Topics.System.All, Handler);
         }
 
         Assert.Contains("flight assist off", messages);
@@ -143,8 +143,8 @@ public sealed class FlightAssistTests
         void AccelerationHandler(double value) => acceleration = value;
 
         DataBus.Drain();
-        DataBus.Instruments.Subscribe(Topics.Flight.FlightAssistForceN, ForceHandler);
-        DataBus.Instruments.Subscribe(Topics.Flight.FlightAssistAccelerationMs2, AccelerationHandler);
+        DataBus.ScalarTelemetry.Subscribe(Topics.Flight.FlightAssistForceN, ForceHandler);
+        DataBus.ScalarTelemetry.Subscribe(Topics.Flight.FlightAssistAccelerationMs2, AccelerationHandler);
         try
         {
             simulation.DebugTickPhysics(PlayerInput.Zero, Dt);
@@ -153,8 +153,8 @@ public sealed class FlightAssistTests
         }
         finally
         {
-            DataBus.Instruments.Unsubscribe(Topics.Flight.FlightAssistForceN, ForceHandler);
-            DataBus.Instruments.Unsubscribe(Topics.Flight.FlightAssistAccelerationMs2, AccelerationHandler);
+            DataBus.ScalarTelemetry.Unsubscribe(Topics.Flight.FlightAssistForceN, ForceHandler);
+            DataBus.ScalarTelemetry.Unsubscribe(Topics.Flight.FlightAssistAccelerationMs2, AccelerationHandler);
         }
 
         Assert.True(force.HasValue && force.Value > 0.0);

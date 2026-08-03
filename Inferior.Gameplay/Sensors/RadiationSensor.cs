@@ -7,7 +7,7 @@ namespace Inferior.Gameplay.Sensors;
 
 /// <summary>
 /// Passive radiation sensor. Measures total ionising flux from all stellar sources
-/// at the ship's current position and publishes it to DataBus.Instruments.
+/// at the ship's current position and publishes it to DataBus.ScalarTelemetry.
 ///
 /// Topics:
 ///   "{Name}.Flux"  — radiation flux in W/m²
@@ -28,6 +28,7 @@ public sealed class RadiationSensor
         {
             TopicPrefix = name,
             ValueName   = Topics.RadiationSensor.Flux,
+            Quantity    = PhysicalQuantity.Irradiance,
             MaxValue    = 1e6,   // W/m² — covers stellar proximity range
             Seed        = (double)HashCode.Combine(name + ".Flux"),
             NoiseWhite  = 0.003,

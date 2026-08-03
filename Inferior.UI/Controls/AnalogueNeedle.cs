@@ -21,7 +21,7 @@ namespace Inferior.UI.Controls;
 /// Tick marks: 20 divisions (9° each). Major marks every 5th (0 %, 25 %, 50 %, 75 %, 100 %).
 ///
 /// Needle and value text both animate with exponential smoothing toward the live value.
-/// Set Topic to auto-subscribe to DataBus.Instruments — no manual wiring needed.
+/// Set Topic to auto-subscribe to DataBus.ScalarTelemetry — no manual wiring needed.
 /// </summary>
 public sealed class AnalogueNeedle : Control
 {
@@ -43,7 +43,7 @@ public sealed class AnalogueNeedle : Control
     private Action<double>? _topicHandler;
 
     /// <summary>
-    /// When set, the gauge subscribes to DataBus.Instruments for this topic and
+    /// When set, the gauge subscribes to DataBus.ScalarTelemetry for this topic and
     /// updates automatically each frame. Changing Topic unsubscribes the old one.
     /// Leave empty to drive the gauge manually via SetValue().
     /// </summary>
@@ -54,12 +54,12 @@ public sealed class AnalogueNeedle : Control
         {
             if (_topic == value) return;
             if (_topicHandler != null && _topic.Length > 0)
-                DataBus.Instruments.Unsubscribe(_topic, _topicHandler);
+                DataBus.ScalarTelemetry.Unsubscribe(_topic, _topicHandler);
             _topic = value;
             if (_topic.Length > 0)
             {
                 _topicHandler = SetValue;
-                DataBus.Instruments.Subscribe(_topic, _topicHandler);
+                DataBus.ScalarTelemetry.Subscribe(_topic, _topicHandler);
             }
             else
             {

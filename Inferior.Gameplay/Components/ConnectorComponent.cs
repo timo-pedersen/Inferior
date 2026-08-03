@@ -60,8 +60,8 @@ public sealed class ConnectorComponent : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {MaxPower / 1e6:F0} MW connector"));
     }
 
@@ -76,6 +76,7 @@ public sealed class ConnectorComponent : ShipComponent
             $"{Name}.Flow",
             () => FlowWatts,
             safeRange:  new RangeValue(0, MaxPower),
-            totalRange: new RangeValue(0, MaxPower)));
+            totalRange: new RangeValue(0, MaxPower),
+            quantity: PhysicalQuantity.Power));
     }
 }

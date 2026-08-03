@@ -1,47 +1,133 @@
+using Inferior.Core.Math;
+using System.Collections.Concurrent;
+
 namespace Inferior.Core.DataBus;
 
 /// <summary>
-/// Static hub for all inter-system messaging. Simulation thread publishes freely;
-/// main thread calls Drain() once per frame to dispatch handlers.
+/// Static compatibility hub for inter-system messaging. Simulation publishers enqueue;
+/// the main thread drains once per frame. These channels are intended to become ship-owned.
 /// </summary>
 public static class DataBus
 {
-    // Device status, cold-start sequence, state changes
-    public static readonly Bus<SystemMessage> System           = new();
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>>
+        TopicsByDevice = new(StringComparer.Ordinal);
 
-    // Live numeric instrument values — published every sim tick
-    // Topic: "ComponentName.ValueName"  e.g. "PowerCore.PowerLoad"
-    // Multiple instances: "ComponentName_N.ValueName"  e.g. "PowerCore_2.PowerLoad"
-    public static readonly Bus<double>       Instruments      = new();
+    /// <summary>Human-readable console and HUD messages. Every occurrence is delivered.</summary>
+    public static readonly Bus<SystemMessage> SystemMessages =
+        new(TopicPolicy.OrderedHistory(256));
 
-    // Component state — damage percent, efficiency — published on change only
-    public static readonly Bus<double>       InstrumentState  = new();
+    /// <summary>Scalar measurements and operational values, in raw SI where applicable.</summary>
+    public static readonly TelemetryChannel<double> ScalarTelemetry = new();
 
-    // Operating envelopes — published at startup and when ranges change
-    public static readonly Bus<RangeValue>   InstrumentRanges = new();
+    /// <summary>Atomic vector measurements, in raw SI where applicable.</summary>
+    public static readonly TelemetryChannel<DVec3> VectorTelemetry = new();
 
-    // Radar contact updates — published when a contact appears or changes
-    public static readonly Bus<RadarContact> Radar            = new();
+    /// <summary>Array-valued spectrum results. Latest completed scan is replayable.</summary>
+    public static readonly TelemetryChannel<double[]> SpectrumTelemetry = new();
 
-    // Contact lost — published when a contact disappears; subscribers handle cleanup
-    public static readonly Bus<string>       RadarLost        = new();
+    /// <summary>Retained descriptions keyed by telemetry topic.</summary>
+    public static readonly Bus<TelemetryInfo> TelemetryInfo =
+        new(TopicPolicy.LatestState);
 
-    // Spectrum scan results — published on demand by active SolarSpectrumSensor
-    public static readonly Bus<double[]>     Spectra          = new();
+    /// <summary>Retained descriptions keyed by sensor/component device ID.</summary>
+    public static readonly Bus<DeviceInfo> DeviceInfo =
+        new(TopicPolicy.LatestState);
 
-    // Selected target changed — published by TargetingSystem; null-sentinel has empty Id
-    public static readonly Bus<RadarContact> Target           = new();
+    /// <summary>Retained current operational state keyed by sensor/component device ID.</summary>
+    public static readonly Bus<DeviceState> DeviceState =
+        new(TopicPolicy.LatestState);
 
-    // Called once per frame from Game.Update() on main thread
+    // Radar contact updates and losses remain event channels pending the radar migration.
+    public static readonly Bus<RadarContact> Radar = new();
+    public static readonly Bus<string> RadarLost = new();
+
+    // Selected target changed; empty Id is the existing cleared sentinel.
+    public static readonly Bus<RadarContact> Target = new(TopicPolicy.LatestState);
+
     public static void Drain()
     {
-        System.Drain();
-        Instruments.Drain();
-        InstrumentState.Drain();
-        InstrumentRanges.Drain();
+        SystemMessages.Drain();
+        ScalarTelemetry.Drain();
+        VectorTelemetry.Drain();
+        SpectrumTelemetry.Drain();
+        TelemetryInfo.Drain();
+        DeviceInfo.Drain();
+        DeviceState.Drain();
         Radar.Drain();
         RadarLost.Drain();
-        Spectra.Drain();
         Target.Drain();
+    }
+
+    /// <summary>
+    /// Publish a retained telemetry description and register its device ownership for
+    /// deterministic removal at a device/ship lifecycle boundary.
+    /// </summary>
+    public static void PublishTelemetryInfo(TelemetryInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        ArgumentException.ThrowIfNullOrWhiteSpace(info.Topic);
+        ArgumentException.ThrowIfNullOrWhiteSpace(info.DeviceId);
+        info.Publication.Validate();
+        info.TopicPolicy.Validate();
+
+        switch (info.ValueKind)
+        {
+            case TelemetryValueKind.Scalar:
+                ScalarTelemetry.ConfigureTopic(info.Topic, info.TopicPolicy);
+                break;
+            case TelemetryValueKind.Vector:
+                VectorTelemetry.ConfigureTopic(info.Topic, info.TopicPolicy);
+                break;
+            case TelemetryValueKind.Spectrum:
+                SpectrumTelemetry.ConfigureTopic(info.Topic, info.TopicPolicy);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(info), "Unknown telemetry payload kind.");
+        }
+
+        var topics = TopicsByDevice.GetOrAdd(
+            info.DeviceId,
+            static _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
+        topics[info.Topic] = 0;
+        TelemetryInfo.Publish(info.Topic, info);
+    }
+
+    /// <summary>
+    /// Remove retained metadata, state, and telemetry owned by one device. Call only after
+    /// its publishers have stopped and their pending publications have been drained;
+    /// queued publications are deliberately not rewritten.
+    /// </summary>
+    public static void RemoveDevice(string deviceId)
+    {
+        if (TopicsByDevice.TryRemove(deviceId, out var topics))
+        {
+            foreach (string topic in topics.Keys)
+            {
+                ScalarTelemetry.RemoveRetained(topic);
+                VectorTelemetry.RemoveRetained(topic);
+                SpectrumTelemetry.RemoveRetained(topic);
+                TelemetryInfo.RemoveRetained(topic);
+            }
+        }
+
+        DeviceInfo.RemoveRetained(deviceId);
+        DeviceState.RemoveRetained(deviceId);
+    }
+
+    /// <summary>
+    /// Clear transient retained presentation state at a simulation boundary. Subscriptions
+    /// and topic contracts remain intact; future ship-owned channels will replace this hook.
+    /// </summary>
+    public static void ClearRetained()
+    {
+        SystemMessages.ClearRetained();
+        ScalarTelemetry.ClearRetained();
+        VectorTelemetry.ClearRetained();
+        SpectrumTelemetry.ClearRetained();
+        TelemetryInfo.ClearRetained();
+        DeviceInfo.ClearRetained();
+        DeviceState.ClearRetained();
+        Target.ClearRetained();
+        TopicsByDevice.Clear();
     }
 }

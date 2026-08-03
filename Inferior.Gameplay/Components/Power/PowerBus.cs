@@ -94,8 +94,8 @@ public sealed class PowerBus : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {Capacitor.MaxJ / 1e6:F1} MJ bus"));
     }
 
@@ -105,13 +105,15 @@ public sealed class PowerBus : ShipComponent
             $"{Name}.Level",
             () => Capacitor.FillFraction,
             safeRange:  new RangeValue(0.2, 1.0),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         double maxW = MaxPower < 1e15 ? MaxPower : 1e9;  // sensible range if unset
         _sensors.Add(new ComponentSensor(
             $"{Name}.Consumption",
             () => DrawnWatts,
             safeRange:  new RangeValue(0, maxW),
-            totalRange: new RangeValue(0, maxW)));
+            totalRange: new RangeValue(0, maxW),
+            quantity: PhysicalQuantity.Power));
     }
 }

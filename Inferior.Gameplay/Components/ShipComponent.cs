@@ -1,4 +1,5 @@
 using Inferior.Core.DataBus;
+using Inferior.Core.Simulation;
 
 namespace Inferior.Gameplay.Components;
 
@@ -100,6 +101,18 @@ public abstract class ShipComponent
     public IReadOnlyList<ComponentSensor> Sensors => _sensors;
     protected readonly List<ComponentSensor> _sensors = new();
 
+    /// <summary>Additional simulation command topics accepted directly by this device.</summary>
+    protected virtual IReadOnlyList<string> DeviceCommandTopics => [];
+
+    private bool _deviceInfoPublished;
+    private bool _deviceStatePublished;
+    private ComponentStatus _publishedStatus;
+    private double _publishedDamage;
+    private double _publishedEfficiency;
+    private readonly List<(string Prefix, Action<ComponentCommand> Handler)> _commandHandlers = [];
+    private readonly List<IDisposable> _commandSubscriptions = [];
+    private bool _busActive;
+
     // ── Events ────────────────────────────────────────────────────────────────
     /// <summary>
     /// Fired once when the component transitions to Started.
@@ -138,6 +151,7 @@ public abstract class ShipComponent
     /// </summary>
     public void Tick(double dt)
     {
+        PublishDeviceInfoOnce();
         TickStartupSequence(dt);
 
         if (Status == ComponentStatus.Running)
@@ -148,6 +162,35 @@ public abstract class ShipComponent
         }
         else if (Status == ComponentStatus.PowerOff)
             OnPowerOffTick(dt);
+
+        PublishDeviceStateIfChanged();
+    }
+
+    /// <summary>Attach this installed component to the current command bus.</summary>
+    public void ActivateBus()
+    {
+        if (_busActive)
+            return;
+
+        _busActive = true;
+        foreach (ComponentSensor sensor in _sensors)
+            sensor.ActivateBus();
+        foreach (var (prefix, handler) in _commandHandlers)
+            _commandSubscriptions.Add(CommandBus.Subscribe(prefix, handler));
+    }
+
+    /// <summary>Detach this component when its ship is no longer the active bus owner.</summary>
+    public void DeactivateBus()
+    {
+        if (!_busActive)
+            return;
+
+        _busActive = false;
+        foreach (ComponentSensor sensor in _sensors)
+            sensor.DeactivateBus();
+        foreach (IDisposable subscription in _commandSubscriptions)
+            subscription.Dispose();
+        _commandSubscriptions.Clear();
     }
 
     protected virtual void OnTick(double dt) { }
@@ -161,7 +204,7 @@ public abstract class ShipComponent
     // ── Lifecycle hooks ───────────────────────────────────────────────────────
     /// <summary>Called once when the startup timer begins running (StartupTimer > 0 only).</summary>
     protected virtual void OnInitializationStarted()
-        => DataBus.System.Publish(Topics.System.All, new($"{Name}: initializing"));
+        => DataBus.SystemMessages.Publish(Topics.System.All, new($"{Name}: initializing"));
 
     /// <summary>
     /// Called every tick while Status == Initializing. Override to run warmup physics
@@ -172,13 +215,13 @@ public abstract class ShipComponent
 
     /// <summary>
     /// Called once when the component reaches Started. Publishes sensor ranges and
-    /// the online message. Override to customise — call PublishSensorRanges() yourself
+    /// the online message. Override to customise — call PublishTelemetryInfo() yourself
     /// in place of base.OnInitializationComplete().
     /// </summary>
     protected virtual void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All, new($"{Name}: online"));
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"{Name}: online"));
     }
 
     /// <summary>
@@ -187,7 +230,7 @@ public abstract class ShipComponent
     /// Base publishes the offline message.
     /// </summary>
     protected virtual void OnPowerOff()
-        => DataBus.System.Publish(Topics.System.All, new($"{Name}: offline"));
+        => DataBus.SystemMessages.Publish(Topics.System.All, new($"{Name}: offline"));
 
     /// <summary>
     /// Called once when the component is powered on.
@@ -195,7 +238,7 @@ public abstract class ShipComponent
     /// Base publishes the online message.
     /// </summary>
     protected virtual void OnPowerOn()
-        => DataBus.System.Publish(Topics.System.All, new($"{Name}: powering up"));
+        => DataBus.SystemMessages.Publish(Topics.System.All, new($"{Name}: powering up"));
 
     /// <summary>
     /// Transitions directly to Started from Initializing. For components that manage
@@ -211,16 +254,82 @@ public abstract class ShipComponent
     }
 
     // ── Protected helpers ─────────────────────────────────────────────────────
-    protected void PublishSensorRanges()
+    protected void PublishTelemetryInfo()
     {
         foreach (var s in _sensors)
-            s.PublishRanges();
+            s.PublishInfo();
     }
 
     protected void TickSensors()
     {
         foreach (var s in _sensors)
             s.Tick();
+    }
+
+    protected void RegisterCommand(string prefix, Action<ComponentCommand> handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+        ArgumentNullException.ThrowIfNull(handler);
+        _commandHandlers.Add((prefix, handler));
+        if (_busActive)
+            _commandSubscriptions.Add(CommandBus.Subscribe(prefix, handler));
+    }
+
+    private void PublishDeviceInfoOnce()
+    {
+        if (_deviceInfoPublished || string.IsNullOrWhiteSpace(Name))
+            return;
+
+        _deviceInfoPublished = true;
+        string[] publishedTopics = _sensors.Select(sensor => sensor.Topic).ToArray();
+        string[] commandTopics =
+        [
+            .. _sensors.Select(sensor => sensor.QueryCommandTopic),
+            .. DeviceCommandTopics,
+        ];
+
+        DataBus.DeviceInfo.Publish(Name, new DeviceInfo
+        {
+            DeviceId = Name,
+            PublishedTopics = [.. publishedTopics],
+            CommandTopics = [.. commandTopics],
+            Power = new PowerProfile(
+                IdleWatts: 0.0,
+                ActiveWatts: PowerConsumption,
+                ActivationDurationSeconds:
+                    double.IsFinite(StartupTimer) ? Math.Max(0.0, StartupTimer) : 0.0),
+        });
+    }
+
+    private void PublishDeviceStateIfChanged()
+    {
+        if (string.IsNullOrWhiteSpace(Name) ||
+            (_deviceStatePublished &&
+             _publishedStatus == Status &&
+             _publishedDamage.Equals(Damage) &&
+             _publishedEfficiency.Equals(Efficiency)))
+        {
+            return;
+        }
+
+        _deviceStatePublished = true;
+        _publishedStatus = Status;
+        _publishedDamage = Damage;
+        _publishedEfficiency = Efficiency;
+
+        DataBus.DeviceState.Publish(Name, new DeviceState(
+            Name,
+            Status switch
+            {
+                ComponentStatus.PowerOff => DeviceOperationalStatus.PowerOff,
+                ComponentStatus.PowerOn => DeviceOperationalStatus.PowerOn,
+                ComponentStatus.Initializing => DeviceOperationalStatus.Initializing,
+                ComponentStatus.Running => DeviceOperationalStatus.Running,
+                _ => DeviceOperationalStatus.Unavailable,
+            },
+            Damage,
+            Efficiency,
+            GameClock.SimTime));
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

@@ -1,35 +1,76 @@
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
+using Inferior.Core.Simulation;
 using Inferior.Galaxy;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Gameplay.Sensors;
 
 public readonly record struct PlanetaryCoordinates(
-    double Altitude,
-    double Latitude,
-    double Longitude,
-    double Heading,
-    double GroundSpeed,
-    double VerticalSpeed,
-    double Temperature,
-    double Pressure);
+    double AltitudeMeters,
+    double LatitudeRadians,
+    double LongitudeRadians,
+    double HeadingRadians,
+    double GroundSpeedMetersPerSecond,
+    double VerticalSpeedMetersPerSecond,
+    double TemperatureKelvin,
+    double PressurePascals);
 
 public sealed class PlanetaryCoordinateSensor
 {
+    private const string DeviceId = "PlanetaryCoordinateSensor";
+
+    public PlanetaryCoordinateSensor()
+    {
+        Register(Topics.PlanetCoord.Altitude, PhysicalQuantity.Distance);
+        Register(Topics.PlanetCoord.Latitude, PhysicalQuantity.Angle,
+            new RangeValue(-Math.PI / 2.0, Math.PI / 2.0));
+        Register(Topics.PlanetCoord.Longitude, PhysicalQuantity.Angle,
+            new RangeValue(-Math.PI, Math.PI));
+        Register(Topics.PlanetCoord.Heading, PhysicalQuantity.Angle,
+            new RangeValue(0.0, Math.Tau));
+        Register(Topics.PlanetCoord.GroundSpeed, PhysicalQuantity.Speed);
+        Register(Topics.PlanetCoord.VerticalSpeed, PhysicalQuantity.Speed);
+        Register(Topics.PlanetCoord.Temperature, PhysicalQuantity.Temperature);
+        Register(Topics.PlanetCoord.Pressure, PhysicalQuantity.Pressure);
+
+        DataBus.DeviceInfo.Publish(DeviceId, new DeviceInfo
+        {
+            DeviceId = DeviceId,
+            PublishedTopics =
+            [
+                Topics.PlanetCoord.Altitude,
+                Topics.PlanetCoord.Latitude,
+                Topics.PlanetCoord.Longitude,
+                Topics.PlanetCoord.Heading,
+                Topics.PlanetCoord.GroundSpeed,
+                Topics.PlanetCoord.VerticalSpeed,
+                Topics.PlanetCoord.Temperature,
+                Topics.PlanetCoord.Pressure,
+            ],
+            Power = new PowerProfile(0.0, 0.0),
+        });
+        DataBus.DeviceState.Publish(DeviceId, new DeviceState(
+            DeviceId,
+            DeviceOperationalStatus.Running,
+            Damage: 0.0,
+            Efficiency: 1.0,
+            SimulationTime: GameClock.SimTime));
+    }
+
     public void Tick(DVec3 shipPos, DVec3 shipVel, OrbitalBody body, DVec3 bodyPos, double dt)
     {
         if (body.Planet == null) return;
 
         var coords = Compute(shipPos, shipVel, body, bodyPos);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.Altitude,      coords.Altitude);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.Latitude,      coords.Latitude);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.Longitude,     coords.Longitude);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.Heading,       coords.Heading);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.GroundSpeed,   coords.GroundSpeed);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.VerticalSpeed, coords.VerticalSpeed);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.Temperature,   coords.Temperature);
-        DataBus.Instruments.Publish(Topics.PlanetCoord.Pressure,      coords.Pressure);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.Altitude,      coords.AltitudeMeters);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.Latitude,      coords.LatitudeRadians);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.Longitude,     coords.LongitudeRadians);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.Heading,       coords.HeadingRadians);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.GroundSpeed,   coords.GroundSpeedMetersPerSecond);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.VerticalSpeed, coords.VerticalSpeedMetersPerSecond);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.Temperature,   coords.TemperatureKelvin);
+        DataBus.ScalarTelemetry.Publish(Topics.PlanetCoord.Pressure,      coords.PressurePascals);
     }
 
     public static PlanetaryCoordinates Compute(DVec3 shipPos, DVec3 shipVel, OrbitalBody body, DVec3 bodyPos)
@@ -51,9 +92,8 @@ public sealed class PlanetaryCoordinateSensor
             (double)localPos.Z * localPos.Z);
         if (localLen < 1.0) localLen = 1.0;
 
-        double lat = System.Math.Asin(System.Math.Clamp(localPos.Y / localLen, -1.0, 1.0))
-                     * (180.0 / System.Math.PI);
-        double lon = System.Math.Atan2(localPos.Z, localPos.X) * (180.0 / System.Math.PI);
+        double lat = System.Math.Asin(System.Math.Clamp(localPos.Y / localLen, -1.0, 1.0));
+        double lon = System.Math.Atan2(localPos.Z, localPos.X);
 
         // Surface normal (up) in galaxy space
         DVec3 up = relPos / radius;
@@ -72,8 +112,8 @@ public sealed class PlanetaryCoordinateSensor
         DVec3  vHoriz  = shipVel - up * DVec3.Dot(shipVel, up);
         double vN      = DVec3.Dot(vHoriz, north);
         double vE      = DVec3.Dot(vHoriz, east);
-        double heading = System.Math.Atan2(vE, vN) * (180.0 / System.Math.PI);
-        if (heading < 0.0) heading += 360.0;
+        double heading = System.Math.Atan2(vE, vN);
+        if (heading < 0.0) heading += System.Math.Tau;
 
         // Ground speed: ship velocity minus surface rotation, projected horizontal
         double rotPeriod = System.Math.Abs(body.RotationPeriod) > 0.01 ? body.RotationPeriod : body.Period;
@@ -89,8 +129,8 @@ public sealed class PlanetaryCoordinateSensor
         // Temperature: base × altitude fraction × solar elevation factor
         double temperature = ComputeTemperature(altitude, body, bodyPos, up);
 
-        // Pressure: barometric formula (bar) using PlanetData if available, legacy density otherwise
-        double pressure = body.DensityAtAltitude(altitude);
+        // DensityAtAltitude is bar for generated planets; publish pressure in raw SI pascals.
+        double pressure = body.DensityAtAltitude(altitude) * 100_000.0;
 
         return new PlanetaryCoordinates(altitude, lat, lon, heading, groundSpeed, verticalSpeed, temperature, pressure);
     }
@@ -106,4 +146,20 @@ public sealed class PlanetaryCoordinateSensor
 
         return body.Planet.AverageTemperature * altFraction * (0.5 + 0.5 * solarFactor);
     }
+
+    private static void Register(
+        string topic,
+        PhysicalQuantity quantity,
+        RangeValue? operatingRange = null)
+        => DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = topic,
+            DeviceId = DeviceId,
+            ValueKind = TelemetryValueKind.Scalar,
+            Quantity = quantity,
+            OperatingRange = operatingRange,
+            SuggestedDisplayRange = operatingRange,
+            Publication = new PublicationInfo(PublicationMode.EveryTick),
+            TopicPolicy = TopicPolicy.LatestState,
+        });
 }

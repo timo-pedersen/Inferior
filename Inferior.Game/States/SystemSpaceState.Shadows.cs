@@ -243,7 +243,7 @@ public sealed partial class SystemSpaceState
         foreach (var mod in moduleList)
         {
             if (_shadowCasterMeshes.ContainsKey(mod)) continue;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
                 $"Station shadow: module '{mod.Definition.Id}' (category '{mod.Definition.Category}') " +
                 "has no hull shadow caster — its decoration may cast unattached shadows.",
                 SystemMessagePriority.NB));
@@ -337,7 +337,7 @@ public sealed partial class SystemSpaceState
         {
             _casterStage = (CasterStage)(((int)_casterStage + 1) % 5);
             RebuildDecoCasterMeshesForStage();
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"Station shadow caster stage: {_casterStage}", SystemMessagePriority.NB));
         }
 
@@ -353,28 +353,28 @@ public sealed partial class SystemSpaceState
                     width, _stationShadowContext.Resolution, _shadowKernelMode);
                 penumbraNote = $" (penumbra ~{penumbraMetres * 1000f:F1} mm)";
             }
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"Station shadow kernel: {label}{penumbraNote}", SystemMessagePriority.NB));
         }
 
         if (f6 && !ctrlDown && !shiftDown)
         {
             _stationShadowDeltaView = !_stationShadowDeltaView;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"Station shadow delta view {(_stationShadowDeltaView ? "ON" : "OFF")}",
                     SystemMessagePriority.NB));
         }
         if (f7)
         {
             _stationShadowBinaryView = !_stationShadowBinaryView;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"Station shadow binary view {(_stationShadowBinaryView ? "ON" : "OFF")}",
                     SystemMessagePriority.NB));
         }
         if (f8)
         {
             _showStationShadowOverlay = !_showStationShadowOverlay;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"Station shadow overlay {(_showStationShadowOverlay ? "ON" : "OFF")}",
                     SystemMessagePriority.NB));
         }
@@ -382,7 +382,7 @@ public sealed partial class SystemSpaceState
         {
             _freezeStationShadowMap = !_freezeStationShadowMap;
             _stationShadowFreezeLogged = false;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"Station shadow map {(_freezeStationShadowMap ? "FROZEN" : "LIVE")}",
                     SystemMessagePriority.NB));
         }
@@ -666,7 +666,7 @@ public sealed partial class SystemSpaceState
             $"(penumbra {penumbraMetres * 1000f:F1} mm), {ctx.BuildMilliseconds:F2} ms. " +
             "Keys F6 delta, F7 binary, F8 overlay, F9 freeze, Ctrl+F6 caster stage, Shift+F6 kernel.";
         System.Console.WriteLine(message);
-        DataBus.System.Publish(Topics.System.All, new SystemMessage(message, SystemMessagePriority.NB));
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(message, SystemMessagePriority.NB));
     }
 
     private void DrawStationShadowOverlay(SpriteBatch sb)

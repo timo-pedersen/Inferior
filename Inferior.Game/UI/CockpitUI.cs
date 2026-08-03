@@ -269,7 +269,7 @@ public sealed partial class CockpitUI : IDisposable
         _shieldToggleButton.SetState(false, false);
         _shieldToggleButton.Toggled += (_, on) => _onShieldToggle(on);
 
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             $"Shield.{Topics.Shield.Capacitor}", fill =>
         {
             if (_shieldToggleButton == null) return;
@@ -347,28 +347,35 @@ public sealed partial class CockpitUI : IDisposable
         _ui.Add(_cockpitRail);
 
         // Meters subscribe themselves via Topic — only non-meter handlers need wiring here
-        _subscriptions.Add(new BusSubscription<SystemMessage>(DataBus.System, Topics.System.All, msg =>
-        {
-            _console?.AddMessage(msg);
-            _hudAlert.AddMessage(msg);
-        }));
+        // A newly constructed console can recover the bounded system-message history.
+        // HUD alerts subscribe live-only so old warnings are not announced again.
+        _subscriptions.Add(new BusSubscription<SystemMessage>(
+            DataBus.SystemMessages,
+            Topics.System.All,
+            msg => _console?.AddMessage(msg),
+            ReplayMode.History));
+        _subscriptions.Add(new BusSubscription<SystemMessage>(
+            DataBus.SystemMessages,
+            Topics.System.All,
+            _hudAlert.AddMessage,
+            ReplayMode.None));
 
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.Altitude,      v => _pcAlt   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.VerticalSpeed, v => _pcVs    = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Latitude,      v => _pcLat   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Longitude,     v => _pcLon   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Heading,       v => _pcHdg   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Latitude,      v => _pcLat   = v * (180.0 / Math.PI)));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Longitude,     v => _pcLon   = v * (180.0 / Math.PI)));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Heading,       v => _pcHdg   = v * (180.0 / Math.PI)));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.GroundSpeed,   v => _pcGs    = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.Temperature,   v => _pcTemp  = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Pressure,      v => _pcPress = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Pressure,      v => _pcPress = v / 100_000.0));
 
         _subscriptions.Add(new BusSubscription<RadarContact>(DataBus.Radar, Topics.Radar.All, c =>
         {
@@ -383,7 +390,7 @@ public sealed partial class CockpitUI : IDisposable
 
         _stopLed = new LedIndicator(
             Topics.Flight.XStopActive,
-            DataBus.Instruments,
+            DataBus.ScalarTelemetry,
             _gd,
             _font)
         {
@@ -399,7 +406,7 @@ public sealed partial class CockpitUI : IDisposable
 
         _warnLed = new LedIndicator(
             Topics.Flight.FlightAssistActive,
-            DataBus.Instruments,
+            DataBus.ScalarTelemetry,
             _gd,
             _font)
         {
@@ -462,6 +469,9 @@ public sealed partial class CockpitUI : IDisposable
         if (_shieldCapacitorMeter    != null) _shieldCapacitorMeter.Topic    = "";
         if (_atmPressureMeter        != null) _atmPressureMeter.Topic        = "";
         if (_spectrumGraph           != null) _spectrumGraph.Topic           = "";
+
+        _dockingInstrument?.Dispose();
+        _drivePanel?.Dispose();
 
         foreach (var sub in _subscriptions) sub.Dispose();
         _subscriptions.Clear();
