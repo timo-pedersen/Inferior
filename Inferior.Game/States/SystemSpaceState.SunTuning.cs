@@ -13,6 +13,10 @@ namespace Inferior.Game.States;
 // with either. The number row (D1-D9, D0) was completely free — grepped, not assumed.
 // Adjust keys switched from OemPlus/OemMinus to Up/Down per Timo's request (tenkeyless
 // keyboard — no dedicated +/- keys within easy reach of the number row).
+// Brief B3 Fix 2: arrow Left resets the selected parameter to its baked default; arrow Right
+// (distinct from Left, since resetting one parameter vs. all ten are different-severity
+// actions that shouldn't share a key) resets ALL ten via the already-existing
+// SunTuning.ResetToDefaults() — both keys were grepped free alongside Up/Down above.
 public sealed partial class SystemSpaceState
 {
     private bool _showSunTuningPanel;
@@ -21,24 +25,28 @@ public sealed partial class SystemSpaceState
     // One descriptor per exposed parameter, in on-screen/number-row order (index 0 -> key
     // '1', ..., index 8 -> key '9', index 9 -> key '0') — matches the brief's own numbered
     // list exactly (1: disc floor ... 5: glare intensity multiplier, 6-10: per-layer alphas).
+    // Brief B3 Fix 1/2: Default reads SunTuning's own DefaultXxx const directly (not a
+    // re-typed literal) — the single-source-of-truth requirement applies to the reset value
+    // exactly as much as to the panel's starting value, which SunTuning's own field
+    // initializers already guarantee.
     private readonly record struct SunTuningParam(
-        string Label, System.Func<float> Get, System.Action<float> Set,
+        string Label, System.Func<float> Get, System.Action<float> Set, float Default,
         float Min, float Max, float CoarsePerSecond, float FinePerSecond, string DumpConstName);
 
     private SunTuningParam[]? _sunTuningParams;
 
     private SunTuningParam[] SunTuningParams => _sunTuningParams ??=
     [
-        new("Disc floor (px)",             () => SunTuning.DiscFloorPixels,          v => SunTuning.DiscFloorPixels          = v, 0.1f, 20f, 2f,   0.2f,  "DefaultDiscFloorPixels"),
-        new("Limb-darkening strength",     () => SunTuning.LimbDarkeningStrength,    v => SunTuning.LimbDarkeningStrength    = v, 0f,   1f,  0.5f, 0.05f, "DefaultLimbDarkeningStrength"),
-        new("Glare compression exponent",  () => SunTuning.GlareCompressionExponent, v => SunTuning.GlareCompressionExponent = v, 0.05f, 2f, 0.2f, 0.02f, "DefaultGlareCompressionExponent"),
-        new("Glare size multiplier",       () => SunTuning.GlareSizeMultiplier,      v => SunTuning.GlareSizeMultiplier      = v, 0.01f, 20f, 1f,  0.1f,  "DefaultGlareSizeMultiplier"),
-        new("Glare intensity multiplier",  () => SunTuning.GlareIntensityMultiplier, v => SunTuning.GlareIntensityMultiplier = v, 0f,   5f,  0.5f, 0.05f, "DefaultGlareIntensityMultiplier"),
-        new("Glare layer 0 alpha (white, innermost)", () => SunTuning.GlareLayer0Alpha, v => SunTuning.GlareLayer0Alpha = v, 0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer0Alpha"),
-        new("Glare layer 1 alpha",         () => SunTuning.GlareLayer1Alpha,         v => SunTuning.GlareLayer1Alpha         = v, 0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer1Alpha"),
-        new("Glare layer 2 alpha",         () => SunTuning.GlareLayer2Alpha,         v => SunTuning.GlareLayer2Alpha         = v, 0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer2Alpha"),
-        new("Glare layer 3 alpha",         () => SunTuning.GlareLayer3Alpha,         v => SunTuning.GlareLayer3Alpha         = v, 0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer3Alpha"),
-        new("Glare layer 4 alpha (outermost)", () => SunTuning.GlareLayer4Alpha,     v => SunTuning.GlareLayer4Alpha         = v, 0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer4Alpha"),
+        new("Disc floor (px)",             () => SunTuning.DiscFloorPixels,          v => SunTuning.DiscFloorPixels          = v, SunTuning.DefaultDiscFloorPixels,          0.1f, 20f, 2f,   0.2f,  "DefaultDiscFloorPixels"),
+        new("Limb-darkening strength",     () => SunTuning.LimbDarkeningStrength,    v => SunTuning.LimbDarkeningStrength    = v, SunTuning.DefaultLimbDarkeningStrength,    0f,   1f,  0.5f, 0.05f, "DefaultLimbDarkeningStrength"),
+        new("Glare compression exponent",  () => SunTuning.GlareCompressionExponent, v => SunTuning.GlareCompressionExponent = v, SunTuning.DefaultGlareCompressionExponent, 0.05f, 2f, 0.2f, 0.02f, "DefaultGlareCompressionExponent"),
+        new("Glare size multiplier",       () => SunTuning.GlareSizeMultiplier,      v => SunTuning.GlareSizeMultiplier      = v, SunTuning.DefaultGlareSizeMultiplier,      0.01f, 20f, 1f,  0.1f,  "DefaultGlareSizeMultiplier"),
+        new("Glare intensity multiplier",  () => SunTuning.GlareIntensityMultiplier, v => SunTuning.GlareIntensityMultiplier = v, SunTuning.DefaultGlareIntensityMultiplier, 0f,   5f,  0.5f, 0.05f, "DefaultGlareIntensityMultiplier"),
+        new("Glare layer 0 alpha (white, innermost)", () => SunTuning.GlareLayer0Alpha, v => SunTuning.GlareLayer0Alpha = v, SunTuning.DefaultGlareLayer0Alpha, 0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer0Alpha"),
+        new("Glare layer 1 alpha",         () => SunTuning.GlareLayer1Alpha,         v => SunTuning.GlareLayer1Alpha         = v, SunTuning.DefaultGlareLayer1Alpha,         0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer1Alpha"),
+        new("Glare layer 2 alpha",         () => SunTuning.GlareLayer2Alpha,         v => SunTuning.GlareLayer2Alpha         = v, SunTuning.DefaultGlareLayer2Alpha,         0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer2Alpha"),
+        new("Glare layer 3 alpha",         () => SunTuning.GlareLayer3Alpha,         v => SunTuning.GlareLayer3Alpha         = v, SunTuning.DefaultGlareLayer3Alpha,         0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer3Alpha"),
+        new("Glare layer 4 alpha (outermost)", () => SunTuning.GlareLayer4Alpha,     v => SunTuning.GlareLayer4Alpha         = v, SunTuning.DefaultGlareLayer4Alpha,         0f, 1f, 0.2f, 0.02f, "DefaultGlareLayer4Alpha"),
     ];
 
     private static readonly Keys[] SunTuningSelectKeys =
@@ -58,7 +66,7 @@ public sealed partial class SystemSpaceState
             _showSunTuningPanel = !_showSunTuningPanel;
             DataBus.System.Publish(Topics.System.All, new SystemMessage(
                 _showSunTuningPanel
-                    ? "Sun tuning panel ON — 1-9/0 select, Up/Down adjust (hold Shift for fine step), P dumps source."
+                    ? "Sun tuning panel ON — 1-9/0 select, Up/Down adjust (hold Shift for fine step), Left resets selected, Right resets all, P dumps source."
                     : "Sun tuning panel OFF",
                 SystemMessagePriority.NB));
         }
@@ -81,6 +89,25 @@ public sealed partial class SystemSpaceState
             selected.Set(System.Math.Clamp(selected.Get() + rate * (float)dt, selected.Min, selected.Max));
         if (keys.IsKeyDown(Keys.Down))
             selected.Set(System.Math.Clamp(selected.Get() - rate * (float)dt, selected.Min, selected.Max));
+
+        // Brief B3 Fix 2: Left resets only the selected parameter (the common case while
+        // tuning); Right resets all ten via SunTuning.ResetToDefaults() directly — cheap
+        // (10 assignments), so no reason to build a second reset path.
+        bool leftJustPressed = keys.IsKeyDown(Keys.Left) && !_prevKeys.IsKeyDown(Keys.Left);
+        if (leftJustPressed)
+        {
+            selected.Set(selected.Default);
+            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+                $"{selected.Label} reset to {selected.Default:F4}.", SystemMessagePriority.NB));
+        }
+
+        bool rightJustPressed = keys.IsKeyDown(Keys.Right) && !_prevKeys.IsKeyDown(Keys.Right);
+        if (rightJustPressed)
+        {
+            SunTuning.ResetToDefaults();
+            DataBus.System.Publish(Topics.System.All,
+                new SystemMessage("All sun tuning parameters reset to defaults.", SystemMessagePriority.NB));
+        }
 
         bool pJustPressed = keys.IsKeyDown(Keys.P) && !_prevKeys.IsKeyDown(Keys.P);
         if (pJustPressed)
