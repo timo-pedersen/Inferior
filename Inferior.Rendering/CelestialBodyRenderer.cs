@@ -38,63 +38,35 @@ public sealed class CelestialBodyRenderer : IDisposable
     // ── Visual constants (duplicated from SystemSpaceState — plain constants,
     // cheap to duplicate rather than plumb through as parameters) ───────────────
     private const float StarVisualRadius   = 8f;
-    // Brief B1a Fix 1: KEPT at 1, not raised to the brief's illustrative "~2px at 37 AU."
-    // D-Bright/B1 measured the disc's floor CROSSOVER (where true angular size stops
-    // dominating and the floor locks in) at ~1.5 AU for a G-class star with this 1px floor —
-    // meaning most of the 1-37+ AU range Timo actually flies in was already floor-bound at a
-    // CONSTANT pixel size, which is why "the same star renders at the same size at 1 AU and
-    // 37 AU": cause (2) from the brief, the floor binding at both distances, not (1) distance
-    // going unused — StarApparentRadius's math already derives true angular size from live
-    // distance every frame (confirmed by direct read), it's just that a realistic star's true
-    // angular size is only ~1-2px at typical in-system range under this camera's FOV, so the
-    // floor dominates almost everywhere except close approach or genuinely large (giant)
-    // stars. Verified directly, not assumed: raising this to 2 (matching the brief's literal
-    // "~2px" text) was tried and measured — it makes the defect WORSE for common classes, not
-    // better, because a 2px floor exceeds a G-class star's true 1AU size (1.49px), pulling
-    // 1 AU ITSELF into floor-bound territory (both distances then read as an identical,
-    // flat 2px — zero shrink). Kept at the brief's own stated LOWER bound ("never below
-    // ~1px") instead, which preserves the real (if modest, ~1.5x) shrink for common classes;
-    // see StarApparentRadius's own comment for the full per-class numbers this produces, and
-    // GlareOuterRadius for how Fix 2 carries the primary "how far away" signal instead.
-    private const float StarMinPixels      = 1f;
     private const float PlanetMinPixels    = 1f;
     private const float PlanetMaxBoostDist = 4500f; // ~30 AU — no boost beyond this
     private const float PlanetVisualScale  = 1f;
 
-    // Brief B1 Fix 1 (superseded by B1a Fix 2 below): the glare stack's per-layer relative
-    // size, radius multiples of a shared brightness-driven base rather than the disc's own
-    // apparent radius. D-Bright measured the pre-B1 stack (14x/6x/2.5x/1.1x at alpha
-    // 0.07/0.28/0.65/0.90) as "spatially present but far too faint" — B1 raised every layer's
-    // alpha substantially and added a fifth, much larger, very faint layer for a long
-    // falloff tail. B1a found the glare was STILL negligible despite that, because tying
-    // glare radius to disc radius means a physically tiny disc (true angular size, ~1-2px at
-    // typical range) gets a proportionally tiny glare too — real glare is a property of
-    // source brightness and the optical system, not how large the source APPEARS, which is
-    // why a star light-years away still shows a point of glare rather than nothing. B1a Fix
-    // 2 decouples these radii entirely (see DrawStarGlow) — these five constants now express
-    // each layer's SIZE as a fraction of the outermost (GlareLayer4Radius), and ALPHA is
-    // unchanged from B1 (already correct: near-white core, star-class hue in the halo).
-    private const float GlareLayer0Radius = 1.1f;   private const float GlareLayer0Alpha = 0.95f; // white, innermost
-    private const float GlareLayer1Radius = 2.5f;   private const float GlareLayer1Alpha = 0.80f; // coloured
-    private const float GlareLayer2Radius = 6f;     private const float GlareLayer2Alpha = 0.45f; // coloured
-    private const float GlareLayer3Radius = 14f;    private const float GlareLayer3Alpha = 0.22f; // coloured — was the "primary offender" at 0.07
-    private const float GlareLayer4Radius = 30f;    private const float GlareLayer4Alpha = 0.06f; // coloured, outermost — long falloff tail
+    // Brief B1 Fix 1 / B1a Fix 2: the glare stack's per-layer relative SIZE (radius as a
+    // fraction of the outermost, GlareLayer4Radius, since Fix 2 decoupled glare from disc
+    // size entirely — see GlareOuterRadius/DrawStarGlow) — not live-tunable, only each
+    // layer's ALPHA is (Brief B2 Fix 3, SunTuning.GlareLayer0-4Alpha; these consts are now
+    // just each layer's DEFAULT alpha, read by SunTuning's own defaults, and are kept here as
+    // the historical/documentation record of the relative-radius shape, which stays fixed).
+    private const float GlareLayer0Radius = 1.1f; // white, innermost
+    private const float GlareLayer1Radius = 2.5f; // coloured
+    private const float GlareLayer2Radius = 6f;   // coloured
+    private const float GlareLayer3Radius = 14f;  // coloured
+    private const float GlareLayer4Radius = 30f;  // coloured, outermost — long falloff tail
 
     // Brief B1a Fix 2: glare size driven by the star's own apparent brightness
-    // (Luminosity/distanceAU^2), NOT disc size — see DrawStarGlow/GlareOuterRadiusPixels.
-    // sqrt compression (chosen over log or raw): sqrt(Luminosity/distAU^2) =
-    // sqrt(Luminosity)/distAU, turning inverse-SQUARE brightness falloff into inverse-LINEAR
-    // radius falloff — smoother/less aggressive than log at extreme ranges, preserves
-    // ordering (closer is always bigger), and is simple to reason about and tune. Reference:
-    // a Sol-like G star (Luminosity~1) at 1 AU gives brightnessFactor=1, so
-    // GlareOuterScale IS the outermost layer's radius in pixels at that reference point —
-    // chosen (500px) for a dramatic near-approach halo per the brief's own ask ("a small
-    // disc inside an enormous halo"). At 37 AU the same star's brightnessFactor is 1/37, so
-    // outer radius would be ~13.5px unfloored — GlareFloorPixels (20px radius = 40px
-    // diameter) takes over there, matching the brief's explicit "~40px across at 37 AU"
-    // starting target. GlareMaxPixels is a safety cap only reachable at extreme luminosity
-    // (O-class, Luminosity in the tens of thousands) or extreme close proximity — not a
-    // tuned value, just a guard against a pathologically huge billboard.
+    // (Luminosity/distanceAU^2), NOT disc size — see DrawStarGlow/GlareOuterRadius. Brief B2
+    // Fix 3 generalised the compression from a fixed sqrt to a live-tunable exponent
+    // (SunTuning.GlareCompressionExponent, default 0.5 = sqrt, unchanged behaviour) and added
+    // a live size multiplier (SunTuning.GlareSizeMultiplier) on top of this fixed baseline
+    // scale. Reference: a Sol-like G star (Luminosity~1) at 1 AU with the default 0.5
+    // exponent and 1x multiplier gives brightnessFactor=1, so GlareOuterScale IS the
+    // outermost layer's radius in pixels at that reference point — chosen (500px) for a
+    // dramatic near-approach halo per B1a's brief ("a small disc inside an enormous halo").
+    // GlareFloorPixels/GlareMaxPixels are NOT in Brief B2's tunable-parameter list (only the
+    // multiplier is) — they stay fixed safety/visibility bounds; the multiplier is applied
+    // AFTER this clamp (Brief B2: "scales computed glare radius"), so it can push the
+    // effective size above or below these reference bounds deliberately.
     private const float GlareOuterScale  = 500f;
     private const float GlareFloorPixels = 20f;
     private const float GlareMaxPixels   = 2000f;
@@ -136,19 +108,81 @@ public sealed class CelestialBodyRenderer : IDisposable
 
     // ── Opaque pass ───────────────────────────────────────────────────────────
 
+    /// <summary>Brief B2 Fix 3: readout data for the live tuning panel.</summary>
+    public readonly record struct StarRenderMetrics(
+        double DistanceAU, float DiscRadiusPixels, bool DiscFloorBound, float GlareOuterRadiusPixels);
+
+    /// <summary>
+    /// Brief B2 Fix 3: computes the SAME disc/glare metrics DrawStar/DrawStarGlow actually
+    /// use, without drawing anything — the tuning panel's readout calls this once per frame
+    /// so it reports exactly what the real formulas produce, not a second, independently
+    /// re-derived copy (the exact "two copies of a formula silently drift apart" class of bug
+    /// Brief D-SunSize found and traced to its root).
+    /// </summary>
+    public StarRenderMetrics GetStarMetrics(Camera3D camera, Star star)
+    {
+        Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
+        float   dist      = renderPos.Length();
+        double  distAU    = dist / (Units.AU * Camera3D.RenderScale);
+
+        float physRadius   = (float)(star.RadiusMeters * Camera3D.RenderScale);
+        float discRadiusRU = StarApparentRadius(renderPos, star.RadiusMeters);
+        bool  floorBound   = discRadiusRU > physRadius + 1e-6f;
+
+        float glareRadiusRU = GlareOuterRadius(renderPos, star.Luminosity);
+
+        float projScale = ProjScale();
+        float discPx  = dist < 0.001f ? discRadiusRU  : discRadiusRU  * projScale / dist;
+        float glarePx = dist < 0.001f ? glareRadiusRU : glareRadiusRU * projScale / dist;
+
+        return new StarRenderMetrics(distAU, discPx, floorBound, glarePx);
+    }
+
     // level is accepted but not yet used — planets/star already render as a single
     // cheap representation; no LOD variants exist yet.
+    //
+    // Brief B2 Fix 2: caller now draws this BEFORE DrawStarGlow (was after) — additive
+    // blending only ever adds, so drawing the disc first means the glare's brightest, closest
+    // layer can brighten the disc's own pixels toward white where they overlap; the old
+    // opaque-disc-LAST ordering structurally prevented the core from ever reaching white (an
+    // opaque draw can only replace what's under it, never add to it).
     public void DrawStar(Camera3D camera, Star star, DetailLevel level)
     {
         Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
         float   radius    = StarApparentRadius(renderPos, star.RadiusMeters);
-        _effect.LightingEnabled    = false;
-        _effect.VertexColorEnabled = false;
+
         // Star surface colour — white base tinted toward LightColor by a per-class factor.
         // Hot stars (O/B) stay near-white; cool stars (K/M) show clear yellow/orange/red.
+        // This IS the limb colour, below — the sphere is the tinted base the overlay reveals
+        // at the edge, not a separate "background".
+        _gd.BlendState = BlendState.Opaque;
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = false;
         Color bodyColor = Color.Lerp(Color.White, star.LightColor, star.BodyTintStrength);
         DrawSphere(renderPos, radius, bodyColor, false);
         _effect.LightingEnabled = true;
+
+        // Brief B2 Fix 2: limb-darkening overlay — the SAME shared white/Gaussian-alpha
+        // texture the glare billboards use (_starGlowTex), drawn ALPHA-BLENDED (not additive)
+        // directly on top of the tinted sphere at the disc's own radius. High alpha at centre
+        // reads as saturated white; near-zero alpha at the edge lets the tinted sphere
+        // underneath show through untouched — "saturated white at centre, falling to the
+        // star-class tint toward the limb," with no shader and no second texture asset.
+        // SunTuning.LimbDarkeningStrength scales the overlay's peak alpha; at 0 this is a
+        // no-op (Color*0 has zero effect) and the disc is the flat tinted circle pre-B2
+        // shipped. DepthRead (not Default) matches the glare billboards' own depth handling —
+        // test against what's already there (so a foreground planet still occludes correctly)
+        // without writing new depth from a flat billboard sitting at the sphere's centre.
+        _gd.BlendState        = BlendState.AlphaBlend;
+        _gd.DepthStencilState = DepthStencilState.DepthRead;
+        _effect.TextureEnabled     = true;
+        _effect.VertexColorEnabled = true;
+        _effect.Texture            = _starGlowTex;
+        _effect.World              = Matrix.Identity;
+        DrawGlowBillboard(renderPos, radius, camera.Right, camera.Up,
+            Color.White * SunTuning.LimbDarkeningStrength);
+        _effect.TextureEnabled     = false;
+        _effect.VertexColorEnabled = false;
     }
 
     public void DrawPlanet(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)
@@ -207,42 +241,59 @@ public sealed class CelestialBodyRenderer : IDisposable
         // Brief B1a Fix 2: each layer is a fixed fraction of the outermost (GlareLayer4Radius
         // is the normalising denominator, not a disc-relative multiplier any more) — same
         // relative shape as B1's stack, now scaled as a whole by brightness/distance instead
-        // of by disc size.
-        DrawGlowBillboard(renderPos, outerRU,                                          right, up, star.GlowColor * GlareLayer4Alpha);
-        DrawGlowBillboard(renderPos, outerRU * (GlareLayer3Radius / GlareLayer4Radius), right, up, star.GlowColor * GlareLayer3Alpha);
-        DrawGlowBillboard(renderPos, outerRU * (GlareLayer2Radius / GlareLayer4Radius), right, up, star.GlowColor * GlareLayer2Alpha);
-        DrawGlowBillboard(renderPos, outerRU * (GlareLayer1Radius / GlareLayer4Radius), right, up, star.GlowColor * GlareLayer1Alpha);
-        DrawGlowBillboard(renderPos, outerRU * (GlareLayer0Radius / GlareLayer4Radius), right, up, Color.White    * GlareLayer0Alpha);
+        // of by disc size. Brief B2 Fix 3: each layer's alpha is now SunTuning's live value
+        // (not the old fixed const), further scaled by GlareIntensityMultiplier uniformly —
+        // "scales all layer alphas together" on top of each layer's own individual control.
+        float intensity = SunTuning.GlareIntensityMultiplier;
+        DrawGlowBillboard(renderPos, outerRU,                                          right, up, star.GlowColor * (SunTuning.GlareLayer4Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer3Radius / GlareLayer4Radius), right, up, star.GlowColor * (SunTuning.GlareLayer3Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer2Radius / GlareLayer4Radius), right, up, star.GlowColor * (SunTuning.GlareLayer2Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer1Radius / GlareLayer4Radius), right, up, star.GlowColor * (SunTuning.GlareLayer1Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer0Radius / GlareLayer4Radius), right, up, Color.White    * (SunTuning.GlareLayer0Alpha * intensity));
 
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
     }
 
     /// <summary>
-    /// Brief B1a Fix 2: the outermost glare layer's render-space radius, driven by the
-    /// star's apparent brightness (Luminosity/distanceAU^2, sqrt-compressed to
-    /// sqrt(Luminosity)/distanceAU) rather than disc size — decoupled entirely from
-    /// <see cref="StarApparentRadius"/>. Floored in PIXELS (converted to render-space via the
-    /// same distance/projScale technique StarApparentRadius uses, so it doesn't drift with
-    /// resolution or FOV) so the sun always carries a halo distinctly larger than a
-    /// background starfield point regardless of class or distance; capped as a safety net
-    /// against extreme luminosity or extreme proximity.
+    /// Brief B1a Fix 2: the outermost glare layer's render-space radius, driven by the star's
+    /// apparent brightness (Luminosity/distanceAU^2) rather than disc size — decoupled
+    /// entirely from <see cref="StarApparentRadius"/>. Floored in PIXELS (converted to
+    /// render-space via the same <see cref="ProjScale"/> technique StarApparentRadius uses,
+    /// so it doesn't drift with resolution or FOV) so the sun always carries a halo distinctly
+    /// larger than a background starfield point regardless of class or distance; capped as a
+    /// safety net against extreme luminosity or extreme proximity.
+    ///
+    /// Brief B2 Fix 1: routed through the shared, corrected ProjScale() — this function's own
+    /// inline copy had the SAME tan(60°) bug as StarApparentRadius's (copied from it in B1a,
+    /// before the bug was known), so the glare's absolute pixel targets were likewise ~3x
+    /// their stated values; now corrected, and now the panel (Fix 3) can retune GlareOuterScale
+    /// against real numbers instead of bug-inflated ones.
+    ///
+    /// Brief B2 Fix 3: the compression exponent is now SunTuning.GlareCompressionExponent
+    /// (default 0.5, reproducing the original fixed sqrt exactly: (L/d²)^0.5 = sqrt(L)/d), and
+    /// the result is scaled by SunTuning.GlareSizeMultiplier AFTER the floor/cap clamp — "scales
+    /// COMPUTED glare radius," a multiplier on the already-bounded value, not on the raw
+    /// brightness ratio feeding into it.
     /// </summary>
     private float GlareOuterRadius(Vector3 renderPos, double luminosity)
     {
         float distRU = renderPos.Length();
         double distAU = distRU / (Units.AU * Camera3D.RenderScale);
-        double brightnessFactor = luminosity > 0.0
-            ? System.Math.Sqrt(luminosity) / System.Math.Max(distAU, 0.001)
+        double ratio = luminosity > 0.0
+            ? luminosity / (System.Math.Max(distAU, 0.001) * System.Math.Max(distAU, 0.001))
+            : 0.0;
+        double brightnessFactor = ratio > 0.0
+            ? System.Math.Pow(ratio, SunTuning.GlareCompressionExponent)
             : 0.0;
 
         float outerPixels = System.Math.Clamp(
             GlareOuterScale * (float)brightnessFactor, GlareFloorPixels, GlareMaxPixels);
+        outerPixels *= SunTuning.GlareSizeMultiplier;
 
         if (distRU < 0.001f) return outerPixels; // camera essentially at the star; pixels ~= RU here, degenerate case
 
-        float projScale = _gd.Viewport.Height / (2f * MathF.Tan(MathHelper.ToRadians(60f)));
-        return outerPixels * distRU / projScale;
+        return outerPixels * distRU / ProjScale();
     }
 
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
@@ -285,6 +336,21 @@ public sealed class CelestialBodyRenderer : IDisposable
     }
 
     /// <summary>
+    /// Brief B2 Fix 1: single shared, correct projScale implementation — every caller (disc
+    /// floor, glare floor, planet floor, and the tuning-panel readout) now goes through this
+    /// ONE place instead of each duplicating (and risking re-diverging) the tan()/half-angle
+    /// math. Camera3D's real vertical FOV is 60 degrees as the FULL angle (confirmed:
+    /// Camera3D.SetProjection and SystemSpaceState's own per-pass CreatePerspectiveFieldOfView
+    /// call both pass ToRadians(60f) directly to that API, whose first parameter is
+    /// documented, MonoGame/XNA standard, as the full vertical FOV) — the half-angle for this
+    /// formula is therefore 30 degrees, not 60. Brief D-SunSize found exactly this bug in the
+    /// (now-deleted) duplicate inline copy inside StarApparentRadius/GlareOuterRadius: the
+    /// comment there said "half of 60°" but the code used 60 directly instead of 30.
+    /// PlanetApparentRadius already had this right; it's now just routed through here too.
+    /// </summary>
+    private float ProjScale() => _gd.Viewport.Height / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
+
+    /// <summary>
     /// Minimum render-space radius for a planet within boost range.
     /// Beyond PlanetMaxBoostDist the planet is left to shrink and vanish naturally.
     /// </summary>
@@ -294,9 +360,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         float baseRadius = VisualRadius(body);
         if (dist > PlanetMaxBoostDist) return baseRadius;
 
-        float projScale      = _gd.Viewport.Height
-                             / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
-        float minRenderRadius = PlanetMinPixels * dist / projScale;
+        float minRenderRadius = PlanetMinPixels * dist / ProjScale();
         return System.Math.Max(baseRadius, minRenderRadius);
     }
 
@@ -304,29 +368,24 @@ public sealed class CelestialBodyRenderer : IDisposable
     /// Brief B1 Fix 3: true angular-size render-space radius derived from the star's actual
     /// RadiusMeters, replacing the old flat StarVisualRadius constant that rendered every
     /// star class at the same size (a red giant and a dwarf looked identical — D-Bright's
-    /// own finding). Still floored to a minimum <see cref="StarMinPixels"/> screen size so a
-    /// distant or genuinely tiny star doesn't vanish — the floor is pixel-based (grows with
-    /// distance), not the old fixed render-space constant, so a small star up close still
-    /// shows its true small size rather than being inflated to match a bigger class.
+    /// own finding). Floored to a minimum screen size (<see cref="SunTuning.DiscFloorPixels"/>,
+    /// Brief B2 Fix 3 — live-tunable, was the fixed StarMinPixels constant) so a distant or
+    /// genuinely tiny star doesn't vanish — the floor is pixel-based (grows with distance),
+    /// not a fixed render-space constant, so a small star up close still shows its true small
+    /// size rather than being inflated to match a bigger class.
     ///
-    /// Brief B1a: this formula was already distance-live and resolution/FOV-independent —
-    /// confirmed by direct read, not assumed — the "doesn't shrink" defect B1a diagnosed was
-    /// that the FLOOR's crossover point (where physRadius stops exceeding the floor and locks
-    /// flat) sits at only ~1.5 AU for a G-class star, and even closer for dimmer M/K classes
-    /// — so most of the 1-37+ AU range a player actually flies in was floor-locked at a
-    /// constant pixel size regardless of distance. This is a real consequence of a realistic
-    /// star's true angular size being only ~1-2px at typical in-system range under this
-    /// camera's FOV, not a bug in the live-distance math itself. Measured crossover
-    /// distances (StarMinPixels=1 — raising it to the brief's illustrative "~2px" was tried
-    /// and measured to make things WORSE for common classes, see StarMinPixels' own comment):
-    /// M-dwarf crosses over at ~0.23 AU, K at ~1.13 AU, G at ~1.49 AU — all effectively
-    /// floor-locked by 37 AU, but each still shows a real (if modest, ~1.1-1.5x) shrink
-    /// between 1 AU and 37 AU rather than none; a large O-class giant crosses over at
-    /// ~22.5 AU, giving an 11x difference between 1 AU (22.5px) and 37 AU (1px) — giants read
-    /// as giants over a materially wider range, though every class eventually converges to
-    /// the same 1px floor far enough out. This asymmetry, and the small absolute pixel counts
-    /// even at 1 AU for common classes, is exactly why Brief B1a's Fix 2 makes GLARE (not
-    /// disc) carry the primary "how far away, and how bright" signal — see GlareOuterRadius.
+    /// Brief B2 Fix 1: this formula's OWN projScale used to duplicate <see cref="ProjScale"/>
+    /// inline with a real bug (tan(60°) where the correct half-angle is tan(30°) — see
+    /// ProjScale's own comment; Brief D-SunSize found and quantified it, exactly 3x). Now
+    /// routed through the single shared, correct ProjScale() — physically-bound discs were
+    /// ALREADY rendering correctly on screen even with the bug (this function returns
+    /// physRadius untouched in that regime, and the real camera projection matrix was always
+    /// correct), so this fix changes nothing visible there; it corrects the FLOOR's own
+    /// world-radius (previously ~3x too large — a "1px" floor rendered at ~3px) and the
+    /// CROSSOVER distance (previously 3x too close). Corrected crossovers, DiscFloorPixels=1:
+    /// M-dwarf ~0.68 AU, K ~3.38 AU, G ~4.48 AU, O-giant ~67.4 AU (all exactly 3x the B1a-era
+    /// figures) — meaning a giant now correctly still shows true physical size at 37 AU,
+    /// where B1a's own (bug-affected) report had it floor-locked.
     /// </summary>
     private float StarApparentRadius(Vector3 renderPos, double radiusMeters)
     {
@@ -334,12 +393,7 @@ public sealed class CelestialBodyRenderer : IDisposable
         float dist        = renderPos.Length();
         if (dist < 0.001f) return physRadius;
 
-        // projScale converts render-space size at unit distance to screen pixels.
-        // For a symmetric frustum: projScale = screenHeight / (2 * tan(halfFov))
-        float projScale = _gd.Viewport.Height
-                        / (2f * MathF.Tan(MathHelper.ToRadians(60f))); // half of 60°
-
-        float minRenderRadius = StarMinPixels * dist / projScale;
+        float minRenderRadius = SunTuning.DiscFloorPixels * dist / ProjScale();
         return System.Math.Max(physRadius, minRenderRadius);
     }
 

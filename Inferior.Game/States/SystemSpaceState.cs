@@ -857,6 +857,7 @@ public sealed partial class SystemSpaceState : GameState
         UpdateStationShadowInput(keys);
         UpdateZoneDebugInput(keys);
         UpdateSpecularInput(keys);
+        UpdateSunTuningInput(keys, dt);
 
         // Animations always run, regardless of input mode
         _cockpitUI.Tick(dt);
@@ -1163,6 +1164,7 @@ public sealed partial class SystemSpaceState : GameState
         DrawSkyboxStarOverlay(sb, _hudMarkersVisible);
         _hyperspace.DrawOverlay(sb);
         DrawStationShadowOverlay(sb);
+        DrawSunTuningOverlay(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
@@ -1214,15 +1216,25 @@ public sealed partial class SystemSpaceState : GameState
         _celestialBodies.DrawOrbitRings(_camera, _eclipticRotation, _gameTimeSeconds, level);
         DrawStationOrbitRings();
 
+        // Brief B2 Fix 2: disc drawn BEFORE glow now (was after) — DrawStar internally manages
+        // its own two sub-passes (opaque sphere, then an alpha-blended limb-darkening
+        // overlay), starting from whatever blend state is set here (Opaque) and leaving
+        // AlphaBlend set when it returns; the glow's own Additive state is set explicitly
+        // right after regardless, so no state leaks between them.
+        _gd.BlendState        = BlendState.Opaque;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        _celestialBodies.DrawStar(_camera, _star, level);
+
         // Star glow — depth-read so planets drawn opaque afterward correctly overwrite
         // it on their disc areas (fixes glow bleeding through planets).
         _gd.BlendState        = BlendState.Additive;
         _gd.DepthStencilState = DepthStencilState.DepthRead;
         _celestialBodies.DrawStarGlow(_camera, _star, level);
 
+        // Restore opaque/default for planets — the glow pass above left Additive/DepthRead
+        // set, which would otherwise make every planet draw additively too.
         _gd.BlendState        = BlendState.Opaque;
         _gd.DepthStencilState = DepthStencilState.Default;
-        _celestialBodies.DrawStar(_camera, _star, level);
         foreach (var (body, pos) in _bodyPositions)
             _celestialBodies.DrawPlanet(_camera, body, pos, level);
 
