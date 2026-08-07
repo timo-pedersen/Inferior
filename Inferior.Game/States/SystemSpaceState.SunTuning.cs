@@ -10,8 +10,9 @@ namespace Inferior.Game.States;
 // grep (see UpdateSunTuningInput's own comment) — F1-F11 and F12 (InferiorGame.cs) are all
 // already bound to something in this codebase; Ctrl+F7 sits in the same "Ctrl+F-number
 // debug toggle" family as Ctrl+F4 (zone debug) and Ctrl+F6 (shadow debug) without colliding
-// with either. The number row (D1-D9, D0) and OemPlus/OemMinus were both completely free —
-// grepped, not assumed.
+// with either. The number row (D1-D9, D0) was completely free — grepped, not assumed.
+// Adjust keys switched from OemPlus/OemMinus to Up/Down per Timo's request (tenkeyless
+// keyboard — no dedicated +/- keys within easy reach of the number row).
 public sealed partial class SystemSpaceState
 {
     private bool _showSunTuningPanel;
@@ -57,7 +58,7 @@ public sealed partial class SystemSpaceState
             _showSunTuningPanel = !_showSunTuningPanel;
             DataBus.System.Publish(Topics.System.All, new SystemMessage(
                 _showSunTuningPanel
-                    ? "Sun tuning panel ON — 1-9/0 select, +/- adjust (hold Shift for fine step), P dumps source."
+                    ? "Sun tuning panel ON — 1-9/0 select, Up/Down adjust (hold Shift for fine step), P dumps source."
                     : "Sun tuning panel OFF",
                 SystemMessagePriority.NB));
         }
@@ -76,9 +77,9 @@ public sealed partial class SystemSpaceState
         var  selected  = parms[_sunTuningSelectedIndex];
         float rate     = shiftDown ? selected.FinePerSecond : selected.CoarsePerSecond;
 
-        if (keys.IsKeyDown(Keys.OemPlus))
+        if (keys.IsKeyDown(Keys.Up))
             selected.Set(System.Math.Clamp(selected.Get() + rate * (float)dt, selected.Min, selected.Max));
-        if (keys.IsKeyDown(Keys.OemMinus))
+        if (keys.IsKeyDown(Keys.Down))
             selected.Set(System.Math.Clamp(selected.Get() - rate * (float)dt, selected.Min, selected.Max));
 
         bool pJustPressed = keys.IsKeyDown(Keys.P) && !_prevKeys.IsKeyDown(Keys.P);
