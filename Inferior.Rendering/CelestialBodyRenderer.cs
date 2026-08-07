@@ -296,9 +296,34 @@ public sealed class CelestialBodyRenderer : IDisposable
         return outerPixels * distRU / ProjScale();
     }
 
+    // Timo-reported fix: the disc/glow/limb-overlay billboards used to be centred at exactly
+    // the star's own 3D position — the same point the opaque disc sphere is built around —
+    // and tested (DepthRead, no write) against whatever the sphere already wrote there. A
+    // flat quad through a sphere's centre sits at almost exactly the same depth as the
+    // sphere's own silhouette (where the curved near-hemisphere surface tangents back toward
+    // that plane), and this project's huge Near/Far ratio (0.001/50_000 — a ~5e7:1 span,
+    // needed for the rest of the scene) leaves very little depth-buffer precision at typical
+    // star-viewing distances, so the two nearly-equal depths were landing in the same or
+    // adjacent quantized buckets — genuine z-fighting, worse for physically smaller stars
+    // since their near-hemisphere's own depth range (pole to silhouette) is itself narrower,
+    // shrinking the margin further. Fix: nudge the billboard's centre a small FIXED FRACTION
+    // closer to the camera before building the quad — camera sits at the render-space origin
+    // (Camera3D.ViewMatrix = CreateLookAt(Vector3.Zero, ...)), so scaling center toward zero
+    // moves it straight along the camera-to-star line, reliably winning the depth test against
+    // the disc's own geometry everywhere (not just near the silhouette) without measurably
+    // shifting its on-screen position or size (right/up/radius are unchanged). 0.5% is far
+    // smaller than any real occlusion case (a foreground planet/station sits at a completely
+    // different distance) but comfortably larger than the local depth-buffer quantization step
+    // at the distances where the disc is still large enough for fighting to be visible — at
+    // extreme range the disc is floor-bound to ~1px anyway, where residual fighting (if any)
+    // isn't perceptible. Applies to every caller (limb-darkening overlay AND all five glow
+    // layers) from this one place, not four/five independently-tuned nudges.
+    private const float GlowDepthBiasFactor = 0.995f;
+
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
     {
         if (radius < 0.0001f) return;
+        center *= GlowDepthBiasFactor;
         var tl = center + (-right + up) * radius;
         var tr = center + ( right + up) * radius;
         var bl = center + (-right - up) * radius;
@@ -317,6 +342,20 @@ public sealed class CelestialBodyRenderer : IDisposable
     }
 
     // Gaussian radial gradient baked into a texture — reused for every glow layer.
+    //
+    // Timo-reported fix: t used to be clamped to 1 (MathF.Min(dist/r, 1f)), which is correct
+    // along the flat edges (t=1 there already, by construction) but wrong at the four
+    // corners, where the true radial distance reaches r*sqrt(2) (t≈1.41). Clamping held every
+    // corner pixel at the SAME alpha as the flat-edge falloff target (exp(-3)≈0.05) instead of
+    // letting the Gaussian keep decaying out to the corner's real distance — since every
+    // billboard quad is a SQUARE circumscribing this circular gradient, that left a faint but
+    // visible constant-alpha square "shelf" surrounding the round core on every layer,
+    // compounding across the limb-darkening overlay and all five additive glow layers,
+    // reported as a square artifact around the disc. Removing the clamp lets t range up to
+    // sqrt(2) naturally — the Gaussian is well-defined there and decays the corners to
+    // exp(-6)≈0.0025, ~20x lower than the old clamped shelf and visually negligible — while
+    // the flat-edge value at t=1 (~0.05, the documented "soft edge" every layer's own outer
+    // radius is tuned against) is completely unchanged.
     private static Texture2D CreateStarGlowTexture(GraphicsDevice gd, int size)
     {
         var   tex  = new Texture2D(gd, size, size);
@@ -326,8 +365,8 @@ public sealed class CelestialBodyRenderer : IDisposable
         for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
         {
-            float t     = MathF.Min(MathF.Sqrt((x - r) * (x - r) + (y - r) * (y - r)) / r, 1f);
-            float alpha = MathF.Exp(-t * t * 3f); // gaussian: 1.0 at center → ~0.05 at edge
+            float t     = MathF.Sqrt((x - r) * (x - r) + (y - r) * (y - r)) / r;
+            float alpha = MathF.Exp(-t * t * 3f); // gaussian: 1.0 at center → ~0.05 at t=1 (flat edge) → ~0.0025 at the corners (t≈1.41)
             data[y * size + x] = Color.White * alpha;
         }
 
