@@ -29,7 +29,6 @@ public sealed partial class CockpitUI : IDisposable
     private readonly TargetingSystem        _targeting;
     private readonly HudAlertDisplay        _hudAlert;
     private readonly Func<DVec3, DVec3>     _galaxyToEcliptic;
-    private readonly Action<bool>           _onShieldToggle;
     private readonly Action                 _onShipCycle;
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
@@ -48,6 +47,8 @@ public sealed partial class CockpitUI : IDisposable
     private RadarDisplay?    _radarDisplay;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
+    private EdgePanelHost?   _topPanel;
+    private EngineeringPanel? _engineeringPanel;
     private CockpitRail?     _cockpitRail;
     // Disposed as a batch in Dispose — see BusSubscription<T>
     private readonly List<IDisposable> _subscriptions = new();
@@ -86,7 +87,6 @@ public sealed partial class CockpitUI : IDisposable
         TargetingSystem targeting,
         HudAlertDisplay hudAlert,
         Func<DVec3, DVec3> galaxyToEcliptic,
-        Action<bool> onShieldToggle,
         Action onShipCycle)
     {
         _gd               = gd;
@@ -95,7 +95,6 @@ public sealed partial class CockpitUI : IDisposable
         _targeting        = targeting;
         _hudAlert         = hudAlert;
         _galaxyToEcliptic = galaxyToEcliptic;
-        _onShieldToggle   = onShieldToggle;
         _onShipCycle      = onShipCycle;
 
         // ── DataBus UI setup ──────────────────────────────────────────────────
@@ -245,6 +244,26 @@ public sealed partial class CockpitUI : IDisposable
         _ui.Add(_rightPanel);
         _ui.Add(_leftPanel);
 
+        // Top engineering panel: bus-driven live power topology and thermal values.
+        _engineeringPanel = new EngineeringPanel();
+        _topPanel = new EdgePanelHost(PanelEdge.Top)
+        {
+            PanelSize = Math.Max(160, Math.Min(560, sidePanelH - 40)),
+            HandleSize = 28,
+            HandleLength = 96,
+            CornerMargin = 8,
+            Bounds = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
+        };
+        _topPanel.AddTab("ENGINEER", _engineeringPanel);
+        _topPanel.StateChanged += (isOpen, activeTab) =>
+        {
+            if (isOpen && activeTab == 0)
+                _engineeringPanel?.Activate();
+            else
+                _engineeringPanel?.Deactivate();
+        };
+        _ui.Add(_topPanel);
+
         // ── CockpitRail: 4 tabs (RADAR, DIR BALL, ???, LOG) ──────────────────
         _console = new SystemConsole
         {
@@ -267,7 +286,8 @@ public sealed partial class CockpitUI : IDisposable
             FontScale = 0.72f,
         };
         _shieldToggleButton.SetState(false, false);
-        _shieldToggleButton.Toggled += (_, on) => _onShieldToggle(on);
+        _shieldToggleButton.Toggled += (_, on) =>
+            CommandBus.Send("Shield.Power.Set", on ? 1.0 : 0.0);
 
         _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             $"Shield.{Topics.Shield.Capacitor}", fill =>
@@ -433,6 +453,7 @@ public sealed partial class CockpitUI : IDisposable
     {
         if (_rightPanel != null) _rightPanel.UiModeActive = active;
         if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
+        if (_topPanel   != null) _topPanel.UiModeActive   = active;
         // CockpitRail is always interactable — peek strip tabs and toggle work in all modes.
     }
 
@@ -442,6 +463,11 @@ public sealed partial class CockpitUI : IDisposable
         var sideBounds = new Rectangle(0, 0, width, height - wingH);
         if (_rightPanel  != null) _rightPanel.Bounds  = sideBounds;
         if (_leftPanel   != null) _leftPanel.Bounds   = sideBounds;
+        if (_topPanel != null)
+        {
+            _topPanel.Bounds = new Rectangle(0, 0, width, height);
+            _topPanel.PanelSize = Math.Max(160, Math.Min(560, sideBounds.Height - 40));
+        }
         if (_cockpitRail != null) _cockpitRail.Bounds = new Rectangle(0, 0, width, height);
     }
 
@@ -449,13 +475,15 @@ public sealed partial class CockpitUI : IDisposable
     {
         var (rightTab, rightOpen) = _rightPanel?.CaptureState() ?? (-1, false);
         var (leftTab,  leftOpen)  = _leftPanel?.CaptureState()  ?? (-1, false);
-        return new CockpitLayout(rightTab, rightOpen, leftTab, leftOpen);
+        var (topTab,   topOpen)   = _topPanel?.CaptureState()   ?? (-1, false);
+        return new CockpitLayout(rightTab, rightOpen, leftTab, leftOpen, topTab, topOpen);
     }
 
     public void ApplyLayout(CockpitLayout layout)
     {
         _rightPanel?.ApplyState(layout.RightActiveTab, layout.RightOpen);
         _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
+        _topPanel?.ApplyState(layout.TopActiveTab, layout.TopOpen);
     }
 
     public void Dispose()
@@ -472,6 +500,7 @@ public sealed partial class CockpitUI : IDisposable
 
         _dockingInstrument?.Dispose();
         _drivePanel?.Dispose();
+        _engineeringPanel?.Dispose();
 
         foreach (var sub in _subscriptions) sub.Dispose();
         _subscriptions.Clear();

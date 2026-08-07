@@ -18,6 +18,7 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerPriorityManager : ShipComponent
 {
+    public override bool CanSetPower => false;
     private readonly record struct Entry(
         string          Name,
         Func<double>    DemandWatts,

@@ -37,6 +37,10 @@ public static class DataBus
     public static readonly Bus<DeviceState> DeviceState =
         new(TopicPolicy.LatestState);
 
+    /// <summary>Retained immutable topology projection for the currently active ship.</summary>
+    public static readonly Bus<ShipSystemsTopologySnapshot> ShipSystemsTopology =
+        new(TopicPolicy.LatestState);
+
     // Radar contact updates and losses remain event channels pending the radar migration.
     public static readonly Bus<RadarContact> Radar = new();
     public static readonly Bus<string> RadarLost = new();
@@ -53,6 +57,7 @@ public static class DataBus
         TelemetryInfo.Drain();
         DeviceInfo.Drain();
         DeviceState.Drain();
+        ShipSystemsTopology.Drain();
         Radar.Drain();
         RadarLost.Drain();
         Target.Drain();
@@ -127,6 +132,7 @@ public static class DataBus
         TelemetryInfo.ClearRetained();
         DeviceInfo.ClearRetained();
         DeviceState.ClearRetained();
+        ShipSystemsTopology.ClearRetained();
         Target.ClearRetained();
         TopicsByDevice.Clear();
     }

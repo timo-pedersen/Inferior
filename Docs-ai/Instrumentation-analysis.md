@@ -13,7 +13,22 @@ The system has solid foundations, builds cleanly, and is partially playable—bu
 > Universe Time, save persistence, radar migration, and the generic/Inferior-specific UI
 > project split remain later work.
 
-Debug and Release builds succeed with zero warnings. All 649 tests pass. No files were changed.
+> **Engineering implementation update (2026-08-05):** `Ship` now owns a functional systems
+> topology containing every hull component slot (including empty optional slots), stable
+> power-bus ports, fixed devices, installed occupancy, and directed power connections. The
+> simulation publishes a retained immutable `ShipSystemsTopologySnapshot` when its revision
+> changes. A new top-edge ENGINEER panel subscribes only while open, replays current topology,
+> state, and scalar values, and composes them into a generic value-driven `DiagramCanvas`.
+> Reactor/bus/connector/shield power flow and capacitor values plus component heat, coolant,
+> and heat-sink values are live. Power on/off requests now use advertised command topics on
+> `CommandBus` and wait for `DeviceState` confirmation; the former direct shield-power request
+> bypass has been removed. Heat remains node-only because no coolant-line topology is
+> simulated. Engine instances and hard-coded runtime sensors are represented only to the
+> extent currently owned by the ship; completing their component/power integration remains
+> future work. The baseline findings below are retained as historical audit context.
+
+At the time of the baseline audit, Debug and Release builds succeeded with zero warnings and
+all 649 tests passed; that audit itself changed no files.
 
 ## Current runtime system
 

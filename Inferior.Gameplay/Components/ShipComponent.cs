@@ -16,6 +16,14 @@ public abstract class ShipComponent
     /// <summary>Used in bus messages and diagnostics. e.g. "MainEngine", "TopShield".</summary>
     public string Name { get; init; } = string.Empty;
 
+    /// <summary>Whether the engineering panel may request this device on or off.</summary>
+    public virtual bool CanSetPower => true;
+
+    public string PowerCommandTopic => $"{Name}.Power.Set";
+
+    /// <summary>Live values selected for the engineering topology view.</summary>
+    public virtual IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics => [];
+
     // ── Lifecycle ──────────────────────────────────────────────────────────────
     public ComponentStatus Status { get; protected set; } = ComponentStatus.PowerOff;
 
@@ -173,6 +181,16 @@ public abstract class ShipComponent
             return;
 
         _busActive = true;
+        if (CanSetPower && !string.IsNullOrWhiteSpace(Name))
+        {
+            _commandSubscriptions.Add(CommandBus.Subscribe(
+                PowerCommandTopic,
+                command =>
+                {
+                    if (string.Equals(command.Topic, PowerCommandTopic, StringComparison.Ordinal))
+                        PowerOn = command.Value >= 0.5;
+                }));
+        }
         foreach (ComponentSensor sensor in _sensors)
             sensor.ActivateBus();
         foreach (var (prefix, handler) in _commandHandlers)
@@ -282,11 +300,12 @@ public abstract class ShipComponent
 
         _deviceInfoPublished = true;
         string[] publishedTopics = _sensors.Select(sensor => sensor.Topic).ToArray();
-        string[] commandTopics =
-        [
-            .. _sensors.Select(sensor => sensor.QueryCommandTopic),
-            .. DeviceCommandTopics,
-        ];
+        var commandTopics = _sensors
+            .Select(sensor => sensor.QueryCommandTopic)
+            .Concat(DeviceCommandTopics)
+            .ToList();
+        if (CanSetPower)
+            commandTopics.Add(PowerCommandTopic);
 
         DataBus.DeviceInfo.Publish(Name, new DeviceInfo
         {

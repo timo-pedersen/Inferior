@@ -51,8 +51,47 @@ public sealed class Ship
     private readonly List<ShipComponent> _components = new();
     public IReadOnlyList<ShipComponent> Components => _components;
 
-    public void Install(ShipComponent component)
+    /// <summary>Authoritative installed-device, slot, and power-connection configuration.</summary>
+    public ShipSystemTopology SystemsTopology { get; } = new();
+
+    public void ConfigureSystemSlots(IEnumerable<HullSlot> slots)
+        => SystemsTopology.ConfigureHullSlots(slots);
+
+    public void Install(string slotId, ShipComponent component)
     {
+        SystemsTopology.Install(slotId, component);
+        InstallComponent(component);
+    }
+
+    public void InstallOnPowerBus(
+        string busDeviceId,
+        int portIndex,
+        ShipComponent component)
+    {
+        SystemsTopology.InstallBusComponent(busDeviceId, portIndex, component);
+        InstallComponent(component);
+    }
+
+    public void InstallFixedSystem(
+        string nodeId,
+        string label,
+        ShipComponent component,
+        int order = 0)
+    {
+        SystemsTopology.InstallFixed(nodeId, label, component, order);
+        InstallComponent(component);
+    }
+
+    /// <summary>
+    /// Compatibility installation for tests and transitional builders without slot data.
+    /// New ship construction should use an explicit hull slot, bus slot, or fixed node.
+    /// </summary>
+    public void Install(ShipComponent component)
+        => InstallComponent(component);
+
+    private void InstallComponent(ShipComponent component)
+    {
+        ArgumentNullException.ThrowIfNull(component);
         _components.Add(component);
         component.ActivateBus();
         ComponentMass += component is PowerReactor r ? r.MaxPower * 0.00001 : 0; // stub
@@ -85,6 +124,19 @@ public sealed class Ship
         }
 
         _engineMounts.Add(mount);
+    }
+
+    /// <summary>Synchronize authored engine-slot occupancy after install/remove operations.</summary>
+    public void SynchronizeEngineTopology()
+    {
+        foreach (EngineMount mount in _engineMounts)
+        {
+            EngineInstance? engine = mount.InstalledEngine;
+            SystemsTopology.SetExternalDevice(
+                mount.ComponentSlotId,
+                engine?.InstanceId,
+                engine?.Variant.Engine.DisplayName);
+        }
     }
 
     /// <summary>True when at least one GyroComponent is running. Reduces slipstream exit tumble.</summary>

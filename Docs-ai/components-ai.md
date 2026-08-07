@@ -17,6 +17,28 @@
 | Damage | double | 0.0 = pristine, 1.0 = destroyed |
 | HeatCapacity | double (J/K) | Local thermal mass |
 
+## Ship-owned engineering topology
+
+- `Ship.SystemsTopology` is authoritative for installed-device occupancy, empty hull slots,
+  fixed devices, stable power-bus ports, and directed functional power connections.
+- Hull slots exist in the topology whether occupied or empty. Optional slots therefore
+  appear only on hulls that define them; for example, a hull without a gyro slot does not
+  acquire one from the UI.
+- Replaceability is a node capability and applies generally to components and sensors. It is
+  not a closed type allowlist. The ship computer is the current explicit non-replaceable
+  component.
+- Power buses, connectors, converters, artificial gravity, sensors, and the flight recorder
+  are ordinary topology components when installed. Some sensors require a power connection;
+  others do not.
+- The ship publishes an immutable retained topology snapshot for presentation. Live power,
+  capacitor, heat, coolant, heat-sink, and device-state values remain separate retained
+  telemetry/state topics.
+- The engineering UI subscribes only while open. Power on/off requests are its one current
+  control action: requests use `CommandBus`, and returned `DeviceState` confirms the result.
+- Heat transport lines are not modeled. Show component heat and shared coolant/heat-sink
+  values without inventing a thermal network.
+- Cockpit/control panels are deliberately deferred to a separate panel-management view.
+
 ---
 
 ## Power core

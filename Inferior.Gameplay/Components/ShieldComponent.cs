@@ -24,6 +24,15 @@ namespace Inferior.Gameplay.Components;
 /// </summary>
 public sealed class ShieldComponent : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+    [
+        new(ShipSystemMetricRole.PowerInput, $"{Name}.{Topics.Engineering.PowerInput}"),
+        new(ShipSystemMetricRole.CapacitorFill, $"{Name}.{Topics.Shield.Capacitor}"),
+        new(ShipSystemMetricRole.HeatGeneration, $"{Name}.{Topics.Engineering.HeatGeneration}"),
+        new(ShipSystemMetricRole.ThermalLoad, $"{Name}.{Topics.Engineering.ThermalLoad}"),
+        new(ShipSystemMetricRole.Temperature, $"{Name}.Temperature"),
+    ];
+
     public double MaxShieldJ    { get; }  // maximum shield energy (joules)
     public double ChargeRateW   { get; }  // maximum charge rate, also peak power demand (watts)
     public double CapacitorFill => _capacitor.FillFraction;  // 0–1; readable by sim for slipstream guard
@@ -146,8 +155,9 @@ public sealed class ShieldComponent : ShipComponent
 
     protected override void OnPowerOffTick(double dt)
     {
-        if (_capacitor.StoredJ <= 0.0) return;
-        _capacitor.Draw(DrainRateW * dt);
+        if (_capacitor.StoredJ > 0.0)
+            _capacitor.Draw(DrainRateW * dt);
+        ThermalNode?.Update(0.0, dt);
         TickSensors();
     }
 
@@ -167,6 +177,27 @@ public sealed class ShieldComponent : ShipComponent
             () => Damage,
             safeRange:  new RangeValue(0.0, 0.2),
             totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.PowerInput}",
+            () => _deliveredWatts,
+            safeRange: new RangeValue(0, ChargeRateW),
+            totalRange: new RangeValue(0, ChargeRateW),
+            quantity: PhysicalQuantity.Power));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.HeatGeneration}",
+            () => ThermalNode?.LastHeatInputW ?? 0.0,
+            safeRange: new RangeValue(0, ChargeRateW * 0.7),
+            totalRange: new RangeValue(0, ChargeRateW),
+            quantity: PhysicalQuantity.Power));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.ThermalLoad}",
+            () => ThermalNode?.NormalizedTemperature ?? 0.0,
+            safeRange: new RangeValue(0, 0.7),
+            totalRange: new RangeValue(0, 1.0),
             quantity: PhysicalQuantity.NormalizedRatio));
 
         if (ThermalNode != null)

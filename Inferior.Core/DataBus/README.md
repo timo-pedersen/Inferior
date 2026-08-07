@@ -36,6 +36,7 @@ ownership refactor is made deliberately.
 | `TelemetryInfo` | `TelemetryInfo` | Description of a telemetry topic | latest per drain, retain latest |
 | `DeviceInfo` | `DeviceInfo` | Description of a sensor or component | latest per drain, retain latest |
 | `DeviceState` | `DeviceState` | Current observable operational state | latest per drain, retain latest |
+| `ShipSystemsTopology` | `ShipSystemsTopologySnapshot` | Current ship-owned slots, devices, bus ports, and power connections | latest per drain, retain latest |
 | `SystemMessages` | `SystemMessage` | Human-readable console and HUD messages | deliver all, retain the latest 256 |
 | `Radar` | `RadarContact` | Radar contact updates pending radar migration | deliver all, no retention |
 | `RadarLost` | `string` | Radar contact-loss events pending radar migration | deliver all, no retention |
@@ -758,7 +759,51 @@ impacts.ConfigureTopic(
 Do not create duplicate buses for scalar data merely because a new instrument needs it. Add
 a well-defined topic to the appropriate typed channel.
 
-## 20. Cleanup and lifecycle boundaries
+## 20. Publishing and displaying ship systems topology
+
+The ship owns the authoritative installed-component and connection configuration. The bus
+does not own or mutate that topology. It carries an immutable
+`ShipSystemsTopologySnapshot` so presentation code can render the configuration without
+reading live simulation objects.
+
+The snapshot includes hull component slots, including empty and optional slots; stable power
+bus connection slots; fixed ship systems; directed power connections; and bindings to the
+live telemetry topics relevant to each node. Replaceability is a capability on each node,
+not a hard-coded list of component types. The ship computer is the current explicit
+non-replaceable exception. Cockpit panels are intentionally outside this topology view and
+will have their own panel-management presentation.
+
+The active ship publishes the snapshot on `Topics.Ship.SystemsTopology` when the topology
+revision changes. Latest retention is appropriate because a newly opened engineering panel
+needs the complete current configuration, while replaying superseded configurations would
+serve no purpose. Changes such as installing or removing an engine increment the ship-owned
+revision and cause a new complete snapshot to replace the retained one.
+
+The engineering UI follows this lifecycle:
+
+1. When its edge panel opens, subscribe to `ShipSystemsTopology` with latest replay.
+2. Build generic diagram nodes and connections from the returned snapshot.
+3. Subscribe to each node's `DeviceState` and metric topics with latest replay.
+4. Update numbers and power-flow labels from live telemetry while the panel is open.
+5. On a power toggle, send the node's advertised power command topic over `CommandBus`.
+6. Keep the toggle pending until returned `DeviceState` confirms running or powered off.
+7. Dispose the topology, state, and value subscriptions when the panel closes.
+
+This is why the diagram receives current data immediately without keeping its subscribers
+alive while hidden. Latest replay targets only the newly opened panel; it does not republish
+the value or call existing subscribers again.
+
+Power lines are part of topology because connectors and converters define functional power
+paths. Their labels are live telemetry, normally watts formatted for display. Heat is
+different in the present simulation: coolant transport has no modeled pipe topology. The UI
+therefore shows component heat generation or thermal load, coolant level, and heat-sink fill
+or dissipation as node values without inventing heat-transfer lines.
+
+The reusable `DiagramCanvas` is value-driven. It knows only about boxes, connections,
+display values, states, and a generic action request. The Inferior-specific engineering
+adapter owns bus topics, commands, SI-to-display formatting, and device-state semantics.
+
+## 21. Cleanup and lifecycle boundaries
 
 Every subscription needs an explicit owner and deterministic lifetime.
 
@@ -783,7 +828,7 @@ state while leaving subscriptions and topic policies intact. It does not make bu
 persistent state and should only be used as part of an orderly boundary where old publishers
 cannot immediately repopulate the caches with stale queued data.
 
-## 21. Persistence
+## 22. Persistence
 
 Retention and persistence are intentionally different:
 
@@ -804,7 +849,7 @@ The solar spectrum is the representative case: the completed scan is retained fo
 reconstruction today, while the sensor/ship should eventually persist the result so restarting
 the game cannot erase a measurement the ship had already made.
 
-## 22. Common mistakes
+## 23. Common mistakes
 
 ### Publishing directly to a HUD control
 
@@ -865,7 +910,7 @@ only in the Inferior-specific presentation layer.
 Bounded bus history does not bound a subscriber's own list. Trim the UI or recorder's data as
 it receives samples.
 
-## 23. Checklist for a new instrument path
+## 24. Checklist for a new instrument path
 
 Before considering a sensor-to-HUD path implemented, verify all of the following:
 

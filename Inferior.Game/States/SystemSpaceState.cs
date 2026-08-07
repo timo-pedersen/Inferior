@@ -529,7 +529,6 @@ public sealed partial class SystemSpaceState : GameState
 
         _cockpitUI = new CockpitUI(_gd, _font, _pixel, _targeting, _hudAlert,
             GalaxyToEcliptic,
-            _simulation.RequestSetShieldPower,
             _simulation.RequestCycleShipHull);
         _uiMouseMode     = false;
         _debugCameraMode = false;

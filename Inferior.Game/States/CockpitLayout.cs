@@ -9,7 +9,9 @@ public record CockpitLayout(
     int  RightActiveTab,
     bool RightOpen,
     int  LeftActiveTab,
-    bool LeftOpen)
+    bool LeftOpen,
+    int  TopActiveTab = -1,
+    bool TopOpen = false)
 {
-    public static readonly CockpitLayout Default = new(-1, false, -1, false);
+    public static readonly CockpitLayout Default = new(-1, false, -1, false, -1, false);
 }

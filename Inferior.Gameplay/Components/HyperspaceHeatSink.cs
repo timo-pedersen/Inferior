@@ -20,6 +20,13 @@ namespace Inferior.Gameplay.Components;
 /// </summary>
 public sealed class HyperspaceHeatSink : ShipComponent
 {
+    public override bool CanSetPower => false;
+
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+    [
+        new(ShipSystemMetricRole.HeatSinkFill, $"{Name}.{Topics.HeatSink.Fill}"),
+        new(ShipSystemMetricRole.HeatDissipation, $"{Name}.{Topics.HeatSink.Dissipation}"),
+    ];
     /// <summary>Maximum heat energy before saturation (joules).</summary>
     public double CapacityJ { get; }
 

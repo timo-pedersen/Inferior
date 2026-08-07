@@ -93,6 +93,7 @@ public sealed class SpaceSimulation : Simulation
     // ── Ship ──────────────────────────────────────────────────────────────────
     private volatile Ship? _ship;
     private IDisposable? _cockpitCommandSubscription;
+    private int _publishedSystemsTopologyRevision = -1;
 
     public SpaceSimulation()
     {
@@ -108,6 +109,7 @@ public sealed class SpaceSimulation : Simulation
                 component.DeactivateBus();
 
         _ship = ship;
+        _publishedSystemsTopologyRevision = -1;
         foreach (ShipComponent component in ship.Components)
             component.ActivateBus();
         _cockpitCommandSubscription = CommandBus.Subscribe(
@@ -275,11 +277,6 @@ public sealed class SpaceSimulation : Simulation
 
     public void RequestCycleShipHull()
         => Interlocked.Increment(ref _shipHullCycleRequests);
-
-    private int _shieldPowerRequest = -1;
-
-    public void RequestSetShieldPower(bool enabled)
-        => Interlocked.Exchange(ref _shieldPowerRequest, enabled ? 1 : 0);
 
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
@@ -494,19 +491,13 @@ public sealed class SpaceSimulation : Simulation
         for (int i = 0; i < shipCycleRequests; i++)
             ship = CycleShipHull(ship);
 
-        int shieldPowerRequest = Interlocked.Exchange(ref _shieldPowerRequest, -1);
-        if (shieldPowerRequest >= 0)
-        {
-            foreach (ShieldComponent shield in ship.Components.OfType<ShieldComponent>())
-                shield.PowerOn = shieldPowerRequest == 1;
-        }
-
         int engineRemovalRequest = Interlocked.Exchange(ref _debugEngineRemovalRequest, 0);
         if (engineRemovalRequest != 0)
         {
             EngineMountSide side = (EngineMountSide)(engineRemovalRequest - 1);
             EngineMount? mount = ship.EngineMounts.FirstOrDefault(candidate => candidate.Side == side);
             EngineInstance? removed = mount?.RemoveInstalledEngine();
+            ship.SynchronizeEngineTopology();
             DataBus.SystemMessages.Publish(
                 Topics.System.All,
                 new SystemMessage(
@@ -1006,6 +997,7 @@ public sealed class SpaceSimulation : Simulation
                 starboard);
         }
         SetSharedEngineHarmony(ship, _newtonianGear + 1);
+        ship.SynchronizeEngineTopology();
 
         DataBus.SystemMessages.Publish(
             Topics.System.All,
@@ -2436,6 +2428,14 @@ public sealed class SpaceSimulation : Simulation
 
         if (_ship != null)
         {
+            if (_publishedSystemsTopologyRevision != _ship.SystemsTopology.Revision)
+            {
+                DataBus.ShipSystemsTopology.Publish(
+                    Topics.Ship.SystemsTopology,
+                    _ship.SystemsTopology.CreateSnapshot(_ship.Id));
+                _publishedSystemsTopologyRevision = _ship.SystemsTopology.Revision;
+            }
+
             double sig = 0.0;
             foreach (var c in _ship.Components)
                 if (c.ThermalNode != null) sig += c.ThermalNode.LastHeatInputW;

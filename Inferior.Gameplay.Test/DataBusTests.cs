@@ -1,11 +1,49 @@
 using Inferior.Core.DataBus;
 using Inferior.Gameplay.Components;
+using Inferior.Gameplay.Components.Power;
 using Xunit;
 
 namespace Inferior.Gameplay.Test;
 
 public sealed class DataBusTests
 {
+    [Fact]
+    public void PoweredOffBusDoesNotSupplyItsStoredEnergy()
+    {
+        var bus = new PowerBus("TestBus", capacityJ: 1_000, maxPower: 500);
+        bus.Capacitor.Charge(500, 1.0);
+        bus.PowerOn = true;
+        bus.NotifyPowerAvailable();
+
+        Assert.Equal(100.0, bus.Draw(100.0, 1.0));
+
+        bus.PowerOn = false;
+        Assert.Equal(0.0, bus.Draw(100.0, 1.0));
+    }
+
+    [Fact]
+    public void ComponentPowerCommandsUseTheCommandBusAndRespectLifecycle()
+    {
+        string deviceId = $"TestShield-{Guid.NewGuid():N}";
+        var shield = new ShieldComponent(deviceId, maxShieldJ: 1_000, chargeRateW: 100);
+        shield.ActivateBus();
+        try
+        {
+            CommandBus.Send(shield.PowerCommandTopic, 1.0);
+            CommandBus.Drain();
+            Assert.True(shield.PowerOn);
+
+            shield.DeactivateBus();
+            CommandBus.Send(shield.PowerCommandTopic, 0.0);
+            CommandBus.Drain();
+            Assert.True(shield.PowerOn);
+        }
+        finally
+        {
+            shield.DeactivateBus();
+        }
+    }
+
     [Fact]
     public void OrderedTopicDeliversEveryQueuedPublication()
     {

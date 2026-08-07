@@ -21,6 +21,16 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerReactor : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+    [
+        new(ShipSystemMetricRole.PowerOutput, $"{Name}.Output"),
+        new(ShipSystemMetricRole.PowerFlow, $"{Name}.Drawn"),
+        new(ShipSystemMetricRole.CapacitorFill, $"{Name}.Capacitor"),
+        new(ShipSystemMetricRole.HeatGeneration, $"{Name}.{Topics.Engineering.HeatGeneration}"),
+        new(ShipSystemMetricRole.ThermalLoad, $"{Name}.{Topics.Engineering.ThermalLoad}"),
+        new(ShipSystemMetricRole.Temperature, $"{Name}.Temperature"),
+    ];
+
     protected override IReadOnlyList<string> DeviceCommandTopics => [$"{Name}.Throttle.Set"];
 
     public double MaxPower      { get; }
@@ -73,6 +83,15 @@ public sealed class PowerReactor : ShipComponent
         TickSensors();
     }
 
+    protected override void OnPowerOffTick(double dt)
+    {
+        CurrentOutput = 0.0;
+        double drawnJ = OutputCapacitor.SnapshotAndResetDrawn();
+        DrawnWatts = dt > 0.0 ? drawnJ / dt : 0.0;
+        ThermalNode?.Update(0.0, dt);
+        TickSensors();
+    }
+
     protected override void OnInitializationComplete()
     {
         PublishTelemetryInfo();
@@ -116,6 +135,21 @@ public sealed class PowerReactor : ShipComponent
             safeRange:  new RangeValue(0, safeTempK),
             totalRange: new RangeValue(0, maxTempK),
             quantity: PhysicalQuantity.Temperature));
+
+        double maxHeatW = MaxPower * Math.Max(0.0, 1.0 - Efficiency) * 4.0;
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.HeatGeneration}",
+            () => ThermalNode?.LastHeatInputW ?? 0.0,
+            safeRange: new RangeValue(0, maxHeatW * 0.7),
+            totalRange: new RangeValue(0, maxHeatW),
+            quantity: PhysicalQuantity.Power));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.ThermalLoad}",
+            () => ThermalNode?.NormalizedTemperature ?? 0.0,
+            safeRange: new RangeValue(0, 0.7),
+            totalRange: new RangeValue(0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Efficiency",

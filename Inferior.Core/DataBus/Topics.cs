@@ -21,6 +21,13 @@ public static class Topics
         public const string DamagePercent = "DamagePercent";
     }
 
+    public static class Engineering
+    {
+        public const string PowerInput     = "PowerInput";
+        public const string HeatGeneration = "HeatGeneration";
+        public const string ThermalLoad    = "ThermalLoad";
+    }
+
     public static class Shield
     {
         public const string Name = "Shield";
@@ -177,6 +184,7 @@ public static class Topics
 
     public static class Ship
     {
+        public const string SystemsTopology = "Ship.SystemsTopology";
         /// <summary>Sum of all component ThermalNode.LastHeatInputW — total heat generation rate (watts).</summary>
         public const string ThermalSignature = "Ship.ThermalSignature";
         /// <summary>Warning level: 0=clear, 1=monitoring, 2=caution, 3=warning, 4=critical.</summary>

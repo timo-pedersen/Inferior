@@ -18,6 +18,8 @@ namespace Inferior.Gameplay.Components;
 /// </summary>
 public sealed class ConnectorComponent : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+        [new(ShipSystemMetricRole.PowerFlow, $"{Name}.Flow")];
     /// <summary>ID of the bus this connector draws from.</summary>
     public string FromBusId { get; init; } = "";
 
@@ -53,7 +55,9 @@ public sealed class ConnectorComponent : ShipComponent
     {
         manager.Register(
             Name,
-            () => Math.Min(demandFunc(), MaxPower),
+            () => Status == ComponentStatus.Running
+                ? Math.Min(demandFunc(), MaxPower)
+                : 0.0,
             w => { FlowWatts = w; deliverFunc(w); },
             priority);
     }
@@ -67,6 +71,12 @@ public sealed class ConnectorComponent : ShipComponent
 
     protected override void OnTick(double dt)
     {
+        TickSensors();
+    }
+
+    protected override void OnPowerOffTick(double dt)
+    {
+        FlowWatts = 0.0;
         TickSensors();
     }
 

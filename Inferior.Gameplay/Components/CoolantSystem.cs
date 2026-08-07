@@ -18,6 +18,8 @@ namespace Inferior.Gameplay.Components;
 /// </summary>
 public sealed class CoolantSystem : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+        [new(ShipSystemMetricRole.CoolantLevel, $"{Name}.{Topics.CoolantSystem.Level}")];
     public double HeatFlowPerComponent { get; init; }  // watts max per node
     public double CoolantLeakage       { get; init; }  // fraction/second lost through leakage
 

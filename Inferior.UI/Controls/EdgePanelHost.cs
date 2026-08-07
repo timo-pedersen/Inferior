@@ -50,6 +50,12 @@ public sealed class EdgePanelHost : Control
     /// <summary>When false, tab handles are hidden and the panel slides flush with the screen edge.</summary>
     public bool UiModeActive { get; set; } = true;
 
+    public bool IsOpen => _isOpen;
+    public int ActiveTab => _activeTab;
+
+    /// <summary>Raised when the logical open state or active tab changes.</summary>
+    public event Action<bool, int>? StateChanged;
+
     // ── Constructor ───────────────────────────────────────────────────────────
 
     public EdgePanelHost(PanelEdge edge) => Edge = edge;
@@ -72,6 +78,9 @@ public sealed class EdgePanelHost : Control
     /// </summary>
     public void ApplyState(int activeTab, bool isOpen)
     {
+        int previousTab = _activeTab;
+        bool wasOpen = _isOpen;
+
         // Hide all content first
         foreach (var tab in _tabs)
             tab.Content.Visible = false;
@@ -82,6 +91,9 @@ public sealed class EdgePanelHost : Control
 
         if (_activeTab >= 0)
             _tabs[_activeTab].Content.Visible = true;
+
+        if (wasOpen != _isOpen || previousTab != _activeTab)
+            StateChanged?.Invoke(_isOpen, _activeTab);
     }
 
     // ── Layout ────────────────────────────────────────────────────────────────
@@ -245,6 +257,8 @@ public sealed class EdgePanelHost : Control
         {
             SetActiveTab(index); // switch without re-animating
         }
+
+        StateChanged?.Invoke(_isOpen, _activeTab);
     }
 
     private void SetActiveTab(int index)

@@ -20,6 +20,11 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerBus : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+    [
+        new(ShipSystemMetricRole.PowerFlow, $"{Name}.Consumption"),
+        new(ShipSystemMetricRole.CapacitorFill, $"{Name}.Level"),
+    ];
     // ── Throughput limits (watts — rate, not stored energy) ───────────────────
     /// <summary>Total throughput ceiling (watts).</summary>
     public double MaxPower              { get; init; }
@@ -60,7 +65,7 @@ public sealed class PowerBus : ShipComponent
     /// </summary>
     public double Draw(double requestedWatts, double dt)
     {
-        if (dt <= 0.0) return 0.0;
+        if (Status != ComponentStatus.Running || dt <= 0.0) return 0.0;
         double cappedWatts = Math.Min(requestedWatts, MaxPower);
         double deliveredJ  = Capacitor.Draw(cappedWatts * dt);
         double deliveredW  = deliveredJ / dt;
@@ -89,6 +94,13 @@ public sealed class PowerBus : ShipComponent
             }
         }
 
+        TickSensors();
+    }
+
+    protected override void OnPowerOffTick(double dt)
+    {
+        DrawnWatts = 0.0;
+        _drawnThisTick = 0.0;
         TickSensors();
     }
 
