@@ -296,38 +296,72 @@ public sealed class CelestialBodyRenderer : IDisposable
         return outerPixels * distRU / ProjScale();
     }
 
-    // Timo-reported fix: the disc/glow/limb-overlay billboards used to be centred at exactly
-    // the star's own 3D position — the same point the opaque disc sphere is built around —
-    // and tested (DepthRead, no write) against whatever the sphere already wrote there. A
-    // flat quad through a sphere's centre sits at almost exactly the same depth as the
-    // sphere's own silhouette (where the curved near-hemisphere surface tangents back toward
-    // that plane), and this project's huge Near/Far ratio (0.001/50_000 — a ~5e7:1 span,
-    // needed for the rest of the scene) leaves very little depth-buffer precision at typical
-    // star-viewing distances, so the two nearly-equal depths were landing in the same or
-    // adjacent quantized buckets — genuine z-fighting, worse for physically smaller stars
-    // since their near-hemisphere's own depth range (pole to silhouette) is itself narrower,
-    // shrinking the margin further. Fix: nudge the billboard's centre a small FIXED FRACTION
-    // closer to the camera before building the quad — camera sits at the render-space origin
-    // (Camera3D.ViewMatrix = CreateLookAt(Vector3.Zero, ...)), so scaling center toward zero
-    // moves it straight along the camera-to-star line, reliably winning the depth test against
-    // the disc's own geometry everywhere (not just near the silhouette) without measurably
-    // shifting its on-screen position or size (right/up/radius are unchanged). 0.5% is far
-    // smaller than any real occlusion case (a foreground planet/station sits at a completely
-    // different distance) but comfortably larger than the local depth-buffer quantization step
-    // at the distances where the disc is still large enough for fighting to be visible — at
-    // extreme range the disc is floor-bound to ~1px anyway, where residual fighting (if any)
-    // isn't perceptible. Applies to every caller (limb-darkening overlay AND all five glow
-    // layers) from this one place, not four/five independently-tuned nudges.
-    private const float GlowDepthBiasFactor = 0.995f;
+    // Timo-reported fix, corrected after an empirically-disproven first attempt (see below).
+    // The disc/glow/limb-overlay billboards are flat quads centred at exactly the star's own
+    // 3D position — the same point the opaque disc sphere is built around — and tested
+    // (DepthRead, no write) against whatever the sphere already wrote there. A flat quad
+    // through a sphere's centre sits at almost exactly the same depth as the sphere's own
+    // silhouette (where the curved near-hemisphere surface tangents back toward that plane),
+    // and the far render pass's projection (SystemSpaceState.BuildActivePasses:
+    // near≈5.7e-5, far=50_000 render units — an even more extreme ratio than a flat
+    // 0.001/50_000 guess) leaves very little depth-buffer precision at typical star-viewing
+    // distances, worse for physically smaller stars since their near-hemisphere's own depth
+    // range is itself narrower.
+    //
+    // FIRST ATTEMPT (reverted): a small fixed fractional nudge (0.5%) of the billboard's
+    // *centre* only. Verified in-engine to still fight at ~2.8 AU (Elmiea, O-class) — measured
+    // afterward, the real required separation grows close to linearly with distance and reaches
+    // needing the billboard pushed to within ~13% of its true distance by ~2.8 AU, decades
+    // larger than 0.5%; a flat percentage cannot cover both close and moderate range. Nudging
+    // the centre only, with the offset (±right±up)*radius added afterward at unscaled size,
+    // also visibly enlarges the quad as distance shrinks (an object of fixed absolute size
+    // looks bigger the closer it is) — fine at 0.5% (imperceptible) but not at the 10-90%
+    // nudges moderate-range stars actually need.
+    //
+    // CORRECTED FIX: scale the ENTIRE final corner point (both the centre AND the ±radius
+    // offset) by a factor k, rather than just the centre. Because the camera sits at the
+    // render-space origin (Camera3D.ViewMatrix = CreateLookAt(Vector3.Zero, ...)) and the
+    // projection matrix has no x/y translation term, uniformly scaling a 3D point toward the
+    // origin leaves its projected screen X/Y EXACTLY unchanged (clip.x/clip.w and clip.y/clip.w
+    // both have k cancel top and bottom) while still reducing its depth (clip.z has a
+    // k-INDEPENDENT additive term, M43 — from the point's homogeneous w=1 — that clip.x/y
+    // don't have, so scaling doesn't cancel there). This means k can be as large as needed
+    // with NO visual side effect at all — verified both analytically and empirically (a
+    // temporary GPU harness rendering real coplanar quads through the actual far-pass
+    // projection matrix, at k values matching this formula, found ZERO pixel differences
+    // between a biased and unbiased render of the same quad, and confirmed the depth test
+    // reliably resolves correctly from 0.066 AU out to 150 AU — the harness also caught that
+    // RasterizerState.DepthBias, the "normal" GPU-native tool for this exact problem, is a
+    // total no-op on this project's GraphicsDevice/backend even at magnitude 1e12, ruling it
+    // out; not committed, deleted after use).
+    //
+    // k is derived from the ACTIVE projection's own M33/M43 (read directly off
+    // _effect.Projection, whichever of the far/mid/near passes is currently active — see
+    // SystemSpaceState.BuildActivePasses) rather than a hardcoded near/far pair, so this stays
+    // correct if those constants are ever retuned, with no second copy to keep in sync.
+    private float ComputeGlowDepthBiasK(float dist)
+    {
+        if (dist < 0.0001f) return 1f;
+        float m43 = _effect.Projection.M43;
+        if (m43 == 0f) return 1f;
+        // Comfortably above the 1-ULP minimum a 24-bit depth buffer requires to resolve two
+        // otherwise-adjacent stored values — costs nothing visually (see derivation above), so
+        // generous margin is free.
+        const float marginUlps = 64f;
+        const float ulp        = 1f / 16777216f; // 2^24, Depth24Stencil8
+        float targetShift = marginUlps * ulp;
+        float denom = 1f - targetShift * dist / m43;
+        return denom > 0.0001f ? System.Math.Clamp(1f / denom, 0.01f, 1f) : 1f;
+    }
 
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
     {
         if (radius < 0.0001f) return;
-        center *= GlowDepthBiasFactor;
-        var tl = center + (-right + up) * radius;
-        var tr = center + ( right + up) * radius;
-        var bl = center + (-right - up) * radius;
-        var br = center + ( right - up) * radius;
+        float k = ComputeGlowDepthBiasK(center.Length());
+        var tl = (center + (-right + up) * radius) * k;
+        var tr = (center + ( right + up) * radius) * k;
+        var bl = (center + (-right - up) * radius) * k;
+        var br = (center + ( right - up) * radius) * k;
         _glowVerts[0] = new(tl, color, new Vector2(0, 0));
         _glowVerts[1] = new(tr, color, new Vector2(1, 0));
         _glowVerts[2] = new(bl, color, new Vector2(0, 1));
