@@ -188,6 +188,18 @@ public sealed class CelestialBodyRenderer : IDisposable
         _gd.DepthStencilState = DepthStencilState.DepthRead;
         _effect.TextureEnabled     = true;
         _effect.VertexColorEnabled = true;
+        // Timo-reported fix #2 (same underlying pattern as the LightingEnabled fix above, a
+        // second leftover-state bug from the same B2 Fix 2 code, in the same method): DrawSphere
+        // sets _effect.DiffuseColor to the disc's tinted bodyColor, and this was NEVER reset
+        // before this overlay draw. BasicEffect multiplies DiffuseColor * VertexColor *
+        // TextureColor when VertexColorEnabled/TextureEnabled are both set, so the overlay was
+        // being drawn tinted by whatever colour the disc happened to be — confirmed by a
+        // temporary GPU harness (deleted, never committed): forcing DiffuseColor back to white
+        // was the single change that took the overlay from contributing nothing to blending
+        // exactly as designed. Reset here for the same reason LightingEnabled is: this draw
+        // should be self-contained, not implicitly dependent on what the previous draw call in
+        // this same method happened to leave behind in shared effect state.
+        _effect.DiffuseColor       = Vector3.One;
         _effect.Texture            = _starGlowTex;
         _effect.World              = Matrix.Identity;
         DrawGlowBillboard(renderPos, radius, camera.Right, camera.Up,
@@ -351,25 +363,55 @@ public sealed class CelestialBodyRenderer : IDisposable
     // _effect.Projection, whichever of the far/mid/near passes is currently active — see
     // SystemSpaceState.BuildActivePasses) rather than a hardcoded near/far pair, so this stays
     // correct if those constants are ever retuned, with no second copy to keep in sync.
-    private float ComputeGlowDepthBiasK(float dist)
+    // Timo-reported fix #2: the formula above only guarantees beating the SILHOUETTE's depth
+    // (≈dist, the tangent point where the sphere's curve rejoins the flat billboard's own
+    // plane) — it says nothing about the sphere's NEAR POLE, which sits at (dist - physRadius)
+    // and can be meaningfully CLOSER than dist when physRadius is a non-negligible fraction of
+    // dist (close approach to a physically large star). At the silhouette-only margin, the
+    // billboard beats the sphere everywhere EXCEPT its own central screen region, where the
+    // sphere's near-facing hemisphere is nearer than the biased billboard — producing a
+    // jagged (tessellation-shaped, since the 24-ring/24-segment sphere approximates a curve
+    // with flat facets) hole right in the middle showing the bare tinted disc instead of the
+    // overlay/glow, growing as physRadius/dist grows on approach. `radius` (the caller's own
+    // billboard radius — always >= the star's true physRadius, since it's either that exact
+    // value when phys-bound or an inflated floor value when floor-bound) stands in for
+    // physRadius here — safe to use directly, and using the bigger radius of the outer glow
+    // layers is simply extra-safe margin, never a problem given scaling has no visual cost.
+    private float ComputeGlowDepthBiasK(float dist, float radius)
     {
         if (dist < 0.0001f) return 1f;
+
+        // Constraint 1 — beat the silhouette (handles far/small-disc z-fighting).
+        float kUlp = 1f;
         float m43 = _effect.Projection.M43;
-        if (m43 == 0f) return 1f;
-        // Comfortably above the 1-ULP minimum a 24-bit depth buffer requires to resolve two
-        // otherwise-adjacent stored values — costs nothing visually (see derivation above), so
-        // generous margin is free.
-        const float marginUlps = 64f;
-        const float ulp        = 1f / 16777216f; // 2^24, Depth24Stencil8
-        float targetShift = marginUlps * ulp;
-        float denom = 1f - targetShift * dist / m43;
-        return denom > 0.0001f ? System.Math.Clamp(1f / denom, 0.01f, 1f) : 1f;
+        if (m43 != 0f)
+        {
+            // Comfortably above the 1-ULP minimum a 24-bit depth buffer requires to resolve
+            // two otherwise-adjacent stored values — generous margin is free (see the class
+            // doc comment above).
+            const float marginUlps = 64f;
+            const float ulp        = 1f / 16777216f; // 2^24, Depth24Stencil8
+            float targetShift = marginUlps * ulp;
+            float denom = 1f - targetShift * dist / m43;
+            if (denom > 0.0001f) kUlp = System.Math.Clamp(1f / denom, 0.01f, 1f);
+        }
+
+        // Constraint 2 — beat the sphere's own near pole, (dist - radius), with a comfortable
+        // multiple of `radius` as margin (not razor-thin against the pole itself either).
+        float kGeometric = 1f;
+        if (radius > 0f && radius < dist)
+        {
+            const float geometricMargin = 1.5f;
+            kGeometric = System.Math.Clamp((dist - radius * geometricMargin) / dist, 0.01f, 1f);
+        }
+
+        return System.Math.Min(kUlp, kGeometric);
     }
 
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
     {
         if (radius < 0.0001f) return;
-        float k = ComputeGlowDepthBiasK(center.Length());
+        float k = ComputeGlowDepthBiasK(center.Length(), radius);
         var tl = (center + (-right + up) * radius) * k;
         var tr = (center + ( right + up) * radius) * k;
         var bl = (center + (-right - up) * radius) * k;
