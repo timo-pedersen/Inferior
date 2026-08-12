@@ -160,7 +160,6 @@ public sealed class CelestialBodyRenderer : IDisposable
         _effect.VertexColorEnabled = false;
         Color bodyColor = Color.Lerp(Color.White, star.LightColor, star.BodyTintStrength);
         DrawSphere(renderPos, radius, bodyColor, false);
-        _effect.LightingEnabled = true;
 
         // Brief B2 Fix 2: limb-darkening overlay — the SAME shared white/Gaussian-alpha
         // texture the glare billboards use (_starGlowTex), drawn ALPHA-BLENDED (not additive)
@@ -173,6 +172,18 @@ public sealed class CelestialBodyRenderer : IDisposable
         // shipped. DepthRead (not Default) matches the glare billboards' own depth handling —
         // test against what's already there (so a foreground planet still occludes correctly)
         // without writing new depth from a flat billboard sitting at the sphere's centre.
+        //
+        // Timo-reported fix: LightingEnabled must stay FALSE through this draw too — it used
+        // to be reset to true right after the disc (above), before this billboard, so this
+        // quad was drawn WITH lighting enabled despite using VertexPositionColorTexture, a
+        // format with no normal channel at all. BasicEffect lit it anyway against whatever
+        // undefined/leftover normal data happened to be bound, producing a directional-light-
+        // dependent shading pattern baked onto what should be a uniform, symmetric alpha
+        // gradient — reported as an off-centre "iris" that tracked a fixed direction (the
+        // star's own light direction) relative to the camera, growing as the disc grew. Kept
+        // unlit through the whole draw, matching DrawStarGlow's own explicit
+        // LightingEnabled=false for the same reason; restored to true only once this method
+        // returns, for the planet draws that come after and do need it.
         _gd.BlendState        = BlendState.AlphaBlend;
         _gd.DepthStencilState = DepthStencilState.DepthRead;
         _effect.TextureEnabled     = true;
@@ -183,6 +194,7 @@ public sealed class CelestialBodyRenderer : IDisposable
             Color.White * SunTuning.LimbDarkeningStrength);
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
+        _effect.LightingEnabled    = true;
     }
 
     public void DrawPlanet(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)
