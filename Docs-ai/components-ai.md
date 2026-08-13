@@ -192,6 +192,22 @@ Mostly passive. Expels degenerate matter produced when ionised metal rod matter 
 
 **Active sensors:** require a command on the CommandBus to return a value; may require bus power; some take time to charge or gather data (e.g. planet mineral scanner — large energy pulse, results may lag several seconds).
 
+### Solar heat irradiance
+
+- `SolarHeatSensor` is a replaceable passive ship component requiring no main-bus power.
+- Publishes `{Name}.Irradiance` at 4 Hz through `ScalarTelemetry` as raw `W/m²`
+  (`PhysicalQuantity.Irradiance`).
+- The SensorData provider uses the generated star's actual surface temperature and radius,
+  plus centre-to-ship distance: `σT⁴(R/d)²`. Spectral class is not used as a substitute for
+  the generated temperature.
+- The reading is incoming bolometric heat flux for a black surface normal to the rays. It is
+  currently before celestial occlusion, atmospheric attenuation, ship orientation, projected
+  area, and material absorptivity.
+- Actual heat added to a ship/component will later be calculated in watts from this input and
+  the exposed object's geometry/material. It is not connected to thermal stores yet.
+- This measurement is separate from ionising radiation and from the command-triggered,
+  normalized solar-spectrum scan. The spectrum remains its own data product.
+
 ---
 
 ## Consumables

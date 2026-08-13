@@ -2227,14 +2227,9 @@ public sealed class SpaceSimulation : Simulation
         world.MassiveBodies.Clear();
         world.OrbitalBodies.Clear();
 
-        world.MassiveBodies.Add(new CelestialBody
-        {
-            Position       = DVec3.Zero,
-            Mass           = context.Star.MassKg,
-            Radius         = context.Star.RadiusMeters,
-            Class          = context.Star.SpectralClass,
-            RotationPeriod = 2.192e6,
-        });
+        CelestialBody liveStar = CelestialBody.FromStar(context.Star, DVec3.Zero);
+        liveStar.RotationPeriod = 2.192e6;
+        world.MassiveBodies.Add(liveStar);
 
         foreach (var planet in context.System.Planets)
             CollectBody(world, planet, DVec3.Zero, simTime);

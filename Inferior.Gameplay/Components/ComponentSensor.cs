@@ -15,6 +15,7 @@ public sealed class ComponentSensor
     public RangeValue TotalRange { get; }
     public RangeValue SafeRange { get; }
     public PhysicalQuantity Quantity { get; }
+    public PublicationInfo Publication { get; }
     public string QueryCommandTopic => Topic + ".Query";
 
     private readonly Func<double> _read;
@@ -25,13 +26,15 @@ public sealed class ComponentSensor
         Func<double> read,
         RangeValue safeRange,
         RangeValue totalRange,
-        PhysicalQuantity quantity = PhysicalQuantity.Unspecified)
+        PhysicalQuantity quantity = PhysicalQuantity.Unspecified,
+        PublicationInfo? publication = null)
     {
         Topic = topic;
         _read = read;
         SafeRange = safeRange;
         TotalRange = totalRange;
         Quantity = quantity;
+        Publication = publication ?? new PublicationInfo(PublicationMode.EveryTick);
 
     }
 
@@ -66,7 +69,7 @@ public sealed class ComponentSensor
             OperatingRange = TotalRange,
             SuggestedDisplayRange = TotalRange,
             Bands = [.. bands],
-            Publication = new PublicationInfo(PublicationMode.EveryTick),
+            Publication = Publication,
             TopicPolicy = TopicPolicy.LatestState,
         });
     }

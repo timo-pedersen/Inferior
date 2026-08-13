@@ -27,6 +27,16 @@ The system has solid foundations, builds cleanly, and is partially playable—bu
 > extent currently owned by the ship; completing their component/power integration remains
 > future work. The baseline findings below are retained as historical audit context.
 
+> **Solar heat implementation update (2026-08-13):** The live simulation star now preserves
+> its generated temperature rather than reducing it to a spectral-class representative.
+> `SensorData.Environment.SolarHeatIrradiance` calculates bolometric incoming heat flux from
+> actual temperature, actual radius, and ship distance using `σT⁴(R/d)²`. A replaceable,
+> unpowered `SolarHeatSensor` is installed in a default sensor slot, publishes retained scalar
+> irradiance at 4 Hz in `W/m²`, and exposes the value in the engineering topology. It remains
+> distinct from the stubbed ionising-radiation sensor and normalized spectrum scan. Occlusion,
+> atmospheric attenuation, orientation/material absorption, and application to ship thermal
+> stores remain later work.
+
 At the time of the baseline audit, Debug and Release builds succeeded with zero warnings and
 all 649 tests passed; that audit itself changed no files.
 

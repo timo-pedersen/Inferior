@@ -2,6 +2,7 @@ using Inferior.Core.DataBus;
 using Inferior.Game.Ships;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
+using Inferior.Gameplay.Sensors;
 using Xunit;
 
 namespace Inferior.Game.Test;
@@ -33,7 +34,7 @@ public sealed class ShipEngineeringTopologyTests
     }
 
     [Fact]
-    public void DefaultShipProjectsPowerPathAndLeavesUninstalledSensorsVisible()
+    public void DefaultShipProjectsPowerPathAndSolarHeatSensorWhileLeavingSensorCapacityVisible()
     {
         Ship ship = ShipBuilder.NewShip("type-1")
             .WithDefaultStartingComponents()
@@ -49,8 +50,12 @@ public sealed class ShipEngineeringTopologyTests
         Assert.Contains(snapshot.Connections, connection =>
             connection.ConnectionId == "power.mainbus-shield.device"
             && connection.FlowTopic == "ShieldConnector.Flow");
+        Assert.Contains(ship.Components, component => component is SolarHeatSensor);
         Assert.Contains(snapshot.Nodes, node =>
-            node.SlotId == "sensor_gravity"
+            node.DeviceId == "SolarHeatSensor"
+            && node.Metrics.Any(metric => metric.Role == ShipSystemMetricRole.HeatIrradiance));
+        Assert.Contains(snapshot.Nodes, node =>
+            node.Category == SlotCategory.Sensor.ToString()
             && node.DeviceId is null
             && node.IsReplaceable);
     }

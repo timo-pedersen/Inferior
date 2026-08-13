@@ -6,6 +6,7 @@ using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
+using Inferior.Gameplay.Sensors;
 using Inferior.Persistence.Data;
 using Microsoft.Xna.Framework;
 
@@ -149,6 +150,7 @@ public sealed class ShipBuilder
             string shieldSlot = FindSlot(hull, SlotCategory.Shield);
             string heatSinkSlot = FindSlot(hull, SlotCategory.HeatSink);
             string coolantSlot = FindSlot(hull, SlotCategory.CoolantSystem);
+            string solarHeatSensorSlot = FindSlot(hull, SlotCategory.Sensor);
 
             ship.Install(reactorSlot, reactor);
             ship.Install(busSlot, bus);
@@ -160,6 +162,7 @@ public sealed class ShipBuilder
             ship.InstallOnPowerBus(bus.Name, 1, shieldConnector);
             ship.Install(heatSinkSlot, heatsink);
             ship.Install(coolantSlot, coolant);
+            ship.Install(solarHeatSensorSlot, new SolarHeatSensor());
             ship.SystemsTopology.ConnectPowerSource(
                 "power.reactor-mainbus",
                 reactor.Name,

@@ -279,6 +279,7 @@ public sealed class EngineeringPanel : Control, IDisposable
         ShipSystemMetricRole.CoolantLevel => "COOLANT",
         ShipSystemMetricRole.HeatSinkFill => "SINK",
         ShipSystemMetricRole.HeatDissipation => "DISSIPATION",
+        ShipSystemMetricRole.HeatIrradiance => "SOLAR HEAT",
         _ => role.ToString().ToUpperInvariant(),
     };
 
@@ -289,8 +290,21 @@ public sealed class EngineeringPanel : Control, IDisposable
             or ShipSystemMetricRole.CoolantLevel
             or ShipSystemMetricRole.HeatSinkFill => $"{value * 100.0:F0}%",
         ShipSystemMetricRole.Temperature => $"{value:F0} K",
+        ShipSystemMetricRole.HeatIrradiance => FormatIrradiance(value),
         _ => FormatPower(value),
     };
+
+    private static string FormatIrradiance(double wattsPerSquareMetre)
+    {
+        double magnitude = Math.Abs(wattsPerSquareMetre);
+        return magnitude switch
+        {
+            >= 1_000_000_000.0 => $"{wattsPerSquareMetre / 1_000_000_000.0:F2} GW/m²",
+            >= 1_000_000.0 => $"{wattsPerSquareMetre / 1_000_000.0:F2} MW/m²",
+            >= 1_000.0 => $"{wattsPerSquareMetre / 1_000.0:F1} kW/m²",
+            _ => $"{wattsPerSquareMetre:F0} W/m²",
+        };
+    }
 
     private static string FormatPower(double watts)
     {

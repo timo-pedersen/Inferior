@@ -152,6 +152,11 @@ public static class Topics
         public const string Data = "Data";  // double[] — 10-bin normalised Planck spectrum (0-1 per bin)
     }
 
+    public static class SolarHeat
+    {
+        public const string Irradiance = "Irradiance"; // bolometric heat flux, W/m²
+    }
+
     public static class Target
     {
         public const string Changed = "Target.Changed";   // RadarContact; empty Id = cleared

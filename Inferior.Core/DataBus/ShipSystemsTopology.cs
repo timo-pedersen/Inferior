@@ -38,6 +38,7 @@ public enum ShipSystemMetricRole
     CoolantLevel,
     HeatSinkFill,
     HeatDissipation,
+    HeatIrradiance,
 }
 
 public readonly record struct ShipSystemMetricBinding(
