@@ -154,10 +154,11 @@ public static class StationTextureRegistry
 
         float valueFloor          = StationBrightnessTuning.VariantValueFloor;
         float compressionStrength = StationBrightnessTuning.VariantCompressionStrength;
+        float saturationFalloff   = StationBrightnessTuning.SaturationFalloff;
 
         return new TexturePalette
         {
-            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta, valueFloor, compressionStrength),
+            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta, valueFloor, compressionStrength, saturationFalloff),
             AccentColour     = basePalette.AccentColour,
             GrimeColour      = ApplyHsvOffset(basePalette.GrimeColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
             NoiseStrength    = basePalette.NoiseStrength,
@@ -171,11 +172,17 @@ public static class StationTextureRegistry
 
     private static Color ApplyHsvOffset(
         Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta,
-        float minValue = 0f, float compressionStrength = 0f)
+        float minValue = 0f, float compressionStrength = 0f, float saturationFalloff = 0f)
     {
         RgbToHsv(c, out float h, out float s, out float v);
         h = (h + hueDeltaDegrees + 360f) % 360f;
         s = Math.Clamp(s + saturationDelta, 0f, 1f);
+
+        // Brief B4a Fix 2: the "natural" value this variant would have with NO floor/
+        // compression applied — kept separately so the floor/compression's own artificial
+        // lift (vFinal - vNatural, below) can be measured and partly traded back out of s,
+        // without that trade also firing for colours the floor/compression never touched.
+        float vNatural = Math.Clamp(v + brightnessDelta, 0f, 1f);
         v = Math.Clamp(v + brightnessDelta, minValue, 1f);
 
         // Brief B4 Fix 2: power-curve compression over [minValue, 1] — see the big comment
@@ -189,6 +196,17 @@ public static class StationTextureRegistry
             float gamma = 1f / (1f + compressionStrength);
             v = minValue + MathF.Pow(t, gamma) * (1f - minValue);
         }
+
+        // Brief B4a Fix 2: flooring/lifting V alone reads as a large apparent saturation
+        // increase — v*s is chroma, so raising v while holding s fixed raises chroma, which
+        // is what Timo's floor=0.9 diagnostic test read as "over-saturated." Physically,
+        // brightly lit paint reads LESS saturated, not more. saturationFalloff (default 0,
+        // an exact no-op) trades some of THIS colour's own artificial lift back out of s —
+        // a colour the floor/compression never raised (vNatural already >= minValue, lift=0)
+        // is left untouched regardless of the falloff value.
+        float lift = MathF.Max(0f, v - vNatural);
+        if (saturationFalloff > 0f && lift > 0f)
+            s = Math.Clamp(s * (1f - saturationFalloff * lift), 0f, 1f);
 
         return HsvToRgb(h, s, v);
     }

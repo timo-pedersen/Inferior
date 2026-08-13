@@ -12,11 +12,15 @@ namespace Inferior.Rendering;
 ///   <c>MeshRenderer.DrawBakedColorLit</c>/<c>DrawBakedColorLitShadowed</c>, a live shader
 ///   uniform (<c>LitSurface.fx</c>'s <c>DecorationBrightness</c>). Zero regeneration cost —
 ///   changes apply on the very next frame.
-/// - <see cref="VariantValueFloor"/>/<see cref="VariantCompressionStrength"/> — read only at
-///   STATION PANEL TEXTURE GENERATION time (<c>StationTextureRegistry.OffsetPaletteForVariant</c>).
-///   Changing these does NOT retroactively alter textures already baked into a loaded
-///   station; the tuning panel's regenerate action re-runs texture generation for the
-///   nearest station to preview a change (see SystemSpaceState.StationBrightnessTuning.cs).
+/// - <see cref="VariantValueFloor"/>/<see cref="VariantCompressionStrength"/>/
+///   <see cref="SaturationFalloff"/> — read only at STATION PANEL TEXTURE GENERATION time
+///   (<c>StationTextureRegistry.OffsetPaletteForVariant</c>). Changing these does NOT
+///   retroactively alter textures already baked into a loaded station. Brief B4 shipped this
+///   half of the panel with only a manual regenerate action (J); Brief B4a found that wasn't
+///   enough — Timo had to leave and re-enter the system to see any effect at all — so the
+///   panel now triggers a debounced rebuild of the current station automatically whenever one
+///   of these three changes (see SystemSpaceState.StationBrightnessTuning.cs), with J kept as
+///   a manual force-regenerate.
 ///
 /// <see cref="Ambient"/> is a live pass-through to <see cref="SceneLighting.Ambient"/>, not a
 /// separate store — SceneLighting already owns this value and multiple systems read it every
@@ -42,11 +46,17 @@ public static class StationBrightnessTuning
     // 0 = no compression, i.e. exactly the pre-B4 behaviour (a hard floor at
     // VariantValueFloor, nothing else remapped) — neutral by construction.
     public const float DefaultVariantCompressionStrength = 0f;
+    // Brief B4a Fix 2: 0 = no coupling, i.e. exactly pre-B4a behaviour — flooring/lifting a
+    // variant's HSV value leaves its saturation untouched, which is what produced the
+    // "over-saturated" read Timo reported at a high floor (v*s = chroma; lifting v alone
+    // raises chroma). See StationTextureRegistry.ApplyHsvOffset for the mechanism.
+    public const float DefaultSaturationFalloff = 0f;
 
     // ── Live values ──────────────────────────────────────────────────────────────────
     public static float DecorationBrightnessMultiplier { get; set; } = DefaultDecorationBrightnessMultiplier;
     public static float VariantValueFloor              { get; set; } = DefaultVariantValueFloor;
     public static float VariantCompressionStrength     { get; set; } = DefaultVariantCompressionStrength;
+    public static float SaturationFalloff              { get; set; } = DefaultSaturationFalloff;
 
     public static float Ambient
     {
@@ -60,5 +70,6 @@ public static class StationBrightnessTuning
         Ambient                        = DefaultAmbient;
         VariantValueFloor              = DefaultVariantValueFloor;
         VariantCompressionStrength     = DefaultVariantCompressionStrength;
+        SaturationFalloff              = DefaultSaturationFalloff;
     }
 }
