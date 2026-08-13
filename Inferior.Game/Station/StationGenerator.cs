@@ -27,6 +27,22 @@ public sealed record StationTextureAssignment(
     int AlbedoTextureIndex,
     int MaterialTextureIndex);
 
+public sealed record StationTexturePreparationDiagnostics(
+    int GeneratedTextureCount,
+    int GeneratedVariantPairCount,
+    int SelectedUniqueTextureCount,
+    int SelectedUniqueTexturePairCount,
+    int DiscardedTextureCount,
+    int UploadedAlbedoTextureCount,
+    int UploadedMaterialTextureCount,
+    int ModuleTextureBindingCount,
+    int SharedFallbackReferenceCount);
+
+internal sealed record StationTextureCompactionResult(
+    IReadOnlyList<PreparedStationTexture> Textures,
+    IReadOnlyList<StationTextureAssignment> Assignments,
+    StationTexturePreparationDiagnostics Diagnostics);
+
 public sealed record StationGenerationCpuResult(
     List<PlacedModule> Modules,
     IReadOnlyList<PreparedStationTexture> Textures,
@@ -34,7 +50,9 @@ public sealed record StationGenerationCpuResult(
     IReadOnlyDictionary<PlacedModule, StationMeshCpuData> FlatDecorationMeshes,
     IReadOnlyList<StationVisualUploadPlanItem> UploadPlan,
     MegastationPrototypeDiagnostics? MegastationDiagnostics,
-    double GenerationMilliseconds);
+    double GenerationMilliseconds,
+    StationTexturePreparationDiagnostics TextureDiagnostics,
+    bool UsesSharedMegastationFallbackTextures = false);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -98,12 +116,8 @@ public sealed class StationGenerator
                 cancellationToken: cancellationToken);
             PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
             List<PlacedModule> megaModules = [module];
-            PreparedStationTexture[] megaTextures =
-            [
-                new(1, 1, [Color.White]),
-                new(1, 1, [new Color(128, 255, 0, 0)]),
-            ];
-            StationTextureAssignment[] megaAssignments = [new(module, 0, 1)];
+            PreparedStationTexture[] megaTextures = [];
+            StationTextureAssignment[] megaAssignments = [];
             var megaFlatMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
             IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
                 megaModules,
@@ -119,7 +133,18 @@ public sealed class StationGenerator
                 megaFlatMeshes,
                 megaUploadPlan,
                 cpu.Diagnostics,
-                stopwatch.Elapsed.TotalMilliseconds);
+                stopwatch.Elapsed.TotalMilliseconds,
+                new(
+                    GeneratedTextureCount: 0,
+                    GeneratedVariantPairCount: 0,
+                    SelectedUniqueTextureCount: 0,
+                    SelectedUniqueTexturePairCount: 1,
+                    DiscardedTextureCount: 0,
+                    UploadedAlbedoTextureCount: 0,
+                    UploadedMaterialTextureCount: 0,
+                    ModuleTextureBindingCount: 2,
+                    SharedFallbackReferenceCount: 2),
+                UsesSharedMegastationFallbackTextures: true);
         }
 
         int seed = NameHash(station.Name);
@@ -158,22 +183,92 @@ public sealed class StationGenerator
             profile,
             station,
             cancellationToken);
-        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
-            modules,
+        StationTextureCompactionResult compacted = CompactSelectedTextures(
             textures,
             assignments,
+            generatedVariantPairCount: modules.Count > 0
+                ? (textures.Count - 1) / 2
+                : 0);
+        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
+            modules,
+            compacted.Textures,
+            compacted.Assignments,
             flatMeshes,
             enabledShadowCasterClasses,
             cancellationToken);
         stopwatch.Stop();
         return new StationGenerationCpuResult(
             modules,
-            textures,
-            assignments,
+            compacted.Textures,
+            compacted.Assignments,
             flatMeshes,
             uploadPlan,
             null,
-            stopwatch.Elapsed.TotalMilliseconds);
+            stopwatch.Elapsed.TotalMilliseconds,
+            compacted.Diagnostics);
+    }
+
+    internal static StationTextureCompactionResult CompactSelectedTextures(
+        IReadOnlyList<PreparedStationTexture> generatedTextures,
+        IReadOnlyList<StationTextureAssignment> assignments,
+        int generatedVariantPairCount = -1)
+    {
+        if (generatedVariantPairCount < -1)
+            throw new ArgumentOutOfRangeException(nameof(generatedVariantPairCount));
+        var remap = new Dictionary<int, int>();
+        var compactTextures = new List<PreparedStationTexture>();
+        var compactAssignments = new List<StationTextureAssignment>(assignments.Count);
+        var albedoIndices = new HashSet<int>();
+        var materialIndices = new HashSet<int>();
+        int selectedPairCount = assignments
+            .Select(assignment => (
+                assignment.AlbedoTextureIndex,
+                assignment.MaterialTextureIndex))
+            .Distinct()
+            .Count();
+
+        int Remap(int originalIndex)
+        {
+            if ((uint)originalIndex >= (uint)generatedTextures.Count)
+                throw new InvalidOperationException(
+                    $"Station texture assignment index {originalIndex} is outside " +
+                    $"the generated texture range 0..{generatedTextures.Count - 1}.");
+            if (remap.TryGetValue(originalIndex, out int existing))
+                return existing;
+            int compactIndex = compactTextures.Count;
+            remap.Add(originalIndex, compactIndex);
+            compactTextures.Add(generatedTextures[originalIndex]);
+            return compactIndex;
+        }
+
+        foreach (StationTextureAssignment assignment in assignments)
+        {
+            int albedo = Remap(assignment.AlbedoTextureIndex);
+            int material = Remap(assignment.MaterialTextureIndex);
+            albedoIndices.Add(albedo);
+            materialIndices.Add(material);
+            compactAssignments.Add(assignment with
+            {
+                AlbedoTextureIndex = albedo,
+                MaterialTextureIndex = material,
+            });
+        }
+
+        return new(
+            compactTextures,
+            compactAssignments,
+            new(
+                GeneratedTextureCount: generatedTextures.Count,
+                GeneratedVariantPairCount: generatedVariantPairCount >= 0
+                    ? generatedVariantPairCount
+                    : generatedTextures.Count / 2,
+                SelectedUniqueTextureCount: compactTextures.Count,
+                SelectedUniqueTexturePairCount: selectedPairCount,
+                DiscardedTextureCount: generatedTextures.Count - compactTextures.Count,
+                UploadedAlbedoTextureCount: albedoIndices.Count,
+                UploadedMaterialTextureCount: materialIndices.Count,
+                ModuleTextureBindingCount: assignments.Count * 2,
+                SharedFallbackReferenceCount: 0));
     }
 
     private static IReadOnlyList<StationVisualUploadPlanItem> BuildUploadPlan(
@@ -199,7 +294,10 @@ public sealed class StationGenerator
             plan.Add(new(
                 kind,
                 $"texture[{i}]",
-                (long)texture.Width * texture.Height * 4,
+                StationGpuByteAccounting.TextureBytes(
+                    texture.Width,
+                    texture.Height,
+                    bytesPerPixel: 4),
                 Texture: texture));
         }
 
@@ -302,7 +400,12 @@ public sealed class StationGenerator
             => new(
                 kind,
                 $"module[{index}]/{module.Definition.Id}",
-                (long)mesh.Vertices.Length * 36 + (long)mesh.Indices.Length * 4,
+                StationGpuByteAccounting.VertexBufferBytes(
+                    mesh.Vertices.Length,
+                    VertexPositionNormalColorTexture.VertexDeclaration.VertexStride)
+                + StationGpuByteAccounting.IndexBufferBytes(
+                    mesh.Indices.Length,
+                    IndexElementSize.ThirtyTwoBits),
                 module,
                 Mesh: mesh,
                 Bounds: bounds);
@@ -375,6 +478,16 @@ public sealed class StationGenerator
         var uploaded = new List<Texture2D>(prepared.Textures.Count);
         try
         {
+            if (prepared.UsesSharedMegastationFallbackTextures)
+            {
+                Texture2D albedo = UploadFlat(Color.White);
+                Texture2D material = UploadFlat(new Color(128, 255, 0, 0));
+                foreach (PlacedModule module in prepared.Modules)
+                {
+                    module.TextureInstance = albedo;
+                    module.MaterialInstance = material;
+                }
+            }
             foreach (PreparedStationTexture texture in prepared.Textures)
             {
                 var gpu = new Texture2D(gd, texture.Width, texture.Height);
@@ -392,6 +505,22 @@ public sealed class StationGenerator
                 prepared.Modules,
                 uploaded,
                 prepared.MegastationDiagnostics);
+
+            Texture2D UploadFlat(Color color)
+            {
+                var texture = new Texture2D(gd, 1, 1);
+                try
+                {
+                    texture.SetData([color]);
+                    uploaded.Add(texture);
+                    return texture;
+                }
+                catch
+                {
+                    texture.Dispose();
+                    throw;
+                }
+            }
         }
         catch
         {

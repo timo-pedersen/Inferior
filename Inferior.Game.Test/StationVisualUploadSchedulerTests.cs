@@ -81,7 +81,64 @@ public sealed class StationVisualUploadSchedulerTests
         StationVisualOversizedOperation oversized =
             Assert.IsType<StationVisualOversizedOperation>(scheduler.LargestOversizedOperation);
         Assert.Equal("mega-hull", oversized.ResourceIdentity);
+        Assert.Equal(0, oversized.VertexCount);
+        Assert.Equal(0, oversized.IndexCount);
         Assert.Equal(7.5, oversized.ElapsedMilliseconds);
+        Assert.Equal(5.5, oversized.BudgetOverrunMilliseconds);
+        Assert.Equal(1, scheduler.OversizedOperationCount);
+        Assert.Same(oversized, Assert.Single(scheduler.OversizedOperations));
+    }
+
+    [Fact]
+    public void EveryOversizedOperationRetainsMeshMeasurement()
+    {
+        var clock = new FakeClock();
+        var scheduler = new StationVisualUploadScheduler(
+            [
+                new(
+                    StationVisualUploadResourceKind.HullMesh,
+                    "module[0]/mega",
+                    8_000_000,
+                    () =>
+                    {
+                        clock.Advance(4.5);
+                        return new FakeResource(clock, 0.0);
+                    },
+                    VertexCount: 180_000,
+                    IndexCount: 380_000),
+                new(
+                    StationVisualUploadResourceKind.ShadowHullMesh,
+                    "module[0]/mega",
+                    8_000_000,
+                    () =>
+                    {
+                        clock.Advance(3.25);
+                        return new FakeResource(clock, 0.0);
+                    },
+                    VertexCount: 180_000,
+                    IndexCount: 380_000),
+            ],
+            2.0,
+            clock);
+
+        scheduler.Pump();
+        scheduler.Pump();
+
+        Assert.Equal(2, scheduler.OversizedOperationCount);
+        Assert.Collection(
+            scheduler.OversizedOperations,
+            hull =>
+            {
+                Assert.Equal(StationVisualUploadResourceKind.HullMesh, hull.Kind);
+                Assert.Equal(180_000, hull.VertexCount);
+                Assert.Equal(380_000, hull.IndexCount);
+                Assert.Equal(2.5, hull.BudgetOverrunMilliseconds);
+            },
+            shadow =>
+            {
+                Assert.Equal(StationVisualUploadResourceKind.ShadowHullMesh, shadow.Kind);
+                Assert.Equal(1.25, shadow.BudgetOverrunMilliseconds);
+            });
     }
 
     [Fact]

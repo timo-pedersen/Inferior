@@ -2,6 +2,78 @@ using System.Diagnostics;
 
 namespace Inferior.Game.StationGen;
 
+internal static class StationGpuByteAccounting
+{
+    public static long TextureBytes(int width, int height, int bytesPerPixel)
+    {
+        if (width < 0) throw new ArgumentOutOfRangeException(nameof(width));
+        if (height < 0) throw new ArgumentOutOfRangeException(nameof(height));
+        if (bytesPerPixel < 0) throw new ArgumentOutOfRangeException(nameof(bytesPerPixel));
+        return checked((long)width * height * bytesPerPixel);
+    }
+
+    public static long VertexBufferBytes(int vertexCount, int vertexStride)
+    {
+        if (vertexCount < 0) throw new ArgumentOutOfRangeException(nameof(vertexCount));
+        if (vertexStride < 0) throw new ArgumentOutOfRangeException(nameof(vertexStride));
+        return checked((long)vertexCount * vertexStride);
+    }
+
+    public static long IndexBufferBytes(
+        int indexCount,
+        Microsoft.Xna.Framework.Graphics.IndexElementSize elementSize)
+    {
+        int bytesPerIndex = elementSize switch
+        {
+            Microsoft.Xna.Framework.Graphics.IndexElementSize.SixteenBits => 2,
+            Microsoft.Xna.Framework.Graphics.IndexElementSize.ThirtyTwoBits => 4,
+            _ => throw new ArgumentOutOfRangeException(nameof(elementSize)),
+        };
+        return TextureBytes(indexCount, 1, bytesPerIndex);
+    }
+
+    public static long ShadowMapBytes(
+        int width,
+        int height,
+        Microsoft.Xna.Framework.Graphics.SurfaceFormat colorFormat,
+        Microsoft.Xna.Framework.Graphics.DepthFormat depthFormat)
+        => TextureBytes(
+            width,
+            height,
+            ColorBytesPerPixel(colorFormat) + DepthBytesPerPixel(depthFormat));
+
+    public static long ResidentOwnedBytes(long uploadedResourceBytes, long shadowMapBytes)
+    {
+        if (uploadedResourceBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(uploadedResourceBytes));
+        if (shadowMapBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(shadowMapBytes));
+        return checked(uploadedResourceBytes + shadowMapBytes);
+    }
+
+    private static int ColorBytesPerPixel(
+        Microsoft.Xna.Framework.Graphics.SurfaceFormat format)
+        => format switch
+        {
+            Microsoft.Xna.Framework.Graphics.SurfaceFormat.Single => 4,
+            Microsoft.Xna.Framework.Graphics.SurfaceFormat.Color => 4,
+            _ => throw new NotSupportedException(
+                $"Station GPU byte accounting does not define color format {format}."),
+        };
+
+    private static int DepthBytesPerPixel(
+        Microsoft.Xna.Framework.Graphics.DepthFormat format)
+        => format switch
+        {
+            Microsoft.Xna.Framework.Graphics.DepthFormat.None => 0,
+            Microsoft.Xna.Framework.Graphics.DepthFormat.Depth16 => 2,
+            Microsoft.Xna.Framework.Graphics.DepthFormat.Depth24 => 4,
+            Microsoft.Xna.Framework.Graphics.DepthFormat.Depth24Stencil8 => 4,
+            _ => throw new NotSupportedException(
+                $"Station GPU byte accounting does not define depth format {format}."),
+        };
+}
+
 public enum StationVisualUploadResourceKind
 {
     PanelAlbedoTexture,
@@ -21,7 +93,11 @@ public sealed record StationVisualUploadPlanItem(
     PlacedModule? Module = null,
     PreparedStationTexture? Texture = null,
     StationMeshCpuData? Mesh = null,
-    (Microsoft.Xna.Framework.Vector3 Min, Microsoft.Xna.Framework.Vector3 Max)? Bounds = null);
+    (Microsoft.Xna.Framework.Vector3 Min, Microsoft.Xna.Framework.Vector3 Max)? Bounds = null)
+{
+    public int VertexCount => Mesh?.Vertices.Length ?? 0;
+    public int IndexCount => Mesh?.Indices.Length ?? 0;
+}
 
 internal interface IStationVisualUploadClock
 {
@@ -38,13 +114,18 @@ internal sealed record StationVisualUploadWorkItem(
     StationVisualUploadResourceKind Kind,
     string ResourceIdentity,
     long EstimatedBytes,
-    Func<IDisposable?> Execute);
+    Func<IDisposable?> Execute,
+    int VertexCount = 0,
+    int IndexCount = 0);
 
 internal sealed record StationVisualOversizedOperation(
     StationVisualUploadResourceKind Kind,
     string ResourceIdentity,
     long EstimatedBytes,
-    double ElapsedMilliseconds);
+    int VertexCount,
+    int IndexCount,
+    double ElapsedMilliseconds,
+    double BudgetOverrunMilliseconds);
 
 internal enum StationVisualUploadSchedulerState
 {
@@ -65,10 +146,12 @@ internal enum StationVisualUploadSchedulerState
 internal sealed class StationVisualUploadScheduler
 {
     public const double DefaultFrameBudgetMilliseconds = 2.0;
+    private const int MaximumRetainedOversizedOperations = 32;
 
     private readonly IReadOnlyList<StationVisualUploadWorkItem> _items;
     private readonly IStationVisualUploadClock _clock;
     private readonly List<IDisposable> _ownedResources = [];
+    private readonly List<StationVisualOversizedOperation> _oversizedOperations = [];
     private int _nextItem;
     private bool _resourcesReleased;
 
@@ -103,6 +186,9 @@ internal sealed class StationVisualUploadScheduler
     public int CreatedResourceCount => _ownedResources.Count;
     public Exception? Failure { get; private set; }
     public StationVisualOversizedOperation? LargestOversizedOperation { get; private set; }
+    public IReadOnlyList<StationVisualOversizedOperation> OversizedOperations =>
+        _oversizedOperations;
+    public int OversizedOperationCount { get; private set; }
     public StationVisualOversizedOperation? FailedOperation { get; private set; }
     public StationVisualUploadResourceKind? CurrentPhase =>
         State == StationVisualUploadSchedulerState.Uploading && _nextItem < _items.Count
@@ -159,11 +245,11 @@ internal sealed class StationVisualUploadScheduler
                         item.Kind,
                         item.ResourceIdentity,
                         item.EstimatedBytes,
-                        failedElapsed);
-                    if (failedElapsed > FrameBudgetMilliseconds
-                        && (LargestOversizedOperation == null
-                            || failedElapsed > LargestOversizedOperation.ElapsedMilliseconds))
-                        LargestOversizedOperation = FailedOperation;
+                        item.VertexCount,
+                        item.IndexCount,
+                        failedElapsed,
+                        Math.Max(failedElapsed - FrameBudgetMilliseconds, 0.0));
+                    RecordOversizedOperation(FailedOperation);
                     Failure = exception;
                     State = StationVisualUploadSchedulerState.CleaningFailed;
                     ResolveEmptyCleanup();
@@ -176,15 +262,16 @@ internal sealed class StationVisualUploadScheduler
                 MaximumOperationMilliseconds = Math.Max(
                     MaximumOperationMilliseconds,
                     operationElapsed);
-                if (operationElapsed > FrameBudgetMilliseconds
-                    && (LargestOversizedOperation == null
-                        || operationElapsed > LargestOversizedOperation.ElapsedMilliseconds))
+                if (operationElapsed > FrameBudgetMilliseconds)
                 {
-                    LargestOversizedOperation = new(
+                    RecordOversizedOperation(new(
                         item.Kind,
                         item.ResourceIdentity,
                         item.EstimatedBytes,
-                        operationElapsed);
+                        item.VertexCount,
+                        item.IndexCount,
+                        operationElapsed,
+                        operationElapsed - FrameBudgetMilliseconds));
                 }
                 CompletedEstimatedBytes += item.EstimatedBytes;
                 _nextItem++;
@@ -277,5 +364,17 @@ internal sealed class StationVisualUploadScheduler
             State = StationVisualUploadSchedulerState.Cancelled;
         else if (State == StationVisualUploadSchedulerState.CleaningFailed)
             State = StationVisualUploadSchedulerState.Failed;
+    }
+
+    private void RecordOversizedOperation(StationVisualOversizedOperation operation)
+    {
+        if (operation.ElapsedMilliseconds <= FrameBudgetMilliseconds)
+            return;
+        OversizedOperationCount++;
+        if (_oversizedOperations.Count < MaximumRetainedOversizedOperations)
+            _oversizedOperations.Add(operation);
+        if (LargestOversizedOperation == null
+            || operation.ElapsedMilliseconds > LargestOversizedOperation.ElapsedMilliseconds)
+            LargestOversizedOperation = operation;
     }
 }

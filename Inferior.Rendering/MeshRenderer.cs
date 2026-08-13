@@ -14,6 +14,9 @@ namespace Inferior.Rendering;
 /// </summary>
 public sealed class MeshRenderer : IDisposable
 {
+    public static Color WhiteFallbackColor => Color.White;
+    public static Color StationFallbackMaterialColor => new(128, 255, 0, 0);
+
     private readonly GraphicsDevice _gd;
     private readonly Effect         _litSurfaceEffect;
     private readonly Texture2D      _whiteTexture;   // 1x1 white — stand-in for "no real texture"
@@ -22,15 +25,23 @@ public sealed class MeshRenderer : IDisposable
     // gloss=255 (full) so SpecularHighlight's gloss multiply is a no-op — these callers'
     // specular reproduces exactly pre-S2c-1 behaviour, untouched by this brief.
     private readonly Texture2D      _neutralMaterialTexture;
+    private readonly Texture2D      _stationFallbackMaterialTexture;
+
+    public Texture2D WhiteFallbackTexture => _whiteTexture;
+    public Texture2D StationFallbackMaterialTexture => _stationFallbackMaterialTexture;
 
     public MeshRenderer(GraphicsDevice gd, Effect litSurfaceEffect)
     {
         _gd               = gd;
         _litSurfaceEffect = litSurfaceEffect;
         _whiteTexture     = new Texture2D(gd, 1, 1);
-        _whiteTexture.SetData([Color.White]);
+        _whiteTexture.SetData([WhiteFallbackColor]);
         _neutralMaterialTexture = new Texture2D(gd, 1, 1);
         _neutralMaterialTexture.SetData([new Color(128, 255, 0, 255)]);
+        // Station megastations deliberately use reserved B/A = 0. Keep this exact immutable
+        // fallback distinct from the general renderer neutral map above, whose alpha is 255.
+        _stationFallbackMaterialTexture = new Texture2D(gd, 1, 1);
+        _stationFallbackMaterialTexture.SetData([StationFallbackMaterialColor]);
 
         // LitSurface.fx declares EclipseFactor with a "= 1.0" HLSL initializer, but on
         // DesktopGL/MojoShader that initializer is not reliably applied — the parameter can
@@ -180,6 +191,7 @@ public sealed class MeshRenderer : IDisposable
     {
         _whiteTexture.Dispose();
         _neutralMaterialTexture.Dispose();
+        _stationFallbackMaterialTexture.Dispose();
     }
 
     // ── Private ───────────────────────────────────────────────────────────────

@@ -1,0 +1,219 @@
+using Inferior.Game.StationGen;
+using Inferior.Galaxy;
+using Inferior.Rendering;
+using Microsoft.Xna.Framework;
+using Xunit;
+
+namespace Inferior.Game.Test;
+
+public sealed class StationTextureCompactionTests
+{
+    [Fact]
+    public void CompactionKeepsOnlyReferencedPreparedTextureIdentitiesInEncounterOrder()
+    {
+        PreparedStationTexture[] generated = Enumerable.Range(0, 5)
+            .Select(index => Texture(new Color(index, index + 1, index + 2, index + 3)))
+            .ToArray();
+        PlacedModule first = Module("first");
+        PlacedModule second = Module("second");
+        StationTextureAssignment[] assignments =
+        [
+            new(first, AlbedoTextureIndex: 4, MaterialTextureIndex: 1),
+            new(second, AlbedoTextureIndex: 4, MaterialTextureIndex: 3),
+        ];
+
+        StationTextureCompactionResult compacted =
+            StationGenerator.CompactSelectedTextures(generated, assignments);
+
+        Assert.Equal(3, compacted.Textures.Count);
+        Assert.Same(generated[4], compacted.Textures[0]);
+        Assert.Same(generated[1], compacted.Textures[1]);
+        Assert.Same(generated[3], compacted.Textures[2]);
+        Assert.Equal(
+            [(first, 0, 1), (second, 0, 2)],
+            compacted.Assignments.Select(assignment => (
+                assignment.Module,
+                assignment.AlbedoTextureIndex,
+                assignment.MaterialTextureIndex)));
+    }
+
+    [Fact]
+    public void CompactionPreservesSelectedAlbedoAndMaterialPixelsExactly()
+    {
+        PreparedStationTexture[] generated =
+        [
+            Texture(new Color(10, 20, 30, 40), new Color(50, 60, 70, 80)),
+            Texture(new Color(90, 100, 110, 120), new Color(130, 140, 150, 160)),
+            Texture(new Color(170, 180, 190, 200), new Color(210, 220, 230, 240)),
+        ];
+        PlacedModule module = Module("pixels");
+        StationTextureAssignment original = new(module, 2, 0);
+
+        StationTextureCompactionResult compacted =
+            StationGenerator.CompactSelectedTextures(generated, [original]);
+        StationTextureAssignment remapped = Assert.Single(compacted.Assignments);
+
+        Assert.Equal(
+            generated[original.AlbedoTextureIndex].Pixels,
+            compacted.Textures[remapped.AlbedoTextureIndex].Pixels);
+        Assert.Equal(
+            generated[original.MaterialTextureIndex].Pixels,
+            compacted.Textures[remapped.MaterialTextureIndex].Pixels);
+        Assert.Same(
+            generated[original.AlbedoTextureIndex].Pixels,
+            compacted.Textures[remapped.AlbedoTextureIndex].Pixels);
+        Assert.Same(
+            generated[original.MaterialTextureIndex].Pixels,
+            compacted.Textures[remapped.MaterialTextureIndex].Pixels);
+    }
+
+    [Fact]
+    public void CompactionDiagnosticsDistinguishTexturesPairsAndBindings()
+    {
+        PreparedStationTexture[] generated = Enumerable.Range(0, 6)
+            .Select(index => Texture(new Color(index, 0, 0, 0)))
+            .ToArray();
+        PlacedModule first = Module("first");
+        PlacedModule second = Module("second");
+
+        StationTextureCompactionResult compacted =
+            StationGenerator.CompactSelectedTextures(
+                generated,
+                [new(first, 4, 1), new(second, 4, 3)]);
+
+        Assert.Equal(6, compacted.Diagnostics.GeneratedTextureCount);
+        Assert.Equal(3, compacted.Diagnostics.GeneratedVariantPairCount);
+        Assert.Equal(3, compacted.Diagnostics.SelectedUniqueTextureCount);
+        Assert.Equal(2, compacted.Diagnostics.SelectedUniqueTexturePairCount);
+        Assert.Equal(3, compacted.Diagnostics.DiscardedTextureCount);
+        Assert.Equal(1, compacted.Diagnostics.UploadedAlbedoTextureCount);
+        Assert.Equal(2, compacted.Diagnostics.UploadedMaterialTextureCount);
+        Assert.Equal(4, compacted.Diagnostics.ModuleTextureBindingCount);
+        Assert.Equal(0, compacted.Diagnostics.SharedFallbackReferenceCount);
+    }
+
+    [Fact]
+    public void CompactionIsDeterministicAndRejectsInvalidIndices()
+    {
+        PreparedStationTexture[] generated = Enumerable.Range(0, 4)
+            .Select(index => Texture(new Color(index, 0, 0, 0)))
+            .ToArray();
+        PlacedModule module = Module("deterministic");
+        StationTextureAssignment[] assignments = [new(module, 3, 1)];
+
+        StationTextureCompactionResult first =
+            StationGenerator.CompactSelectedTextures(generated, assignments);
+        StationTextureCompactionResult second =
+            StationGenerator.CompactSelectedTextures(generated, assignments);
+
+        Assert.Equal(first.Textures, second.Textures);
+        Assert.Equal(first.Assignments, second.Assignments);
+        Assert.Equal(first.Diagnostics, second.Diagnostics);
+        Assert.Throws<InvalidOperationException>(() =>
+            StationGenerator.CompactSelectedTextures(
+                generated,
+                [new(module, 4, 1)]));
+    }
+
+    [Fact]
+    public void MegastationPreparationUsesBorrowedFallbacksAndSchedulesNoTextureUpload()
+    {
+        Star star = StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;
+        StarSystem system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+        Station station = StarterSystemSelector.SelectStarterStation(system.Stations)!;
+
+        Assert.Equal("Nova Anchorage", station.Name);
+
+        StationGenerationCpuResult prepared = StationGenerator.PrepareCpu(
+            station,
+            useMegastationPrototype: true);
+
+        Assert.True(prepared.UsesSharedMegastationFallbackTextures);
+        Assert.Empty(prepared.Textures);
+        Assert.Empty(prepared.TextureAssignments);
+        Assert.DoesNotContain(prepared.UploadPlan, item => item.Texture != null);
+        Assert.All(prepared.Modules, module =>
+        {
+            Assert.Null(module.TextureInstance);
+            Assert.Null(module.MaterialInstance);
+        });
+        Assert.Equal(0, prepared.TextureDiagnostics.GeneratedTextureCount);
+        Assert.Equal(0, prepared.TextureDiagnostics.GeneratedVariantPairCount);
+        Assert.Equal(0, prepared.TextureDiagnostics.SelectedUniqueTextureCount);
+        Assert.Equal(1, prepared.TextureDiagnostics.SelectedUniqueTexturePairCount);
+        Assert.Equal(0, prepared.TextureDiagnostics.DiscardedTextureCount);
+        Assert.Equal(0, prepared.TextureDiagnostics.UploadedAlbedoTextureCount);
+        Assert.Equal(0, prepared.TextureDiagnostics.UploadedMaterialTextureCount);
+        Assert.Equal(2, prepared.TextureDiagnostics.ModuleTextureBindingCount);
+        Assert.Equal(2, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        Assert.Equal(
+            3_965_952,
+            prepared.UploadPlan.Sum(item => item.EstimatedBytes));
+    }
+
+    [Fact]
+    public void RendererFallbackValuesRemainExactAndSemanticallyDistinct()
+    {
+        Assert.Equal(Color.White, MeshRenderer.WhiteFallbackColor);
+        Assert.Equal(new Color(128, 255, 0, 0), MeshRenderer.StationFallbackMaterialColor);
+        Assert.NotEqual(new Color(128, 255, 0, 255), MeshRenderer.StationFallbackMaterialColor);
+    }
+
+    [Fact]
+    public void RealOrdinaryStationUploadsOnlyItsCompactedSelectedTextures()
+    {
+        Star star = StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;
+        StarSystem system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
+        Station station = Assert.Single(
+            system.Stations,
+            candidate => candidate.Name == "High Base");
+
+        StationGenerationCpuResult prepared = StationGenerator.PrepareCpu(station);
+        StationTexturePreparationDiagnostics diagnostics = prepared.TextureDiagnostics;
+        StationVisualUploadPlanItem[] textureUploads = prepared.UploadPlan
+            .Where(item => item.Texture != null)
+            .ToArray();
+
+        Assert.False(prepared.UsesSharedMegastationFallbackTextures);
+        Assert.Equal(161, diagnostics.GeneratedTextureCount);
+        Assert.Equal(80, diagnostics.GeneratedVariantPairCount);
+        Assert.Equal(30, diagnostics.SelectedUniqueTextureCount);
+        Assert.Equal(15, diagnostics.SelectedUniqueTexturePairCount);
+        Assert.Equal(131, diagnostics.DiscardedTextureCount);
+        Assert.Equal(15, diagnostics.UploadedAlbedoTextureCount);
+        Assert.Equal(15, diagnostics.UploadedMaterialTextureCount);
+        Assert.Equal(58, diagnostics.ModuleTextureBindingCount);
+        Assert.True(diagnostics.GeneratedTextureCount > diagnostics.SelectedUniqueTextureCount);
+        Assert.True(diagnostics.DiscardedTextureCount > 0);
+        Assert.Equal(diagnostics.SelectedUniqueTextureCount, prepared.Textures.Count);
+        Assert.Equal(prepared.Textures.Count, textureUploads.Length);
+        Assert.Equal(
+            62_167_440,
+            prepared.UploadPlan.Sum(item => item.EstimatedBytes));
+        Assert.Equal(prepared.TextureAssignments.Count * 2, diagnostics.ModuleTextureBindingCount);
+        Assert.All(prepared.TextureAssignments, assignment =>
+        {
+            Assert.InRange(assignment.AlbedoTextureIndex, 0, prepared.Textures.Count - 1);
+            Assert.InRange(assignment.MaterialTextureIndex, 0, prepared.Textures.Count - 1);
+        });
+    }
+
+    private static PreparedStationTexture Texture(params Color[] pixels)
+        => new(pixels.Length, 1, pixels);
+
+    private static PlacedModule Module(string id)
+        => new()
+        {
+            Definition = new StationModuleDefinition
+            {
+                Id = id,
+                Category = "test",
+                BoundingBox = Vector3.One,
+                MinScale = StationScale.Outpost,
+                Ports = [],
+            },
+            Transform = Matrix.Identity,
+            Seed = 1,
+            ChamferDepth = 0.1f,
+        };
+}

@@ -50,13 +50,35 @@ public sealed partial class SystemSpaceState
 
     private sealed class StationVisualPackage : IDisposable
     {
+        private sealed record TextureUploadDiagnostic(
+            Texture2D Texture,
+            StationVisualUploadResourceKind Purpose,
+            string ResourceIdentity,
+            int OperationOrdinal,
+            string PreviousOperation,
+            int Width,
+            int Height,
+            SurfaceFormat Format,
+            bool HasMipmaps,
+            long ByteCount,
+            double ConstructorMilliseconds,
+            double SetDataMilliseconds,
+            double OwnershipAssignmentMilliseconds);
+
+        private sealed record TextureDisposalDiagnostic(
+            string ResourceIdentity,
+            double ElapsedMilliseconds);
+
         private bool _disposed;
+        private readonly List<TextureUploadDiagnostic> _textureUploadDiagnostics = [];
+        private readonly List<TextureDisposalDiagnostic> _textureDisposalDiagnostics = [];
 
         public StationVisualPackage(
             StationVisualDescriptor descriptor,
             List<PlacedModule> modules,
             IReadOnlyList<Texture2D> textures,
             MegastationPrototypeDiagnostics? megastationDiagnostics,
+            StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
             Vector3 boundsMax,
@@ -67,6 +89,7 @@ public sealed partial class SystemSpaceState
             Modules = modules;
             Textures = textures.ToList();
             MegastationDiagnostics = megastationDiagnostics;
+            TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
             BoundsMax = boundsMax;
@@ -78,10 +101,14 @@ public sealed partial class SystemSpaceState
         public List<PlacedModule> Modules { get; }
         public List<Texture2D> Textures { get; }
         public MegastationPrototypeDiagnostics? MegastationDiagnostics { get; }
+        public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
         public double UploadWallMilliseconds { get; set; }
         public double FinalCommitMilliseconds { get; set; }
+        public long UploadedResourceGpuBytes { get; set; }
+        public int TextureReferenceAssignmentCount { get; set; }
+        public double TextureReferenceAssignmentMilliseconds { get; set; }
         public Vector3 BoundsMin { get; }
         public Vector3 BoundsMax { get; }
         public double EnvelopeRadiusMeters { get; }
@@ -117,7 +144,8 @@ public sealed partial class SystemSpaceState
                 + ShadowCasterMeshes.Count
                 + DecoCasterMeshes.Count);
 
-        public int OwnedTextureCount => Textures.Count + (ShadowMap == null ? 0 : 1);
+        public int OwnedTextureCount => Textures.Count;
+        public int OwnedShadowMapCount => ShadowMap == null ? 0 : 1;
 
         public long EstimatedCpuMeshBytes
         {
@@ -134,39 +162,25 @@ public sealed partial class SystemSpaceState
             }
         }
 
-        public long EstimatedGpuBytes
-        {
-            get
-            {
-                long bytes = 0;
-                Add(HullMeshes);
-                Add(DecoMeshes);
-                Add(FlatDecoMeshes);
-                Add(GlassMeshes);
-                Add(ShadowCasterMeshes);
-                Add(DecoCasterMeshes);
-                foreach (Texture2D texture in Textures)
-                    bytes += (long)texture.Width * texture.Height * 4;
-                if (ShadowMap != null)
-                    bytes += (long)ShadowMap.Width * ShadowMap.Height * 8;
-                return bytes;
+        public long ShadowMapGpuBytes => ShadowMap == null
+            ? 0
+            : StationGpuByteAccounting.ShadowMapBytes(
+                ShadowMap.Width,
+                ShadowMap.Height,
+                ShadowMap.Format,
+                ShadowMap.DepthStencilFormat);
 
-                void Add(Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> meshes)
-                {
-                    foreach (var mesh in meshes.Values)
-                    {
-                        bytes += (long)mesh.vb.VertexCount * mesh.vb.VertexDeclaration.VertexStride;
-                        bytes += (long)mesh.ib.IndexCount * 4;
-                    }
-                }
-            }
-        }
+        public long ResidentOwnedGpuBytes => StationGpuByteAccounting.ResidentOwnedBytes(
+            UploadedResourceGpuBytes,
+            ShadowMapGpuBytes);
 
         public void Dispose()
         {
             if (_disposed)
                 return;
             _disposed = true;
+
+            var totalStopwatch = Stopwatch.StartNew();
 
             DisposeMeshes(HullMeshes);
             DisposeMeshes(DecoMeshes);
@@ -175,7 +189,7 @@ public sealed partial class SystemSpaceState
             DisposeMeshes(ShadowCasterMeshes);
             DisposeMeshes(DecoCasterMeshes);
             foreach (Texture2D texture in Textures)
-                texture.Dispose();
+                DisposeTexture(texture);
             Textures.Clear();
             ShadowMap?.Dispose();
             ShadowMap = null;
@@ -196,6 +210,113 @@ public sealed partial class SystemSpaceState
                 module.GlowLights.Clear();
             }
             Modules.Clear();
+            totalStopwatch.Stop();
+            PublishTextureDisposalDiagnostics(totalStopwatch.Elapsed.TotalMilliseconds);
+        }
+
+        public void RecordTextureUpload(
+            Texture2D texture,
+            StationVisualUploadPlanItem item,
+            int operationOrdinal,
+            string previousOperation,
+            double constructorMilliseconds,
+            double setDataMilliseconds,
+            double ownershipAssignmentMilliseconds)
+        {
+            _textureUploadDiagnostics.Add(new(
+                texture,
+                item.Kind,
+                item.ResourceIdentity,
+                operationOrdinal,
+                previousOperation,
+                texture.Width,
+                texture.Height,
+                texture.Format,
+                texture.LevelCount > 1,
+                item.EstimatedBytes,
+                constructorMilliseconds,
+                setDataMilliseconds,
+                ownershipAssignmentMilliseconds));
+        }
+
+        public void RemoveAndDisposeTexture(Texture2D texture)
+        {
+            Textures.Remove(texture);
+            DisposeTexture(texture);
+        }
+
+        public void PublishTextureUploadDiagnostics()
+        {
+            int total = _textureUploadDiagnostics.Count;
+            double constructorTotal = _textureUploadDiagnostics.Sum(
+                diagnostic => diagnostic.ConstructorMilliseconds);
+            double setDataTotal = _textureUploadDiagnostics.Sum(
+                diagnostic => diagnostic.SetDataMilliseconds);
+            double ownershipAssignmentTotal = _textureUploadDiagnostics.Sum(
+                diagnostic => diagnostic.OwnershipAssignmentMilliseconds);
+            double maximumSetData = total == 0
+                ? 0.0
+                : _textureUploadDiagnostics.Max(diagnostic => diagnostic.SetDataMilliseconds);
+            for (int i = 0; i < total; i++)
+            {
+                TextureUploadDiagnostic diagnostic = _textureUploadDiagnostics[i];
+                Debug.WriteLine(
+                    $"[StationTexture] upload station={Descriptor.Identity}; " +
+                    $"owner=StationVisualPackage; creation={i + 1}/{total}; " +
+                    $"purpose={diagnostic.Purpose}; resource={diagnostic.ResourceIdentity}; " +
+                    $"operation={diagnostic.OperationOrdinal}; previous={diagnostic.PreviousOperation}; " +
+                    $"dimensions={diagnostic.Width}x{diagnostic.Height}; format={diagnostic.Format}; " +
+                    $"mipmaps={diagnostic.HasMipmaps}; bytes={diagnostic.ByteCount}; " +
+                    $"constructorMs={diagnostic.ConstructorMilliseconds:F3}; " +
+                    $"setDataMs={diagnostic.SetDataMilliseconds:F3}; " +
+                    $"ownerAssignmentMs={diagnostic.OwnershipAssignmentMilliseconds:F3}");
+            }
+            Debug.WriteLine(
+                $"[StationTexture] references station={Descriptor.Identity}; " +
+                $"owner=PlacedModule; assignments={TextureReferenceAssignmentCount}; " +
+                $"assignmentMs={TextureReferenceAssignmentMilliseconds:F3}");
+            Debug.WriteLine(
+                $"[StationTexture] preparation station={Descriptor.Identity}; " +
+                $"generatedTextureObjects={TextureDiagnostics.GeneratedTextureCount}; " +
+                $"generatedVariantPairs={TextureDiagnostics.GeneratedVariantPairCount}; " +
+                $"selectedUniqueTextureObjects={TextureDiagnostics.SelectedUniqueTextureCount}; " +
+                $"selectedUniquePairs={TextureDiagnostics.SelectedUniqueTexturePairCount}; " +
+                $"discardedTextureObjects={TextureDiagnostics.DiscardedTextureCount}; " +
+                $"uploadedAlbedo={TextureDiagnostics.UploadedAlbedoTextureCount}; " +
+                $"uploadedMaterial={TextureDiagnostics.UploadedMaterialTextureCount}; " +
+                $"moduleBindings={TextureDiagnostics.ModuleTextureBindingCount}; " +
+                $"fallbackReferences={TextureDiagnostics.SharedFallbackReferenceCount}; " +
+                $"setDataCalls={_textureUploadDiagnostics.Count}; " +
+                $"constructorTotalMs={constructorTotal:F3}; setDataTotalMs={setDataTotal:F3}; " +
+                $"maxSetDataMs={maximumSetData:F3}; " +
+                $"ownerAssignmentTotalMs={ownershipAssignmentTotal:F3}");
+        }
+
+        private void DisposeTexture(Texture2D texture)
+        {
+            string identity = _textureUploadDiagnostics
+                .FirstOrDefault(diagnostic => ReferenceEquals(diagnostic.Texture, texture))
+                ?.ResourceIdentity ?? "unknown";
+            var stopwatch = Stopwatch.StartNew();
+            texture.Dispose();
+            stopwatch.Stop();
+            _textureDisposalDiagnostics.Add(new(
+                identity,
+                stopwatch.Elapsed.TotalMilliseconds));
+        }
+
+        private void PublishTextureDisposalDiagnostics(double totalMilliseconds)
+        {
+            foreach (TextureDisposalDiagnostic diagnostic in _textureDisposalDiagnostics)
+            {
+                Debug.WriteLine(
+                    $"[StationTexture] dispose station={Descriptor.Identity}; " +
+                    $"owner=StationVisualPackage; resource={diagnostic.ResourceIdentity}; " +
+                    $"disposeMs={diagnostic.ElapsedMilliseconds:F3}");
+            }
+            Debug.WriteLine(
+                $"[StationTexture] package-dispose station={Descriptor.Identity}; " +
+                $"textures={_textureDisposalDiagnostics.Count}; totalDisposeMs={totalMilliseconds:F3}");
         }
 
         private static long EstimateMesh(StationModuleMesh? mesh)
@@ -506,19 +627,47 @@ public sealed partial class SystemSpaceState
             generation.Modules,
             [],
             generation.MegastationDiagnostics,
+            generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
             prepared.BoundsMax,
             envelopeRadius,
             prepared.RenderBoundsRadiusMeters);
-        var work = new List<StationVisualUploadWorkItem>(generation.UploadPlan.Count);
-        foreach (StationVisualUploadPlanItem item in generation.UploadPlan)
+        if (generation.UsesSharedMegastationFallbackTextures)
         {
+            MeshRenderer renderer = _meshRenderer
+                ?? throw new InvalidOperationException(
+                    "Megastation fallbacks require an active mesh renderer.");
+            var assignmentStopwatch = Stopwatch.StartNew();
+            foreach (PlacedModule module in generation.Modules)
+            {
+                module.TextureInstance = renderer.WhiteFallbackTexture;
+                module.MaterialInstance = renderer.StationFallbackMaterialTexture;
+            }
+            assignmentStopwatch.Stop();
+            package.TextureReferenceAssignmentCount = generation.Modules.Count * 2;
+            package.TextureReferenceAssignmentMilliseconds =
+                assignmentStopwatch.Elapsed.TotalMilliseconds;
+        }
+        var work = new List<StationVisualUploadWorkItem>(generation.UploadPlan.Count);
+        for (int i = 0; i < generation.UploadPlan.Count; i++)
+        {
+            StationVisualUploadPlanItem item = generation.UploadPlan[i];
+            int operationOrdinal = i;
+            string previousOperation = i == 0
+                ? "none"
+                : $"{generation.UploadPlan[i - 1].Kind}:{generation.UploadPlan[i - 1].ResourceIdentity}";
             work.Add(new(
                 item.Kind,
                 item.ResourceIdentity,
                 item.EstimatedBytes,
-                () => UploadStationVisualResource(package, item)));
+                () => UploadStationVisualResource(
+                    package,
+                    item,
+                    operationOrdinal,
+                    previousOperation),
+                item.VertexCount,
+                item.IndexCount));
         }
         return new(
             descriptor,
@@ -530,18 +679,34 @@ public sealed partial class SystemSpaceState
 
     private IDisposable UploadStationVisualResource(
         StationVisualPackage package,
-        StationVisualUploadPlanItem item)
+        StationVisualUploadPlanItem item,
+        int operationOrdinal,
+        string previousOperation)
     {
         if (item.Texture is { } preparedTexture)
         {
+            var constructorStopwatch = Stopwatch.StartNew();
             var texture = new Texture2D(
                 _gd,
                 preparedTexture.Width,
                 preparedTexture.Height);
+            constructorStopwatch.Stop();
             try
             {
+                var setDataStopwatch = Stopwatch.StartNew();
                 texture.SetData(preparedTexture.Pixels);
+                setDataStopwatch.Stop();
+                var assignmentStopwatch = Stopwatch.StartNew();
                 package.Textures.Add(texture);
+                assignmentStopwatch.Stop();
+                package.RecordTextureUpload(
+                    texture,
+                    item,
+                    operationOrdinal,
+                    previousOperation,
+                    constructorStopwatch.Elapsed.TotalMilliseconds,
+                    setDataStopwatch.Elapsed.TotalMilliseconds,
+                    assignmentStopwatch.Elapsed.TotalMilliseconds);
             }
             catch
             {
@@ -550,8 +715,7 @@ public sealed partial class SystemSpaceState
             }
             return new DelegateDisposable(() =>
             {
-                package.Textures.Remove(texture);
-                texture.Dispose();
+                package.RemoveAndDisposeTexture(texture);
             });
         }
 
@@ -650,10 +814,19 @@ public sealed partial class SystemSpaceState
                 return;
             }
 
-            foreach (StationTextureAssignment assignment in session.Prepared.Generation.TextureAssignments)
+            if (!session.Prepared.Generation.UsesSharedMegastationFallbackTextures)
             {
-                assignment.Module.TextureInstance = package.Textures[assignment.AlbedoTextureIndex];
-                assignment.Module.MaterialInstance = package.Textures[assignment.MaterialTextureIndex];
+                var textureAssignmentStopwatch = Stopwatch.StartNew();
+                foreach (StationTextureAssignment assignment in session.Prepared.Generation.TextureAssignments)
+                {
+                    assignment.Module.TextureInstance = package.Textures[assignment.AlbedoTextureIndex];
+                    assignment.Module.MaterialInstance = package.Textures[assignment.MaterialTextureIndex];
+                }
+                textureAssignmentStopwatch.Stop();
+                package.TextureReferenceAssignmentCount =
+                    session.Prepared.Generation.TextureAssignments.Count * 2;
+                package.TextureReferenceAssignmentMilliseconds =
+                    textureAssignmentStopwatch.Elapsed.TotalMilliseconds;
             }
             StationGenerator.ApplyPreparedLandingPads(
                 session.Descriptor.Station,
@@ -669,6 +842,7 @@ public sealed partial class SystemSpaceState
             package.FinalCommitMilliseconds = commitStopwatch.Elapsed.TotalMilliseconds;
             package.UploadMilliseconds = session.Scheduler.TotalUploadMilliseconds;
             package.UploadWallMilliseconds = session.WallStopwatch.Elapsed.TotalMilliseconds;
+            package.UploadedResourceGpuBytes = session.Scheduler.CompletedEstimatedBytes;
             installed = true;
         }
         catch (Exception exception)
@@ -691,6 +865,7 @@ public sealed partial class SystemSpaceState
                     diagnostics,
                     MegastationPrototypeSettings.DevelopmentSelection.Mode);
             PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
+            package.PublishTextureUploadDiagnostics();
             PublishMissingStationHullCasterWarnings(package);
         }
         StartDeferredPreparation(TakeDeferredStationPreparation());
@@ -754,6 +929,12 @@ public sealed partial class SystemSpaceState
                 $"cleanupMs={scheduler.CleanupMilliseconds:F1}; livePackages={_stationVisualSlot.LiveCount}{oversized}",
                 SystemMessagePriority.NB);
         }
+        PublishOversizedStationUploadOperations(
+            session.Descriptor.Identity,
+            scheduler,
+            scheduler.State == StationVisualUploadSchedulerState.Failed
+                ? SystemMessagePriority.Warning
+                : SystemMessagePriority.NB);
         StartDeferredPreparation(TakeDeferredStationPreparation());
     }
 
@@ -924,6 +1105,33 @@ public sealed partial class SystemSpaceState
             SystemMessagePriority.NB);
     }
 
+    private static void PublishOversizedStationUploadOperations(
+        string stationIdentity,
+        StationVisualUploadScheduler scheduler,
+        SystemMessagePriority priority)
+    {
+        foreach (StationVisualOversizedOperation operation in scheduler.OversizedOperations)
+        {
+            PublishStationResidencyMessage(
+                $"[StationUpload] oversized id={stationIdentity}; type={operation.Kind}; " +
+                $"mesh={operation.ResourceIdentity}; vertices={operation.VertexCount}; " +
+                $"indices={operation.IndexCount}; bytes={operation.EstimatedBytes}; " +
+                $"uploadMs={operation.ElapsedMilliseconds:F1}; " +
+                $"budgetMs={scheduler.FrameBudgetMilliseconds:F1}; " +
+                $"overrunMs={operation.BudgetOverrunMilliseconds:F1}",
+                priority);
+        }
+        int omitted = scheduler.OversizedOperationCount - scheduler.OversizedOperations.Count;
+        if (omitted > 0)
+        {
+            PublishStationResidencyMessage(
+                $"[StationUpload] oversized id={stationIdentity}; omitted={omitted}; " +
+                $"retained={scheduler.OversizedOperations.Count}; " +
+                $"total={scheduler.OversizedOperationCount}",
+                priority);
+        }
+    }
+
     private void PublishInstalledStationVisual(
         StationVisualPackage package,
         long sequence,
@@ -952,8 +1160,16 @@ public sealed partial class SystemSpaceState
             $"uploadedBytes={scheduler.CompletedEstimatedBytes}/{scheduler.TotalEstimatedBytes}; " +
             $"vertices={package.VertexCount}; triangles={package.TriangleCount}; " +
             $"livePackages={_stationVisualSlot.LiveCount}; gpuBuffers={package.OwnedGpuBufferCount}; " +
-            $"textures={package.OwnedTextureCount}; cpuMeshBytes={package.EstimatedCpuMeshBytes}; " +
-            $"gpuBytes={package.EstimatedGpuBytes}; staleDiscarded=false{oversized}",
+            $"ownedTextures={package.OwnedTextureCount}; shadowMaps={package.OwnedShadowMapCount}; " +
+            $"cpuMeshBytes={package.EstimatedCpuMeshBytes}; " +
+            $"uploadedResourceGpuBytes={package.UploadedResourceGpuBytes}; " +
+            $"shadowMapGpuBytes={package.ShadowMapGpuBytes}; " +
+            $"residentOwnedGpuBytes={package.ResidentOwnedGpuBytes}; " +
+            $"staleDiscarded=false{oversized}",
+            SystemMessagePriority.NB);
+        PublishOversizedStationUploadOperations(
+            package.Descriptor.Identity,
+            scheduler,
             SystemMessagePriority.NB);
     }
 
@@ -986,8 +1202,13 @@ public sealed partial class SystemSpaceState
             $"generationMs={(package?.GenerationMilliseconds ?? 0):F1}; " +
             $"gameThreadUploadMs={(package?.UploadMilliseconds ?? 0):F1}; vertices={package?.VertexCount ?? 0}; " +
             $"triangles={package?.TriangleCount ?? 0}; livePackages={livePackagesAfterChange}; " +
-            $"gpuBuffers={package?.OwnedGpuBufferCount ?? 0}; textures={package?.OwnedTextureCount ?? 0}; " +
-            $"cpuMeshBytes={package?.EstimatedCpuMeshBytes ?? 0}; gpuBytes={package?.EstimatedGpuBytes ?? 0}; " +
+            $"gpuBuffers={package?.OwnedGpuBufferCount ?? 0}; " +
+            $"ownedTextures={package?.OwnedTextureCount ?? 0}; " +
+            $"shadowMaps={package?.OwnedShadowMapCount ?? 0}; " +
+            $"cpuMeshBytes={package?.EstimatedCpuMeshBytes ?? 0}; " +
+            $"uploadedResourceGpuBytes={package?.UploadedResourceGpuBytes ?? 0}; " +
+            $"shadowMapGpuBytes={package?.ShadowMapGpuBytes ?? 0}; " +
+            $"residentOwnedGpuBytes={package?.ResidentOwnedGpuBytes ?? 0}; " +
             $"staleDiscarded={stale.ToString().ToLowerInvariant()}",
             SystemMessagePriority.NB);
     }
@@ -1003,6 +1224,7 @@ public sealed partial class SystemSpaceState
         SystemMessagePriority priority)
     {
         Console.WriteLine(message);
+        Debug.WriteLine(message);
         DataBus.System.Publish(
             Topics.System.All,
             new SystemMessage(message, priority));
