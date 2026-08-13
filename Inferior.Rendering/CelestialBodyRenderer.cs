@@ -396,13 +396,25 @@ public sealed class CelestialBodyRenderer : IDisposable
             if (denom > 0.0001f) kUlp = System.Math.Clamp(1f / denom, 0.01f, 1f);
         }
 
-        // Constraint 2 — beat the sphere's own near pole, (dist - radius), with a comfortable
-        // multiple of `radius` as margin (not razor-thin against the pole itself either).
+        // Constraint 2 — beat the sphere's own near pole, (dist - radius). Timo's second
+        // report (a large star, 9M km, "dancing"/"vibrating" irregular jagged patch) showed
+        // this constraint's first version (an ADDITIVE margin, dist - radius*1.5) wasn't
+        // robust — a fixed multiple of radius stays a THIN margin in absolute depth-buffer
+        // terms once radius/dist gets large, and what showed on screen was genuine per-facet
+        // z-fighting (the 24-ring/24-segment sphere's individual facets flipping win/lose
+        // frame to frame) rather than the earlier clean "hole" — consistent with a margin that
+        // was sometimes just barely insufficient rather than always cleanly insufficient.
+        // Fixed by using a PROPORTIONAL safety factor instead: push the billboard to HALF the
+        // near pole's own distance from the camera, not just some fixed offset from it — this
+        // scales correctly at any radius/dist ratio instead of eroding as radius/dist grows.
+        // Free to be this aggressive: scaling the whole point by k preserves screen position
+        // exactly regardless of magnitude (proven and empirically verified — see the class doc
+        // comment above), so there is no visual cost to a large safety factor here.
         float kGeometric = 1f;
         if (radius > 0f && radius < dist)
         {
-            const float geometricMargin = 1.5f;
-            kGeometric = System.Math.Clamp((dist - radius * geometricMargin) / dist, 0.01f, 1f);
+            const float nearPoleSafetyFactor = 0.5f;
+            kGeometric = System.Math.Clamp(nearPoleSafetyFactor * (dist - radius) / dist, 0.01f, 1f);
         }
 
         return System.Math.Min(kUlp, kGeometric);
