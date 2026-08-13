@@ -363,32 +363,46 @@ public sealed class CelestialBodyRenderer : IDisposable
     // _effect.Projection, whichever of the far/mid/near passes is currently active — see
     // SystemSpaceState.BuildActivePasses) rather than a hardcoded near/far pair, so this stays
     // correct if those constants are ever retuned, with no second copy to keep in sync.
-    // Timo-reported fix #2: the formula above only guarantees beating the SILHOUETTE's depth
-    // (≈dist, the tangent point where the sphere's curve rejoins the flat billboard's own
-    // plane) — it says nothing about the sphere's NEAR POLE, which sits at (dist - physRadius)
-    // and can be meaningfully CLOSER than dist when physRadius is a non-negligible fraction of
-    // dist (close approach to a physically large star). At the silhouette-only margin, the
-    // billboard beats the sphere everywhere EXCEPT its own central screen region, where the
-    // sphere's near-facing hemisphere is nearer than the biased billboard — producing a
-    // jagged (tessellation-shaped, since the 24-ring/24-segment sphere approximates a curve
-    // with flat facets) hole right in the middle showing the bare tinted disc instead of the
-    // overlay/glow, growing as physRadius/dist grows on approach. `radius` (the caller's own
-    // billboard radius — always >= the star's true physRadius, since it's either that exact
-    // value when phys-bound or an inflated floor value when floor-bound) stands in for
-    // physRadius here — safe to use directly, and using the bigger radius of the outer glow
-    // layers is simply extra-safe margin, never a problem given scaling has no visual cost.
-    private float ComputeGlowDepthBiasK(float dist, float radius)
+    // Timo-reported fix #2, then #3: two successive attempts at a "beat the sphere's near
+    // pole" constraint (an additive margin, then a proportional one) both still showed real
+    // artifacts in-engine — an additive margin stayed thin once radius/dist grew large, and
+    // even the proportional version (dist-radius)*0.5 wasn't enough for Timo's third report
+    // (a distance-tied "stable, then jumps" flicker, not per-frame noise — matching quantized
+    // depth-test instability, not a clean miss). Both versions computed the bias from a
+    // multi-step radius/dist formula (subtraction then division), each step its own source of
+    // float32 rounding, and had an edge case (radius >= dist silently disabled the
+    // constraint) that was never stress-tested at the extreme proximity ratios Timo was
+    // actually flying at.
+    //
+    // Replaced with something structurally simpler and unconditionally robust: rather than
+    // reasoning about exactly where the sphere's own geometry can be, just push the billboard
+    // to a small FIXED fraction of its true distance — independent of radius entirely, so
+    // there is no per-star-size formula to get subtly wrong and no edge case where the
+    // constraint silently stops applying. A billboard at 1% of its true distance sits closer
+    // to the camera than a sphere's near pole for ANY radius up to 99% of the viewing
+    // distance (i.e. unless the camera is essentially touching the star's surface) — far more
+    // margin than the sphere's own geometry could plausibly need, and — as established
+    // throughout this fix (see the class doc comment above, both proven analytically and
+    // empirically) — completely free: scaling the whole point by k preserves screen position
+    // exactly regardless of magnitude, so extra aggression costs nothing visually. The only
+    // real constraint left is not clipping through the ACTIVE pass's own near plane, which is
+    // guarded explicitly below (derived from the same M33/M43 already read off the live
+    // projection, not a second hardcoded copy).
+    private float ComputeGlowDepthBiasK(float dist)
     {
         if (dist < 0.0001f) return 1f;
 
-        // Constraint 1 — beat the silhouette (handles far/small-disc z-fighting).
-        float kUlp = 1f;
+        float m33 = _effect.Projection.M33;
         float m43 = _effect.Projection.M43;
+
+        // Constraint 1 — beat the silhouette at large distance, where even a fixed small
+        // fraction of dist isn't automatically enough (required world-space separation grows
+        // roughly with dist, not a fixed fraction of it — see the class doc comment above).
+        float kUlp = 1f;
         if (m43 != 0f)
         {
             // Comfortably above the 1-ULP minimum a 24-bit depth buffer requires to resolve
-            // two otherwise-adjacent stored values — generous margin is free (see the class
-            // doc comment above).
+            // two otherwise-adjacent stored values — generous margin is free.
             const float marginUlps = 64f;
             const float ulp        = 1f / 16777216f; // 2^24, Depth24Stencil8
             float targetShift = marginUlps * ulp;
@@ -396,34 +410,34 @@ public sealed class CelestialBodyRenderer : IDisposable
             if (denom > 0.0001f) kUlp = System.Math.Clamp(1f / denom, 0.01f, 1f);
         }
 
-        // Constraint 2 — beat the sphere's own near pole, (dist - radius). Timo's second
-        // report (a large star, 9M km, "dancing"/"vibrating" irregular jagged patch) showed
-        // this constraint's first version (an ADDITIVE margin, dist - radius*1.5) wasn't
-        // robust — a fixed multiple of radius stays a THIN margin in absolute depth-buffer
-        // terms once radius/dist gets large, and what showed on screen was genuine per-facet
-        // z-fighting (the 24-ring/24-segment sphere's individual facets flipping win/lose
-        // frame to frame) rather than the earlier clean "hole" — consistent with a margin that
-        // was sometimes just barely insufficient rather than always cleanly insufficient.
-        // Fixed by using a PROPORTIONAL safety factor instead: push the billboard to HALF the
-        // near pole's own distance from the camera, not just some fixed offset from it — this
-        // scales correctly at any radius/dist ratio instead of eroding as radius/dist grows.
-        // Free to be this aggressive: scaling the whole point by k preserves screen position
-        // exactly regardless of magnitude (proven and empirically verified — see the class doc
-        // comment above), so there is no visual cost to a large safety factor here.
-        float kGeometric = 1f;
-        if (radius > 0f && radius < dist)
+        // Constraint 2 — unconditional aggressive fixed floor, covering close approach to a
+        // physically large star (see the big comment above for why a fixed fraction, not a
+        // radius-dependent formula).
+        const float kFixed = 0.01f;
+
+        float k = System.Math.Min(kUlp, kFixed);
+
+        // Constraint 3 — never let the biased point collapse into/behind the active pass's
+        // own near plane. near = M43/M33 is exact for CreatePerspectiveFieldOfView's standard
+        // form (M33 = far/(near-far), M43 = near*far/(near-far), so M43/M33 = near).
+        if (m33 != 0f)
         {
-            const float nearPoleSafetyFactor = 0.5f;
-            kGeometric = System.Math.Clamp(nearPoleSafetyFactor * (dist - radius) / dist, 0.01f, 1f);
+            float near = m43 / m33;
+            if (near > 0f)
+            {
+                const float nearSafetyMultiple = 10f;
+                float minK = System.Math.Min(1f, (near * nearSafetyMultiple) / dist);
+                k = System.Math.Max(k, minK);
+            }
         }
 
-        return System.Math.Min(kUlp, kGeometric);
+        return k;
     }
 
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
     {
         if (radius < 0.0001f) return;
-        float k = ComputeGlowDepthBiasK(center.Length(), radius);
+        float k = ComputeGlowDepthBiasK(center.Length());
         var tl = (center + (-right + up) * radius) * k;
         var tr = (center + ( right + up) * radius) * k;
         var bl = (center + (-right - up) * radius) * k;
