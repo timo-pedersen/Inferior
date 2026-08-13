@@ -63,8 +63,14 @@ public sealed class NovaAnchorageVariantFloorTests(ITestOutputHelper output)
             float baseColourValue = System.Math.Max(variantPalette.BaseColour.R,
                 System.Math.Max(variantPalette.BaseColour.G, variantPalette.BaseColour.B)) / 255f;
             output.WriteLine($"Variant index {idx}/{seeds.Length}, post-offset BaseColour={variantPalette.BaseColour}, value={baseColourValue:F3}");
-            Assert.True(baseColourValue >= StationTextureRegistry.MinVariantBaseValue - 0.001f,
-                $"Expected variant BaseColour value >= floor ({StationTextureRegistry.MinVariantBaseValue}), got {baseColourValue:F3} ({variantPalette.BaseColour})");
+            // Brief B4: the floor is now live-tunable (StationBrightnessTuning.VariantValueFloor,
+            // default matches the old fixed MinVariantBaseValue constant this test used to
+            // reference) — assert against the live value so this keeps testing "the real
+            // generation pass respects whatever floor is currently configured," not a stale
+            // constant that no longer drives the actual code path.
+            float expectedFloor = Inferior.Rendering.StationBrightnessTuning.VariantValueFloor;
+            Assert.True(baseColourValue >= expectedFloor - 0.001f,
+                $"Expected variant BaseColour value >= floor ({expectedFloor}), got {baseColourValue:F3} ({variantPalette.BaseColour})");
 
             Assert.NotNull(bay.TextureInstance);
             var pixels = new Color[bay.TextureInstance!.Width * bay.TextureInstance.Height];

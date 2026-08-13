@@ -187,6 +187,7 @@ public sealed partial class SystemSpaceState
                     float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
                     _meshRenderer.DrawBakedColorLitShadowed(deco.vb, deco.ib, world, view, proj,
                         SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
+                        StationBrightnessTuning.DecorationBrightnessMultiplier,
                         _stationShadowMap!, mod.Transform, ctx.StationLocalToLightView,
                         ctx.MinXY, ctx.InvSize, ctx.Near, ctx.DepthSpan,
                         new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
@@ -197,7 +198,8 @@ public sealed partial class SystemSpaceState
                 else
                 {
                     _meshRenderer.DrawBakedColorLit(deco.vb, deco.ib, world, view, proj,
-                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex);
+                        SceneLighting.SunDirection, sunCol, SceneLighting.Ambient, tex,
+                        StationBrightnessTuning.DecorationBrightnessMultiplier);
                 }
             }
         }

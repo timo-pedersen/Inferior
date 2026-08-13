@@ -858,6 +858,7 @@ public sealed partial class SystemSpaceState : GameState
         UpdateZoneDebugInput(keys);
         UpdateSpecularInput(keys);
         UpdateSunTuningInput(keys, dt);
+        UpdateStationBrightnessTuningInput(keys, dt);
 
         // Animations always run, regardless of input mode
         _cockpitUI.Tick(dt);
@@ -1165,6 +1166,7 @@ public sealed partial class SystemSpaceState : GameState
         _hyperspace.DrawOverlay(sb);
         DrawStationShadowOverlay(sb);
         DrawSunTuningOverlay(sb);
+        DrawStationBrightnessTuningOverlay(sb);
         sb.End();
 
         // Crosshair — separate pass with colour-invert blend so it's readable against any background
