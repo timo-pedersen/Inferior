@@ -53,7 +53,8 @@ public sealed record StationGenerationCpuResult(
     double GenerationMilliseconds,
     StationTexturePreparationDiagnostics TextureDiagnostics,
     bool UsesSharedMegastationFallbackTextures = false,
-    MegastationSemanticZoningResult? MegastationSemanticZoning = null);
+    MegastationSemanticZoningResult? MegastationSemanticZoning = null,
+    MegastationWindowDiagnostics? MegastationWindowDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -146,7 +147,8 @@ public sealed class StationGenerator
                     ModuleTextureBindingCount: 2,
                     SharedFallbackReferenceCount: 2),
                 UsesSharedMegastationFallbackTextures: true,
-                MegastationSemanticZoning: cpu.SemanticZoning);
+                MegastationSemanticZoning: cpu.SemanticZoning,
+                MegastationWindowDiagnostics: cpu.WindowPlan.Diagnostics);
         }
 
         int seed = NameHash(station.Name);

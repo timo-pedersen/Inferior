@@ -96,6 +96,8 @@ public sealed record MegastationPrototypeCpuResult(
     IReadOnlyList<EdgeRegionPlan> Edges,
     IReadOnlyList<CornerRegionPlan> Corners,
     StationModuleMesh Mesh,
+    MegastationWindowPlan WindowPlan,
+    StationModuleMesh WindowGlassMesh,
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
 
@@ -162,6 +164,15 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             topology,
             faceResults);
+        MegastationWindowPlan windowPlan = MegastationWindowPlanner.Plan(
+            grid,
+            topology,
+            semanticZoning,
+            cancellationToken);
+        MegastationWindowMeshBuildResult windowMesh = MegastationWindowMeshBuilder.Build(
+            windowPlan,
+            cancellationToken);
+        windowPlan = windowPlan with { Diagnostics = windowMesh.Diagnostics };
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(
             regularised.Occupancy,
@@ -260,6 +271,8 @@ public static class MegastationPrototypeGenerator
             edges,
             corners,
             mesh,
+            windowPlan,
+            windowMesh.Mesh,
             meshStats,
             diag);
     }
@@ -288,6 +301,7 @@ public static class MegastationPrototypeGenerator
             AabbMin = bounds * -0.5f,
             AabbMax = bounds * 0.5f,
             HullMesh = cpu.Mesh,
+            GlassMesh = cpu.WindowGlassMesh,
         };
     }
 

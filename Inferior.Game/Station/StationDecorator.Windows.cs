@@ -20,11 +20,11 @@ public static partial class StationDecorator
         _            => 0.25f,
     };
 
-    private static readonly Color WarmWhiteColor    = new(255, 250, 220);
-    private static readonly Color NeutralWhiteColor = new(240, 240, 248);
-    private static readonly Color CoolBlueColor     = new(210, 225, 255);
-    private static readonly Color DimAmberColor     = new(200, 170, 100);
-    private static readonly Color DarkWindowColor   = new( 31,  30,  26);  // WarmWhite × 0.12f
+    private static readonly Color WarmWhiteColor    = StationWindowVisuals.WarmWhite;
+    private static readonly Color NeutralWhiteColor = StationWindowVisuals.NeutralWhite;
+    private static readonly Color CoolBlueColor     = StationWindowVisuals.CoolBlue;
+    private static readonly Color DimAmberColor     = StationWindowVisuals.DimAmber;
+    private static readonly Color DarkWindowColor   = StationWindowVisuals.DarkWarm;
 
     private static Color PickWindowColor(string category, System.Random rng)
     {
@@ -371,13 +371,9 @@ public static partial class StationDecorator
 
     // ── Glass gradient helpers ────────────────────────────────────────────────
 
-    private static Color GlassTopColor(Color c) => Color.Lerp(c, Color.White, 0.18f);
+    private static Color GlassTopColor(Color c) => StationWindowVisuals.GlassTop(c);
 
-    private static Color GlassBottomColor(Color c) => new Color(
-        (byte)MathF.Min(c.R * 0.72f, 255f),
-        (byte)MathF.Min(c.G * 0.72f, 255f),
-        (byte)Math.Min((int)(c.B * 0.72f) + 8, 255),
-        c.A);
+    private static Color GlassBottomColor(Color c) => StationWindowVisuals.GlassBottom(c);
 
     // Maps a vertex position along `upDir` to a gradient colour between bottom and top.
     private static Color GlassGradientColor(Color c, Vector3 v, Vector3 upDir, float minY, float maxY)

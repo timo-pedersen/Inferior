@@ -97,6 +97,25 @@ public sealed partial class SystemSpaceState
             SystemMessagePriority.NB));
     }
 
+    private static void PublishMegastationWindowDiagnostics(
+        string stationIdentity,
+        MegastationWindowDiagnostics diagnostics)
+    {
+        string message = $"[MegastationWindows] station={stationIdentity}; " +
+            $"habitationZones={diagnostics.HabitationZoneCount}; " +
+            $"eligibleRegions={diagnostics.EligibleRegionCount}; activeRegions={diagnostics.ActiveRegionCount}; " +
+            $"darkRegions={diagnostics.DarkRegionCount}; blocks={diagnostics.BlockCount}; " +
+            $"windows={diagnostics.WindowCount}; lit={diagnostics.LitWindowCount}; " +
+            $"dim={diagnostics.DimWindowCount}; dark={diagnostics.DarkWindowCount}; " +
+            $"absentCandidates={diagnostics.AbsentCandidateCount}; " +
+            $"eligibleArea={diagnostics.EligibleHabitationWallArea:F1}m2; " +
+            $"activeArea={diagnostics.ActiveWindowArea:F1}m2; " +
+            $"meshVertices={diagnostics.MeshVertexCount}; meshTriangles={diagnostics.MeshTriangleCount}; " +
+            $"meshBytes={diagnostics.MeshBytes}; planningMs={diagnostics.PlanningMilliseconds}; " +
+            $"meshBuildMs={diagnostics.MeshBuildMilliseconds}";
+        PublishStationResidencyMessage(message, SystemMessagePriority.NB);
+    }
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────

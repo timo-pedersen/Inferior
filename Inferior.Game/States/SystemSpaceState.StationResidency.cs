@@ -79,6 +79,7 @@ public sealed partial class SystemSpaceState
             IReadOnlyList<Texture2D> textures,
             MegastationPrototypeDiagnostics? megastationDiagnostics,
             MegastationSemanticZoningResult? megastationSemanticZoning,
+            MegastationWindowDiagnostics? megastationWindowDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -91,6 +92,7 @@ public sealed partial class SystemSpaceState
             Textures = textures.ToList();
             MegastationDiagnostics = megastationDiagnostics;
             MegastationSemanticZoning = megastationSemanticZoning;
+            MegastationWindowDiagnostics = megastationWindowDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -104,6 +106,7 @@ public sealed partial class SystemSpaceState
         public List<Texture2D> Textures { get; }
         public MegastationPrototypeDiagnostics? MegastationDiagnostics { get; }
         public MegastationSemanticZoningResult? MegastationSemanticZoning { get; }
+        public MegastationWindowDiagnostics? MegastationWindowDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -656,6 +659,7 @@ public sealed partial class SystemSpaceState
             [],
             generation.MegastationDiagnostics,
             generation.MegastationSemanticZoning,
+            generation.MegastationWindowDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -897,6 +901,8 @@ public sealed partial class SystemSpaceState
                 PublishMegastationSemanticZoningDiagnostics(
                     package.Descriptor.Identity,
                     zoning.Diagnostics);
+            if (package.MegastationWindowDiagnostics is { } windows)
+                PublishMegastationWindowDiagnostics(package.Descriptor.Identity, windows);
             PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
             package.PublishTextureUploadDiagnostics();
             PublishMissingStationHullCasterWarnings(package);

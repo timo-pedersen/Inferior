@@ -1,4 +1,5 @@
 using Inferior.Game.StationGen;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.Galaxy;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
@@ -146,8 +147,14 @@ public sealed class StationTextureCompactionTests
         Assert.Equal(0, prepared.TextureDiagnostics.UploadedMaterialTextureCount);
         Assert.Equal(2, prepared.TextureDiagnostics.ModuleTextureBindingCount);
         Assert.Equal(2, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        MegastationWindowDiagnostics windows = Assert.IsType<MegastationWindowDiagnostics>(
+            prepared.MegastationWindowDiagnostics);
+        StationVisualUploadPlanItem glass = Assert.Single(
+            prepared.UploadPlan,
+            item => item.Kind == StationVisualUploadResourceKind.GlassMesh);
+        Assert.Equal(windows.MeshBytes, glass.EstimatedBytes);
         Assert.Equal(
-            3_965_952,
+            3_965_952 + windows.MeshBytes,
             prepared.UploadPlan.Sum(item => item.EstimatedBytes));
     }
 
