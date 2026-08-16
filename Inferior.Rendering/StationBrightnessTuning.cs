@@ -7,6 +7,12 @@ namespace Inferior.Rendering;
 /// values AND the tuning panel's starting values read from — the panel and the defaults can
 /// never drift apart (the rule established in Brief B3).
 ///
+/// Brief B5: Timo's tuned values are now baked into these DefaultXxx constants (across red/
+/// white/yellow/blue star systems and a deliberately colourful station) — this class's live
+/// values start at the tuned appearance with no panel interaction required. The panel itself
+/// stays (per the brief: "it earned its place and tuning may continue") — only the defaults
+/// it reads from moved.
+///
 /// Two different consumers read these:
 /// - <see cref="DecorationBrightnessMultiplier"/> — read every frame by
 ///   <c>MeshRenderer.DrawBakedColorLit</c>/<c>DrawBakedColorLitShadowed</c>, a live shader
@@ -34,23 +40,29 @@ namespace Inferior.Rendering;
 public static class StationBrightnessTuning
 {
     // ── Defaults — also the values ResetToDefaults() restores ──────────────────────────
+    // Brief B5: decoration was never the problem — the ~0.50 vertex-colour multiply is real
+    // arithmetic but the greeble-invisible complaint traced to the variant tail (a near-black
+    // rolled BaseColour), not a globally-dark decoration path. 1.0 is Timo's settled answer,
+    // not a placeholder — see StationTextureRegistry's variant floor/compression instead.
     public const float DefaultDecorationBrightnessMultiplier = 1f;
-    // Matches SceneLighting.Ambient's own field-initializer default exactly — this is a
-    // pass-through, not an independent value, so its "default" must match the thing it
-    // forwards to.
-    public const float DefaultAmbient = 0.09f;
-    // Matches the pre-B4 fixed MinVariantBaseValue constant (Brief P1 Fix A) — baking this
-    // brief's mechanism in at the exact value already shipped keeps the neutral-default
-    // rendering identical until Timo actually tunes something.
-    public const float DefaultVariantValueFloor = 0.15f;
-    // 0 = no compression, i.e. exactly the pre-B4 behaviour (a hard floor at
-    // VariantValueFloor, nothing else remapped) — neutral by construction.
-    public const float DefaultVariantCompressionStrength = 0f;
-    // Brief B4a Fix 2: 0 = no coupling, i.e. exactly pre-B4a behaviour — flooring/lifting a
-    // variant's HSV value leaves its saturation untouched, which is what produced the
-    // "over-saturated" read Timo reported at a high floor (v*s = chroma; lifting v alone
-    // raises chroma). See StationTextureRegistry.ApplyHsvOffset for the mechanism.
-    public const float DefaultSaturationFalloff = 0f;
+    // Brief B5: 0.09 -> 0.1, "essentially unchanged" — confirmed by testing, not assumed,
+    // that ambient was likewise not the real problem. Matches SceneLighting.Ambient's own
+    // field-initializer default exactly, since this is a pass-through, not an independent
+    // value — its default must match the thing it forwards to.
+    public const float DefaultAmbient = 0.1f;
+    // Brief B5: 0.15 (Brief P1 Fix A's original pathological-black-variant floor) -> 0.2.
+    public const float DefaultVariantValueFloor = 0.2f;
+    // Brief B5: 0 -> 1.0, full strength. This is where the real fix lives — lifting the
+    // lower tail SMOOTHLY so dark modules (Nova Anchorage's bay: post-offset BaseColour
+    // (0,0,0), ~17 mean luminance against a ~130 median) become legible while staying
+    // distinguishable from each other, preserving S2b-2's deliberate variance rather than
+    // piling everything onto one floor value.
+    public const float DefaultVariantCompressionStrength = 1f;
+    // Brief B5: 0 -> 1.0, full coupling. Flooring/lifting HSV value alone reads as a large
+    // apparent saturation increase (v*s = chroma) — at full strength, lifting v no longer
+    // intensifies colour at all, which is what "over-saturated red-star stations improved"
+    // needed. See StationTextureRegistry.ApplyHsvOffset for the mechanism.
+    public const float DefaultSaturationFalloff = 1f;
 
     // ── Live values ──────────────────────────────────────────────────────────────────
     public static float DecorationBrightnessMultiplier { get; set; } = DefaultDecorationBrightnessMultiplier;
