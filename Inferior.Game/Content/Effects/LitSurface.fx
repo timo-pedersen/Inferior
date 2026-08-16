@@ -46,6 +46,8 @@ float    EclipseFactor = 1.0;   // reserved for Phase E; 1.0 = no eclipse
 
 float3   MaterialColor = float3(1, 1, 1);   // DynamicLit only — flat per-draw tint
 
+float3   DebugFlatColor = float3(1, 1, 1);  // debug-only semantic surface override
+
 // Brief S1: single-source Blinn-Halfway specular, DynamicLit*/station-hulls only. No HLSL
 // initializers — same policy as the shadow parameters below (project policy since the
 // EclipseFactor incident); MeshRenderer.cs sets all three explicitly every DynamicLit*
@@ -450,6 +452,11 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
     return float4(rgb, 1.0);
 }
 
+float4 PS_DebugFlatColor(VertexOutput input) : COLOR0
+{
+    return float4(DebugFlatColor, 1.0);
+}
+
 technique BakedColorLit
 {
     pass P0
@@ -483,5 +490,14 @@ technique DynamicLitShadowed
     {
         VertexShader = compile vs_3_0 VS();
         PixelShader  = compile ps_3_0 PS_DynamicLitShadowed();
+    }
+}
+
+technique DebugFlatColor
+{
+    pass P0
+    {
+        VertexShader = compile vs_3_0 VS();
+        PixelShader  = compile ps_3_0 PS_DebugFlatColor();
     }
 }

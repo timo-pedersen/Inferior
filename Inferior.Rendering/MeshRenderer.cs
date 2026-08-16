@@ -106,6 +106,28 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx, startIndex, indexCount / 3);
     }
 
+    public void DrawDebugFlatColorRange(
+        VertexBuffer vb,
+        IndexBuffer ib,
+        int startIndex,
+        int indexCount,
+        Matrix world,
+        Matrix view,
+        Matrix projection,
+        Color color)
+    {
+        if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
+            throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
+
+        var fx = _litSurfaceEffect;
+        fx.CurrentTechnique = fx.Techniques["DebugFlatColor"];
+        fx.Parameters["World"].SetValue(world);
+        fx.Parameters["View"].SetValue(view);
+        fx.Parameters["Projection"].SetValue(projection);
+        fx.Parameters["DebugFlatColor"].SetValue(color.ToVector3());
+        Draw(vb, ib, fx, startIndex, indexCount / 3);
+    }
+
     public void DrawDynamicLitShadowed(
         VertexBuffer vb, IndexBuffer ib,
         Matrix world, Matrix view, Matrix projection,

@@ -101,7 +101,25 @@ public static class MegastationPrototypeMeshBuilder
         var stopwatch = Stopwatch.StartNew();
         BoundaryTopology topology = BoundaryTopologyBuilder.Build(occupancy, settings);
         stopwatch.Stop();
-        long topologyMs = stopwatch.ElapsedMilliseconds;
+        return Build(
+            occupancy,
+            topology,
+            mesh,
+            debugColorMode,
+            settings,
+            stopwatch.ElapsedMilliseconds);
+    }
+
+    public static MegastationMeshStats Build(
+        StructuralOccupancy occupancy,
+        BoundaryTopology topology,
+        StationModuleMesh mesh,
+        MegastationDebugColorMode debugColorMode = MegastationDebugColorMode.StructuralVsUrban,
+        MegastationPrototypeSettings? settings = null,
+        long topologyBuildMilliseconds = 0)
+    {
+        settings ??= MegastationPrototypeSettings.Default;
+        var stopwatch = new Stopwatch();
 
         bool requireValidStructuralBoundary = settings.EnableTopologyRegularisation;
         if (requireValidStructuralBoundary && topology.Stats.InvalidDiagonalCount != 0)
@@ -164,7 +182,7 @@ public static class MegastationPrototypeMeshBuilder
             chamferPlan.SuppressedRunCount,
             bevelQuads,
             cornerCaps,
-            topologyMs,
+            topologyBuildMilliseconds,
             stopwatch.ElapsedMilliseconds,
             sharpValidation,
             finalValidation,

@@ -78,6 +78,7 @@ public sealed partial class SystemSpaceState
             List<PlacedModule> modules,
             IReadOnlyList<Texture2D> textures,
             MegastationPrototypeDiagnostics? megastationDiagnostics,
+            MegastationSemanticZoningResult? megastationSemanticZoning,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -89,6 +90,7 @@ public sealed partial class SystemSpaceState
             Modules = modules;
             Textures = textures.ToList();
             MegastationDiagnostics = megastationDiagnostics;
+            MegastationSemanticZoning = megastationSemanticZoning;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -101,6 +103,7 @@ public sealed partial class SystemSpaceState
         public List<PlacedModule> Modules { get; }
         public List<Texture2D> Textures { get; }
         public MegastationPrototypeDiagnostics? MegastationDiagnostics { get; }
+        public MegastationSemanticZoningResult? MegastationSemanticZoning { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -120,6 +123,7 @@ public sealed partial class SystemSpaceState
         public Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> HullMeshes { get; } = [];
         public Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> ShadowCasterMeshes { get; } = [];
         public Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> DecoCasterMeshes { get; } = [];
+        public Dictionary<MegastationZoneRole, IndexBuffer> SemanticDebugIndexBuffers { get; } = [];
         public Dictionary<PlacedModule, (Vector3 min, Vector3 max)> ShadowCasterHullBounds { get; } = [];
         public Dictionary<PlacedModule, (Vector3 min, Vector3 max)> ShadowCasterDecoBounds { get; } = [];
         public RenderTarget2D? ShadowMap { get; set; }
@@ -188,6 +192,9 @@ public sealed partial class SystemSpaceState
             DisposeMeshes(GlassMeshes);
             DisposeMeshes(ShadowCasterMeshes);
             DisposeMeshes(DecoCasterMeshes);
+            foreach (IndexBuffer buffer in SemanticDebugIndexBuffers.Values)
+                buffer.Dispose();
+            SemanticDebugIndexBuffers.Clear();
             foreach (Texture2D texture in Textures)
                 DisposeTexture(texture);
             Textures.Clear();
@@ -212,6 +219,27 @@ public sealed partial class SystemSpaceState
             Modules.Clear();
             totalStopwatch.Stop();
             PublishTextureDisposalDiagnostics(totalStopwatch.Elapsed.TotalMilliseconds);
+        }
+
+        public IReadOnlyDictionary<MegastationZoneRole, IndexBuffer> EnsureSemanticDebugIndexBuffers(
+            GraphicsDevice graphicsDevice)
+        {
+            if (SemanticDebugIndexBuffers.Count > 0 || MegastationSemanticZoning == null)
+                return SemanticDebugIndexBuffers;
+
+            foreach (MegastationSemanticIndexGroup group in MegastationSemanticZoning.DebugIndexGroups)
+            {
+                if (group.Indices.Count == 0)
+                    continue;
+                var buffer = new IndexBuffer(
+                    graphicsDevice,
+                    IndexElementSize.ThirtyTwoBits,
+                    group.Indices.Count,
+                    BufferUsage.WriteOnly);
+                buffer.SetData(group.Indices.ToArray());
+                SemanticDebugIndexBuffers.Add(group.Role, buffer);
+            }
+            return SemanticDebugIndexBuffers;
         }
 
         public void RecordTextureUpload(
@@ -627,6 +655,7 @@ public sealed partial class SystemSpaceState
             generation.Modules,
             [],
             generation.MegastationDiagnostics,
+            generation.MegastationSemanticZoning,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -864,6 +893,10 @@ public sealed partial class SystemSpaceState
                 PublishMegastationPrototypeDiagnostics(
                     diagnostics,
                     MegastationPrototypeSettings.DevelopmentSelection.Mode);
+            if (package.MegastationSemanticZoning is { } zoning)
+                PublishMegastationSemanticZoningDiagnostics(
+                    package.Descriptor.Identity,
+                    zoning.Diagnostics);
             PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
             package.PublishTextureUploadDiagnostics();
             PublishMissingStationHullCasterWarnings(package);

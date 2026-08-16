@@ -76,6 +76,27 @@ public sealed partial class SystemSpaceState
             SystemMessagePriority.NB));
     }
 
+    private static void PublishMegastationSemanticZoningDiagnostics(
+        string stationIdentity,
+        MegastationSemanticZoningDiagnostics diagnostics)
+    {
+        string roles = string.Join("; ", Enum.GetValues<MegastationZoneRole>().Select(role =>
+        {
+            float percentage = diagnostics.TotalSurfaceArea <= 0f
+                ? 0f
+                : diagnostics.AreaByRole.GetValueOrDefault(role) / diagnostics.TotalSurfaceArea * 100f;
+            return $"{role}={percentage:F1}%";
+        }));
+        DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            $"[MegastationZoning] station={stationIdentity}; zones={diagnostics.ZoneCount}; " +
+            $"surfaceFaces={diagnostics.SurfaceFaceCount}; surfaceArea={diagnostics.TotalSurfaceArea:F1}m2; " +
+            $"zoningMs={diagnostics.ZoningMilliseconds}; {roles}; " +
+            $"anchors core/faceDistricts/edges/corners={diagnostics.CoreAnchorCount}/" +
+            $"{diagnostics.FaceDistrictAnchorCount}/{diagnostics.EdgeAnchorCount}/{diagnostics.CornerAnchorCount}; " +
+            $"repairFragments={diagnostics.RepairFragmentCount}; fragmentsMerged={diagnostics.FragmentsMerged}",
+            SystemMessagePriority.NB));
+    }
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────
@@ -176,6 +197,42 @@ public sealed partial class SystemSpaceState
                 // receiver-plane correction can fix. See SystemSpaceState.Shadows.cs.
                 Matrix world = mod.Transform * Matrix.CreateScale(rs) * stationRot
                              * Matrix.CreateTranslation(renderPos);
+
+                if (_megastationZoningDebug
+                    && ResidentStationVisual.MegastationSemanticZoning is { } zoning
+                    && mod.Definition.Category == "megastation-prototype")
+                {
+                    IReadOnlyDictionary<MegastationZoneRole, IndexBuffer> debugBuffers =
+                        ResidentStationVisual.EnsureSemanticDebugIndexBuffers(_gd);
+                    foreach (MegastationSemanticIndexGroup group in zoning.DebugIndexGroups)
+                    {
+                        if (!debugBuffers.TryGetValue(group.Role, out IndexBuffer? debugIndices))
+                            continue;
+                        _meshRenderer.DrawDebugFlatColorRange(
+                            hull.vb,
+                            debugIndices,
+                            0,
+                            debugIndices.IndexCount,
+                            world,
+                            view,
+                            proj,
+                            MegastationZoneDebugColor(group.Role));
+                    }
+                    int semanticIndexCount = zoning.Diagnostics.SurfaceFaceCount * 6;
+                    if (semanticIndexCount < hull.ib.IndexCount)
+                    {
+                        _meshRenderer.DrawDebugFlatColorRange(
+                            hull.vb,
+                            hull.ib,
+                            semanticIndexCount,
+                            hull.ib.IndexCount - semanticIndexCount,
+                            world,
+                            view,
+                            proj,
+                            MegastationZoneDebugColor(MegastationZoneRole.Structural));
+                    }
+                    continue;
+                }
 
                 if (useShadow)
                 {
@@ -334,6 +391,17 @@ public sealed partial class SystemSpaceState
         _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
     }
+
+    private static Color MegastationZoneDebugColor(MegastationZoneRole role) => role switch
+    {
+        MegastationZoneRole.Structural => new Color(78, 88, 98),
+        MegastationZoneRole.Habitation => new Color(55, 170, 225),
+        MegastationZoneRole.Industrial => new Color(220, 125, 42),
+        MegastationZoneRole.Logistics => new Color(215, 195, 62),
+        MegastationZoneRole.Utilities => new Color(130, 78, 180),
+        MegastationZoneRole.Strategic => new Color(220, 55, 75),
+        _ => Color.White,
+    };
 
     private void DrawStationOrbitRings()
     {

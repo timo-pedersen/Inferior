@@ -166,6 +166,7 @@ public sealed partial class SystemSpaceState : GameState
     private bool _uiMouseMode;
     private bool _debugCameraMode;
     private bool _semanticHullDebug;
+    private bool _megastationZoningDebug;
     private bool _engineModuleDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
@@ -630,7 +631,12 @@ public sealed partial class SystemSpaceState : GameState
                           && keys.IsKeyDown(Keys.F3)
                           && !_prevKeys.IsKeyDown(Keys.F3);
         bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
-        bool f5JustPressed  = keys.IsKeyDown(Keys.F5)  && !_prevKeys.IsKeyDown(Keys.F5);
+        bool ctrlF5JustPressed = ctrlDown
+            && keys.IsKeyDown(Keys.F5)
+            && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F5));
+        bool f5JustPressed  = !ctrlDown
+            && keys.IsKeyDown(Keys.F5)
+            && !_prevKeys.IsKeyDown(Keys.F5);
         bool shipPositionMarkerToggledOn = false;
 
         if (tabJustPressed)
@@ -727,6 +733,15 @@ public sealed partial class SystemSpaceState : GameState
                 _shipPositionMarkerEnabled
                     ? "Ship simulation position marker enabled."
                     : "Ship simulation position marker disabled.",
+                SystemMessagePriority.Info));
+        }
+        if (ctrlF5JustPressed)
+        {
+            _megastationZoningDebug = !_megastationZoningDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _megastationZoningDebug
+                    ? "Megastation semantic zoning debug enabled."
+                    : "Megastation semantic zoning debug disabled.",
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);

@@ -88,6 +88,8 @@ public sealed record MegastationPrototypeCpuResult(
     StructuralOccupancy Occupancy,
     StructuralOccupancy RegularisedOccupancy,
     TopologyRegularisationReport TopologyRegularisation,
+    BoundaryTopology BoundaryTopology,
+    MegastationSemanticZoningResult SemanticZoning,
     IReadOnlyList<SurfacePatch> Patches,
     MegastationUrbanStyle Style,
     IReadOnlyList<UrbanGrowthResult> Faces,
@@ -152,8 +154,21 @@ public static class MegastationPrototypeGenerator
         var regularised = settings.EnableTopologyRegularisation
             ? TopologyRegulariser.Regularise(occupancy, settings)
             : BuildDisabledRegularisationResult(occupancy, settings, validation);
+        var topologyStopwatch = Stopwatch.StartNew();
+        BoundaryTopology topology = BoundaryTopologyBuilder.Build(regularised.Occupancy, settings);
+        topologyStopwatch.Stop();
+        MegastationSemanticZoningResult semanticZoning = MegastationSemanticZoningBuilder.Build(
+            rootSeed,
+            regularised.Occupancy,
+            topology,
+            faceResults);
         var mesh = new StationModuleMesh();
-        var meshStats = MegastationPrototypeMeshBuilder.Build(regularised.Occupancy, mesh, settings: settings);
+        var meshStats = MegastationPrototypeMeshBuilder.Build(
+            regularised.Occupancy,
+            topology,
+            mesh,
+            settings: settings,
+            topologyBuildMilliseconds: topologyStopwatch.ElapsedMilliseconds);
         cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
 
@@ -232,7 +247,21 @@ public static class MegastationPrototypeGenerator
             meshStats.MeshBuildMilliseconds,
             stopwatch.ElapsedMilliseconds);
 
-        return new MegastationPrototypeCpuResult(grid, occupancy, regularised.Occupancy, regularised.Report, patches, style, faceResults, edges, corners, mesh, meshStats, diag);
+        return new MegastationPrototypeCpuResult(
+            grid,
+            occupancy,
+            regularised.Occupancy,
+            regularised.Report,
+            topology,
+            semanticZoning,
+            patches,
+            style,
+            faceResults,
+            edges,
+            corners,
+            mesh,
+            meshStats,
+            diag);
     }
 
     public static PlacedModule CreatePlacedModule(MegastationPrototypeCpuResult cpu)
