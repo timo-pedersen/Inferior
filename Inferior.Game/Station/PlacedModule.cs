@@ -26,7 +26,12 @@ public sealed record StationLightInfo(
     float        Rate          = 0f,         // Hz; 0 = continuous, no animation
     float        Phase         = 0f,         // 0.0–1.0 seed-derived phase offset
     LightPattern Pattern       = LightPattern.Continuous
-);
+)
+{
+    // Optional presentation metadata for lights mounted directly on a known surface.
+    // Ordinary station lights predate this field and retain their existing behaviour.
+    public Vector3? SurfaceNormal { get; init; }
+}
 
 public sealed class OpenPort
 {

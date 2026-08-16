@@ -98,6 +98,7 @@ public sealed record MegastationPrototypeCpuResult(
     StationModuleMesh Mesh,
     MegastationWindowPlan WindowPlan,
     StationModuleMesh WindowGlassMesh,
+    MegastationLightPlan LightPlan,
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
 
@@ -173,6 +174,11 @@ public static class MegastationPrototypeGenerator
             windowPlan,
             cancellationToken);
         windowPlan = windowPlan with { Diagnostics = windowMesh.Diagnostics };
+        MegastationLightPlan lightPlan = MegastationLightingPlanner.Plan(
+            grid,
+            topology,
+            semanticZoning,
+            cancellationToken);
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(
             regularised.Occupancy,
@@ -273,6 +279,7 @@ public static class MegastationPrototypeGenerator
             mesh,
             windowPlan,
             windowMesh.Mesh,
+            lightPlan,
             meshStats,
             diag);
     }
@@ -292,7 +299,7 @@ public static class MegastationPrototypeGenerator
             Ports = [],
             MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
         };
-        return new PlacedModule
+        var module = new PlacedModule
         {
             Definition = def,
             Transform = Matrix.Identity,
@@ -303,6 +310,8 @@ public static class MegastationPrototypeGenerator
             HullMesh = cpu.Mesh,
             GlassMesh = cpu.WindowGlassMesh,
         };
+        module.GlowLights.AddRange(cpu.LightPlan.Lights.Select(light => light.ToStationLightInfo()));
+        return module;
     }
 
     public static double EstimateConservativeEnvelopeRadius(

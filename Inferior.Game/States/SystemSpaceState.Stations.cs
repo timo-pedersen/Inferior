@@ -20,9 +20,16 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
+using System.Diagnostics;
 using System.Reflection.Metadata;
 
 namespace Inferior.Game.States;
+
+internal readonly record struct StationGlowDepthDecision(
+    bool IsFrontFacing,
+    float Facing,
+    float AppliedBiasMeters,
+    Vector3 BiasedCameraRelativePosition);
 
 public sealed partial class SystemSpaceState
 {
@@ -116,6 +123,37 @@ public sealed partial class SystemSpaceState
         PublishStationResidencyMessage(message, SystemMessagePriority.NB);
     }
 
+    private static void PublishMegastationLightingDiagnostics(
+        string stationIdentity,
+        MegastationLightingDiagnostics diagnostics)
+    {
+        string message = $"[MegastationLighting] station={stationIdentity}; " +
+            $"industrial=zones:{diagnostics.IndustrialZoneCount},activeRegions:{diagnostics.IndustrialActiveRegionCount}," +
+            $"clusters:{diagnostics.IndustrialClusterCount},lights:{diagnostics.IndustrialLightCount}," +
+            $"eligibleAreaM2:{diagnostics.IndustrialEligibleArea:F0},lightsPer1000M2:" +
+            $"{LightsPer1000SquareMetres(diagnostics.IndustrialLightCount, diagnostics.IndustrialEligibleArea):F3}; " +
+            $"logistics=zones:{diagnostics.LogisticsZoneCount},activeRegions:{diagnostics.LogisticsActiveRegionCount}," +
+            $"clusters:{diagnostics.LogisticsClusterCount},lights:{diagnostics.LogisticsLightCount}," +
+            $"eligibleAreaM2:{diagnostics.LogisticsEligibleArea:F0},lightsPer1000M2:" +
+            $"{LightsPer1000SquareMetres(diagnostics.LogisticsLightCount, diagnostics.LogisticsEligibleArea):F3}; " +
+            $"utilities=zones:{diagnostics.UtilitiesZoneCount},activeRegions:{diagnostics.UtilitiesActiveRegionCount}," +
+            $"clusters:{diagnostics.UtilitiesClusterCount},lights:{diagnostics.UtilitiesLightCount}," +
+            $"eligibleAreaM2:{diagnostics.UtilitiesEligibleArea:F0},lightsPer1000M2:" +
+            $"{LightsPer1000SquareMetres(diagnostics.UtilitiesLightCount, diagnostics.UtilitiesEligibleArea):F3}; " +
+            $"strategic=zones:{diagnostics.StrategicZoneCount},activeRegions:{diagnostics.StrategicActiveRegionCount}," +
+            $"clusters:{diagnostics.StrategicClusterCount},lights:{diagnostics.StrategicLightCount}," +
+            $"eligibleAreaM2:{diagnostics.StrategicEligibleArea:F0},lightsPer1000M2:" +
+            $"{LightsPer1000SquareMetres(diagnostics.StrategicLightCount, diagnostics.StrategicEligibleArea):F3}; " +
+            $"totalClusters={diagnostics.ClusterCount}; totalLights=" +
+            $"{diagnostics.IndustrialLightCount + diagnostics.LogisticsLightCount + diagnostics.UtilitiesLightCount + diagnostics.StrategicLightCount}; " +
+            $"steady={diagnostics.SteadyLightCount}; " +
+            $"animated={diagnostics.AnimatedLightCount}; planningMs={diagnostics.PlanningMilliseconds}";
+        PublishStationResidencyMessage(message, SystemMessagePriority.NB);
+    }
+
+    private static float LightsPer1000SquareMetres(int lightCount, float area)
+        => area <= 0f ? 0f : lightCount * 1000f / area;
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────
@@ -125,6 +163,20 @@ public sealed partial class SystemSpaceState
     // strong"); Off/Subtle/Default/Strong presets and the J-key runtime cycle are removed
     // now that the value is settled, not deferred as future tuning.
     private const float StationBumpStrength = 0.3f;
+    // The 10m diagnostic established that sprite scale, not bias magnitude, was the
+    // decisive visibility failure. Both 2m and 0.5m clipped correctly at shallow
+    // angles, but 2m was visually preferred and is retained. This changes only
+    // submitted sprite depth, never the
+    // planned or projected light position; rear-facing lights are rejected before bias.
+    internal const float MegastationGlowCameraDepthBiasMeters = 2f;
+    // Nova's original 6px floor was imperceptible; the 72px diagnostic established
+    // that the presentation path was sound. Twenty-five pixels is the requested
+    // production-scale follow-up, retaining each light's normal colour and intensity.
+    internal const float MegastationGlowSizePixels = 25f;
+    private int _megastationGlowFrameVisibleCount;
+    private int _megastationGlowFrameSubmittedCount;
+    private double _megastationGlowFrameProjectionAndSubmissionMilliseconds;
+    private double _nextMegastationGlowFrameDiagnosticSeconds;
 
     private static float StationPhysicalRadius(Galaxy.Station s) => s.Size switch
     {
@@ -491,6 +543,7 @@ public sealed partial class SystemSpaceState
     private void DrawStationGlows(SpriteBatch sb, float nearBoundReal, float farBoundReal)
     {
         if (ResidentStationVisual == null) return;
+        long timingStart = Stopwatch.GetTimestamp();
 
         // Active pass's projection (_effect.Projection), not camera.ProjectionMatrix —
         // that's only a representative mid-tier projection now that rendering uses three
@@ -515,17 +568,23 @@ public sealed partial class SystemSpaceState
             {
                 foreach (var light in mod.GlowLights)
                 {
-                    Vector3 relPos   = stationRel + Vector3.Transform(light.WorldPosition, stRotQ);
+                    Vector3 stationLocalRotated = Vector3.Transform(light.WorldPosition, stRotQ);
+                    Vector3 relPos   = stationRel + stationLocalRotated;
                     float   distance = relPos.Length();
                     if (distance < 0.1f) continue;
                     if (distance < nearBoundReal || distance >= farBoundReal) continue;
+
+                    StationGlowDepthDecision depthDecision = light.SurfaceNormal is { } surfaceNormal
+                        ? ResolveStationGlowDepth(
+                            relPos,
+                            Vector3.Transform(surfaceNormal, stRotQ))
+                        : new StationGlowDepthDecision(true, 1f, 0f, relPos);
+                    if (!depthDecision.IsFrontFacing) continue;
 
                     Vector2? screen = TargetingSystem.ProjectToScreen(relPos, viewProj, viewport);
                     if (screen == null) continue;
 
                     float intensity = ComputeGlowIntensity(light);
-                    if (intensity < 0.01f) continue;
-
                     float baseSize = light.Type switch
                     {
                         StationGen.GlowType.NavigationLight => 1200f,
@@ -535,24 +594,89 @@ public sealed partial class SystemSpaceState
                         StationGen.GlowType.DockGuidance    => 600f,   // AmbientMarker x1.5, per Timo's ask
                         _                                   => 400f,
                     };
-                    float size  = MathHelper.Clamp(baseSize / distance, 6f, 140f);
+                    float size = light.SurfaceNormal != null
+                        ? MegastationGlowSizePixels
+                        : MathHelper.Clamp(baseSize / distance, 6f, 140f);
                     float scale = size / _navGlowTex.Width;
+
+                    if (intensity < 0.01f) continue;
+                    _megastationGlowFrameVisibleCount++;
 
                     // Real depth for this pass's depth test. Without this every sprite
                     // draws at layerDepth 0 (nearest possible depth value), which would
                     // always pass DepthRead regardless of what's actually in front of it —
                     // the state change alone (above) isn't sufficient without this.
-                    Vector3 renderPos  = relPos * (float)Camera3D.RenderScale;
-                    Vector4 clip       = Vector4.Transform(new Vector4(renderPos, 1f), viewProj);
-                    float   layerDepth = MathHelper.Clamp(clip.Z / clip.W, 0f, 1f);
+                    Vector3 depthRenderPos = depthDecision.BiasedCameraRelativePosition
+                        * (float)Camera3D.RenderScale;
+                    Vector4 depthClip = Vector4.Transform(
+                        new Vector4(depthRenderPos, 1f),
+                        viewProj);
+                    float layerDepth = MathHelper.Clamp(depthClip.Z / depthClip.W, 0f, 1f);
 
                     sb.Draw(_navGlowTex, screen.Value, null,
                             light.Colour * intensity, 0f, texCentre, scale,
                             SpriteEffects.None, layerDepth);
+                    _megastationGlowFrameSubmittedCount++;
                 }
             }
         }
         sb.End();
+        _megastationGlowFrameProjectionAndSubmissionMilliseconds +=
+            Stopwatch.GetElapsedTime(timingStart).TotalMilliseconds;
+    }
+
+    private void BeginMegastationGlowFrameDiagnostics()
+    {
+        _megastationGlowFrameVisibleCount = 0;
+        _megastationGlowFrameSubmittedCount = 0;
+        _megastationGlowFrameProjectionAndSubmissionMilliseconds = 0.0;
+    }
+
+    private void CompleteMegastationGlowFrameDiagnostics()
+    {
+        if (ResidentStationVisual?.MegastationLightingDiagnostics is not { } diagnostics
+            || _gameTimeSeconds < _nextMegastationGlowFrameDiagnosticSeconds)
+            return;
+
+        _nextMegastationGlowFrameDiagnosticSeconds = _gameTimeSeconds + 5.0;
+        int planned = diagnostics.IndustrialLightCount
+            + diagnostics.LogisticsLightCount
+            + diagnostics.UtilitiesLightCount
+            + diagnostics.StrategicLightCount;
+        string message = $"[MegastationLightingFrame] station={ResidentStationVisual.Descriptor.Identity}; " +
+            $"plannedLightCount={planned}; visibleLightCount={_megastationGlowFrameVisibleCount}; " +
+            $"submittedLightCount={_megastationGlowFrameSubmittedCount}; " +
+            $"animatedLightCount={diagnostics.AnimatedLightCount}; " +
+            $"depthBiasMeters={MegastationGlowCameraDepthBiasMeters:F1}; " +
+            $"surfaceGlowSizePixels={MegastationGlowSizePixels:F0}; rearFaceGate=true; " +
+            $"lightProjectionAndSubmissionMs=" +
+            $"{_megastationGlowFrameProjectionAndSubmissionMilliseconds:F3}";
+        Console.WriteLine(message);
+        Debug.WriteLine(message);
+    }
+
+    internal static StationGlowDepthDecision ResolveStationGlowDepth(
+        Vector3 cameraRelativePosition,
+        Vector3 worldSurfaceNormal)
+    {
+        float distanceSquared = cameraRelativePosition.LengthSquared();
+        float normalLengthSquared = worldSurfaceNormal.LengthSquared();
+        if (distanceSquared < 0.0001f || normalLengthSquared < 0.0001f)
+            return new StationGlowDepthDecision(false, 0f, 0f, cameraRelativePosition);
+
+        Vector3 fromCamera = Vector3.Normalize(cameraRelativePosition);
+        Vector3 normal = Vector3.Normalize(worldSurfaceNormal);
+        float facing = Vector3.Dot(normal, -fromCamera);
+        if (facing <= 0f)
+            return new StationGlowDepthDecision(false, facing, 0f, cameraRelativePosition);
+
+        Vector3 biasedPosition = cameraRelativePosition
+            - fromCamera * MegastationGlowCameraDepthBiasMeters;
+        return new StationGlowDepthDecision(
+            true,
+            facing,
+            MegastationGlowCameraDepthBiasMeters,
+            biasedPosition);
     }
 
     private static float ComputeGlowIntensity(StationLightInfo light)

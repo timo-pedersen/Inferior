@@ -1008,6 +1008,7 @@ public sealed partial class SystemSpaceState : GameState
         // cross-pass depth test needed. Correctness comes from the passes covering
         // strictly decreasing, non-overlapping-by-construction ranges, not from
         // depth comparison.
+        BeginMegastationGlowFrameDiagnostics();
         var passes = BuildActivePasses();
         for (int i = 0; i < passes.Count; i++)
         {
@@ -1020,6 +1021,7 @@ public sealed partial class SystemSpaceState : GameState
 
             pass.DrawCallback(pass.Level);
         }
+        CompleteMegastationGlowFrameDiagnostics();
 
         // DrawStationGlows now runs once per pass (see DrawFarPassContent/DrawMidPassContent/
         // DrawNearPassContent below), each filtered to that pass's own distance range and

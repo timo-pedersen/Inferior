@@ -80,6 +80,7 @@ public sealed partial class SystemSpaceState
             MegastationPrototypeDiagnostics? megastationDiagnostics,
             MegastationSemanticZoningResult? megastationSemanticZoning,
             MegastationWindowDiagnostics? megastationWindowDiagnostics,
+            MegastationLightingDiagnostics? megastationLightingDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -93,6 +94,7 @@ public sealed partial class SystemSpaceState
             MegastationDiagnostics = megastationDiagnostics;
             MegastationSemanticZoning = megastationSemanticZoning;
             MegastationWindowDiagnostics = megastationWindowDiagnostics;
+            MegastationLightingDiagnostics = megastationLightingDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -107,6 +109,7 @@ public sealed partial class SystemSpaceState
         public MegastationPrototypeDiagnostics? MegastationDiagnostics { get; }
         public MegastationSemanticZoningResult? MegastationSemanticZoning { get; }
         public MegastationWindowDiagnostics? MegastationWindowDiagnostics { get; }
+        public MegastationLightingDiagnostics? MegastationLightingDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -660,6 +663,7 @@ public sealed partial class SystemSpaceState
             generation.MegastationDiagnostics,
             generation.MegastationSemanticZoning,
             generation.MegastationWindowDiagnostics,
+            generation.MegastationLightingDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -903,6 +907,8 @@ public sealed partial class SystemSpaceState
                     zoning.Diagnostics);
             if (package.MegastationWindowDiagnostics is { } windows)
                 PublishMegastationWindowDiagnostics(package.Descriptor.Identity, windows);
+            if (package.MegastationLightingDiagnostics is { } lighting)
+                PublishMegastationLightingDiagnostics(package.Descriptor.Identity, lighting);
             PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
             package.PublishTextureUploadDiagnostics();
             PublishMissingStationHullCasterWarnings(package);
