@@ -1,6 +1,7 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Inferior.Core.Random;
+using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
 
@@ -113,17 +114,32 @@ public static class StationTextureRegistry
     // internal, not private: StationPanelVariantTests asserts variants actually differ in
     // colour, not just position — the exact regression the S2b-1 gate-fix addressed.
     //
-    // Brief P1 Fix A: BaseColour's HSV value is floored at MinVariantBaseValue (D-NovaTank —
-    // Nova Anchorage's Independent-economy docking-bay rolled a variant whose brightnessDelta
-    // crushed V to 0, producing a literal (0,0,0) BaseColour and a ~17-mean-luminance texture;
-    // both the hull (PS_DynamicLit) and every decoration pass (PS_BakedColorLit) multiply
-    // through that same bitmap, so a black variant reads as "no surface" rather than "a dark
-    // module"). The floor applies to BaseColour only, not GrimeColour — grime is deliberately
-    // near-black already by design (e.g. Industrial's GrimeColour has V≈0.11, already below
-    // this floor), so flooring it too would brighten ordinary wear patches as a side effect
-    // rather than only fixing the pathological all-black case. Hue/saturation spread are
-    // untouched either way — the wide colour variance on high-spread economies (Independent,
-    // Agricultural) is intentional and must survive.
+    // Brief P1 Fix A: BaseColour's HSV value is floored (D-NovaTank — Nova Anchorage's
+    // Independent-economy docking-bay rolled a variant whose brightnessDelta crushed V to 0,
+    // producing a literal (0,0,0) BaseColour and a ~17-mean-luminance texture; both the hull
+    // (PS_DynamicLit) and every decoration pass (PS_BakedColorLit) multiply through that same
+    // bitmap, so a black variant reads as "no surface" rather than "a dark module"). The floor
+    // applies to BaseColour only, not GrimeColour — grime is deliberately near-black already
+    // by design (e.g. Industrial's GrimeColour has V≈0.11, already below the floor), so
+    // flooring it too would brighten ordinary wear patches as a side effect rather than only
+    // fixing the pathological all-black case. Hue/saturation spread are untouched either way —
+    // the wide colour variance on high-spread economies (Independent, Agricultural) is
+    // intentional and must survive.
+    //
+    // Brief B4 Fix 2: the floor alone piles modules up AT the floor rather than spreading them
+    // — D-Bright measured the real problem as a wide, low-tailed distribution (P10 66.2,
+    // median 129.6), not uniform darkness, so a plain floor raise would flatten variety at the
+    // dark end without lifting the tail that actually reads as "too dark to navigate by."
+    // VariantCompressionStrength remaps the WHOLE [floor,1] range with a power curve instead:
+    // t=(v-floor)/(1-floor), t'=t^gamma where gamma=1/(1+strength) — strength=0 gives gamma=1
+    // (t'=t, an exact no-op, so the pre-B4 hard-floor-only behaviour is untouched at the
+    // default), strength>0 gives gamma<1, which lifts LOW t (near the floor) sharply while
+    // leaving HIGH t (near 1, i.e. already-bright variants) nearly unchanged — exactly "lift
+    // the tail, hold the top" without a second, independently-tuned curve shape. Both
+    // VariantValueFloor and VariantCompressionStrength are live (StationBrightnessTuning),
+    // read fresh every time a variant is generated — see that class's own doc comment for why
+    // this only affects textures generated AFTER a change, not ones already baked into a
+    // loaded station.
     internal static TexturePalette OffsetPaletteForVariant(TexturePalette basePalette, int seed, float colourSpread)
     {
         var rng = new System.Random(seed ^ 0x484F4655); // "HOFU" — colour-offset salt
@@ -136,9 +152,13 @@ public static class StationTextureRegistry
         // (wear is what can actually drive a texel toward true matte).
         float baseGloss = 0.4f + (float)rng.NextDouble() * 0.6f;
 
+        float valueFloor          = StationBrightnessTuning.VariantValueFloor;
+        float compressionStrength = StationBrightnessTuning.VariantCompressionStrength;
+        float saturationFalloff   = StationBrightnessTuning.SaturationFalloff;
+
         return new TexturePalette
         {
-            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta, MinVariantBaseValue),
+            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta, valueFloor, compressionStrength, saturationFalloff),
             AccentColour     = basePalette.AccentColour,
             GrimeColour      = ApplyHsvOffset(basePalette.GrimeColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
             NoiseStrength    = basePalette.NoiseStrength,
@@ -150,22 +170,44 @@ public static class StationTextureRegistry
         };
     }
 
-    // Brief P1 Fix A: the texture is a multiplier on everything sampled through it (hull
-    // albedo, decoration albedo, and — via the material map's height/gloss channels —
-    // specular and bump too), so its brightness sets the ceiling on how much of any of that
-    // can ever reach the screen. At V=0 a module doesn't read as "a black module," it reads
-    // as "a module with no surface." 0.15 sits in the brief's suggested 0.12-0.18 range: dark
-    // enough that a floored module still reads as dramatically darker than a normal
-    // neighbour, bright enough that panel grid/seams/wear/specular/bump still show through.
-    internal const float MinVariantBaseValue = 0.15f;
-
     private static Color ApplyHsvOffset(
-        Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta, float minValue = 0f)
+        Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta,
+        float minValue = 0f, float compressionStrength = 0f, float saturationFalloff = 0f)
     {
         RgbToHsv(c, out float h, out float s, out float v);
         h = (h + hueDeltaDegrees + 360f) % 360f;
         s = Math.Clamp(s + saturationDelta, 0f, 1f);
+
+        // Brief B4a Fix 2: the "natural" value this variant would have with NO floor/
+        // compression applied — kept separately so the floor/compression's own artificial
+        // lift (vFinal - vNatural, below) can be measured and partly traded back out of s,
+        // without that trade also firing for colours the floor/compression never touched.
+        float vNatural = Math.Clamp(v + brightnessDelta, 0f, 1f);
         v = Math.Clamp(v + brightnessDelta, minValue, 1f);
+
+        // Brief B4 Fix 2: power-curve compression over [minValue, 1] — see the big comment
+        // on OffsetPaletteForVariant above for the shape/rationale. Guarded so a floor of
+        // exactly 1 (degenerate, not reachable by any real tuning range) can't divide by
+        // zero, and skipped entirely at strength<=0 (the neutral default) to keep that case
+        // a byte-identical no-op rather than a pow() call that happens to return its input.
+        if (compressionStrength > 0f && minValue < 1f)
+        {
+            float t     = (v - minValue) / (1f - minValue);
+            float gamma = 1f / (1f + compressionStrength);
+            v = minValue + MathF.Pow(t, gamma) * (1f - minValue);
+        }
+
+        // Brief B4a Fix 2: flooring/lifting V alone reads as a large apparent saturation
+        // increase — v*s is chroma, so raising v while holding s fixed raises chroma, which
+        // is what Timo's floor=0.9 diagnostic test read as "over-saturated." Physically,
+        // brightly lit paint reads LESS saturated, not more. saturationFalloff (default 0,
+        // an exact no-op) trades some of THIS colour's own artificial lift back out of s —
+        // a colour the floor/compression never raised (vNatural already >= minValue, lift=0)
+        // is left untouched regardless of the falloff value.
+        float lift = MathF.Max(0f, v - vNatural);
+        if (saturationFalloff > 0f && lift > 0f)
+            s = Math.Clamp(s * (1f - saturationFalloff * lift), 0f, 1f);
+
         return HsvToRgb(h, s, v);
     }
 

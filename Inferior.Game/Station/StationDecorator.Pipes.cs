@@ -252,7 +252,12 @@ public static partial class StationDecorator
         float runHalfLen = runSpan * 0.5f - 1.5f;
         if (runHalfLen <= 0.5f) return;
 
-        int runCount = 4 + rng.Next(3); // 4-6, "imagine five pipes running in parallel"
+        // Brief Z4 Fix 2: run count scales with the zone's perpendicular span instead of a
+        // flat 4-6, via the named spacing constant (a wider corridor plausibly carries more
+        // parallel runs, not always "five pipes" regardless of size).
+        int runCount = Math.Clamp(
+            (int)MathF.Round(perpSpan / ZoneContentDensity.PipeCorridorRunSpacingMetres),
+            ZoneContentDensity.PipeCorridorMinRuns, ZoneContentDensity.PipeCorridorMaxRuns);
 
         double sizeRoll  = rng.NextDouble();
         float  radius    = sizeRoll < 0.35 ? 0.10f : sizeRoll < 0.70 ? 0.22f : 0.40f;

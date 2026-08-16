@@ -179,6 +179,16 @@ public static partial class StationDecorator
         public bool NeedsSignage      = true;
     }
 
+    // Brief D-Z2: pure observability record — retains exactly what Decorate() actually
+    // produced for one zone, recorded at the moment of production rather than recomputed
+    // later, so PlacedModule.DebugZones is provably "what the production assignment did,"
+    // not a re-simulation. Never read by any decision-making code; consumed only by the
+    // zone-type debug overlay and the in-game per-zone content dump.
+    internal sealed record ZoneDebugRecord(
+        int FaceIndex, int ZoneIndexOnFace,
+        FaceInfo Zone, ZoneType Type,
+        int RegionsClaimed, int FacesAdded);
+
     // Picks a uniformly random still-unclaimed zone index, or -1 if none remain. Marking
     // claimed[] as zones are picked makes repeated calls behave like sampling without
     // replacement — equivalent to a Fisher-Yates shuffle, just rebuilt each call (zone
@@ -384,6 +394,49 @@ public static partial class StationDecorator
     // the underlying roll landed on.
     private const float CommsArrayTankSizeCap = 0.85f;
 
+    // Brief Z4 Fix 2, revised by Brief Z5 Fix 3: content density per zone type, one named
+    // table (mirrors DecorCastingPolicy's single-table pattern) — starting values, tunable
+    // by eye, not correctness. Machinery is deliberately absent: per Timo, "1-3 small tanks
+    // is fine — roughly today's tank behaviour, not area-scaled" (unchanged from Z3's
+    // GenerateTanks call). Only the zone types whose composition genuinely differs by area
+    // are here. TankFarm's own former per-sqm/max-cluster pair (Z4) is gone — Z5 Fix 1
+    // replaced independent clusters with planned parallel runs, whose count is now derived
+    // from zone geometry directly in GenerateTankFarmContent (StationDecorator.Tanks.cs);
+    // TankFarmMaxRuns lives there, next to the run-sizing math it bounds.
+    internal static class ZoneContentDensity
+    {
+        // Fraction of TankFarm runs that deliberately roll "large" (~5m diameter, via
+        // PickLargeTankRadius) rather than the normal small/medium/rare PickTankRadius
+        // range — Timo: "several large tanks... with smaller ones around them," the size
+        // MIX is what reads as a farm, not run count alone.
+        public const float TankFarmLargeClusterFraction = 0.35f;
+
+        // CommsArray: antenna/mast count per square metre — "a large comms zone should
+        // read as an array, not two masts." Brief Z5 Fix 3: max raised 14->30 — the old cap
+        // bound at just 280m² (0.05/sqm), well inside the range of real CommsArray zones;
+        // masts stay less dense than tanks/containers per zone area, so the per-sqm rate is
+        // unchanged, only the ceiling for genuinely large zones moved.
+        public const float CommsArrayAntennasPerSqm = 0.05f;
+        public const int   CommsArrayMinAntennas    = 2;
+        public const int   CommsArrayMaxAntennas    = 30;
+
+        // Storage: container count per square metre — a yard, not a couple of crates.
+        // Brief Z5 Fix 3: max raised 16->48 — the old cap bound at just 320m² (0.05/sqm);
+        // measured real zones reach ~1200m²+, where Fix 1's grid-capacity ceiling (actual
+        // containers that physically fit, computed in PlaceContainerYard) is now the
+        // binding limit for the largest zones, not this constant.
+        public const float StorageContainersPerSqm = 0.05f;
+        public const int   StorageMaxContainers     = 48;
+
+        // PipeCorridor: one parallel run per this many metres of the zone's PERPENDICULAR
+        // span (length already tracks the zone's long axis via runHalfLen; this is about
+        // how many parallel lines fit side-by-side across the short axis). Not touched by
+        // Z5 Fix 3 — not named in that brief's clamp table.
+        public const float PipeCorridorRunSpacingMetres = 4.0f;
+        public const int   PipeCorridorMinRuns          = 3;
+        public const int   PipeCorridorMaxRuns          = 12;
+    }
+
     // Dispatches one zone's content by type. Antennas/Dishes aren't assigned to any
     // specific ZoneType in Z1's table (the brief lists them as "zoned" scope but doesn't
     // give them a table row) — they run as a background pass on every zone regardless of
@@ -406,11 +459,19 @@ public static partial class StationDecorator
         // sign/placard needs to be able to claim cleanly. Every other type keeps them as a
         // background pass — CommsArray gets the "heavy" variant (Brief Z2 Part 2), everyone
         // else (including PipeCorridor) gets the normal occasional roll unchanged.
+        // Brief Z4 Fix 2: CommsArray's mast count now also scales with zone area
+        // (ZoneContentDensity.CommsArrayAntennasPerSqm) instead of heavy's flat rng.Next(2,5).
         if (type != ZoneType.Structural && type != ZoneType.Signage)
         {
+            int? commsArrayCount = type == ZoneType.CommsArray
+                ? Math.Clamp(
+                    (int)MathF.Round(zone.Width * zone.Height * ZoneContentDensity.CommsArrayAntennasPerSqm),
+                    ZoneContentDensity.CommsArrayMinAntennas, ZoneContentDensity.CommsArrayMaxAntennas)
+                : null;
+
             mesh.CurrentDecorClass = DecorClass.Antennas;
             GenerateAntennas(mod, zone, antennaRng, mesh, mod.GlowLights, occupancy, greeblePlacements,
-                heavy: type == ZoneType.CommsArray);
+                heavy: type == ZoneType.CommsArray, explicitCount: commsArrayCount);
             mesh.CurrentDecorClass = DecorClass.Dishes;
             GenerateDishes(mod, zone, dishRng, mesh, occupancy, greeblePlacements);
         }
@@ -428,31 +489,43 @@ public static partial class StationDecorator
                 break;
 
             case ZoneType.Machinery:
+                // Brief Z3 Fix B / Z4 Fix 1: guaranteed: true on all three — Machinery's own
+                // named character is "greebles, vents, work/storage clutter" plus tanks, so
+                // every pass serving it is a commitment, not just the tank call Z3 covered.
                 mesh.CurrentDecorClass = DecorClass.Tanks;
-                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()));
+                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()), guaranteed: true);
                 mesh.CurrentDecorClass = DecorClass.VentGrilles;
-                GenerateVentGrilles(mod, zone, ventRng, mesh, occupancy);
+                GenerateVentGrilles(mod, zone, ventRng, mesh, occupancy, guaranteed: true);
                 mesh.CurrentDecorClass = DecorClass.Greebles;
-                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements);
+                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements, guaranteed: true);
                 break;
 
             case ZoneType.TankFarm:
+                // Brief Z4 Fix 2/3: dedicated area-scaled, size-mixed composition — differs
+                // from Machinery's generic GenerateTanks call in kind, not just amount (Timo:
+                // TankFarm and Machinery "differ in kind, not only amount"). Supersedes the
+                // Z3 Fix B guaranteed-GenerateTanks call this case used to make.
                 mesh.CurrentDecorClass = DecorClass.Tanks;
-                GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()));
+                GenerateTankFarmContent(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()));
                 break;
 
             case ZoneType.ServiceCore:
+                // Brief Z4 Fix 1: guaranteed: true on VentGrilles/Greebles — ServiceCore's
+                // name itself is its committed content (hatches+vents+greebles). Hatches has
+                // no probability gate of its own (only size/orientation gates), so it was
+                // already effectively unconditional — no parameter needed there.
                 mesh.CurrentDecorClass = DecorClass.Hatches;
                 GenerateHatches(mod, zone, hatchRng, mesh, occupancy);
                 mesh.CurrentDecorClass = DecorClass.VentGrilles;
-                GenerateVentGrilles(mod, zone, ventRng, mesh, occupancy);
+                GenerateVentGrilles(mod, zone, ventRng, mesh, occupancy, guaranteed: true);
                 mesh.CurrentDecorClass = DecorClass.Greebles;
-                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements);
+                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements, guaranteed: true);
                 break;
 
             case ZoneType.Storage:
+                // Brief Z4 Fix 1: guaranteed: true — Storage's whole purpose is containers.
                 mesh.CurrentDecorClass = DecorClass.Containers;
-                GenerateContainers(mod, zone, mesh, occupancy, new System.Random(containerRng.Next()));
+                GenerateContainers(mod, zone, mesh, occupancy, new System.Random(containerRng.Next()), guaranteed: true);
                 break;
 
             // Brief Z2 Part 2: assembled from existing passes, not new geometry. Antennas
@@ -467,14 +540,26 @@ public static partial class StationDecorator
             // categories (DishCategories excludes docking-bay/industrial/hab/cargo
             // outright), so "shouldn't dominate" holds without any change here.
             case ZoneType.CommsArray:
+                // Brief Z3 Fix B: guaranteed: true on the greeble call only — "equipment
+                // cabinets at mast bases" is named as CommsArray's content. The tank call
+                // stays unguaranteed (Timo's own framing was "PERHAPS a small greeble tank
+                // or 5" — optional flavour, not a commitment like TankFarm/Machinery).
                 mesh.CurrentDecorClass = DecorClass.Greebles;
-                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements);
+                GenerateGreebles(mod, zone, greebleRng, mesh, occupancy, greeblePlacements, guaranteed: true);
                 mesh.CurrentDecorClass = DecorClass.Tanks;
                 GenerateTanks(mod, zone, mesh, occupancy, new System.Random(tankRng.Next()), sizeCap: CommsArrayTankSizeCap);
                 break;
 
             // Brief Z2 Part 3: parallel surface-pipe runs along the zone's long axis — a
             // weighting of GenerateSurfacePipes (its parallel parameter), not new geometry.
+            // Brief Z4 Fix 1 audit: GenerateParallelSurfacePipes (the parallel:true target)
+            // has NO probability/frequency gate at all — its only early-returns are
+            // !face.IsExposed and a near-zero-length zone. Measured directly: 0 of 4886
+            // sampled exposed PipeCorridor zones (300 stations) produced zero pipes. This
+            // means the Z4 brief's own stated diagnosis for "empty purple zones"
+            // ("GenerateSurfacePipes has its own probability gate that docking-bay falls
+            // through") does not reproduce against this code — flagged to Timo rather than
+            // adding a bypass for a gate that doesn't exist here. No change made.
             case ZoneType.PipeCorridor:
                 mesh.CurrentDecorClass = DecorClass.SurfacePipes;
                 GenerateSurfacePipes(mod, zone, surfacePipeRng, mesh, parallel: true);

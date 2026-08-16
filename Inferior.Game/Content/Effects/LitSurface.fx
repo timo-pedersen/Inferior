@@ -44,6 +44,18 @@ float3   SunColour;
 float    Ambient;               // scalar floor, matches SceneLighting.Ambient
 float    EclipseFactor = 1.0;   // reserved for Phase E; 1.0 = no eclipse
 
+// Brief B4: live decoration brightness multiplier (StationBrightnessTuning.
+// DecorationBrightnessMultiplier), BakedColorLit*/station-decoration only — never read by
+// DynamicLit* (hull isn't the dim one; see D-Bright). No HLSL initializer, same "never rely
+// on an .fx default" policy as every other tunable here — MeshRenderer.cs sets it explicitly
+// on every BakedColorLit*/BakedColorLitShadowed draw call. 1.0 = no change from pre-B4
+// output; this is a pure multiply on the FINAL rgb (mathematically identical to scaling
+// input.Color.rgb, since nothing else in the formula depends on vertex colour), so it
+// compounds with — rather than replaces — the baked-in DarkenColor-style darkening already
+// in the vertex colour: raising it lifts every decoration type uniformly instead of needing
+// N separate constants retuned.
+float    DecorationBrightness;
+
 float3   MaterialColor = float3(1, 1, 1);   // DynamicLit only — flat per-draw tint
 
 // Brief S1: single-source Blinn-Halfway specular, DynamicLit*/station-hulls only. No HLSL
@@ -305,7 +317,7 @@ float4 PS_BakedColorLit(VertexOutput input) : COLOR0
     float  factor = max(max(nl * EclipseFactor, Ambient), s);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
-    float3 rgb = input.Color.rgb * tex.rgb * factor * SunColour;
+    float3 rgb = input.Color.rgb * tex.rgb * factor * SunColour * DecorationBrightness;
     return float4(rgb, 1.0);
 }
 
@@ -328,7 +340,7 @@ float4 PS_BakedColorLitShadowed(VertexOutput input) : COLOR0
     float  factor = max(max(nl * shadow * EclipseFactor, Ambient), s);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
-    float3 rgb = input.Color.rgb * tex.rgb * factor * SunColour;
+    float3 rgb = input.Color.rgb * tex.rgb * factor * SunColour * DecorationBrightness;
     return float4(rgb, 1.0);
 }
 

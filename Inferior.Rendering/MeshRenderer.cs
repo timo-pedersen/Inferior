@@ -130,12 +130,16 @@ public sealed class MeshRenderer : IDisposable
     /// <summary>
     /// Pre-baked (albedo x AO) vertex-colour geometry (station decoration). Vertex alpha is
     /// the self-illumination floor S — see StationModuleMesh.ApplyIlluminationFlags.
+    /// decorationBrightness is Brief B4's live shader multiplier
+    /// (StationBrightnessTuning.DecorationBrightnessMultiplier) — no default here, same "no
+    /// .fx initializer" policy as every other tunable: the caller always passes the current
+    /// live value explicitly.
     /// </summary>
     public void DrawBakedColorLit(
         VertexBuffer vb, IndexBuffer ib,
         Matrix world, Matrix view, Matrix projection,
         Vector3 sunDirection, Color sunColour, float ambient,
-        Texture2D texture)
+        Texture2D texture, float decorationBrightness)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["BakedColorLit"];
@@ -146,6 +150,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["Texture"].SetValue(texture);
+        fx.Parameters["DecorationBrightness"].SetValue(decorationBrightness);
         Draw(vb, ib, fx);
     }
 
@@ -153,7 +158,7 @@ public sealed class MeshRenderer : IDisposable
         VertexBuffer vb, IndexBuffer ib,
         Matrix world, Matrix view, Matrix projection,
         Vector3 sunDirection, Color sunColour, float ambient,
-        Texture2D texture, Texture2D shadowMap,
+        Texture2D texture, float decorationBrightness, Texture2D shadowMap,
         Matrix moduleToStationLocal, Matrix stationLocalToLightView,
         Vector2 shadowMinXY, Vector2 shadowInvSize,
         float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
@@ -169,6 +174,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["Texture"].SetValue(texture);
+        fx.Parameters["DecorationBrightness"].SetValue(decorationBrightness);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,

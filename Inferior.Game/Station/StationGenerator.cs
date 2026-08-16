@@ -77,6 +77,32 @@ public sealed class StationGenerator
         return new StationGenerationResult(modules, panelTextures);
     }
 
+    // Brief B4 Fix 2: re-runs ONLY texture generation for an already-grown station — the
+    // tuning panel's "regenerate" action, so VariantValueFloor/VariantCompressionStrength
+    // changes get a live preview without re-running the growth engine (which would also
+    // reroll geometry the panel has no business touching). seed/scale/profile/palette are
+    // recomputed rather than cached from the original Generate() call — all four are pure,
+    // deterministic functions of the station's own identity/size, so recomputing them here
+    // is exactly as correct as the values Generate() itself would produce, with no new state
+    // to keep in sync. Caller (SystemSpaceState) owns disposal of the OLD texture list this
+    // replaces and reassignment bookkeeping — this method only builds the new one and points
+    // every module at it, mirroring AssignTextures' own contract.
+    public static IReadOnlyList<Texture2D> RegenerateTextures(
+        Galaxy.Station station, List<PlacedModule> modules, GraphicsDevice gd)
+    {
+        int seed = NameHash(station.Name);
+        StationScale scale = station.Size switch
+        {
+            StationSize.Small  => StationScale.Outpost,
+            StationSize.Medium => StationScale.Station,
+            StationSize.Large  => StationScale.Port,
+            _                  => StationScale.Outpost,
+        };
+        var profile = StationProfile.Generate(seed, scale);
+        var palette = TexturePalette.From(profile);
+        return AssignTextures(modules, gd, palette, profile, station);
+    }
+
     // Brief S2b-2 item 5: certain module categories get a fixed, economy-independent
     // look instead of the hosting station's own economy roll — riding on the SAME
     // GenerateVariantSet/OffsetPaletteForVariant pipeline (still per-station-owned,
