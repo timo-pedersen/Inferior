@@ -18,17 +18,18 @@ public sealed partial class SystemSpaceState
     // the normalized depth units LitSurface.fx's ShadowBiasDepth compares in.
     private const float StationShadowBiasMetres = 0.005f;
 
-    // Mega stations - TODO: Tune! <--- =======================================================
+    // Mega station resolution can be revisited when future greeble materially changes the
+    // shadow-frequency requirement. Current megastation shadows are visually accepted at 8K.
 
     // Per-station shadow-map resolution (Docs/station-lighting-pipeline-spec.md Brief E1
-    // Step 1). The map is fit per-station (FitStationShadowLight), so texel density is
-    // (map extent / resolution) — holding resolution constant across the catalogue and
-    // stepping up only for the mega class keeps near-dock density roughly uniform. Only
-    // one resident station's map is ever live at a time,
-    // so worst case GPU residency is the mega size, and only while actually near a mega.
+    // Step 1). The map remains fit per station. The Z2a investigation measured sustained
+    // GPU queue back-pressure while rebuilding Nova's 16384^2 target every frame. An 8192^2
+    // target removed the observed stutter and retained acceptable shadow quality in-engine.
+    // Fitting, update cadence, caster policy, shader, and bias remain unchanged.
     private const float StationShadowMegaBreakpointMetres = 1500f; 
     private const int StationShadowMapSizeStandard = 8192;
-    private const int StationShadowMapSizeMega = 16384;
+    // Retain mega classification/fitting for diagnostics and future independent tuning.
+    private const int StationShadowMapSizeMega = 8192;
 
     private enum StationShadowResolutionClass { Standard, Mega }
 
@@ -66,10 +67,9 @@ public sealed partial class SystemSpaceState
         _ => "Off (1x1)",
     };
 
-    // Penumbra width is texel-size x kernel radius (Brief E1 Step 2) — texel size varies
-    // by station resolution class (Step 1), so the same kernel reads as a tighter band on
-    // a mega station's 16384^2 map than on a standard 8192^2 one. World-space, not tap
-    // count, is what actually describes the visible penumbra.
+    // Penumbra width is texel-size x kernel radius (Brief E1 Step 2). World-space, not tap
+    // count, is what actually describes the visible penumbra; while both classes use
+    // 8192^2, a mega's larger fitted extent naturally produces a wider penumbra.
     private static float ShadowPenumbraWidthMetres(float mapWidthMetres, int resolution, ShadowKernelMode mode) =>
         (mapWidthMetres / resolution) * ShadowKernelRadiusFor(mode);
 
@@ -611,7 +611,10 @@ public sealed partial class SystemSpaceState
         float width = 1f / ctx.InvSize.X;
         float height = 1f / ctx.InvSize.Y;
         float texelMetres = width / ctx.Resolution;
-        string className = ctx.Resolution >= StationShadowMapSizeMega ? "Mega" : "Standard";
+        string className = ClassifyStationShadowResolution(ctx.StationExtentMetres)
+            == StationShadowResolutionClass.Mega
+                ? "Mega"
+                : "Standard";
         float penumbraMetres = ShadowPenumbraWidthMetres(width, ctx.Resolution, _shadowKernelMode);
         string message =
             $"[{label}] {ctx.Station.Name}: extent {ctx.StationExtentMetres:F1} m -> {className} class -> " +
