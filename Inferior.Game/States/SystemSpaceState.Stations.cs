@@ -154,6 +154,25 @@ public sealed partial class SystemSpaceState
     private static float LightsPer1000SquareMetres(int lightCount, float area)
         => area <= 0f ? 0f : lightCount * 1000f / area;
 
+    private static void PublishMegastationAttachmentDiagnostics(
+        string stationIdentity,
+        MegastationAttachmentDiagnostics diagnostics)
+    {
+        string families = diagnostics.ModuleFamilyCounts.Count == 0
+            ? "none"
+            : string.Join(',', diagnostics.ModuleFamilyCounts.Select(pair =>
+                $"{pair.Key}:{pair.Value}"));
+        string message = $"[MegastationAttachments] station={stationIdentity}; " +
+            $"candidates={diagnostics.CandidateSurfaceCount}; selected={diagnostics.SelectedCandidateCount}; " +
+            $"placed={diagnostics.PlacedModuleCount}; " +
+            $"rejected=support:{diagnostics.RejectedSupportCount},clearance:{diagnostics.RejectedClearanceCount},semantic:{diagnostics.RejectedSemanticCount}; " +
+            $"roles=habitation:{diagnostics.HabitationCount},industrial:{diagnostics.IndustrialCount}," +
+            $"logistics:{diagnostics.LogisticsCount},utilities:{diagnostics.UtilitiesCount},strategic:{diagnostics.StrategicCount}; " +
+            $"families={families}; suppressed=windows:{diagnostics.SuppressedWindowCount},lights:{diagnostics.SuppressedLightCount}; " +
+            $"planningMs={diagnostics.PlanningMilliseconds}; clearanceMs={diagnostics.ClearanceMilliseconds}";
+        PublishStationResidencyMessage(message, SystemMessagePriority.NB);
+    }
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────

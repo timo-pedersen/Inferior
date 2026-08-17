@@ -55,7 +55,8 @@ public sealed record StationGenerationCpuResult(
     bool UsesSharedMegastationFallbackTextures = false,
     MegastationSemanticZoningResult? MegastationSemanticZoning = null,
     MegastationWindowDiagnostics? MegastationWindowDiagnostics = null,
-    MegastationLightingDiagnostics? MegastationLightingDiagnostics = null);
+    MegastationLightingDiagnostics? MegastationLightingDiagnostics = null,
+    MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -117,40 +118,72 @@ public sealed class StationGenerator
                 identity,
                 stopwatch: stopwatch,
                 cancellationToken: cancellationToken);
-            PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
-            List<PlacedModule> megaModules = [module];
-            PreparedStationTexture[] megaTextures = [];
-            StationTextureAssignment[] megaAssignments = [];
+            stopwatch.Start();
+            PlacedModule structure = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
+            List<PlacedModule> secondaryModules =
+                MegastationAttachmentPlanner.CreatePlacedModules(cpu.AttachmentPlan);
+            StationDecorator.DecorateSecondaryModules(secondaryModules);
+            BakeLighting(secondaryModules);
+            cancellationToken.ThrowIfCancellationRequested();
+
             var megaFlatMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+            foreach (PlacedModule secondary in secondaryModules)
+            {
+                if (secondary.Mesh is not { IsEmpty: false } mesh)
+                    continue;
+                var (vertices, indices) = mesh.ToIntArrays();
+                megaFlatMeshes[secondary] = new StationMeshCpuData(vertices, indices);
+            }
+            StationDecorator.ApplyAmbientOcclusion(secondaryModules);
+
+            int megaSeed = NameHash(station.Name);
+            StationScale megaScale = station.Size switch
+            {
+                StationSize.Small => StationScale.Outpost,
+                StationSize.Medium => StationScale.Station,
+                StationSize.Large => StationScale.Port,
+                _ => StationScale.Outpost,
+            };
+            StationProfile megaProfile = StationProfile.Generate(megaSeed, megaScale);
+            TexturePalette megaPalette = TexturePalette.From(megaProfile);
+            var (generatedTextures, generatedAssignments) = PrepareTextures(
+                secondaryModules,
+                megaPalette,
+                megaProfile,
+                station,
+                cancellationToken,
+                includeNameFace: false);
+            StationTextureCompactionResult megaCompacted = CompactSelectedTextures(
+                generatedTextures,
+                generatedAssignments,
+                generatedVariantPairCount: generatedTextures.Count / 2);
+            List<PlacedModule> megaModules = [structure, .. secondaryModules];
             IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
                 megaModules,
-                megaTextures,
-                megaAssignments,
+                megaCompacted.Textures,
+                megaCompacted.Assignments,
                 megaFlatMeshes,
                 enabledShadowCasterClasses,
                 cancellationToken);
+            stopwatch.Stop();
             return new StationGenerationCpuResult(
                 megaModules,
-                megaTextures,
-                megaAssignments,
+                megaCompacted.Textures,
+                megaCompacted.Assignments,
                 megaFlatMeshes,
                 megaUploadPlan,
                 cpu.Diagnostics,
                 stopwatch.Elapsed.TotalMilliseconds,
-                new(
-                    GeneratedTextureCount: 0,
-                    GeneratedVariantPairCount: 0,
-                    SelectedUniqueTextureCount: 0,
-                    SelectedUniqueTexturePairCount: 1,
-                    DiscardedTextureCount: 0,
-                    UploadedAlbedoTextureCount: 0,
-                    UploadedMaterialTextureCount: 0,
-                    ModuleTextureBindingCount: 2,
-                    SharedFallbackReferenceCount: 2),
+                megaCompacted.Diagnostics with
+                {
+                    ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount + 2,
+                    SharedFallbackReferenceCount = 2,
+                },
                 UsesSharedMegastationFallbackTextures: true,
                 MegastationSemanticZoning: cpu.SemanticZoning,
                 MegastationWindowDiagnostics: cpu.WindowPlan.Diagnostics,
-                MegastationLightingDiagnostics: cpu.LightPlan.Diagnostics);
+                MegastationLightingDiagnostics: cpu.LightPlan.Diagnostics,
+                MegastationAttachmentDiagnostics: cpu.AttachmentPlan.Diagnostics);
         }
 
         int seed = NameHash(station.Name);
@@ -488,7 +521,11 @@ public sealed class StationGenerator
             {
                 Texture2D albedo = UploadFlat(Color.White);
                 Texture2D material = UploadFlat(new Color(128, 255, 0, 0));
-                foreach (PlacedModule module in prepared.Modules)
+                HashSet<PlacedModule> assignedModules = prepared.TextureAssignments
+                    .Select(assignment => assignment.Module)
+                    .ToHashSet();
+                foreach (PlacedModule module in prepared.Modules.Where(
+                             module => !assignedModules.Contains(module)))
                 {
                     module.TextureInstance = albedo;
                     module.MaterialInstance = material;
@@ -589,7 +626,8 @@ public sealed class StationGenerator
         TexturePalette palette,
         StationProfile profile,
         Galaxy.Station station,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeNameFace = true)
     {
         var variantSets =
             new Dictionary<(SurfaceTexture surface, StationEconomy economy), (int Albedo, int Material)[]>();
@@ -654,7 +692,7 @@ public sealed class StationGenerator
                 selected.Material));
         }
 
-        if (modules.Count > 0)
+        if (includeNameFace && modules.Count > 0)
         {
             StationTextureAssignment core = assignments[0];
             Color[] namePixels = GenerateNameFacePixels(

@@ -81,6 +81,7 @@ public sealed partial class SystemSpaceState
             MegastationSemanticZoningResult? megastationSemanticZoning,
             MegastationWindowDiagnostics? megastationWindowDiagnostics,
             MegastationLightingDiagnostics? megastationLightingDiagnostics,
+            MegastationAttachmentDiagnostics? megastationAttachmentDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -95,6 +96,7 @@ public sealed partial class SystemSpaceState
             MegastationSemanticZoning = megastationSemanticZoning;
             MegastationWindowDiagnostics = megastationWindowDiagnostics;
             MegastationLightingDiagnostics = megastationLightingDiagnostics;
+            MegastationAttachmentDiagnostics = megastationAttachmentDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -110,6 +112,7 @@ public sealed partial class SystemSpaceState
         public MegastationSemanticZoningResult? MegastationSemanticZoning { get; }
         public MegastationWindowDiagnostics? MegastationWindowDiagnostics { get; }
         public MegastationLightingDiagnostics? MegastationLightingDiagnostics { get; }
+        public MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -664,6 +667,7 @@ public sealed partial class SystemSpaceState
             generation.MegastationSemanticZoning,
             generation.MegastationWindowDiagnostics,
             generation.MegastationLightingDiagnostics,
+            generation.MegastationAttachmentDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -676,13 +680,19 @@ public sealed partial class SystemSpaceState
                 ?? throw new InvalidOperationException(
                     "Megastation fallbacks require an active mesh renderer.");
             var assignmentStopwatch = Stopwatch.StartNew();
-            foreach (PlacedModule module in generation.Modules)
+            HashSet<PlacedModule> assignedModules = generation.TextureAssignments
+                .Select(assignment => assignment.Module)
+                .ToHashSet();
+            int fallbackModuleCount = 0;
+            foreach (PlacedModule module in generation.Modules.Where(
+                         module => !assignedModules.Contains(module)))
             {
                 module.TextureInstance = renderer.WhiteFallbackTexture;
                 module.MaterialInstance = renderer.StationFallbackMaterialTexture;
+                fallbackModuleCount++;
             }
             assignmentStopwatch.Stop();
-            package.TextureReferenceAssignmentCount = generation.Modules.Count * 2;
+            package.TextureReferenceAssignmentCount = fallbackModuleCount * 2;
             package.TextureReferenceAssignmentMilliseconds =
                 assignmentStopwatch.Elapsed.TotalMilliseconds;
         }
@@ -851,7 +861,7 @@ public sealed partial class SystemSpaceState
                 return;
             }
 
-            if (!session.Prepared.Generation.UsesSharedMegastationFallbackTextures)
+            if (session.Prepared.Generation.TextureAssignments.Count > 0)
             {
                 var textureAssignmentStopwatch = Stopwatch.StartNew();
                 foreach (StationTextureAssignment assignment in session.Prepared.Generation.TextureAssignments)
@@ -860,9 +870,9 @@ public sealed partial class SystemSpaceState
                     assignment.Module.MaterialInstance = package.Textures[assignment.MaterialTextureIndex];
                 }
                 textureAssignmentStopwatch.Stop();
-                package.TextureReferenceAssignmentCount =
+                package.TextureReferenceAssignmentCount +=
                     session.Prepared.Generation.TextureAssignments.Count * 2;
-                package.TextureReferenceAssignmentMilliseconds =
+                package.TextureReferenceAssignmentMilliseconds +=
                     textureAssignmentStopwatch.Elapsed.TotalMilliseconds;
             }
             StationGenerator.ApplyPreparedLandingPads(
@@ -909,6 +919,8 @@ public sealed partial class SystemSpaceState
                 PublishMegastationWindowDiagnostics(package.Descriptor.Identity, windows);
             if (package.MegastationLightingDiagnostics is { } lighting)
                 PublishMegastationLightingDiagnostics(package.Descriptor.Identity, lighting);
+            if (package.MegastationAttachmentDiagnostics is { } attachments)
+                PublishMegastationAttachmentDiagnostics(package.Descriptor.Identity, attachments);
             PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
             package.PublishTextureUploadDiagnostics();
             PublishMissingStationHullCasterWarnings(package);

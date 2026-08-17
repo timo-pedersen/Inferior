@@ -56,6 +56,10 @@ public sealed class MegastationLightingTests
             result.Grid,
             result.BoundaryTopology,
             Reverse(result.SemanticZoning));
+        b = MegastationAttachmentPlanner.SuppressLights(
+            b,
+            result.AttachmentPlan.Reservations,
+            out _);
 
         Assert.Equal(a.Regions.Select(RegionSignature), b.Regions.Select(RegionSignature));
         Assert.Equal(a.Clusters, b.Clusters);

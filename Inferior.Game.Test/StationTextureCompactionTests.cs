@@ -117,7 +117,7 @@ public sealed class StationTextureCompactionTests
     }
 
     [Fact]
-    public void MegastationPreparationUsesBorrowedFallbacksAndSchedulesNoTextureUpload()
+    public void MegastationPreparationBorrowsStructuralFallbacksAndCompactsSecondaryTextures()
     {
         Star star = StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;
         StarSystem system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
@@ -130,32 +130,48 @@ public sealed class StationTextureCompactionTests
             useMegastationPrototype: true);
 
         Assert.True(prepared.UsesSharedMegastationFallbackTextures);
-        Assert.Empty(prepared.Textures);
-        Assert.Empty(prepared.TextureAssignments);
-        Assert.DoesNotContain(prepared.UploadPlan, item => item.Texture != null);
+        Assert.True(prepared.Modules.Count > 1);
+        Assert.NotEmpty(prepared.Textures);
+        Assert.Equal(prepared.Modules.Count - 1, prepared.TextureAssignments.Count);
+        Assert.Equal(prepared.Textures.Count,
+            prepared.UploadPlan.Count(item => item.Texture != null));
+        PlacedModule structural = prepared.Modules[0];
+        Assert.DoesNotContain(prepared.TextureAssignments,
+            assignment => ReferenceEquals(assignment.Module, structural));
+        Assert.All(prepared.Modules.Skip(1), module => Assert.Single(
+            prepared.TextureAssignments,
+            assignment => ReferenceEquals(assignment.Module, module)));
         Assert.All(prepared.Modules, module =>
         {
             Assert.Null(module.TextureInstance);
             Assert.Null(module.MaterialInstance);
         });
-        Assert.Equal(0, prepared.TextureDiagnostics.GeneratedTextureCount);
-        Assert.Equal(0, prepared.TextureDiagnostics.GeneratedVariantPairCount);
-        Assert.Equal(0, prepared.TextureDiagnostics.SelectedUniqueTextureCount);
-        Assert.Equal(1, prepared.TextureDiagnostics.SelectedUniqueTexturePairCount);
-        Assert.Equal(0, prepared.TextureDiagnostics.DiscardedTextureCount);
-        Assert.Equal(0, prepared.TextureDiagnostics.UploadedAlbedoTextureCount);
-        Assert.Equal(0, prepared.TextureDiagnostics.UploadedMaterialTextureCount);
-        Assert.Equal(2, prepared.TextureDiagnostics.ModuleTextureBindingCount);
+        Assert.True(prepared.TextureDiagnostics.GeneratedTextureCount
+            > prepared.TextureDiagnostics.SelectedUniqueTextureCount);
+        Assert.Equal(prepared.Textures.Count,
+            prepared.TextureDiagnostics.SelectedUniqueTextureCount);
+        Assert.Equal(prepared.TextureAssignments.Count * 2 + 2,
+            prepared.TextureDiagnostics.ModuleTextureBindingCount);
         Assert.Equal(2, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        MegastationAttachmentDiagnostics attachments = Assert.IsType<MegastationAttachmentDiagnostics>(
+            prepared.MegastationAttachmentDiagnostics);
+        Assert.Equal(prepared.Modules.Count - 1, attachments.PlacedModuleCount);
         MegastationWindowDiagnostics windows = Assert.IsType<MegastationWindowDiagnostics>(
             prepared.MegastationWindowDiagnostics);
         StationVisualUploadPlanItem glass = Assert.Single(
             prepared.UploadPlan,
-            item => item.Kind == StationVisualUploadResourceKind.GlassMesh);
+            item => item.Kind == StationVisualUploadResourceKind.GlassMesh
+                && ReferenceEquals(item.Module, structural));
         Assert.Equal(windows.MeshBytes, glass.EstimatedBytes);
-        Assert.Equal(
-            3_965_952 + windows.MeshBytes,
-            prepared.UploadPlan.Sum(item => item.EstimatedBytes));
+        Assert.True(prepared.UploadPlan.Sum(item => item.EstimatedBytes)
+            > 3_965_952 + windows.MeshBytes);
+        Console.WriteLine(
+            $"G1 Nova preparation modules={prepared.Modules.Count}; " +
+            $"ownedTextures={prepared.Textures.Count}; textureSetDataCalls={prepared.Textures.Count}; " +
+            $"uploadResources={prepared.UploadPlan.Count}; gpuBuffers=" +
+            $"{prepared.UploadPlan.Count(item => item.Mesh != null) * 2}; " +
+            $"uploadedResourceGpuBytes={prepared.UploadPlan.Sum(item => item.EstimatedBytes)}; " +
+            $"largestUploadBytes={prepared.UploadPlan.Max(item => item.EstimatedBytes)}");
     }
 
     [Fact]

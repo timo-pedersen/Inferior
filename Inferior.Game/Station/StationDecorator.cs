@@ -11,6 +11,14 @@ namespace Inferior.Game.StationGen;
 public static partial class StationDecorator
 {
     public static void Decorate(IReadOnlyList<PlacedModule> modules)
+        => Decorate(modules, includeStationWidePasses: true);
+
+    public static void DecorateSecondaryModules(IReadOnlyList<PlacedModule> modules)
+        => Decorate(modules, includeStationWidePasses: false);
+
+    private static void Decorate(
+        IReadOnlyList<PlacedModule> modules,
+        bool includeStationWidePasses)
     {
         foreach (var mod in modules)
         {
@@ -186,6 +194,11 @@ public static partial class StationDecorator
             if (!glassMesh.IsEmpty)
                 mod.GlassMesh = glassMesh;
         }
+
+        // Megastation secondary structures reuse only the module-local presentation
+        // pipeline. They must not grow station-global landmarks, arrays, dishes, or pads.
+        if (!includeStationWidePasses)
+            return;
 
         // Station-wide passes that need all modules to be decorated first.
         int stationSeed = modules.Count > 0 ? modules[0].Seed : 42;

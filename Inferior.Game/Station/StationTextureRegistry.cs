@@ -135,7 +135,9 @@ public static class StationTextureRegistry
         if (variantCount <= 1) return 0;
         var dominantRoll = new System.Random(seed ^ 0x424D5348); // "BMSH" — base-share roll salt
         if (dominantRoll.NextDouble() < baseShareRatio) return 0;
-        return 1 + (seed % (variantCount - 1));
+        // Derived semantic seeds are signed and may legitimately be negative. Preserve
+        // the existing mapping for positive seeds while keeping the selected index valid.
+        return 1 + (int)((uint)seed % (uint)(variantCount - 1));
     }
 
     // Builds a per-variant TexturePalette whose BaseColour/GrimeColour are hue-rotated

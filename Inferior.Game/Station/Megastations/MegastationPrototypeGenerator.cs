@@ -90,6 +90,7 @@ public sealed record MegastationPrototypeCpuResult(
     TopologyRegularisationReport TopologyRegularisation,
     BoundaryTopology BoundaryTopology,
     MegastationSemanticZoningResult SemanticZoning,
+    MegastationAttachmentPlan AttachmentPlan,
     IReadOnlyList<SurfacePatch> Patches,
     MegastationUrbanStyle Style,
     IReadOnlyList<UrbanGrowthResult> Faces,
@@ -165,11 +166,21 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             topology,
             faceResults);
+        MegastationAttachmentPlan attachmentPlan = MegastationAttachmentPlanner.Plan(
+            grid,
+            regularised.Occupancy,
+            topology,
+            semanticZoning,
+            cancellationToken);
         MegastationWindowPlan windowPlan = MegastationWindowPlanner.Plan(
             grid,
             topology,
             semanticZoning,
             cancellationToken);
+        windowPlan = MegastationAttachmentPlanner.SuppressWindows(
+            windowPlan,
+            attachmentPlan.Reservations,
+            out int suppressedWindows);
         MegastationWindowMeshBuildResult windowMesh = MegastationWindowMeshBuilder.Build(
             windowPlan,
             cancellationToken);
@@ -179,6 +190,14 @@ public static class MegastationPrototypeGenerator
             topology,
             semanticZoning,
             cancellationToken);
+        lightPlan = MegastationAttachmentPlanner.SuppressLights(
+            lightPlan,
+            attachmentPlan.Reservations,
+            out int suppressedLights);
+        attachmentPlan = MegastationAttachmentPlanner.WithSuppressionCounts(
+            attachmentPlan,
+            suppressedWindows,
+            suppressedLights);
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(
             regularised.Occupancy,
@@ -271,6 +290,7 @@ public static class MegastationPrototypeGenerator
             regularised.Report,
             topology,
             semanticZoning,
+            attachmentPlan,
             patches,
             style,
             faceResults,
