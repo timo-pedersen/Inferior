@@ -56,7 +56,9 @@ public sealed record StationGenerationCpuResult(
     MegastationSemanticZoningResult? MegastationSemanticZoning = null,
     MegastationWindowDiagnostics? MegastationWindowDiagnostics = null,
     MegastationLightingDiagnostics? MegastationLightingDiagnostics = null,
-    MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics = null);
+    MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics = null,
+    MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics = null,
+    MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -120,6 +122,7 @@ public sealed class StationGenerator
                 cancellationToken: cancellationToken);
             stopwatch.Start();
             PlacedModule structure = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
+            PlacedModule? megaGreeble = MegastationPrototypeGenerator.CreateMegaGreebleModule(cpu);
             List<PlacedModule> secondaryModules =
                 MegastationAttachmentPlanner.CreatePlacedModules(cpu.AttachmentPlan);
             StationDecorator.DecorateSecondaryModules(secondaryModules);
@@ -157,7 +160,9 @@ public sealed class StationGenerator
                 generatedTextures,
                 generatedAssignments,
                 generatedVariantPairCount: generatedTextures.Count / 2);
-            List<PlacedModule> megaModules = [structure, .. secondaryModules];
+            List<PlacedModule> megaModules = megaGreeble == null
+                ? [structure, .. secondaryModules]
+                : [structure, megaGreeble, .. secondaryModules];
             IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
                 megaModules,
                 megaCompacted.Textures,
@@ -176,14 +181,17 @@ public sealed class StationGenerator
                 stopwatch.Elapsed.TotalMilliseconds,
                 megaCompacted.Diagnostics with
                 {
-                    ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount + 2,
-                    SharedFallbackReferenceCount = 2,
+                    ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount
+                        + (megaGreeble == null ? 2 : 4),
+                    SharedFallbackReferenceCount = megaGreeble == null ? 2 : 4,
                 },
                 UsesSharedMegastationFallbackTextures: true,
                 MegastationSemanticZoning: cpu.SemanticZoning,
                 MegastationWindowDiagnostics: cpu.WindowPlan.Diagnostics,
                 MegastationLightingDiagnostics: cpu.LightPlan.Diagnostics,
-                MegastationAttachmentDiagnostics: cpu.AttachmentPlan.Diagnostics);
+                MegastationAttachmentDiagnostics: cpu.AttachmentPlan.Diagnostics,
+                MegastationInfrastructureDiagnostics: cpu.InfrastructurePlan.Diagnostics,
+                MegastationMegaGreebleDiagnostics: cpu.MegaGreeblePlan.Diagnostics);
         }
 
         int seed = NameHash(station.Name);
@@ -447,7 +455,26 @@ public sealed class StationGenerator
                     IndexElementSize.ThirtyTwoBits),
                 module,
                 Mesh: mesh,
-                Bounds: bounds);
+                Bounds: bounds,
+                DiagnosticPurpose: module.HasNativeMegastationInfrastructure
+                    ? kind switch
+                    {
+                        StationVisualUploadResourceKind.DecorationMesh =>
+                            StationVisualUploadDiagnosticPurpose.MegastationInfrastructureVisible,
+                        StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                            StationVisualUploadDiagnosticPurpose.MegastationInfrastructureShadow,
+                        _ => StationVisualUploadDiagnosticPurpose.None,
+                    }
+                    : module.HasNativeMegastationMegaGreeble
+                        ? kind switch
+                        {
+                            StationVisualUploadResourceKind.DecorationMesh =>
+                                StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleVisible,
+                            StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                                StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleShadow,
+                            _ => StationVisualUploadDiagnosticPurpose.None,
+                        }
+                        : StationVisualUploadDiagnosticPurpose.None);
 
         static StationMeshCpuData? PrepareMesh(StationModuleMesh? mesh)
         {

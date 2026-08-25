@@ -23,6 +23,11 @@ public enum DecorClass
     // Never casts (documented exclusions) — see DecorCastingPolicy.
     PanelSeams, EdgeTrim, Cables, Lights, Glass, LandingPadMarkings,
 
+    // Native megastation infrastructure. Major carries only silhouette-worthy
+    // machinery/tank forms; Minor carries vents and small visible detailing.
+    MegastationInfrastructureMajor, MegastationInfrastructureMinor,
+    MegastationMegaGreebleMajor, MegastationMegaGreebleMinor,
+
     // C1 — structural
     Pipes, SurfacePipes, PipeBrackets,
 
@@ -63,6 +68,7 @@ public sealed class StationModuleMesh
     private readonly List<int>                          _idx   = [];
     private readonly List<(int vertexBase, int count)>  _faces = [];
     private readonly List<(int indexStart, int indexCount, DecorClass decorClass)> _classRanges = [];
+    private bool _breakDecorClassRange;
 
     public bool           IsEmpty       => _verts.Count == 0;
     public int            VertexCount   => _verts.Count;
@@ -86,6 +92,12 @@ public sealed class StationModuleMesh
     public IReadOnlyList<(int indexStart, int indexCount, DecorClass decorClass)> DecorClassRanges
         => _classRanges;
 
+    // Starts a fresh diagnostic/ownership range even when the next geometry has the same
+    // DecorClass as the preceding geometry. Native megastation builders use this at an
+    // instance boundary so per-family caster participation can be enumerated without
+    // changing the combined mesh or its draw-call count.
+    public void BreakDecorClassRange() => _breakDecorClassRange = true;
+
     // Appends (or extends, if contiguous with the previous entry and same class) a
     // class-tagged range covering the indices just added. Called once per geometry-adding
     // method (AddQuad/AddTriangle/gradient variants/MergeTransformed) — sub-shapes built
@@ -94,7 +106,7 @@ public sealed class StationModuleMesh
     private void RecordDecorClassRange(int indexStart, int indexCount)
     {
         if (indexCount <= 0) return;
-        if (_classRanges.Count > 0)
+        if (!_breakDecorClassRange && _classRanges.Count > 0)
         {
             var last = _classRanges[^1];
             if (last.decorClass == CurrentDecorClass && last.indexStart + last.indexCount == indexStart)
@@ -103,6 +115,7 @@ public sealed class StationModuleMesh
                 return;
             }
         }
+        _breakDecorClassRange = false;
         _classRanges.Add((indexStart, indexCount, CurrentDecorClass));
     }
 

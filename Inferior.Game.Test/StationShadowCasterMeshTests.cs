@@ -64,4 +64,32 @@ public class StationShadowCasterMeshTests
         Assert.False(SystemSpaceState.HasMeshFactoryHull(box));
         Assert.Null(box.HullMesh);
     }
+
+    [Fact]
+    public void ProductionCasterStageExplicitlyIncludesNativeMegastationMajorClasses()
+    {
+        DecorClass[] enabled = SystemSpaceState.ClassesForStage(
+            SystemSpaceState.CasterStage.AllClasses).ToArray();
+
+        Assert.Contains(DecorClass.MegastationInfrastructureMajor, enabled);
+        Assert.Contains(DecorClass.MegastationMegaGreebleMajor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationInfrastructureMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationMegaGreebleMinor, enabled);
+    }
+
+    [Fact]
+    public void HullLessPresentationCasterStillContributesShadowFitBounds()
+    {
+        var decoration = (min: new Vector3(-80f, -20f, 3f), max: new Vector3(90f, 25f, 70f));
+
+        bool included = SystemSpaceState.TryCombineStationShadowCasterBounds(
+            hullBounds: null,
+            decorationBounds: decoration,
+            out Vector3 min,
+            out Vector3 max);
+
+        Assert.True(included);
+        Assert.Equal(decoration.min, min);
+        Assert.Equal(decoration.max, max);
+    }
 }

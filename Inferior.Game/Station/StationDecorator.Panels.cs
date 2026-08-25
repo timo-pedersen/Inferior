@@ -258,57 +258,6 @@ public static partial class StationDecorator
         }
     }
 
-    // Shared: dark recess behind grille opening.
-    private static void AddVentBacking(FaceInfo face, float cu, float cv,
-        float ventW, float ventH, Color col, StationModuleMesh mesh)
-    {
-        const float shadowOff = 0.018f;
-        float hw = ventW * 0.5f, hh = ventH * 0.5f;
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw, cv - hh, shadowOff),
-            LocalPointAbs(face, cu + hw, cv - hh, shadowOff),
-            LocalPointAbs(face, cu + hw, cv + hh, shadowOff),
-            LocalPointAbs(face, cu - hw, cv + hh, shadowOff), col);
-    }
-
-    // Shared: thin raised border around a vent opening.
-    private static void AddVentFrame(PlacedModule mod, FaceInfo face,
-        float cu, float cv, float ventW, float ventH, StationModuleMesh mesh)
-    {
-        Color frameCol  = DarkenColor(StationModuleRegistry.CategoryColor(mod.Definition.Category), 0.58f);
-        float hw = ventW * 0.5f, hh = ventH * 0.5f;
-        const float fw = 0.12f;   // frame width
-        const float fo = 0.025f;  // frame Z offset
-
-        // Top bar
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw - fw, cv + hh,      fo),
-            LocalPointAbs(face, cu + hw + fw, cv + hh,      fo),
-            LocalPointAbs(face, cu + hw + fw, cv + hh + fw, fo),
-            LocalPointAbs(face, cu - hw - fw, cv + hh + fw, fo), frameCol);
-
-        // Bottom bar
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw - fw, cv - hh - fw, fo),
-            LocalPointAbs(face, cu + hw + fw, cv - hh - fw, fo),
-            LocalPointAbs(face, cu + hw + fw, cv - hh,      fo),
-            LocalPointAbs(face, cu - hw - fw, cv - hh,      fo), frameCol);
-
-        // Left bar
-        mesh.AddQuad(
-            LocalPointAbs(face, cu - hw - fw, cv - hh, fo),
-            LocalPointAbs(face, cu - hw,      cv - hh, fo),
-            LocalPointAbs(face, cu - hw,      cv + hh, fo),
-            LocalPointAbs(face, cu - hw - fw, cv + hh, fo), frameCol);
-
-        // Right bar
-        mesh.AddQuad(
-            LocalPointAbs(face, cu + hw,      cv - hh, fo),
-            LocalPointAbs(face, cu + hw + fw, cv - hh, fo),
-            LocalPointAbs(face, cu + hw + fw, cv + hh, fo),
-            LocalPointAbs(face, cu + hw,      cv + hh, fo), frameCol);
-    }
-
     // Existing grille style: horizontal or vertical bars.
     private static void AddHBarVentGrille(PlacedModule mod, FaceInfo face,
         float cu, float cv, float ventW, float ventH, System.Random rng,
@@ -316,35 +265,11 @@ public static partial class StationDecorator
     {
         Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
         Color barCol   = DarkenColor(baseCol, 0.45f);
-
-        AddVentBacking(face, cu, cv, ventW, ventH, new Color(12, 12, 14), mesh);
-
         bool horizontal = rng.NextDouble() < 0.6;
         int  barCount   = rng.Next(3, 8);
-        float hw = ventW * 0.5f, hh = ventH * 0.5f;
-        const float barThick = 0.04f;
-        const float barOff   = 0.030f;
-
-        for (int b = 0; b < barCount; b++)
-        {
-            float t   = (b + 0.5f) / barCount;
-            float pos = horizontal
-                ? cv - hh + ventH * t
-                : cu - hw + ventW * t;
-
-            float b0u = horizontal ? cu - hw  : pos - barThick * 0.5f;
-            float b0v = horizontal ? pos - barThick * 0.5f : cv - hh;
-            float b1u = horizontal ? cu + hw  : pos + barThick * 0.5f;
-            float b1v = horizontal ? pos + barThick * 0.5f : cv + hh;
-
-            mesh.AddQuad(
-                LocalPointAbs(face, b0u, b0v, barOff),
-                LocalPointAbs(face, b1u, b0v, barOff),
-                LocalPointAbs(face, b1u, b1v, barOff),
-                LocalPointAbs(face, b0u, b1v, barOff), barCol);
-        }
-
-        AddVentFrame(mod, face, cu, cv, ventW, ventH, mesh);
+        StationIndustrialPrimitives.EmitHorizontalBarVent(mesh,
+            IndustrialFrame(face, cu, cv), ventW, ventH, horizontal, barCount,
+            DarkenColor(baseCol, 0.58f), barCol);
     }
 
     // Louvered vent: angled slats like venetian blinds.
@@ -354,29 +279,10 @@ public static partial class StationDecorator
     {
         Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
         Color slatCol  = DarkenColor(baseCol, 0.50f);
-
-        AddVentBacking(face, cu, cv, ventW, ventH, new Color(10, 10, 12), mesh);
-
         int   slats     = rng.Next(4, 8);
-        float slatsH    = ventH / slats;
-        const float slabThick = 0.045f;
-        float hh = ventH * 0.5f, hw = ventW * 0.5f;
-
-        for (int s = 0; s < slats; s++)
-        {
-            float vCentre = cv - hh + slatsH * (s + 0.5f);
-            float vBot    = vCentre - slatsH * 0.3f;
-            float vTop    = vCentre + slatsH * 0.3f;
-
-            // Slat slopes in the normal direction from bottom to top — gives angled appearance.
-            Vector3 s0 = LocalPointAbs(face, cu - hw, vBot, 0.022f);
-            Vector3 s1 = LocalPointAbs(face, cu + hw, vBot, 0.022f);
-            Vector3 s2 = LocalPointAbs(face, cu + hw, vTop, 0.022f + slabThick);
-            Vector3 s3 = LocalPointAbs(face, cu - hw, vTop, 0.022f + slabThick);
-            mesh.AddQuad(s0, s1, s2, s3, slatCol);
-        }
-
-        AddVentFrame(mod, face, cu, cv, ventW, ventH, mesh);
+        StationIndustrialPrimitives.EmitLouveredVent(mesh,
+            IndustrialFrame(face, cu, cv), ventW, ventH, slats,
+            DarkenColor(baseCol, 0.58f), slatCol);
     }
 
     // Screen mesh vent: fine grid of thin bars in both directions.
@@ -386,41 +292,9 @@ public static partial class StationDecorator
     {
         Color baseCol  = StationModuleRegistry.CategoryColor(mod.Definition.Category);
         Color wireCol  = DarkenColor(baseCol, 0.45f);
-
-        AddVentBacking(face, cu, cv, ventW, ventH, new Color(8, 8, 10), mesh);
-
-        const float wireThick = 0.025f;
-        const float wireOff   = 0.026f;
-        float hw = ventW * 0.5f, hh = ventH * 0.5f;
-
-        int hCount = Math.Max(1, (int)(ventW / 0.35f));
-        int vCount = Math.Max(1, (int)(ventH / 0.35f));
-
-        // Horizontal wires
-        for (int i = 1; i < vCount; i++)
-        {
-            float vPos = cv - hh + ventH * ((float)i / vCount);
-            float hs   = wireThick * 0.5f;
-            mesh.AddQuad(
-                LocalPointAbs(face, cu - hw, vPos - hs, wireOff),
-                LocalPointAbs(face, cu + hw, vPos - hs, wireOff),
-                LocalPointAbs(face, cu + hw, vPos + hs, wireOff),
-                LocalPointAbs(face, cu - hw, vPos + hs, wireOff), wireCol);
-        }
-
-        // Vertical wires (offset slightly forward so they cross over horizontals)
-        for (int i = 1; i < hCount; i++)
-        {
-            float uPos = cu - hw + ventW * ((float)i / hCount);
-            float hs   = wireThick * 0.5f;
-            mesh.AddQuad(
-                LocalPointAbs(face, uPos - hs, cv - hh, wireOff + 0.005f),
-                LocalPointAbs(face, uPos + hs, cv - hh, wireOff + 0.005f),
-                LocalPointAbs(face, uPos + hs, cv + hh, wireOff + 0.005f),
-                LocalPointAbs(face, uPos - hs, cv + hh, wireOff + 0.005f), wireCol);
-        }
-
-        AddVentFrame(mod, face, cu, cv, ventW, ventH, mesh);
+        StationIndustrialPrimitives.EmitScreenVent(mesh,
+            IndustrialFrame(face, cu, cv), ventW, ventH,
+            DarkenColor(baseCol, 0.58f), wireCol);
     }
 
 }

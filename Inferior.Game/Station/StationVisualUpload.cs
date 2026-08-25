@@ -86,6 +86,15 @@ public enum StationVisualUploadResourceKind
     ShadowDecorationMesh,
 }
 
+public enum StationVisualUploadDiagnosticPurpose
+{
+    None,
+    MegastationInfrastructureVisible,
+    MegastationInfrastructureShadow,
+    MegastationMegaGreebleVisible,
+    MegastationMegaGreebleShadow,
+}
+
 public sealed record StationVisualUploadPlanItem(
     StationVisualUploadResourceKind Kind,
     string ResourceIdentity,
@@ -93,7 +102,8 @@ public sealed record StationVisualUploadPlanItem(
     PlacedModule? Module = null,
     PreparedStationTexture? Texture = null,
     StationMeshCpuData? Mesh = null,
-    (Microsoft.Xna.Framework.Vector3 Min, Microsoft.Xna.Framework.Vector3 Max)? Bounds = null)
+    (Microsoft.Xna.Framework.Vector3 Min, Microsoft.Xna.Framework.Vector3 Max)? Bounds = null,
+    StationVisualUploadDiagnosticPurpose DiagnosticPurpose = StationVisualUploadDiagnosticPurpose.None)
 {
     public int VertexCount => Mesh?.Vertices.Length ?? 0;
     public int IndexCount => Mesh?.Indices.Length ?? 0;

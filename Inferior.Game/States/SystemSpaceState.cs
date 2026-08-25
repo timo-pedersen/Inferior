@@ -167,6 +167,7 @@ public sealed partial class SystemSpaceState : GameState
     private bool _debugCameraMode;
     private bool _semanticHullDebug;
     private bool _megastationZoningDebug;
+    private bool _megastationInfrastructureDebug;
     private bool _engineModuleDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
@@ -634,7 +635,11 @@ public sealed partial class SystemSpaceState : GameState
         bool ctrlF5JustPressed = ctrlDown
             && keys.IsKeyDown(Keys.F5)
             && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F5));
+        bool shiftF5JustPressed = !ctrlDown && shiftDown
+            && keys.IsKeyDown(Keys.F5)
+            && !_prevKeys.IsKeyDown(Keys.F5);
         bool f5JustPressed  = !ctrlDown
+            && !shiftDown
             && keys.IsKeyDown(Keys.F5)
             && !_prevKeys.IsKeyDown(Keys.F5);
         bool shipPositionMarkerToggledOn = false;
@@ -742,6 +747,15 @@ public sealed partial class SystemSpaceState : GameState
                 _megastationZoningDebug
                     ? "Megastation semantic zoning debug enabled."
                     : "Megastation semantic zoning debug disabled.",
+                SystemMessagePriority.Info));
+        }
+        if (shiftF5JustPressed)
+        {
+            _megastationInfrastructureDebug = !_megastationInfrastructureDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _megastationInfrastructureDebug
+                    ? "Megastation detail debug enabled: G2 magenta/cyan/green/orange; mega-greeble yellow surface solar, cyan radial solar, magenta dishes."
+                    : "Megastation detail debug disabled.",
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);

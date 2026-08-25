@@ -196,11 +196,12 @@ public sealed class MegastationAttachmentTests
     [Theory]
     [InlineData("Gaanis:Gaanis II:Omega Beacon")]
     [InlineData("Araris:Araris I:Swift Depot")]
-    public void OtherMegastationsRemainSparseAndReportable(string stationIdentity)
+    public void OtherMegastationsRemainBoundedAndReportable(string stationIdentity)
     {
-        MegastationAttachmentDiagnostics diagnostics = MegastationPrototypeGenerator
-            .GenerateCpu(stationIdentity)
-            .AttachmentPlan.Diagnostics;
+        MegastationPrototypeCpuResult result = MegastationPrototypeGenerator
+            .GenerateCpu(stationIdentity);
+        MegastationAttachmentDiagnostics diagnostics = result.AttachmentPlan.Diagnostics;
+        MegastationInfrastructureDiagnostics infrastructure = result.InfrastructurePlan.Diagnostics;
 
         Assert.InRange(diagnostics.PlacedModuleCount, 10, 80);
         Console.WriteLine(
@@ -212,6 +213,18 @@ public sealed class MegastationAttachmentTests
             $"supportRejects={diagnostics.RejectedSupportCount}; clearanceRejects={diagnostics.RejectedClearanceCount}; " +
             $"windowsSuppressed={diagnostics.SuppressedWindowCount}; lightsSuppressed={diagnostics.SuppressedLightCount}; " +
             $"planningMs={diagnostics.PlanningMilliseconds}; clearanceMs={diagnostics.ClearanceMilliseconds}");
+        Assert.InRange(infrastructure.ClusterCount, 1,
+            MegastationInfrastructureTuning.Default.StationClusterCap);
+        Assert.True(infrastructure.PrimitiveCount >= infrastructure.ClusterCount * 5);
+        Console.WriteLine(
+            $"G2 {stationIdentity} candidateArea={infrastructure.CandidateArea:F0}; " +
+            $"activeArea={infrastructure.ActiveArea:F0}; clusters={infrastructure.ClusterCount}; " +
+            $"primitives={infrastructure.PrimitiveCount}; housings={infrastructure.HousingCount}; " +
+            $"vents={infrastructure.VentCount}; tanks={infrastructure.TankCount}; " +
+            $"visible={infrastructure.VisibleVertexCount}v/{infrastructure.VisibleTriangleCount}t/" +
+            $"{infrastructure.VisibleMeshBytes}B; shadow={infrastructure.ShadowVertexCount}v/" +
+            $"{infrastructure.ShadowTriangleCount}t/{infrastructure.ShadowMeshBytes}B; " +
+            $"planningMs={infrastructure.PlanningMilliseconds}; meshMs={infrastructure.MeshBuildMilliseconds}");
     }
 
     [Fact]

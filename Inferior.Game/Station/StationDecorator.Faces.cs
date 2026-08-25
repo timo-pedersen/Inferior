@@ -117,6 +117,9 @@ public static partial class StationDecorator
          + face.LocalUp     * v
          + face.LocalNormal * offset;
 
+    private static StationSurfaceFrame IndustrialFrame(FaceInfo face, float u, float v)
+        => new(LocalPointAbs(face, u, v, 0f), face.LocalNormal, face.LocalRight, face.LocalUp);
+
     // Transforms a module-local face point to station-relative space via mod.Transform.
     // Used to compute WorldPosition values for StationLightInfo.
     private static Vector3 StationPoint(PlacedModule mod, FaceInfo face, float u, float v, float offset)

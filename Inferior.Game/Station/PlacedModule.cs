@@ -6,7 +6,14 @@ namespace Inferior.Game.StationGen;
 // DockGuidance is distinct from AmbientMarker so its glow sprite can be sized independently
 // (see the baseSize switch in SystemSpaceState.Stations.cs) — bumping AmbientMarker itself
 // would also enlarge every unrelated ambient position marker on the station.
-public enum GlowType { NavigationLight, WarningStrobe, AviationWarning, AmbientMarker, DockGuidance }
+public enum GlowType
+{
+    NavigationLight,
+    WarningStrobe,
+    AviationWarning,
+    AmbientMarker,
+    DockGuidance,
+}
 
 public enum LightPattern
 {
@@ -59,6 +66,18 @@ public sealed class PlacedModule
     public          StationPort?            AttachmentPort { get; set; }
     public          List<StationPort>       ChildPorts     { get; } = [];
     public          StationModuleMesh?      Mesh            { get; set; }
+    // Capability marker for a combined native megastation decoration mesh. Upload
+    // diagnostics use this rather than station/module identity checks.
+    public          bool                    HasNativeMegastationInfrastructure { get; init; }
+    // Capability marker for the separately batched mega-greeble presentation layer.
+    public          bool                    HasNativeMegastationMegaGreeble { get; init; }
+    // Explicit capability for batched presentation-only modules which intentionally
+    // have decoration geometry but no load-bearing hull of their own.
+    public          bool                    IsHullLessPresentationLayer { get; init; }
+    // CPU-only diagnostic line list. Never uploaded or drawn unless the runtime
+    // G2 debug toggle is enabled.
+    public          VertexPositionColor[]?  NativeInfrastructureDebugLines { get; init; }
+    public          VertexPositionColor[]?  NativeMegaGreebleDebugLines { get; init; }
     // Brief U1: only ever set for MeshFactory modules (a box module's hull is built
     // procedurally by StationGenerator.PrepareBoxHullMesh from Definition/ChamferDepth
     // alone, so it never needs storing here). Load-bearing hull geometry

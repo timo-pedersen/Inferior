@@ -223,6 +223,13 @@ public static partial class StationDecorator
     public static readonly DecorClass[] C4Classes =
         [DecorClass.Windows, DecorClass.Hatches];
 
+    // Native megastation presentation layers were introduced after the legacy C1-C4
+    // rollout. They still need an explicit place in the production caster set: merely
+    // setting DecorCastingPolicy to true is not enough because station residency passes
+    // the active rollout-stage classes to CPU preparation.
+    public static readonly DecorClass[] MegastationCasterClasses =
+        [DecorClass.MegastationInfrastructureMajor, DecorClass.MegastationMegaGreebleMajor];
+
     // Docs/station-lighting-pipeline-spec.md §10 Phase C: the executable form of the
     // "documented casting policy." SystemSpaceState.Shadows.cs reads this to decide which
     // DecorClassRanges feed the per-module shadow-caster index buffer. Rollout is one
@@ -243,6 +250,10 @@ public static partial class StationDecorator
             [DecorClass.Lights]             = false, // lights/lenses, bay guidance lights, placards — tiny and/or emissive
             [DecorClass.Glass]              = false, // separate transparent mesh, per spec
             [DecorClass.LandingPadMarkings] = false, // flat; pad faces are kept clear anyway
+            [DecorClass.MegastationInfrastructureMinor] = false, // vents and small service detail
+            [DecorClass.MegastationInfrastructureMajor] = true,  // tanks and substantial housings
+            [DecorClass.MegastationMegaGreebleMinor] = false, // ribs, receivers and fine braces
+            [DecorClass.MegastationMegaGreebleMajor] = true,  // collector, dish and major supports
 
             // C1 — structural. Landed: gated via F8 overlay + Timo's in-engine screenshots.
             [DecorClass.Pipes]        = true,

@@ -90,6 +90,7 @@ public sealed record MegastationPrototypeCpuResult(
     TopologyRegularisationReport TopologyRegularisation,
     BoundaryTopology BoundaryTopology,
     MegastationSemanticZoningResult SemanticZoning,
+    IReadOnlyList<MegastationPlanarRegion> PlanarRegions,
     MegastationAttachmentPlan AttachmentPlan,
     IReadOnlyList<SurfacePatch> Patches,
     MegastationUrbanStyle Style,
@@ -100,6 +101,10 @@ public sealed record MegastationPrototypeCpuResult(
     MegastationWindowPlan WindowPlan,
     StationModuleMesh WindowGlassMesh,
     MegastationLightPlan LightPlan,
+    MegastationInfrastructurePlan InfrastructurePlan,
+    StationModuleMesh InfrastructureMesh,
+    MegastationMegaGreeblePlan MegaGreeblePlan,
+    StationModuleMesh MegaGreebleMesh,
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
 
@@ -112,12 +117,20 @@ public static class MegastationPrototypeGenerator
         string id = station.PersistenceId ?? station.Name;
         MegastationPrototypeCpuResult cpu = GenerateCpu(id, settings, sw);
         PlacedModule module = CreatePlacedModule(cpu);
+        PlacedModule? megaGreeble = CreateMegaGreebleModule(cpu);
 
         var albedo = MakeFlat(gd, Color.White);
         var material = MakeFlat(gd, new Color(128, 255, 0, 0));
         module.TextureInstance = albedo;
         module.MaterialInstance = material;
-        return new MegastationPrototypeResult([module], [albedo, material], cpu.Diagnostics);
+        if (megaGreeble != null)
+        {
+            megaGreeble.TextureInstance = albedo;
+            megaGreeble.MaterialInstance = material;
+        }
+        return new MegastationPrototypeResult(
+            megaGreeble == null ? [module] : [module, megaGreeble],
+            [albedo, material], cpu.Diagnostics);
     }
 
     public static MegastationPrototypeCpuResult GenerateCpu(
@@ -166,11 +179,15 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             topology,
             faceResults);
+        MegastationPlanarRegion[] planarRegions = MegastationPlanarRegionExtractor.Extract(
+            grid,
+            topology,
+            semanticZoning,
+            cancellationToken);
         MegastationAttachmentPlan attachmentPlan = MegastationAttachmentPlanner.Plan(
             grid,
             regularised.Occupancy,
-            topology,
-            semanticZoning,
+            planarRegions,
             cancellationToken);
         MegastationWindowPlan windowPlan = MegastationWindowPlanner.Plan(
             grid,
@@ -198,6 +215,25 @@ public static class MegastationPrototypeGenerator
             attachmentPlan,
             suppressedWindows,
             suppressedLights);
+        MegastationInfrastructurePlan infrastructurePlan = MegastationInfrastructurePlanner.Plan(
+            planarRegions,
+            attachmentPlan,
+            windowPlan,
+            lightPlan,
+            cancellationToken);
+        MegastationInfrastructureMeshBuildResult infrastructureMesh =
+            MegastationInfrastructureMeshBuilder.Build(infrastructurePlan, cancellationToken);
+        infrastructurePlan = infrastructurePlan with
+        {
+            Diagnostics = infrastructureMesh.Diagnostics,
+        };
+        MegastationMegaGreeblePlan megaGreeblePlan = MegastationMegaGreeblePlanner.Plan(
+            planarRegions, attachmentPlan, windowPlan, lightPlan, infrastructurePlan,
+            regularised.Occupancy, style,
+            cancellationToken);
+        MegastationMegaGreebleMeshBuildResult megaGreebleMesh =
+            MegastationMegaGreebleMeshBuilder.Build(megaGreeblePlan, cancellationToken);
+        megaGreeblePlan = megaGreeblePlan with { Diagnostics = megaGreebleMesh.Diagnostics };
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(
             regularised.Occupancy,
@@ -290,6 +326,7 @@ public static class MegastationPrototypeGenerator
             regularised.Report,
             topology,
             semanticZoning,
+            planarRegions,
             attachmentPlan,
             patches,
             style,
@@ -300,12 +337,22 @@ public static class MegastationPrototypeGenerator
             windowPlan,
             windowMesh.Mesh,
             lightPlan,
+            infrastructurePlan,
+            infrastructureMesh.Mesh,
+            megaGreeblePlan,
+            megaGreebleMesh.Mesh,
             meshStats,
             diag);
     }
 
     public static PlacedModule CreatePlacedModule(MegastationPrototypeCpuResult cpu)
     {
+#if DEBUG
+        VertexPositionColor[]? infrastructureDebugLines =
+            MegastationInfrastructureDebug.BuildLines(cpu.InfrastructurePlan);
+#else
+        VertexPositionColor[]? infrastructureDebugLines = null;
+#endif
         Vector3 bounds = new(
             cpu.Grid.Dimension(GridAxis.X),
             cpu.Grid.Dimension(GridAxis.Y),
@@ -327,11 +374,50 @@ public static class MegastationPrototypeGenerator
             ChamferDepth = 0f,
             AabbMin = bounds * -0.5f,
             AabbMax = bounds * 0.5f,
+            Mesh = cpu.InfrastructureMesh,
+            HasNativeMegastationInfrastructure = true,
+            NativeInfrastructureDebugLines = infrastructureDebugLines,
             HullMesh = cpu.Mesh,
             GlassMesh = cpu.WindowGlassMesh,
         };
         module.GlowLights.AddRange(cpu.LightPlan.Lights.Select(light => light.ToStationLightInfo()));
         return module;
+    }
+
+    public static PlacedModule? CreateMegaGreebleModule(MegastationPrototypeCpuResult cpu)
+    {
+        if (cpu.MegaGreebleMesh.IsEmpty)
+            return null;
+        Vector3 bounds = new(cpu.Grid.Dimension(GridAxis.X), cpu.Grid.Dimension(GridAxis.Y),
+            cpu.Grid.Dimension(GridAxis.Z));
+        var definition = new StationModuleDefinition
+        {
+            Id = "megastation-mega-greeble",
+            Category = "megastation-mega-greeble",
+            BoundingBox = bounds,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+#if DEBUG
+        VertexPositionColor[]? debugLines =
+            MegastationMegaGreebleDebug.BuildLines(cpu.MegaGreeblePlan);
+#else
+        VertexPositionColor[]? debugLines = null;
+#endif
+        return new PlacedModule
+        {
+            Definition = definition,
+            Transform = Matrix.Identity,
+            Seed = MegastationSeed.Derive(cpu.Diagnostics.RootSeed, "mega-greeble:v1"),
+            ChamferDepth = 0f,
+            AabbMin = bounds * -0.5f,
+            AabbMax = bounds * 0.5f,
+            Mesh = cpu.MegaGreebleMesh,
+            HasNativeMegastationMegaGreeble = true,
+            IsHullLessPresentationLayer = true,
+            NativeMegaGreebleDebugLines = debugLines,
+        };
     }
 
     public static double EstimateConservativeEnvelopeRadius(

@@ -129,7 +129,7 @@ public sealed partial class SystemSpaceState
     // landing there, so a not-yet-landed class can be gated (F8 overlay + screenshots)
     // before its bool flips to true for real. Default tracks whatever's currently landed in
     // DecorCastingPolicy, so normal play needs no keypress to see the production result.
-    private enum CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }
+    internal enum CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }
     private CasterStage _casterStage = DefaultCasterStage();
 
     private static CasterStage DefaultCasterStage()
@@ -143,18 +143,27 @@ public sealed partial class SystemSpaceState
         return CasterStage.HullOnly;
     }
 
-    private static IEnumerable<DecorClass> ClassesForStage(CasterStage stage) => stage switch
+    internal static IEnumerable<DecorClass> ClassesForStage(CasterStage stage)
     {
-        CasterStage.HullOnly   => [],
-        CasterStage.PlusC1     => StationDecorator.C1Classes,
-        CasterStage.PlusC2     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes),
-        CasterStage.PlusC3     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
-                                                             .Concat(StationDecorator.C3Classes),
-        CasterStage.AllClasses => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
-                                                             .Concat(StationDecorator.C3Classes)
-                                                             .Concat(StationDecorator.C4Classes),
-        _ => [],
-    };
+        IEnumerable<DecorClass> legacy = stage switch
+        {
+            CasterStage.HullOnly   => [],
+            CasterStage.PlusC1     => StationDecorator.C1Classes,
+            CasterStage.PlusC2     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes),
+            CasterStage.PlusC3     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
+                                                                 .Concat(StationDecorator.C3Classes),
+            CasterStage.AllClasses => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
+                                                                 .Concat(StationDecorator.C3Classes)
+                                                                 .Concat(StationDecorator.C4Classes),
+            _ => [],
+        };
+        // HullOnly remains a true diagnostic exclusion. The normal production stage is
+        // AllClasses, where native megastation casters are explicitly appended instead of
+        // silently depending on the old ordinary-decoration rollout arrays.
+        return stage == CasterStage.AllClasses
+            ? legacy.Concat(StationDecorator.MegastationCasterClasses)
+            : legacy;
+    }
 
     private sealed record StationShadowContext(
         Galaxy.Station Station,
@@ -509,15 +518,14 @@ public sealed partial class SystemSpaceState
         var corners = new List<Vector3>(modules.Count * 8);
         foreach (var mod in modules)
         {
-            if (!visual.ShadowCasterHullBounds.TryGetValue(mod, out var hullBounds)) continue;
-
-            Vector3 boundsMin = hullBounds.min;
-            Vector3 boundsMax = hullBounds.max;
-            if (visual.ShadowCasterDecoBounds.TryGetValue(mod, out var decoBounds))
-            {
-                boundsMin = Vector3.Min(boundsMin, decoBounds.min);
-                boundsMax = Vector3.Max(boundsMax, decoBounds.max);
-            }
+            bool hasHull = visual.ShadowCasterHullBounds.TryGetValue(mod, out var hullBounds);
+            bool hasDeco = visual.ShadowCasterDecoBounds.TryGetValue(mod, out var decoBounds);
+            if (!TryCombineStationShadowCasterBounds(
+                    hasHull ? hullBounds : null,
+                    hasDeco ? decoBounds : null,
+                    out Vector3 boundsMin,
+                    out Vector3 boundsMax))
+                continue;
 
             for (int ix = 0; ix <= 1; ix++)
             for (int iy = 0; iy <= 1; iy++)
@@ -531,6 +539,35 @@ public sealed partial class SystemSpaceState
             }
         }
         return corners;
+    }
+
+    internal static bool TryCombineStationShadowCasterBounds(
+        (Vector3 min, Vector3 max)? hullBounds,
+        (Vector3 min, Vector3 max)? decorationBounds,
+        out Vector3 boundsMin,
+        out Vector3 boundsMax)
+    {
+        if (hullBounds is { } hull && decorationBounds is { } decoration)
+        {
+            boundsMin = Vector3.Min(hull.min, decoration.min);
+            boundsMax = Vector3.Max(hull.max, decoration.max);
+            return true;
+        }
+        if (hullBounds is { } hullOnly)
+        {
+            boundsMin = hullOnly.min;
+            boundsMax = hullOnly.max;
+            return true;
+        }
+        if (decorationBounds is { } decorationOnly)
+        {
+            boundsMin = decorationOnly.min;
+            boundsMax = decorationOnly.max;
+            return true;
+        }
+        boundsMin = default;
+        boundsMax = default;
+        return false;
     }
 
     // Step 1 resolution input: the union station-local AABB's largest dimension, from the

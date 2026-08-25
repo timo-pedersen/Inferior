@@ -82,6 +82,8 @@ public sealed partial class SystemSpaceState
             MegastationWindowDiagnostics? megastationWindowDiagnostics,
             MegastationLightingDiagnostics? megastationLightingDiagnostics,
             MegastationAttachmentDiagnostics? megastationAttachmentDiagnostics,
+            MegastationInfrastructureDiagnostics? megastationInfrastructureDiagnostics,
+            MegastationMegaGreebleDiagnostics? megastationMegaGreebleDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -97,6 +99,8 @@ public sealed partial class SystemSpaceState
             MegastationWindowDiagnostics = megastationWindowDiagnostics;
             MegastationLightingDiagnostics = megastationLightingDiagnostics;
             MegastationAttachmentDiagnostics = megastationAttachmentDiagnostics;
+            MegastationInfrastructureDiagnostics = megastationInfrastructureDiagnostics;
+            MegastationMegaGreebleDiagnostics = megastationMegaGreebleDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -113,6 +117,8 @@ public sealed partial class SystemSpaceState
         public MegastationWindowDiagnostics? MegastationWindowDiagnostics { get; }
         public MegastationLightingDiagnostics? MegastationLightingDiagnostics { get; }
         public MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics { get; }
+        public MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics { get; }
+        public MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -121,6 +127,10 @@ public sealed partial class SystemSpaceState
         public long UploadedResourceGpuBytes { get; set; }
         public int TextureReferenceAssignmentCount { get; set; }
         public double TextureReferenceAssignmentMilliseconds { get; set; }
+        public double InfrastructureVisibleUploadMilliseconds { get; private set; }
+        public double InfrastructureShadowUploadMilliseconds { get; private set; }
+        public double MegaGreebleVisibleUploadMilliseconds { get; private set; }
+        public double MegaGreebleShadowUploadMilliseconds { get; private set; }
         public Vector3 BoundsMin { get; }
         public Vector3 BoundsMax { get; }
         public double EnvelopeRadiusMeters { get; }
@@ -274,6 +284,20 @@ public sealed partial class SystemSpaceState
                 constructorMilliseconds,
                 setDataMilliseconds,
                 ownershipAssignmentMilliseconds));
+        }
+
+        public void RecordInfrastructureUpload(
+            StationVisualUploadDiagnosticPurpose purpose,
+            double elapsedMilliseconds)
+        {
+            if (purpose == StationVisualUploadDiagnosticPurpose.MegastationInfrastructureVisible)
+                InfrastructureVisibleUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationInfrastructureShadow)
+                InfrastructureShadowUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleVisible)
+                MegaGreebleVisibleUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleShadow)
+                MegaGreebleShadowUploadMilliseconds += elapsedMilliseconds;
         }
 
         public void RemoveAndDisposeTexture(Texture2D texture)
@@ -668,6 +692,8 @@ public sealed partial class SystemSpaceState
             generation.MegastationWindowDiagnostics,
             generation.MegastationLightingDiagnostics,
             generation.MegastationAttachmentDiagnostics,
+            generation.MegastationInfrastructureDiagnostics,
+            generation.MegastationMegaGreebleDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -770,7 +796,12 @@ public sealed partial class SystemSpaceState
             throw new InvalidOperationException($"Upload item '{item.ResourceIdentity}' has no resource data.");
 
         PlacedModule module = item.Module;
+        var meshUploadStopwatch = Stopwatch.StartNew();
         (VertexBuffer vb, IndexBuffer ib, int triCount) gpu = BuildGpuMesh(item.Mesh);
+        meshUploadStopwatch.Stop();
+        package.RecordInfrastructureUpload(
+            item.DiagnosticPurpose,
+            meshUploadStopwatch.Elapsed.TotalMilliseconds);
         Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> target = item.Kind switch
         {
             StationVisualUploadResourceKind.HullMesh => package.HullMeshes,
@@ -921,6 +952,53 @@ public sealed partial class SystemSpaceState
                 PublishMegastationLightingDiagnostics(package.Descriptor.Identity, lighting);
             if (package.MegastationAttachmentDiagnostics is { } attachments)
                 PublishMegastationAttachmentDiagnostics(package.Descriptor.Identity, attachments);
+            if (package.MegastationInfrastructureDiagnostics is { } infrastructure)
+            {
+                StationShadowGpuParticipation shadow = GetNativeMegastationShadowParticipation(
+                    package, module => module.HasNativeMegastationInfrastructure);
+                PublishMegastationInfrastructureDiagnostics(
+                    package.Descriptor.Identity,
+                    infrastructure,
+                    package.InfrastructureVisibleUploadMilliseconds,
+                    package.InfrastructureShadowUploadMilliseconds,
+                    package.OwnedTextureCount,
+                    package.OwnedGpuBufferCount,
+                    package.UploadedResourceGpuBytes,
+                    shadow);
+            }
+            if (package.MegastationMegaGreebleDiagnostics is { } megaGreeble)
+            {
+                StationShadowGpuParticipation shadow = GetNativeMegastationShadowParticipation(
+                    package, module => module.HasNativeMegastationMegaGreeble);
+                PublishMegastationMegaGreebleDiagnostics(
+                    package.Descriptor.Identity,
+                    megaGreeble,
+                    package.MegaGreebleVisibleUploadMilliseconds,
+                    package.MegaGreebleShadowUploadMilliseconds,
+                    package.OwnedTextureCount,
+                    package.OwnedGpuBufferCount,
+                    package.UploadedResourceGpuBytes,
+                    shadow);
+            }
+            if (package.MegastationInfrastructureDiagnostics is { } g2Shadow
+                && package.MegastationMegaGreebleDiagnostics is { } megaShadow)
+            {
+                StationShadowGpuParticipation g2Gpu = GetNativeMegastationShadowParticipation(
+                    package, module => module.HasNativeMegastationInfrastructure);
+                StationShadowGpuParticipation megaGpu = GetNativeMegastationShadowParticipation(
+                    package, module => module.HasNativeMegastationMegaGreeble);
+                PublishStationResidencyMessage(
+                    $"[MegastationGreebleShadow] station={package.Descriptor.Identity}; " +
+                    $"cpu={g2Shadow.ShadowVertexCount + megaShadow.ShadowVertexCount}v/" +
+                    $"{g2Shadow.ShadowTriangleCount + megaShadow.ShadowTriangleCount}t/" +
+                    $"{g2Shadow.ShadowMeshBytes + megaShadow.ShadowMeshBytes}B; " +
+                    $"gpu={g2Gpu.GpuCasterVertices + megaGpu.GpuCasterVertices}v/" +
+                    $"{g2Gpu.GpuCasterTriangles + megaGpu.GpuCasterTriangles}t; " +
+                    $"buffersUploaded={g2Gpu.GpuCasterUploaded && megaGpu.GpuCasterUploaded}; " +
+                    $"drawTraversal={g2Gpu.ModuleInShadowTraversal && megaGpu.ModuleInShadowTraversal}; " +
+                    $"fitBounds={g2Gpu.FitBoundsUploaded && megaGpu.FitBoundsUploaded}",
+                    SystemMessagePriority.NB);
+            }
             PublishInstalledStationVisual(package, session.RequestSequence, session.Scheduler);
             package.PublishTextureUploadDiagnostics();
             PublishMissingStationHullCasterWarnings(package);
@@ -928,11 +1006,35 @@ public sealed partial class SystemSpaceState
         StartDeferredPreparation(TakeDeferredStationPreparation());
     }
 
+    internal sealed record StationShadowGpuParticipation(
+        bool ModuleInShadowTraversal,
+        bool GpuCasterUploaded,
+        bool FitBoundsUploaded,
+        int GpuCasterVertices,
+        int GpuCasterTriangles);
+
+    private static StationShadowGpuParticipation GetNativeMegastationShadowParticipation(
+        StationVisualPackage package,
+        Func<PlacedModule, bool> selector)
+    {
+        PlacedModule? module = package.Modules.SingleOrDefault(selector);
+        if (module == null)
+            return new(false, false, false, 0, 0);
+        bool uploaded = package.DecoCasterMeshes.TryGetValue(module, out var caster);
+        return new(
+            ModuleInShadowTraversal: package.Modules.Contains(module),
+            GpuCasterUploaded: uploaded,
+            FitBoundsUploaded: package.ShadowCasterDecoBounds.ContainsKey(module),
+            GpuCasterVertices: uploaded ? caster.vb.VertexCount : 0,
+            GpuCasterTriangles: uploaded ? caster.triCount : 0);
+    }
+
     private static void PublishMissingStationHullCasterWarnings(StationVisualPackage package)
     {
         foreach (PlacedModule module in package.Modules)
         {
-            if (package.ShadowCasterMeshes.ContainsKey(module))
+            if (module.IsHullLessPresentationLayer
+                || package.ShadowCasterMeshes.ContainsKey(module))
                 continue;
             DataBus.System.Publish(Topics.System.All, new SystemMessage(
                 $"Station shadow: module '{module.Definition.Id}' (category '{module.Definition.Category}') " +

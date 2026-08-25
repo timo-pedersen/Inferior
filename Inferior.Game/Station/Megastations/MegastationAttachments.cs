@@ -147,10 +147,20 @@ public static class MegastationAttachmentPlanner
         BoundaryTopology topology,
         MegastationSemanticZoningResult zoning,
         CancellationToken cancellationToken = default)
+        => Plan(
+            grid,
+            occupancy,
+            MegastationPlanarRegionExtractor.Extract(grid, topology, zoning, cancellationToken),
+            cancellationToken);
+
+    public static MegastationAttachmentPlan Plan(
+        SliceGrid grid,
+        StructuralOccupancy occupancy,
+        IReadOnlyList<MegastationPlanarRegion> planarRegions,
+        CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        MegastationAttachmentSurface[] surfaces = ExtractCandidateSurfaces(
-            grid, topology, zoning, cancellationToken);
+        MegastationAttachmentSurface[] surfaces = ProjectCandidateSurfaces(grid, planarRegions);
         var placements = new List<MegastationAttachmentPlacement>();
         var reservations = new List<MegastationAttachmentReservation>();
         var occupiedSecondaryBounds = new List<(Vector3 Min, Vector3 Max)>();
@@ -286,94 +296,43 @@ public static class MegastationAttachmentPlanner
         MegastationSemanticZoningResult zoning,
         CancellationToken cancellationToken = default)
     {
-        var eligible = zoning.Zones
-            .Where(zone => zone.Role != MegastationZoneRole.Structural)
-            .SelectMany(zone => zone.Faces.Select(face => (zone, face)))
-            .OrderBy(pair => pair.face)
+        return ProjectCandidateSurfaces(
+            grid,
+            MegastationPlanarRegionExtractor.Extract(grid, topology, zoning, cancellationToken));
+    }
+
+    private static MegastationAttachmentSurface[] ProjectCandidateSurfaces(
+        SliceGrid grid,
+        IReadOnlyList<MegastationPlanarRegion> planarRegions)
+    {
+        return planarRegions
+            .Where(region => region.PhysicalArea >= MinimumSurfaceArea
+                && MathF.Min(region.PhysicalExtents.X, region.PhysicalExtents.Y) >= MinimumSurfaceSpan)
+            .Select(region => new MegastationAttachmentSurface(
+                region.StableId,
+                region.ZoneId,
+                region.ZoneSeed,
+                region.ZoneRole,
+                region.Direction,
+                region.PlaneGridCoordinate,
+                region.PlaneCoordinateMetres,
+                region.OutwardNormal,
+                region.TangentU,
+                region.TangentV,
+                region.PhysicalCentre,
+                region.Faces,
+                region.ExactMask.Select(rect => new MegastationAttachmentMaskRect(
+                    rect.Face, rect.MinU, rect.MaxU, rect.MinV, rect.MaxV)).ToArray(),
+                region.PhysicalArea,
+                region.PhysicalExtents,
+                region.Prominence,
+                region.Exposure,
+                region.Concavity,
+                region.Extremity,
+                region.PhysicalExtents - new Vector2(SupportMarginMetres * 2f),
+                MaximumGridDimension(grid)))
+            .OrderBy(surface => surface.StableId, StringComparer.Ordinal)
             .ToArray();
-        var result = new List<MegastationAttachmentSurface>();
-        foreach (var planeGroup in eligible.GroupBy(pair => (
-                     pair.zone.Identity, pair.face.Direction, PlaneCoordinate(pair.face))))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var byFace = planeGroup.ToDictionary(pair => pair.face, pair => pair.zone);
-            var remaining = new SortedSet<BoundaryFaceKey>(byFace.Keys);
-            while (remaining.Count > 0)
-            {
-                BoundaryFaceKey first = remaining.Min;
-                var component = new SortedSet<BoundaryFaceKey>();
-                var queue = new Queue<BoundaryFaceKey>();
-                remaining.Remove(first);
-                queue.Enqueue(first);
-                while (queue.Count > 0)
-                {
-                    BoundaryFaceKey current = queue.Dequeue();
-                    component.Add(current);
-                    foreach (BoundaryEdgeKey edge in topology.FaceByKey[current].Edges)
-                    foreach (BoundaryFaceKey neighbour in topology.EdgeByKey[edge].IncidentFaces)
-                        if (byFace.ContainsKey(neighbour) && remaining.Remove(neighbour))
-                            queue.Enqueue(neighbour);
-                }
-
-                MegastationSemanticZone zone = byFace[first];
-                BoundaryFace firstFace = topology.FaceByKey[first];
-                Vector3 p0 = BoundaryTopologyBuilder.Position(grid, firstFace.Vertices[0]);
-                Vector3 p1 = BoundaryTopologyBuilder.Position(grid, firstFace.Vertices[1]);
-                Vector3 p3 = BoundaryTopologyBuilder.Position(grid, firstFace.Vertices[3]);
-                Vector3 tangentU = Vector3.Normalize(p1 - p0);
-                Vector3 tangentV = Vector3.Normalize(p3 - p0);
-                Vector3 normal = BoundaryTopologyBuilder.Normal(first.Direction);
-                MegastationAttachmentMaskRect[] mask = component
-                    .Select(face => MaskRect(grid, topology.FaceByKey[face], tangentU, tangentV))
-                    .ToArray();
-                float minU = mask.Min(rect => rect.MinU);
-                float maxU = mask.Max(rect => rect.MaxU);
-                float minV = mask.Min(rect => rect.MinV);
-                float maxV = mask.Max(rect => rect.MaxV);
-                float area = mask.Sum(rect => (rect.MaxU - rect.MinU) * (rect.MaxV - rect.MinV));
-                Vector2 extents = new(maxU - minU, maxV - minV);
-                if (area < MinimumSurfaceArea
-                    || MathF.Min(extents.X, extents.Y) < MinimumSurfaceSpan)
-                    continue;
-
-                Vector3 desired = normal * Vector3.Dot(p0, normal)
-                    + tangentU * ((minU + maxU) * 0.5f)
-                    + tangentV * ((minV + maxV) * 0.5f);
-                BoundaryFaceKey centreFace = component
-                    .OrderBy(face => Vector3.DistanceSquared(FaceCentre(grid, topology.FaceByKey[face]), desired))
-                    .ThenBy(face => face)
-                    .First();
-                Vector3 centre = FaceCentre(grid, topology.FaceByKey[centreFace]);
-                string faceKey = string.Join('|', component.Select(FaceIdentity));
-                int signature = MegastationSeed.Derive(zone.Seed, faceKey);
-                string stableId = $"{zone.Identity}/{AlgorithmKey}/plane:{first.Direction}:" +
-                    $"{PlaneCoordinate(first)}:{component.Min.X},{component.Min.Y},{component.Min.Z}:" +
-                    $"{unchecked((uint)signature):X8}";
-                result.Add(new(
-                    stableId,
-                    zone.Identity,
-                    zone.Seed,
-                    zone.Role,
-                    first.Direction,
-                    PlaneCoordinate(first),
-                    Vector3.Dot(p0, normal),
-                    normal,
-                    tangentU,
-                    tangentV,
-                    centre,
-                    component.ToArray(),
-                    mask,
-                    area,
-                    extents,
-                    zone.Metrics.Prominence,
-                    zone.Metrics.ImmediateExposure,
-                    zone.Metrics.ConcavityContext,
-                    zone.Metrics.Extremity,
-                    extents - new Vector2(SupportMarginMetres * 2f),
-                    MaximumGridDimension(grid)));
-            }
-        }
-        return result.OrderBy(surface => surface.StableId, StringComparer.Ordinal).ToArray();
     }
 
     public static List<PlacedModule> CreatePlacedModules(MegastationAttachmentPlan plan)

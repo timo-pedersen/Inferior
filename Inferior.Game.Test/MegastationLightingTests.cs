@@ -248,8 +248,11 @@ public sealed class MegastationLightingTests
         Assert.Equal(result.Diagnostics.BoundaryTopologySignature, rebuiltStructureStats.TopologySignature.Semantic);
         Assert.Equal(result.Mesh.ToIntArrays().verts, rebuiltStructure.ToIntArrays().verts);
         Assert.Equal(result.Mesh.ToIntArrays().indices, rebuiltStructure.ToIntArrays().indices);
-        Assert.Equal(result.LightPlan.Lights.Select(light => light.ToStationLightInfo()), module.GlowLights);
-        Assert.Null(module.Mesh);
+        Assert.Equal(
+            result.LightPlan.Lights.Select(light => light.ToStationLightInfo()),
+            module.GlowLights);
+        Assert.Same(result.InfrastructureMesh, module.Mesh);
+        Assert.True(module.HasNativeMegastationInfrastructure);
         Assert.Equal(result.WindowGlassMesh, module.GlassMesh);
         Assert.DoesNotContain(
             typeof(MegastationLightingPlanner).GetMethods(),

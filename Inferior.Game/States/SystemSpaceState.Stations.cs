@@ -173,6 +173,100 @@ public sealed partial class SystemSpaceState
         PublishStationResidencyMessage(message, SystemMessagePriority.NB);
     }
 
+    private static void PublishMegastationInfrastructureDiagnostics(
+        string stationIdentity,
+        MegastationInfrastructureDiagnostics diagnostics,
+        double visibleUploadMilliseconds,
+        double shadowUploadMilliseconds,
+        int ownedTextures,
+        int gpuBuffers,
+        long uploadedResourceGpuBytes,
+        StationShadowGpuParticipation shadowParticipation)
+    {
+        string roles = string.Join(',', Enum.GetValues<MegastationZoneRole>()
+            .Where(role => role != MegastationZoneRole.Structural)
+            .Select(role =>
+            {
+                MegastationInfrastructureRoleDiagnostics d = diagnostics.ByRole[role];
+                return $"{role}:clusters:{d.ClusterCount},housings:{d.HousingCount}," +
+                    $"vents:{d.VentCount},tanks:{d.TankCount}";
+            }));
+        string casterFamilies = string.Join(',', diagnostics.ShadowByFamily.Select(family =>
+            $"{family.Family}:policy:{family.Policy},instances:{family.ShadowCastingInstanceCount}/" +
+            $"{family.VisibleInstanceCount},visibleTriangles:{family.VisibleTriangleCount}," +
+            $"caster:{family.CasterVertexCount}v/{family.CasterTriangleCount}t"));
+        string message = $"[MegastationInfrastructure] station={stationIdentity}; " +
+            $"candidateArea={diagnostics.CandidateArea:F0}; activeArea={diagnostics.ActiveArea:F0}; " +
+            $"regions={diagnostics.CandidateRegionCount}; cells={diagnostics.CandidateCellCount}; " +
+            $"clusters={diagnostics.ClusterCount}; primitives={diagnostics.PrimitiveCount}; " +
+            $"housings={diagnostics.HousingCount}; vents={diagnostics.VentCount}; tanks={diagnostics.TankCount}; " +
+            $"roles={roles}; rejects=exactMask:{diagnostics.ExactMaskRejectCount}," +
+            $"g1:{diagnostics.G1RejectCount},windows:{diagnostics.WindowRejectCount}," +
+            $"lights:{diagnostics.LightRejectCount},spacing:{diagnostics.SpacingRejectCount}," +
+            $"topology:{diagnostics.TopologyUnsuitableCount},density:{diagnostics.RoleDensityRejectCount}," +
+            $"stationCap:{diagnostics.StationCapRejectCount},zoneCap:{diagnostics.ZoneCapRejectCount}; " +
+            $"visibleVertices={diagnostics.VisibleVertexCount}; visibleTriangles={diagnostics.VisibleTriangleCount}; " +
+            $"visibleBytes={diagnostics.VisibleMeshBytes}; shadowVertices={diagnostics.ShadowVertexCount}; " +
+            $"shadowTriangles={diagnostics.ShadowTriangleCount}; shadowBytes={diagnostics.ShadowMeshBytes}; " +
+            $"shadowFamilies={casterFamilies}; " +
+            $"planningMs={diagnostics.PlanningMilliseconds}; meshBuildMs={diagnostics.MeshBuildMilliseconds}; " +
+            $"visibleUploadMs={visibleUploadMilliseconds:F1}; shadowUploadMs={shadowUploadMilliseconds:F1}; " +
+            $"gpuShadow=uploaded:{shadowParticipation.GpuCasterUploaded}," +
+            $"traversed:{shadowParticipation.ModuleInShadowTraversal},fitBounds:{shadowParticipation.FitBoundsUploaded}," +
+            $"{shadowParticipation.GpuCasterVertices}v/{shadowParticipation.GpuCasterTriangles}t; " +
+            $"ownedTextures={ownedTextures}; gpuBuffers={gpuBuffers}; " +
+            $"uploadedResourceGpuBytes={uploadedResourceGpuBytes}";
+        PublishStationResidencyMessage(message, SystemMessagePriority.NB);
+    }
+
+    private static void PublishMegastationMegaGreebleDiagnostics(
+        string stationIdentity,
+        MegastationMegaGreebleDiagnostics diagnostics,
+        double visibleUploadMilliseconds,
+        double shadowUploadMilliseconds,
+        int ownedTextures,
+        int gpuBuffers,
+        long uploadedResourceGpuBytes,
+        StationShadowGpuParticipation shadowParticipation)
+    {
+        string families = string.Join(',', diagnostics.ByFamily.Select(pair =>
+            $"{pair.Key}:regions:{pair.Value.EligibleRegionCount},area:{pair.Value.EligibleArea:F0}," +
+            $"candidates:{pair.Value.CandidateCount},accepted:{pair.Value.AcceptedCount}," +
+            $"rejects:mask:{pair.Value.ExactMaskRejectCount}/g1:{pair.Value.G1RejectCount}/" +
+            $"windows:{pair.Value.WindowRejectCount}/lights:{pair.Value.LightRejectCount}/" +
+            $"g2:{pair.Value.G2RejectCount}/other:{pair.Value.MegaGreebleRejectCount}/" +
+            $"suitability:{pair.Value.SuitabilityRejectCount}/clearance:{pair.Value.OutwardClearanceRejectCount}/" +
+            $"density:{pair.Value.DensityRejectCount}/cap:{pair.Value.CapRejectCount}"));
+        string casterFamilies = string.Join(',', diagnostics.ShadowByFamily.Select(family =>
+            $"{family.Family}:policy:{family.Policy},instances:{family.ShadowCastingInstanceCount}/" +
+            $"{family.VisibleInstanceCount},visibleTriangles:{family.VisibleTriangleCount}," +
+            $"caster:{family.CasterVertexCount}v/{family.CasterTriangleCount}t"));
+        string message = $"[MegastationMegaGreeble] station={stationIdentity}; families={families}; " +
+            $"solar=surface:{diagnostics.SolarSurfaceArrayCount},radial:{diagnostics.SolarRadialWingCount}," +
+            $"single:{diagnostics.SolarSingleWingCount},double:{diagnostics.SolarDoubleWingCount}," +
+            $"broad:{diagnostics.SolarBroadCollectorCount},field:{diagnostics.SolarSmallFieldCount}," +
+            $"length:{diagnostics.SolarMinimumLength:F1}/{diagnostics.SolarMedianLength:F1}/{diagnostics.SolarMaximumLength:F1}m; " +
+            $"radialHeight:{diagnostics.RadialWingMinimumHeight:F1}/{diagnostics.RadialWingMedianHeight:F1}/{diagnostics.RadialWingMaximumHeight:F1}m; " +
+            $"radialWidth:{diagnostics.RadialWingMinimumWidth:F1}/{diagnostics.RadialWingMedianWidth:F1}/{diagnostics.RadialWingMaximumWidth:F1}m; " +
+            $"radialFolds:radial:{diagnostics.RadialFoldOrientationCount}," +
+            $"transverse:{diagnostics.TransverseFoldOrientationCount}; " +
+            $"dish=supported:{diagnostics.SupportedDishCount},surface:{diagnostics.SurfaceMountedDishCount}," +
+            $"diameter:{diagnostics.DishMinimumDiameter:F1}/{diagnostics.DishMedianDiameter:F1}/{diagnostics.DishMaximumDiameter:F1}m; " +
+            $"visible={diagnostics.VisibleVertexCount}v/{diagnostics.VisibleTriangleCount}t/{diagnostics.VisibleMeshBytes}B; " +
+            $"shadow={diagnostics.ShadowVertexCount}v/{diagnostics.ShadowTriangleCount}t/{diagnostics.ShadowMeshBytes}B; " +
+            $"shadowFamilies={casterFamilies}; " +
+            $"planningMs={diagnostics.PlanningMilliseconds}; meshBuildMs={diagnostics.MeshBuildMilliseconds}; " +
+            $"uploadMs=visible:{visibleUploadMilliseconds:F1},shadow:{shadowUploadMilliseconds:F1}; " +
+            $"gpuShadow=uploaded:{shadowParticipation.GpuCasterUploaded}," +
+            $"traversed:{shadowParticipation.ModuleInShadowTraversal},fitBounds:{shadowParticipation.FitBoundsUploaded}," +
+            $"{shadowParticipation.GpuCasterVertices}v/{shadowParticipation.GpuCasterTriangles}t; " +
+            $"ownedTextureDelta={diagnostics.OwnedTextureDelta}; gpuBufferDelta={diagnostics.GpuBufferDelta}; " +
+            $"packageOwnedTextures={ownedTextures}; packageGpuBuffers={gpuBuffers}; uploadedResourceGpuBytes={uploadedResourceGpuBytes}; " +
+            $"signature={diagnostics.PlanSignature}; largest={diagnostics.LargestInstanceIdentity}:" +
+            $"{diagnostics.LargestInstanceWidth:F1}x{diagnostics.LargestInstanceLength:F1}x{diagnostics.LargestInstanceProtrusion:F1}m";
+        PublishStationResidencyMessage(message, SystemMessagePriority.NB);
+    }
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────
@@ -359,8 +453,6 @@ public sealed partial class SystemSpaceState
         // Full uses the wear/ambient-occlusion-graded mesh; Medium/Minimal use the flat
         // (ungraded) variant built before that pass ran — same generator, fewer steps,
         // same principle already established for containers and station decoration.
-        var decoMeshesForLevel = level == DetailLevel.Full ? _decoMeshes : _decoMeshesFlat;
-
         foreach (var (station, universePos) in ResidentStationEntries())
         {
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
@@ -384,7 +476,14 @@ public sealed partial class SystemSpaceState
 
             foreach (var mod in modules)
             {
-                if (!decoMeshesForLevel.TryGetValue(mod, out var deco)) continue;
+                // Depth tier and geometric LOD are separate concerns. The current pass
+                // API carries them in one DetailLevel value, but G2's metre-scale native
+                // infrastructure must remain visible in the 5m–57km mid depth pass.
+                // Reuse its one full mesh there; do not allocate/upload a flattened copy.
+                var decoMeshesForModule = UsesFullDecorationMeshInPass(mod, level)
+                    ? _decoMeshes
+                    : _decoMeshesFlat;
+                if (!decoMeshesForModule.TryGetValue(mod, out var deco)) continue;
 
                 // See the hull pass above — mod.Transform used directly, matching the
                 // caster and ModuleToStationLocal exactly, not decomposed-then-rebuilt.
@@ -471,6 +570,9 @@ public sealed partial class SystemSpaceState
             }
         }
 
+        if (_megastationInfrastructureDebug)
+            DrawMegastationInfrastructureDebugLines();
+
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
         _effect.LightingEnabled    = true;
@@ -480,6 +582,42 @@ public sealed partial class SystemSpaceState
         // and ShipMeshRenderer.Draw's post-draw restore).
         _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
+    }
+
+    internal static bool UsesFullDecorationMeshInPass(PlacedModule module, DetailLevel level)
+        => level == DetailLevel.Full
+            || (level == DetailLevel.Medium && (module.HasNativeMegastationInfrastructure
+                || module.HasNativeMegastationMegaGreeble));
+
+    private void DrawMegastationInfrastructureDebugLines()
+    {
+        float renderScale = (float)Camera3D.RenderScale;
+        _effect.TextureEnabled = false;
+        _effect.LightingEnabled = false;
+        _effect.VertexColorEnabled = true;
+        _gd.DepthStencilState = DepthStencilState.Default;
+
+        foreach (var (station, universePosition) in ResidentStationEntries())
+        {
+            Vector3 renderPosition = _camera.ToRenderSpace(universePosition);
+            Quaternion orientation = station.GetOrientation(_gameTimeSeconds);
+            Matrix stationRotation = Matrix.CreateFromQuaternion(new Quaternion(
+                orientation.X, orientation.Y, orientation.Z, orientation.W));
+            _effect.World = Matrix.CreateScale(renderScale) * stationRotation
+                * Matrix.CreateTranslation(renderPosition);
+            foreach (PlacedModule module in ResidentStationVisual!.Modules)
+            {
+                VertexPositionColor[]? lines = module.NativeInfrastructureDebugLines
+                    ?? module.NativeMegaGreebleDebugLines;
+                if (lines is not { Length: > 1 })
+                    continue;
+                foreach (EffectPass pass in _effect.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawUserPrimitives(PrimitiveType.LineList, lines, 0, lines.Length / 2);
+                }
+            }
+        }
     }
 
     private static Color MegastationZoneDebugColor(MegastationZoneRole role) => role switch

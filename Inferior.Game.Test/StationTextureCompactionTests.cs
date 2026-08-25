@@ -1,5 +1,6 @@
 using Inferior.Game.StationGen;
 using Inferior.Game.StationGen.Megastations;
+using Inferior.Game.States;
 using Inferior.Galaxy;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
@@ -127,18 +128,24 @@ public sealed class StationTextureCompactionTests
 
         StationGenerationCpuResult prepared = StationGenerator.PrepareCpu(
             station,
-            useMegastationPrototype: true);
+            useMegastationPrototype: true,
+            enabledShadowCasterClasses: SystemSpaceState.ClassesForStage(
+                SystemSpaceState.CasterStage.AllClasses).ToHashSet());
 
         Assert.True(prepared.UsesSharedMegastationFallbackTextures);
         Assert.True(prepared.Modules.Count > 1);
         Assert.NotEmpty(prepared.Textures);
-        Assert.Equal(prepared.Modules.Count - 1, prepared.TextureAssignments.Count);
+        Assert.Equal(prepared.Modules.Count - 2, prepared.TextureAssignments.Count);
         Assert.Equal(prepared.Textures.Count,
             prepared.UploadPlan.Count(item => item.Texture != null));
         PlacedModule structural = prepared.Modules[0];
+        PlacedModule megaGreeble = Assert.Single(prepared.Modules,
+            module => module.HasNativeMegastationMegaGreeble);
         Assert.DoesNotContain(prepared.TextureAssignments,
-            assignment => ReferenceEquals(assignment.Module, structural));
-        Assert.All(prepared.Modules.Skip(1), module => Assert.Single(
+            assignment => ReferenceEquals(assignment.Module, structural)
+                || ReferenceEquals(assignment.Module, megaGreeble));
+        Assert.All(prepared.Modules.Where(module => !ReferenceEquals(module, structural)
+            && !ReferenceEquals(module, megaGreeble)), module => Assert.Single(
             prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, module)));
         Assert.All(prepared.Modules, module =>
@@ -150,12 +157,12 @@ public sealed class StationTextureCompactionTests
             > prepared.TextureDiagnostics.SelectedUniqueTextureCount);
         Assert.Equal(prepared.Textures.Count,
             prepared.TextureDiagnostics.SelectedUniqueTextureCount);
-        Assert.Equal(prepared.TextureAssignments.Count * 2 + 2,
+        Assert.Equal(prepared.TextureAssignments.Count * 2 + 4,
             prepared.TextureDiagnostics.ModuleTextureBindingCount);
-        Assert.Equal(2, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        Assert.Equal(4, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
         MegastationAttachmentDiagnostics attachments = Assert.IsType<MegastationAttachmentDiagnostics>(
             prepared.MegastationAttachmentDiagnostics);
-        Assert.Equal(prepared.Modules.Count - 1, attachments.PlacedModuleCount);
+        Assert.Equal(prepared.Modules.Count - 2, attachments.PlacedModuleCount);
         MegastationWindowDiagnostics windows = Assert.IsType<MegastationWindowDiagnostics>(
             prepared.MegastationWindowDiagnostics);
         StationVisualUploadPlanItem glass = Assert.Single(
@@ -163,6 +170,35 @@ public sealed class StationTextureCompactionTests
             item => item.Kind == StationVisualUploadResourceKind.GlassMesh
                 && ReferenceEquals(item.Module, structural));
         Assert.Equal(windows.MeshBytes, glass.EstimatedBytes);
+        MegastationInfrastructureDiagnostics infrastructure =
+            Assert.IsType<MegastationInfrastructureDiagnostics>(
+                prepared.MegastationInfrastructureDiagnostics);
+        Assert.Same(structural.Mesh, prepared.Modules[0].Mesh);
+        Assert.True(structural.HasNativeMegastationInfrastructure);
+        Assert.DoesNotContain(prepared.FlatDecorationMeshes.Keys,
+            module => ReferenceEquals(module, structural));
+        StationVisualUploadPlanItem infrastructureVisible = Assert.Single(
+            prepared.UploadPlan,
+            item => item.DiagnosticPurpose ==
+                StationVisualUploadDiagnosticPurpose.MegastationInfrastructureVisible);
+        StationVisualUploadPlanItem infrastructureShadow = Assert.Single(
+            prepared.UploadPlan,
+            item => item.DiagnosticPurpose ==
+                StationVisualUploadDiagnosticPurpose.MegastationInfrastructureShadow);
+        Assert.Same(structural, infrastructureVisible.Module);
+        Assert.Same(structural, infrastructureShadow.Module);
+        Assert.Equal(infrastructure.VisibleMeshBytes, infrastructureVisible.EstimatedBytes);
+        Assert.Equal(infrastructure.ShadowMeshBytes, infrastructureShadow.EstimatedBytes);
+        MegastationMegaGreebleDiagnostics megaGreebleDiagnostics =
+            Assert.IsType<MegastationMegaGreebleDiagnostics>(prepared.MegastationMegaGreebleDiagnostics);
+        StationVisualUploadPlanItem megaGreebleVisible = Assert.Single(prepared.UploadPlan,
+            item => item.DiagnosticPurpose == StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleVisible);
+        StationVisualUploadPlanItem megaGreebleShadow = Assert.Single(prepared.UploadPlan,
+            item => item.DiagnosticPurpose == StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleShadow);
+        Assert.Same(megaGreeble, megaGreebleVisible.Module);
+        Assert.Same(megaGreeble, megaGreebleShadow.Module);
+        Assert.Equal(megaGreebleDiagnostics.VisibleMeshBytes, megaGreebleVisible.EstimatedBytes);
+        Assert.Equal(megaGreebleDiagnostics.ShadowMeshBytes, megaGreebleShadow.EstimatedBytes);
         Assert.True(prepared.UploadPlan.Sum(item => item.EstimatedBytes)
             > 3_965_952 + windows.MeshBytes);
         Console.WriteLine(

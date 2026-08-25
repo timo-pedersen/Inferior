@@ -2,11 +2,15 @@
 
 > Updated per design session. Tells AI what is done, what is in progress, and what is next.
 >
-> Station-residency verification limit: automated coverage proves policy, request, cancellation,
-> disposal, and frame-budget scheduling behavior. An indivisible megastation mesh upload may
-> still exceed one frame's budget, and the resident shadow map is still rendered every frame.
-> Memory plateau, control responsiveness, depth-tier/shadow appearance, and the unchanged sharp
-> megastation result require Timo's in-engine pass.
+> Megastation development is active on `mega-stations`. The accepted production baseline is the
+> sharp manifold A/B/C0/C2 structural mesh plus Z1 semantic zoning, Z2a habitation windows, Z2b
+> glow lighting, G1 attached secondary structures, single-station visual residency, compacted
+> ordinary texture uploads, shared megastation fallback textures, and an 8192² megastation shadow
+> map. G2a native infrastructure and the mega-greeble layer are implemented but remain uncommitted
+> while Timo completes the remaining G2a visual review. Mega-greeble parabolic antennas, flat
+> SurfaceArrays, RadialSolarWings, and the new G2/mega-greeble shadow participation are visually
+> accepted and locked. The abandoned `E:\Git\GitInferior-megastation-prototype-c`
+> investigation remains untouched and unmerged.
 
 ---
 
@@ -35,6 +39,11 @@
 | **Megastation Prototype B** | Implemented, build/test clean, and visually accepted by Timo. Raw occupied massing is frozen unless a later explicit brief revisits it. | Extends Prototype A to all six cuboid faces plus shared twelve edge regions and eight corner regions. Timo visually verified all six faces, multiple seeds, shared edges/corners, close and distant views, silhouette readability, immense scale, organic departure from the cuboid, and a useful mixture of small and very large masses; perimeter strength varies and may be tuned later, but is not currently a problem. `StructuralOccupancy` records raw owner metadata (`StructuralCore`, `FaceInterior`, `EdgeRegion`, `CornerRegion`) and region ids. Station-wide style is generated from stable station identity; the accepted `PositiveY` face deliberately retains the Prototype A seed-compatibility route. `SeedCompatibilityVersion=1` remains the raw massing compatibility version. Canonical SHA-256 raw massing signatures preserve slice widths, core ranges, station-wide style, raw per-cell occupied/owner/region data, face depth maps, edge profiles, and corner plans separately from the regularised structural-solid signature. Development control has one source location: `MegastationPrototypeSettings.DevelopmentSelection` currently `Frequent`, probability `0.50`, `ForceStarterStation=true`; `Canonical` remains available by changing that value and selection mode does not enter shape seed derivation. Integration happens through `mega-stations`, not directly into `master`; `mega-stations` receives updates from `master`, and future megastation work branches from the updated integration branch. |
 | **Megastation Prototype C0 topology regularisation** | Implemented, merged to `mega-stations`, build/test clean, deterministic/manifold sweep passed, and visually confirmed by Timo. | C0 inserted a deterministic topology regularisation stage between raw Prototype B massing and mesh generation: raw accepted urban massing -> topology regularisation -> regularised structural solid -> boundary extraction and mesh generation. Historical C0 versioning at merge was generator version 3, seed compatibility version 1, and topology regularisation algorithm version 1. Regularisation adds material only (`MegacellOwner.TopologyRegularisation`), removes no cells, and keeps the raw Prototype B occupancy/signatures preserved separately. Mesh generation consumes `RegularisedOccupancy`; raw `Occupancy` remains available for massing signatures and audits. The 24-station deterministic/manifold sweep passed after merge: 4 fixed fixtures plus 20 deterministic sweep ids, edge-critical after=0, vertex-critical after=0, connected components after=1, sealed-cavity state unchanged, removed cells=0, regularised signature deterministic for the checked subset, and the ordinary sharp boundary mesh manifold check passed. Deferred: production chamfers, semantic modules, windows, lights, greeble, pipes, tanks, antennas, annexes, Boolean cuts, jagged core erosion, bridges/overhangs, docking bays/interiors, final rarity, LOD, and shadow changes. |
 | **Megastation Prototypes A/B/C0/C2 accepted baseline** | A, B, C0, and C2 are merged and pushed to `mega-stations`; builds/tests pass and the production sharp mesh is visually accepted by Timo. | All-six-face massing and C0 topology regularisation are accepted. C2 retains exact-grid boundary topology, deterministic topology signatures, sharp/final-array validation, and chamfer diagnostics. C2 chamfers were visually rejected because coverage was sparse and runs tapered into sharp vertices, so production rendering deliberately uses the clean sharp manifold mesh. Complete visual edge treatment is deferred. Do not reopen chamfers without an explicit new brief. The abandoned `E:\Git\GitInferior-megastation-prototype-c` investigation remains untouched and unmerged. Current versioning remains `GeneratorVersion=4`, `SeedCompatibilityVersion=1`, `TopologyRegularisationAlgorithmVersion=1`, `BoundaryTopologyAlgorithmVersion=1`, and `StructuralChamferAlgorithmVersion=1`. |
+| **Megastation residency and texture-upload optimisation** | Implemented, committed, and confirmed in-engine by Timo. | Stations load at 200 km and unload at 250 km with the existing hysteresis. Expected request-token cancellation is converted at the CPU preparation worker boundary into the cancelled/stale lifecycle outcome; unrelated exceptions and cancellation with a non-cancelled or different token remain genuine faults. Preparation tasks are observed exactly once across supersession, reset, and system change, and deferred work starts only after prior ownership resolves. Upload diagnostics established that repeated `Texture2D.SetData` synchronization—not megastation mesh size—was the dominant hitch. Ordinary prepared variants are compacted deterministically to the selected unique variants before upload, preserving exact selected albedo/material pixels and pairing. Megastations reuse renderer/state-owned immutable white and neutral-material fallbacks, adding no station-owned fallback textures. `gpuBytes` diagnostics report package-owned uploaded resources rather than unrelated device memory. |
+| **Megastation Z1/Z2 semantic presentation** | Implemented, committed, and visually accepted by Timo. | Z1 assigns deterministic semantic zones from exact boundary topology. Z2a adds deterministic habitation-window geometry while preserving structural signatures. Z2b adds topology/role-driven glow lights; the existing sprite path remains suitable after applying a measured 2 m camera/world-space presentation bias, rear-face through-hull gating, and a 25 px megastation glow size. The accepted density tuning is approximately ten times the first Z2b pass. Planner placement, Z1 zoning, structural geometry, and shadow architecture were not changed by the glow presentation fix. |
+| **Megastation G1 secondary structures** | Implemented, committed, and visually accepted by Timo. | Deterministic module-as-greeble buildings attach to selected semantic/topological surfaces, preserving the structural mesh and earlier Z1/Z2 plans. G1 provides large attached buildings above the native-infrastructure scale and reserves its accepted coplanar footprints and volumes for later layers. |
+| **Megastation shadow baseline** | 8192² for megastations; committed and visually confirmed by Timo. | The former 16384² megastation target caused a severe, repeatable 1.7–4.2 km yaw/roll stutter band. Reducing megastations to 8192² removed the observed stutter; Timo confirmed current shadow quality is acceptable, including after G1. Keep 8192² while later greeble detail is assessed. This entry supersedes the older 16384² megastation statements retained in the historical station-lighting row below. |
+| **Megastation mega-greeble solar/parabolics and native shadow participation** | Implemented in the current uncommitted G2a working tree and visually accepted by Timo. Treat as locked. | The extensible mega-greeble layer batches two solar forms and two parabolic forms into one visible mesh plus one selective caster mesh, with zero owned textures. Flat `SurfaceArray` geometry remains the accepted hull-parallel framed design. `RadialSolarWing` is an outward-projecting two-sided accordion collector with deterministic arbitrary azimuth, radial/transverse fold orientation, a station-grid-aligned fixed foundation, and a turntable/yoke separating the fixed base from the rotated collector; Nova's accepted examples are approximately 132–179 m tall. Supported and surface-mounted parabolic dishes have physical front/back shells, connected rims, and accepted major support structures. Native G2 substantial housings/tanks and all four mega-greeble forms now reach the actual station shadow-map draw through explicit major/minor policies, uploaded combined caster buffers, shared authoritative module transforms, and decoration-only fit bounds for the hull-less mega-greeble layer. Timo visually accepted parabolics, both solar types, and their/G2 shadow participation on 2026-08-25. Do not alter these forms, transforms, density, placement, or shadow participation without an explicit new brief; keep the accepted 8192² shadow baseline. |
 | **Single-station visual residency + Phase 1 frame-budgeted installation** | Implemented; Debug and Release builds pass with zero warnings; all 721 solution tests pass, including 43 focused GraphicsDevice-free residency/upload/cancellation tests. In-engine performance/visual verification remains pending. | `SystemSpaceState` retains lightweight identity/orbit/dot/targeting data for every station but owns zero or one completed `StationVisualPackage`. `StationVisualResidencyState` applies deterministic nearest selection, persistent-identity tie-breaking, explicit-arrival supersession, request sequencing, and 200 km load / 250 km unload hysteresis from `StationVisualResidencyPolicy`. `StationGenerator.PrepareCpu` now prepares ordinary/megastation geometry, procedural texture pixels, final hull/deco/flat/glass arrays, selected shadow-caster arrays/bounds, and a deterministic ordered upload plan on a worker. `StationPreparationTask<T>` catches `OperationCanceledException` only when its associated request token is cancelled and is the exception's token, returning an expected cancelled outcome inside the worker boundary; unrelated faults and other-token/non-cancelled cancellation exceptions remain genuine failures. Polling and reset/state-exit detachment claim exactly one observation path, successful stale results release CPU ownership, and deferred requests begin only after the old preparation/upload chain resolves. CPU completion creates one hidden pending package; `StationVisualUploadScheduler` uploads one existing resource operation at a time under a single 2 ms cooperative budget, permits and records indivisible overruns, and exposes accumulated/frame/operation timings. Textures, render buffers, and existing caster buffers are amortised; a single megastation mesh remains one measured operation pending Phase 2 evidence. Only after every operation succeeds does a small final commit revalidate identity/token, apply texture assignments and landing pads, transition residency, transfer ownership, and atomically publish the package. Normal cancellation/failure cleanup is frame-budgeted and blocks deferred replacement until resolved; system reset/state exit force complete cleanup because no later frame is guaranteed. Stale results cannot install, expected cancellation never enters failed/retry-suppressed state, and partial packages never enter render/shadow paths. Bounded start/completion/cancellation/failure diagnostics report phase, resource/byte progress, wall vs game-thread upload time, frame maxima/overruns, oversized or failed operation identity/type/bytes/time, cleanup, and final-commit duration. Package disposal and detailed rendering/depth-tier behavior remain as before. Shadow resolution/frequency/fitting/shaders/sampling/bias/caster policy, station appearance/generation/selection/distances, and accepted sharp megastation geometry are unchanged. Runtime responsiveness, memory plateau, visual/shadow identity, rapid cycling, and remaining megastation oversized-operation behavior require Timo's in-engine confirmation. |
 | **StationDecorator mechanical split** | ✓ Done, geometry-identity verified | `Inferior.Game/Station/StationDecorator.cs` (3199 lines, one static class) split into 11 `partial` files by section-banner boundaries — `StationDecorator.cs` (Decorate/policy/AO, 249 lines), `.Faces.cs`, `.Windows.cs`, `.Antennas.cs`, `.Structures.cs`, `.Greebles.cs`, `.Pipes.cs`, `.Panels.cs`, `.Tanks.cs`, `.Lights.cs`, `.Containers.cs`. Pure move — every method stayed `private static`, no signature/visibility changes, no reordering; the only textual edit was adding `partial` to the class declaration (required for the split to compile at all). `StationCableGenerator` (already its own class) untouched. **Proof, not just reasoning:** generated 20 seeded stations (528 modules total, `StationGenerator.GenerateModulesForDiagnostics` + `StationDecorator.Decorate`, no GraphicsDevice needed) and SHA-256-hashed every module's main-mesh and glass-mesh vertex/index arrays (`ToArrays()`) before and after the split via `git stash` A/B — all 528 hashes identical. Build clean, 0 warnings, 451/451 tests pass. **Noted, not fixed, per the brief:** two independent `AddTextGeometry` implementations exist (`StationDecorator.Tanks.cs`, private, tank labels; `ShippingContainerFactory.AddTextGeometry`, called from `.Lights.cs`, container placard) — root of the recurring mirrored container-text bug, left alone; `PlaceContainer` (`.Containers.cs`) still half-duplicates container geometry ownership with `ShippingContainerFactory`; window sizing (`.Windows.cs`) is still face-proportional, not absolute — both explicitly deferred to later briefs (mega-module windows is next). |
 | **Absolute window sizing (mega-module readability)** | Implemented, builds clean, 465/465 tests pass. **Not yet visually confirmed** — Timo's gate is to approach a mega module and confirm windows read as human-scale rows and the module reads as large. | `StationDecorator.Windows.cs`'s `GenerateWindows` gained an absolute ceiling on window spacing alongside its pre-existing floor, so window SIZE stops scaling with face size — count scales with area instead (`cols`/`rows` already derive from `face.Width/gridW`, so bounding `gridW`/`gridH` is the whole fix). New named constants: `MinWindowSpacing` (2, the old floor), `MaxWindowSpacingDense` (4.5), `MaxWindowSpacingSparse` (7.5 — separate from dense on purpose: a shared ceiling would clamp ordinary sparse faces too and erase the deliberate fewer-larger-windows sparse look), `MaxWindowSize` (4.25, a direct clamp on `winW`/`winH` — **tuned up from an initial 3.5 draft** after measuring that 3.5 was double-clipping core/industrial/cargo's sparse, largest-size-tier windows a further 5-20% beyond what the spacing ceiling alone does; 4.25 sits just above the sparse ceiling's own worst case (7.5×0.55=4.125), so it's genuinely redundant in normal cases as intended and only bites on mega faces), `MaxWindowCountPerFace` (300, a safety cap that widens spacing evenly rather than truncating the grid mid-populate if `cols*rows` would exceed it). No mega-module branch — the rule binds only above ~22m face width by construction. The grid-sizing math (no rng/mesh side effects) was split into a new `internal static ComputeWindowGrid(faceWidth, faceHeight, sparse, sizeScale)` — same GraphicsDevice-free testable-helper pattern as `StationTextureRegistry.OffsetPaletteForVariant` — so the geometry budget could be measured directly rather than estimated (new `StationWindowGridTests.cs`, 14 tests: dense grids on the 5 canonical small-module faces are byte-identical or near-identical to the pre-brief formula — hab/science exactly identical on every tier, core/industrial/cargo bind the ceiling by ≤10%; sparse-stays-sparser-than-dense on all 5; a real mega docking-bay wall (station seed 11, `StationScale.Port` → 238×238×32m cavity, the largest reachable via normal generation) measured via `StationModuleRegistry.CreateDockingBay`+`DockingBayHull.Build` at 239.47×33.47m and 239.47×239.47m stays within the 300-window cap and 4.25m size bound instead of the ~9m/~7m windows the old floor-only formula would have produced; determinism). No changes to `AddOctagonPorthole`/`AddCupola`/`AddWindowBraces`/`AddTriangleBrace`/the glass split/`PickWindowColor`/`WindowProbability`/the blank-face or per-cell-skip rolls, ribbon glazing, z-fighting, or `AddTextGeometry`/`PlaceContainer` (all explicitly out of scope per the brief). |
@@ -163,6 +172,47 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ## What is in progress
 
+### G2a megastation native infrastructure — visual correction phase
+
+G2a is implemented in the working tree but is deliberately uncommitted pending visual acceptance.
+It extracts one canonical deterministic planar-region substrate shared by G1 and G2; focused
+regression coverage confirms G1 surface identities and accepted placement results remain unchanged.
+The G2 planner runs after final G1, Z2a, and Z2b plans, uses 96 m stable surface-local cells,
+semantic/topological suitability, exact-mask support, deterministic spacing/caps, and reservations
+for G1 structures, windows, lights, and earlier G2 clusters. Implemented cluster families are
+machinery housings, ventilation, and small/medium tanks. Stateless emitters batch all visible G2
+geometry into one native infrastructure mesh with a selective major-form shadow mesh; the station
+owns no additional textures.
+
+After the second scale/readability correction, Nova's current measured preparation result is 233
+clusters / 1,615 family instances (664 housings, 664 vents, 287 tanks), 235,508 visible vertices /
+113,466 triangles / 9,839,880 bytes, and 66,288 selective-shadow vertices / 30,848 triangles /
+2,756,544 bytes. The active cluster footprint is 330,196 m², about 2.1% of 15,619,907 m² candidate
+area. Role distribution is deliberately selective: 85 Industrial, 130 Utilities, 12 Logistics,
+6 Habitation, zero Strategic/Structural clusters. G2 still adds four GPU buffers and zero owned
+textures. The current working tree passes all 811 solution tests plus clean Debug and Release builds.
+
+Timo confirmed the G2 geometry exists and that the 8192² shadow baseline still avoids the former
+2–3 km stutter. A presentation bug initially restricted native infrastructure to the 0.1–5 m
+`DetailLevel.Full` depth pass, causing an abrupt appearance immediately before near-plane clipping.
+The correction reuses the same single G2 mesh in the mid-depth pass without duplicating GPU
+resources; ordinary modules retain their flattened medium representation and G2 remains absent from
+the far/minimal pass. Timo visually confirmed this render-tier correction. The temporary 250 px
+magenta locator glow and its dedicated glow type were removed before the emitter-correction visual
+review. G2 machinery now composes the shared equipment-housing, junction-box, and conduit-entry
+emitters; vents use the shared horizontal-bar, louver, and screen emitters; tanks use the shared
+octagonal body, truncated caps, bands, and major connection with G2 supports. Major housings/tanks
+cast selective shadows; vents and secondary details do not. The 2–3 km yaw/roll regression remains
+visually confirmed fixed by the 8192² shadow-map baseline and has not reappeared through the G2a
+corrections. Timo has now visually accepted the G2/mega-greeble shadow participation together with
+the two solar forms and both parabolic forms; these are locked and must not be retuned as part of
+remaining G2a work. G2a infrastructure scale/density/readability itself remains pending Timo's
+visual acceptance.
+
+Shift+F5 toggles a Debug-only CPU line-list diagnostic: magenta cluster footprints, cyan machinery,
+green vents, and orange tanks. It allocates no persistent GPU resource and is absent from Release
+package data.
+
 ### Power system — refinement phase
 
 Core working: reactor, bus, shield startup sequence, instruments. Needs:
@@ -175,7 +225,12 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
 
 ## What is next (priority order)
 
-0. **User is confirming manually**: `docking-bay` module + station stats panel + station
+0. **G2a native infrastructure visual corrections and acceptance.** Continue only the remaining
+   medium-infrastructure review without changing accepted G1, Z1, Z2a, Z2b, structural geometry,
+   streaming, the 8192² shadow baseline, mega-greeble parabolics, either solar form, or native
+   G2/mega-greeble shadow participation. Rerun full verification and commit only after Timo accepts
+   the remaining G2a result.
+1. **Older outstanding manual gate:** `docking-bay` module + station stats panel + station
    display-position separation, all in-engine. Fly to a Large station and confirm the hollow
    interior actually renders (culling risk), the door/frame look right, growth still extends
    from its 5 non-door ports, the system-map station panel's bay/door dimensions match, a
@@ -184,14 +239,11 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
    verify any of this via computer-use for tooling reasons (see table above) — if picked back up
    by Claude later, kill all `Inferior.Game.exe` processes first and avoid repeated
    `open_application` calls.
-1. **Lighting pipeline — Brief E1 (Steps 1+2) complete, visually confirmed by Timo** on
-   `feature/shadow-resolution` — per-station shadow-map resolution (8192² standard /
-   16384² mega) plus a 5x5 PCF kernel, default on, still toggleable (Shift+F6). The
-   FocusMap/two-tier Phase D line is abandoned (see "Station lighting / shadows" row
-   above). Free-object shadow participation (ship/rails containers/calibration cube as
-   casters and receivers) remains out of scope for E1, deferred to whatever comes next —
-   no brief written yet.
-2. **Starter algorithm / containers / calibration cube / screenshots in-engine
+2. **Free-object shadow participation** remains deferred: ship, rails containers, and the
+   calibration cube do not yet cast into or receive from the station shadow map. The abandoned
+   FocusMap/two-tier Phase D line remains frozen and must not be revived. Current megastations use
+   the accepted 8192² single StationMap baseline described above.
+3. **Starter algorithm / containers / calibration cube / screenshots in-engine
    verification** (Brief-StarterAndTestProps, all four tasks implemented, build, tests
    pass) — needs Timo to confirm: new-game starter spawn lands at the algorithm-selected
    station (not necessarily "Far Station" by name any more); station-placed containers
@@ -199,21 +251,21 @@ Core working: reactor, bus, shield startup sequence, instruments. Needs:
    is readable (six distinct face colours + labels, visible spin) at the expected spot
    near the starter station; Ctrl+C actually produces a `Screenshots/*.png` file next to
    the executable.
-3. **Cockpit light control in-engine verification** — the cockpit geometry, eye point,
+4. **Cockpit light control in-engine verification** — the cockpit geometry, eye point,
    authored 3° inward yaw, chase presentation, and projected ship-forward reticle were
    visually accepted by Timo on 2026-07-19. Ctrl+F1 produced no visible result, so the
    debug route now uses `F1` for canopy lights (`Ctrl+F1` remains an alias) and `Shift+F1`
    for internal lights, with explicit on/off HUD feedback. Confirm that both light material
    groups visibly change in chase view. First-person own-ship geometry remains intentionally
    hidden.
-4. **`StationSceneRenderer` extraction** — station mesh/glow/dot rendering out of
+5. **`StationSceneRenderer` extraction** — station mesh/glow/dot rendering out of
    `SystemSpaceState.Stations.cs` into `Inferior.Rendering`, same pattern as
    `CelestialBodyRenderer`/`SkyboxRenderer`/`ShipMeshRenderer`.
-5. **`SpawnShip` vs. `ShipBuilder` convention** — `SpawnShip` still manually wires
+6. **`SpawnShip` vs. `ShipBuilder` convention** — `SpawnShip` still manually wires
    reactor/bus/shield/heatsink/coolant directly, bypassing the documented "`ShipBuilder`
    is the sole construction path for `Ship`" rule. Investigation in progress as of this
    doc update; no resolution decided yet.
-6. **Player-editable cockpit** — design pass (see Open design decisions). This means
+7. **Player-editable cockpit** — design pass (see Open design decisions). This means
    runtime editing of cockpit instruments, not the physical cockpit mount/module system
    implemented above.
 

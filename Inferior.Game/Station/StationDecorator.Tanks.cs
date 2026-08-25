@@ -42,67 +42,6 @@ public static partial class StationDecorator
         return names[rng.Next(names.Length)];
     }
 
-    // Returns start and end cross-section rings for an N-sided prism.
-    // Mirrors AddPrismPipe's ring generation so caps align perfectly with the body.
-    private static (Vector3[] start, Vector3[] end) GetPrismRings(
-        Vector3 start, Vector3 end, float radius, int sides)
-    {
-        Vector3 dir       = Vector3.Normalize(end - start);
-        Vector3 arbitrary = MathF.Abs(dir.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
-        Vector3 right     = Vector3.Normalize(Vector3.Cross(dir, arbitrary));
-        Vector3 up        = Vector3.Normalize(Vector3.Cross(right, dir));
-
-        var startRing = new Vector3[sides];
-        var endRing   = new Vector3[sides];
-        for (int i = 0; i < sides; i++)
-        {
-            float   a      = i * MathF.Tau / sides;
-            Vector3 offset = right * MathF.Cos(a) * radius + up * MathF.Sin(a) * radius;
-            startRing[i] = start + offset;
-            endRing[i]   = end   + offset;
-        }
-        return (startRing, endRing);
-    }
-
-    // Truncated-pyramid cap for one end of a tank body.
-    // Both caps: pass the appropriate ring + flipLaterals=true.
-    //   Start cap: reversed startRing so the tip triangles wind outward toward -axis;
-    //              flipLaterals=true because reversing the ring gives it the same
-    //              winding orientation (CW from outside) as endRing, so the lateral
-    //              quads need the same flip to produce outward-facing normals.
-    //   End cap:   non-reversed endRing + flipLaterals=true.
-    // The tip face winding is the same for both ends.
-    private static void AddTankCap(StationModuleMesh mesh,
-        Vector3[] bodyRing, Vector3 outDir, float tipRadius, float capDepth, Color color,
-        bool flipLaterals = false)
-    {
-        int     N          = bodyRing.Length;
-        Vector3 bodyCenter = Vector3.Zero;
-        foreach (var v in bodyRing) bodyCenter += v;
-        bodyCenter /= N;
-
-        Vector3 tipCenter = bodyCenter + outDir * capDepth;
-
-        var tipRing = new Vector3[N];
-        for (int i = 0; i < N; i++)
-        {
-            Vector3 outward = Vector3.Normalize(bodyRing[i] - bodyCenter);
-            tipRing[i] = tipCenter + outward * tipRadius;
-        }
-
-        for (int i = 0; i < N; i++)
-        {
-            int next = (i + 1) % N;
-            if (flipLaterals)
-                mesh.AddQuad(bodyRing[next], bodyRing[i], tipRing[i], tipRing[next], color);
-            else
-                mesh.AddQuad(bodyRing[i], bodyRing[next], tipRing[next], tipRing[i], color);
-        }
-
-        for (int i = 0; i < N; i++)
-            mesh.AddTriangle(tipCenter, tipRing[(i + 1) % N], tipRing[i], color);
-    }
-
     // Pixel-art text rendered as tiny raised quads on a planar surface.
     private static void AddTextGeometry(StationModuleMesh mesh,
         string text, Vector3 origin, Vector3 textRight, Vector3 textUp, Vector3 textNormal,
@@ -255,36 +194,8 @@ public static partial class StationDecorator
         string substanceName, int tankId,
         System.Random rng)
     {
-        const int sides = 8;
-        mesh.AddPrismPipe(start, end, bodyRadius, sides, bodyColor);
-
-        var (startRing, endRing) = GetPrismRings(start, end, bodyRadius, sides);
-        float   tipRadius = bodyRadius * 0.28f;
-        float   capDepth  = bodyRadius * 0.50f;
-        Vector3 axis      = Vector3.Normalize(end - start);
-
-        // Reverse startRing so the tip triangles wind outward for the start cap.
-        // Both caps use flipLaterals=true: after reversal, startRingRev is CW from
-        // outside (like endRing from its outside), so the same lateral flip applies.
-        var startRingRev = new Vector3[sides];
-        for (int i = 0; i < sides; i++) startRingRev[i] = startRing[sides - 1 - i];
-
-        AddTankCap(mesh, startRingRev, -axis, tipRadius, capDepth, bodyColor, flipLaterals: true);
-        AddTankCap(mesh, endRing,       axis, tipRadius, capDepth, bodyColor, flipLaterals: true);
-
-        float stripeW = MathF.Max(bodyRadius * 0.08f, 0.04f);
-        for (int s = 1; s <= stripeCount; s++)
-        {
-            float   t   = (float)s / (stripeCount + 1);
-            Vector3 ctr = Vector3.Lerp(start, end, t);
-            mesh.AddPrismPipe(ctr - axis * stripeW, ctr + axis * stripeW,
-                              bodyRadius * 1.04f, sides, stripeColor);
-        }
-
-        // Connecting pipe from nearest cap tip to module surface, in stripe colour
-        bool    useStart = Vector3.Distance(start, attachPoint) < Vector3.Distance(end, attachPoint);
-        Vector3 capTip   = useStart ? start - axis * capDepth : end + axis * capDepth;
-        mesh.AddPrismPipe(capTip, attachPoint, bodyRadius * 0.18f, 6, stripeColor);
+        StationIndustrialPrimitives.EmitTankCore(mesh, start, end, bodyRadius,
+            bodyColor, stripeColor, stripeCount, attachPoint);
 
         // Label plate + pixel text
         AddTankLabel(mesh, (start + end) * 0.5f, labelNormal, labelUp,
