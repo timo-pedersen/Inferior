@@ -188,6 +188,7 @@ public sealed partial class SystemSpaceState
         _stationCycle.Reset();
         ComputeEclipticRotation();
         _simulation.InstallSystem(_star, _system);
+        InitializeSystemMaterialLibrary();
         BuildStationVisualCatalog();
 
         // Rebuild skybox for new star

@@ -1,4 +1,5 @@
 using Inferior.Rendering;
+using Inferior.Game.StationGen.Megastations;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -27,6 +28,7 @@ public enum DecorClass
     // machinery/tank forms; Minor carries vents and small visible detailing.
     MegastationInfrastructureMajor, MegastationInfrastructureMinor,
     MegastationMegaGreebleMajor, MegastationMegaGreebleMinor,
+    MegastationFabricMajor, MegastationFabricMinor,
 
     // C1 — structural
     Pipes, SurfacePipes, PipeBrackets,
@@ -68,6 +70,7 @@ public sealed class StationModuleMesh
     private readonly List<int>                          _idx   = [];
     private readonly List<(int vertexBase, int count)>  _faces = [];
     private readonly List<(int indexStart, int indexCount, DecorClass decorClass)> _classRanges = [];
+    private readonly List<(int indexStart, int indexCount, SystemMaterialFamilyId family)> _materialRanges = [];
     private bool _breakDecorClassRange;
 
     public bool           IsEmpty       => _verts.Count == 0;
@@ -80,6 +83,8 @@ public sealed class StationModuleMesh
     // call below tags the index range it just added with whatever class is current. See
     // the DecorClass enum doc comment and StationDecorator.DecorCastingPolicy.
     public DecorClass CurrentDecorClass { get; set; } = DecorClass.Unclassified;
+    public SystemMaterialFamilyId? CurrentMaterialFamily { get; set; }
+    public float CurrentUvScaleMeters { get; set; } = 5f;
 
     // Index ranges recorded as geometry was appended, tagged by CurrentDecorClass at the
     // time. Consumed by the shadow system (SystemSpaceState.Shadows.cs) to compose a
@@ -106,6 +111,7 @@ public sealed class StationModuleMesh
     private void RecordDecorClassRange(int indexStart, int indexCount)
     {
         if (indexCount <= 0) return;
+        RecordMaterialRange(indexStart, indexCount);
         if (!_breakDecorClassRange && _classRanges.Count > 0)
         {
             var last = _classRanges[^1];
@@ -117,6 +123,22 @@ public sealed class StationModuleMesh
         }
         _breakDecorClassRange = false;
         _classRanges.Add((indexStart, indexCount, CurrentDecorClass));
+    }
+
+    private void RecordMaterialRange(int indexStart, int indexCount)
+    {
+        if (CurrentMaterialFamily is not { } family)
+            return;
+        if (_materialRanges.Count > 0)
+        {
+            var last = _materialRanges[^1];
+            if (last.family == family && last.indexStart + last.indexCount == indexStart)
+            {
+                _materialRanges[^1] = (last.indexStart, last.indexCount + indexCount, family);
+                return;
+            }
+        }
+        _materialRanges.Add((indexStart, indexCount, family));
     }
 
     // Set after base/seam geometry is added and before raised decoration (greebles, pipes).
@@ -154,9 +176,9 @@ public sealed class StationModuleMesh
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
         _verts.Add(new VertexPositionNormalColorTexture(v0, normal, color, Vector2.Zero));
-        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(v1 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(v2 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionNormalColorTexture(v3, normal, color, FaceUV(v3 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(v1 - v0, uAxis, vAxis, CurrentUvScaleMeters)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(v2 - v0, uAxis, vAxis, CurrentUvScaleMeters)));
+        _verts.Add(new VertexPositionNormalColorTexture(v3, normal, color, FaceUV(v3 - v0, uAxis, vAxis, CurrentUvScaleMeters)));
         int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
         RecordDecorClassRange(idxStart, _idx.Count - idxStart);
@@ -164,11 +186,36 @@ public sealed class StationModuleMesh
         return b;
     }
 
-    private static Vector2 FaceUV(Vector3 offset, Vector3 uAxis, Vector3 vAxis)
+    private static Vector2 FaceUV(Vector3 offset, Vector3 uAxis, Vector3 vAxis, float uvScale)
+        => new(Vector3.Dot(offset, uAxis) / uvScale,
+               Vector3.Dot(offset, vAxis) / uvScale);
+
+    // Megastation structural path: station-local projection keeps adjacent coplanar
+    // boundary quads on one phase. Ordinary station callers retain AddQuad's legacy
+    // per-quad origin and 5 m default.
+    public int AddQuadProjected(
+        Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
+        Vector3 expectedNormal, Vector3 canonicalU, Vector3 canonicalV,
+        float tileSizeMeters, Color color)
     {
-        const float UvScale = 5.0f;
-        return new Vector2(Vector3.Dot(offset, uAxis) / UvScale,
-                           Vector3.Dot(offset, vAxis) / UvScale);
+        if (tileSizeMeters <= 0f || !float.IsFinite(tileSizeMeters))
+            throw new ArgumentOutOfRangeException(nameof(tileSizeMeters));
+        int b = _verts.Count;
+        Vector3 normal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
+        if (Vector3.Dot(normal, expectedNormal) < 0f)
+            normal = -normal;
+        Vector2 Uv(Vector3 p) => new(
+            Vector3.Dot(p, canonicalU) / tileSizeMeters,
+            Vector3.Dot(p, canonicalV) / tileSizeMeters);
+        _verts.Add(new(v0, normal, color, Uv(v0)));
+        _verts.Add(new(v1, normal, color, Uv(v1)));
+        _verts.Add(new(v2, normal, color, Uv(v2)));
+        _verts.Add(new(v3, normal, color, Uv(v3)));
+        int idxStart = _idx.Count;
+        _idx.AddRange([b, b + 2, b + 1, b, b + 3, b + 2]);
+        RecordDecorClassRange(idxStart, 6);
+        _faces.Add((b, 4));
+        return b;
     }
 
     // Overload that accepts an explicit face normal (ignored — winding determines normal)
@@ -339,8 +386,8 @@ public sealed class StationModuleMesh
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
         _verts.Add(new VertexPositionNormalColorTexture(v0, normal, color, Vector2.Zero));
-        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(edge0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(edge1, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, FaceUV(edge0, uAxis, vAxis, CurrentUvScaleMeters)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, FaceUV(edge1, uAxis, vAxis, CurrentUvScaleMeters)));
         int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1]);
         RecordDecorClassRange(idxStart, _idx.Count - idxStart);
@@ -362,8 +409,8 @@ public sealed class StationModuleMesh
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
         _verts.Add(new VertexPositionNormalColorTexture(v0, normal, c0, Vector2.Zero));
-        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(edge0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(edge1, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(edge0, uAxis, vAxis, CurrentUvScaleMeters)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(edge1, uAxis, vAxis, CurrentUvScaleMeters)));
         int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1]);
         RecordDecorClassRange(idxStart, _idx.Count - idxStart);
@@ -387,9 +434,9 @@ public sealed class StationModuleMesh
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
         _verts.Add(new VertexPositionNormalColorTexture(v0, normal, c0, Vector2.Zero));
-        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(v1 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(v2 - v0, uAxis, vAxis)));
-        _verts.Add(new VertexPositionNormalColorTexture(v3, normal, c3, FaceUV(v3 - v0, uAxis, vAxis)));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, c1, FaceUV(v1 - v0, uAxis, vAxis, CurrentUvScaleMeters)));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, c2, FaceUV(v2 - v0, uAxis, vAxis, CurrentUvScaleMeters)));
+        _verts.Add(new VertexPositionNormalColorTexture(v3, normal, c3, FaceUV(v3 - v0, uAxis, vAxis, CurrentUvScaleMeters)));
         int idxStart = _idx.Count;
         _idx.AddRange([b, b+2, b+1,  b, b+3, b+2]);
         RecordDecorClassRange(idxStart, _idx.Count - idxStart);
@@ -492,6 +539,39 @@ public sealed class StationModuleMesh
         return verts.Count == 0 || idx.Count == 0
             ? null
             : new StationMeshCpuData(verts.ToArray(), idx.ToArray());
+    }
+
+    public SystemMaterialMeshCpuData? PrepareMaterialGroups()
+    {
+        if (_materialRanges.Count == 0)
+            return null;
+
+        int taggedIndexCount = _materialRanges.Sum(range => range.indexCount);
+        if (taggedIndexCount != _idx.Count
+            || _materialRanges[0].indexStart != 0
+            || _materialRanges.Zip(_materialRanges.Skip(1), (a, b) =>
+                    a.indexStart + a.indexCount == b.indexStart)
+                .Any(contiguous => !contiguous))
+            throw new InvalidOperationException(
+                "A material-aware mesh must assign every triangle to exactly one material family.");
+
+        var groupedIndices = new List<int>(_idx.Count);
+        var drawRanges = new List<SystemMaterialDrawRange>();
+        foreach (SystemMaterialFamilyId family in Enum.GetValues<SystemMaterialFamilyId>())
+        {
+            int start = groupedIndices.Count;
+            foreach (var range in _materialRanges.Where(range => range.family == family))
+                groupedIndices.AddRange(_idx.GetRange(range.indexStart, range.indexCount));
+            int count = groupedIndices.Count - start;
+            if (count > 0)
+                drawRanges.Add(new(family, start, count));
+        }
+
+        if (groupedIndices.Count != _idx.Count)
+            throw new InvalidOperationException("Material grouping did not preserve every mesh index.");
+        return new(
+            new StationMeshCpuData(_verts.ToArray(), groupedIndices.ToArray()),
+            drawRanges);
     }
 
     // Module-local AABB over a face range — same face-range selection as BuildFaceRange, but

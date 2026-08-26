@@ -58,7 +58,9 @@ public sealed record StationGenerationCpuResult(
     MegastationLightingDiagnostics? MegastationLightingDiagnostics = null,
     MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics = null,
     MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics = null,
-    MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics = null);
+    MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics = null,
+    MegastationFabricDiagnostics? MegastationFabricDiagnostics = null,
+    MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -106,7 +108,8 @@ public sealed class StationGenerator
         Galaxy.Station station,
         bool useMegastationPrototype = false,
         CancellationToken cancellationToken = default,
-        IReadOnlySet<DecorClass>? enabledShadowCasterClasses = null)
+        IReadOnlySet<DecorClass>? enabledShadowCasterClasses = null,
+        SystemMaterialAssignmentContext? systemMaterials = null)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         enabledShadowCasterClasses ??= StationDecorator.DecorCastingPolicy
@@ -119,10 +122,12 @@ public sealed class StationGenerator
             MegastationPrototypeCpuResult cpu = MegastationPrototypeGenerator.GenerateCpu(
                 identity,
                 stopwatch: stopwatch,
-                cancellationToken: cancellationToken);
+                cancellationToken: cancellationToken,
+                systemMaterials: systemMaterials);
             stopwatch.Start();
             PlacedModule structure = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
             PlacedModule? megaGreeble = MegastationPrototypeGenerator.CreateMegaGreebleModule(cpu);
+            PlacedModule? fabric = MegastationPrototypeGenerator.CreateFabricModule(cpu);
             List<PlacedModule> secondaryModules =
                 MegastationAttachmentPlanner.CreatePlacedModules(cpu.AttachmentPlan);
             StationDecorator.DecorateSecondaryModules(secondaryModules);
@@ -160,9 +165,10 @@ public sealed class StationGenerator
                 generatedTextures,
                 generatedAssignments,
                 generatedVariantPairCount: generatedTextures.Count / 2);
-            List<PlacedModule> megaModules = megaGreeble == null
-                ? [structure, .. secondaryModules]
-                : [structure, megaGreeble, .. secondaryModules];
+            List<PlacedModule> megaModules = [structure];
+            if (fabric is not null) megaModules.Add(fabric);
+            if (megaGreeble is not null) megaModules.Add(megaGreeble);
+            megaModules.AddRange(secondaryModules);
             IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
                 megaModules,
                 megaCompacted.Textures,
@@ -171,6 +177,15 @@ public sealed class StationGenerator
                 enabledShadowCasterClasses,
                 cancellationToken);
             stopwatch.Stop();
+            MegastationSystemMaterialDiagnostics? materialDiagnostics =
+                cpu.MaterialAssignment is { } materialAssignment
+                    ? new(
+                        materialAssignment.Palette,
+                        TriangleCounts(structure.HullMaterialRanges),
+                        TriangleCounts(fabric?.DecorationMaterialRanges ?? []),
+                        structure.HullMaterialRanges.Count,
+                        fabric?.DecorationMaterialRanges.Count ?? 0)
+                    : null;
             return new StationGenerationCpuResult(
                 megaModules,
                 megaCompacted.Textures,
@@ -182,8 +197,9 @@ public sealed class StationGenerator
                 megaCompacted.Diagnostics with
                 {
                     ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount
-                        + (megaGreeble == null ? 2 : 4),
-                    SharedFallbackReferenceCount = megaGreeble == null ? 2 : 4,
+                        + 2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)),
+                    SharedFallbackReferenceCount =
+                        2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)),
                 },
                 UsesSharedMegastationFallbackTextures: true,
                 MegastationSemanticZoning: cpu.SemanticZoning,
@@ -191,7 +207,9 @@ public sealed class StationGenerator
                 MegastationLightingDiagnostics: cpu.LightPlan.Diagnostics,
                 MegastationAttachmentDiagnostics: cpu.AttachmentPlan.Diagnostics,
                 MegastationInfrastructureDiagnostics: cpu.InfrastructurePlan.Diagnostics,
-                MegastationMegaGreebleDiagnostics: cpu.MegaGreeblePlan.Diagnostics);
+                MegastationMegaGreebleDiagnostics: cpu.MegaGreeblePlan.Diagnostics,
+                MegastationFabricDiagnostics: cpu.FabricPlan.Diagnostics,
+                MegastationSystemMaterialDiagnostics: materialDiagnostics);
         }
 
         int seed = NameHash(station.Name);
@@ -354,7 +372,9 @@ public sealed class StationGenerator
             cancellationToken.ThrowIfCancellationRequested();
             StationMeshCpuData? mesh = module.Definition.MeshFactory == null
                 ? PrepareBoxHullMesh(module)
-                : PrepareMesh(module.HullMesh);
+                : module.HullMaterialRanges.Count > 0
+                    ? module.HullMesh?.PrepareMaterialGroups()?.Mesh
+                    : PrepareMesh(module.HullMesh);
             if (mesh == null)
                 continue;
             hullMeshes[module] = mesh;
@@ -368,7 +388,9 @@ public sealed class StationGenerator
         foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            StationMeshCpuData? mesh = PrepareMesh(module.Mesh);
+            StationMeshCpuData? mesh = module.DecorationMaterialRanges.Count > 0
+                ? module.Mesh?.PrepareMaterialGroups()?.Mesh
+                : PrepareMesh(module.Mesh);
             if (mesh != null)
                 plan.Add(MeshItem(
                     StationVisualUploadResourceKind.DecorationMesh,
@@ -474,7 +496,16 @@ public sealed class StationGenerator
                                 StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleShadow,
                             _ => StationVisualUploadDiagnosticPurpose.None,
                         }
-                        : StationVisualUploadDiagnosticPurpose.None);
+                        : module.HasNativeMegastationFabric
+                            ? kind switch
+                            {
+                                StationVisualUploadResourceKind.DecorationMesh =>
+                                    StationVisualUploadDiagnosticPurpose.MegastationFabricVisible,
+                                StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                                    StationVisualUploadDiagnosticPurpose.MegastationFabricShadow,
+                                _ => StationVisualUploadDiagnosticPurpose.None,
+                            }
+                            : StationVisualUploadDiagnosticPurpose.None);
 
         static StationMeshCpuData? PrepareMesh(StationModuleMesh? mesh)
         {
@@ -484,6 +515,13 @@ public sealed class StationGenerator
             return new StationMeshCpuData(vertices, indices);
         }
     }
+
+    private static IReadOnlyDictionary<SystemMaterialFamilyId, int> TriangleCounts(
+        IReadOnlyList<SystemMaterialDrawRange> ranges)
+        => Enum.GetValues<SystemMaterialFamilyId>().ToDictionary(
+            family => family,
+            family => ranges.Where(range => range.FamilyId == family)
+                .Sum(range => range.TriangleCount));
 
     internal static StationMeshCpuData PrepareBoxHullMesh(PlacedModule module)
     {

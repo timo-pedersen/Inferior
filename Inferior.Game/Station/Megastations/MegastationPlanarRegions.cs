@@ -10,8 +10,8 @@ public sealed record MegastationPlanarMaskRect(
     float MaxV);
 
 /// <summary>
-/// Canonical CPU-side connected coplanar substrate shared by G1 attachments and
-/// G2 native infrastructure. Identity deliberately retains the accepted G1
+/// Canonical CPU-side connected coplanar substrate shared by G1 attachments,
+/// G2 native infrastructure, and Fabric Structures. Identity deliberately retains the accepted G1
 /// attachments:v1 namespace so extracting this layer cannot perturb G1 output.
 /// </summary>
 public sealed record MegastationPlanarRegion(

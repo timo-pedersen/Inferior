@@ -228,7 +228,8 @@ public static partial class StationDecorator
     // setting DecorCastingPolicy to true is not enough because station residency passes
     // the active rollout-stage classes to CPU preparation.
     public static readonly DecorClass[] MegastationCasterClasses =
-        [DecorClass.MegastationInfrastructureMajor, DecorClass.MegastationMegaGreebleMajor];
+        [DecorClass.MegastationInfrastructureMajor, DecorClass.MegastationMegaGreebleMajor,
+         DecorClass.MegastationFabricMajor];
 
     // Docs/station-lighting-pipeline-spec.md §10 Phase C: the executable form of the
     // "documented casting policy." SystemSpaceState.Shadows.cs reads this to decide which
@@ -254,6 +255,8 @@ public static partial class StationDecorator
             [DecorClass.MegastationInfrastructureMajor] = true,  // tanks and substantial housings
             [DecorClass.MegastationMegaGreebleMinor] = false, // ribs, receivers and fine braces
             [DecorClass.MegastationMegaGreebleMajor] = true,  // collector, dish and major supports
+            [DecorClass.MegastationFabricMinor] = false, // facade strips and minor surface breakup
+            [DecorClass.MegastationFabricMajor] = true,  // substantial background building masses
 
             // C1 — structural. Landed: gated via F8 overlay + Timo's in-engine screenshots.
             [DecorClass.Pipes]        = true,

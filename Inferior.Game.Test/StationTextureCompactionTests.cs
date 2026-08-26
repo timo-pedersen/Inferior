@@ -135,17 +135,21 @@ public sealed class StationTextureCompactionTests
         Assert.True(prepared.UsesSharedMegastationFallbackTextures);
         Assert.True(prepared.Modules.Count > 1);
         Assert.NotEmpty(prepared.Textures);
-        Assert.Equal(prepared.Modules.Count - 2, prepared.TextureAssignments.Count);
+        Assert.Equal(prepared.Modules.Count - 3, prepared.TextureAssignments.Count);
         Assert.Equal(prepared.Textures.Count,
             prepared.UploadPlan.Count(item => item.Texture != null));
         PlacedModule structural = prepared.Modules[0];
         PlacedModule megaGreeble = Assert.Single(prepared.Modules,
             module => module.HasNativeMegastationMegaGreeble);
+        PlacedModule fabric = Assert.Single(prepared.Modules,
+            module => module.HasNativeMegastationFabric);
         Assert.DoesNotContain(prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, structural)
-                || ReferenceEquals(assignment.Module, megaGreeble));
+                || ReferenceEquals(assignment.Module, megaGreeble)
+                || ReferenceEquals(assignment.Module, fabric));
         Assert.All(prepared.Modules.Where(module => !ReferenceEquals(module, structural)
-            && !ReferenceEquals(module, megaGreeble)), module => Assert.Single(
+            && !ReferenceEquals(module, megaGreeble)
+            && !ReferenceEquals(module, fabric)), module => Assert.Single(
             prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, module)));
         Assert.All(prepared.Modules, module =>
@@ -157,12 +161,12 @@ public sealed class StationTextureCompactionTests
             > prepared.TextureDiagnostics.SelectedUniqueTextureCount);
         Assert.Equal(prepared.Textures.Count,
             prepared.TextureDiagnostics.SelectedUniqueTextureCount);
-        Assert.Equal(prepared.TextureAssignments.Count * 2 + 4,
+        Assert.Equal(prepared.TextureAssignments.Count * 2 + 6,
             prepared.TextureDiagnostics.ModuleTextureBindingCount);
-        Assert.Equal(4, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        Assert.Equal(6, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
         MegastationAttachmentDiagnostics attachments = Assert.IsType<MegastationAttachmentDiagnostics>(
             prepared.MegastationAttachmentDiagnostics);
-        Assert.Equal(prepared.Modules.Count - 2, attachments.PlacedModuleCount);
+        Assert.Equal(prepared.Modules.Count - 3, attachments.PlacedModuleCount);
         MegastationWindowDiagnostics windows = Assert.IsType<MegastationWindowDiagnostics>(
             prepared.MegastationWindowDiagnostics);
         StationVisualUploadPlanItem glass = Assert.Single(
@@ -199,6 +203,16 @@ public sealed class StationTextureCompactionTests
         Assert.Same(megaGreeble, megaGreebleShadow.Module);
         Assert.Equal(megaGreebleDiagnostics.VisibleMeshBytes, megaGreebleVisible.EstimatedBytes);
         Assert.Equal(megaGreebleDiagnostics.ShadowMeshBytes, megaGreebleShadow.EstimatedBytes);
+        MegastationFabricDiagnostics fabricDiagnostics =
+            Assert.IsType<MegastationFabricDiagnostics>(prepared.MegastationFabricDiagnostics);
+        StationVisualUploadPlanItem fabricVisible = Assert.Single(prepared.UploadPlan,
+            item => item.DiagnosticPurpose == StationVisualUploadDiagnosticPurpose.MegastationFabricVisible);
+        StationVisualUploadPlanItem fabricShadow = Assert.Single(prepared.UploadPlan,
+            item => item.DiagnosticPurpose == StationVisualUploadDiagnosticPurpose.MegastationFabricShadow);
+        Assert.Same(fabric, fabricVisible.Module);
+        Assert.Same(fabric, fabricShadow.Module);
+        Assert.Equal(fabricDiagnostics.VisibleMeshBytes, fabricVisible.EstimatedBytes);
+        Assert.Equal(fabricDiagnostics.ShadowMeshBytes, fabricShadow.EstimatedBytes);
         Assert.True(prepared.UploadPlan.Sum(item => item.EstimatedBytes)
             > 3_965_952 + windows.MeshBytes);
         Console.WriteLine(

@@ -267,6 +267,39 @@ public sealed partial class SystemSpaceState
         PublishStationResidencyMessage(message, SystemMessagePriority.NB);
     }
 
+    private static void PublishMegastationFabricDiagnostics(
+        string stationIdentity, MegastationFabricDiagnostics d,
+        double visibleUploadMilliseconds, double shadowUploadMilliseconds,
+        int ownedTextures, int gpuBuffers, long uploadedResourceGpuBytes,
+        StationShadowGpuParticipation shadow)
+    {
+        string archetypes = string.Join(',', d.ByArchetype.Select(x => $"{x.Key}:{x.Value}"));
+        string roles = string.Join(',', d.ByRole.Select(x => $"{x.Key}:{x.Value}"));
+        string patterns = string.Join(',', d.ByPattern.Select(x => $"{x.Key}:{x.Value}"));
+        string dense = string.Join('|', d.DensestRegions.Select(x =>
+            $"{x.Role}:{x.Direction}:{x.StructureCount}@{x.Centre.X:F0},{x.Centre.Y:F0},{x.Centre.Z:F0}"));
+        PublishStationResidencyMessage(
+            $"[MegastationFabric] station={stationIdentity}; area={d.EligibleArea:F0}; " +
+            $"regions={d.EligibleRegionCount}; candidates={d.CandidateCount}; accepted={d.AcceptedCount}; " +
+            $"archetypes={archetypes}; roles={roles}; patterns={patterns}; " +
+            $"sizeWxLxH={d.MinimumWidth:F1}/{d.MedianWidth:F1}/{d.MaximumWidth:F1}x" +
+            $"{d.MinimumLength:F1}/{d.MedianLength:F1}/{d.MaximumLength:F1}x" +
+            $"{d.MinimumHeight:F1}/{d.MedianHeight:F1}/{d.MaximumHeight:F1}m; " +
+            $"rejects=mask:{d.ExactMaskRejectCount},g1:{d.G1RejectCount},windows:{d.WindowRejectCount}," +
+            $"lights:{d.LightRejectCount},g2:{d.G2RejectCount},mega:{d.MegaGreebleRejectCount}," +
+            $"self:{d.SelfRejectCount},density:{d.DensityRejectCount},structure:{d.StructuralCollisionRejectCount}; " +
+            $"visible={d.VisibleVertexCount}v/{d.VisibleTriangleCount}t/{d.VisibleMeshBytes}B; " +
+            $"shadow={d.ShadowVertexCount}v/{d.ShadowTriangleCount}t/{d.ShadowMeshBytes}B; " +
+            $"timing=plan:{d.PlanningMilliseconds}ms,mesh:{d.MeshBuildMilliseconds}ms," +
+            $"visibleUpload:{visibleUploadMilliseconds:F1}ms,shadowUpload:{shadowUploadMilliseconds:F1}ms; " +
+            $"gpuShadow=uploaded:{shadow.GpuCasterUploaded},traversed:{shadow.ModuleInShadowTraversal}," +
+            $"fitBounds:{shadow.FitBoundsUploaded},{shadow.GpuCasterVertices}v/{shadow.GpuCasterTriangles}t; " +
+            $"ownedTextureDelta={d.OwnedTextureDelta}; gpuBufferDelta={d.GpuBufferDelta}; " +
+            $"packageOwnedTextures={ownedTextures}; packageGpuBuffers={gpuBuffers}; " +
+            $"uploadedResourceGpuBytes={uploadedResourceGpuBytes}; dense={dense}; signature={d.PlanSignature}",
+            SystemMessagePriority.NB);
+    }
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────
@@ -334,6 +367,7 @@ public sealed partial class SystemSpaceState
         Matrix proj = _effect.Projection;
         var    sunCol = new Color(SceneLighting.SunColour);
         var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
+        SystemMaterialLibrary? systemMaterials = SystemMaterials;
 
         // Hull pass — real-time LitSurface.fx DynamicLit (ambient + saturate(N.L)) with
         // procedural texture; MaterialColor left White (matches the old
@@ -368,7 +402,9 @@ public sealed partial class SystemSpaceState
             foreach (var mod in modules)
             {
                 if (!_hullMeshes.TryGetValue(mod, out var hull)) continue;
-                if (mod.TextureInstance == null) continue;
+                bool usesSystemMaterials = mod.HullMaterialRanges.Count > 0
+                    && systemMaterials != null;
+                if (mod.TextureInstance == null && !usesSystemMaterials) continue;
 
                 // mod.Transform used directly, not decomposed-then-rebuilt: the shadow
                 // caster (RenderStationShadowMap) and the receiver's ModuleToStationLocal
@@ -418,7 +454,44 @@ public sealed partial class SystemSpaceState
                     continue;
                 }
 
-                if (useShadow)
+                if (usesSystemMaterials)
+                {
+                    foreach (SystemMaterialDrawRange range in mod.HullMaterialRanges)
+                    {
+                        SystemMaterialResource material = systemMaterials!.Get(range.FamilyId);
+                        SystemMaterialRecipe recipe = material.Recipe;
+                        if (useShadow)
+                        {
+                            var ctx = _stationShadowContext!;
+                            float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
+                            _meshRenderer.DrawDynamicLitShadowedRange(
+                                hull.vb, hull.ib, range.StartIndex, range.IndexCount,
+                                world, view, proj, Color.White,
+                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                                recipe.SpecularStrength, recipe.SpecularShininess,
+                                material.Albedo, _stationShadowMap!, mod.Transform,
+                                ctx.StationLocalToLightView, ctx.MinXY, ctx.InvSize,
+                                ctx.Near, ctx.DepthSpan,
+                                new Vector2(1f / _stationShadowMapResolution,
+                                    1f / _stationShadowMapResolution),
+                                StationShadowCorrectionLimit, shadowBiasDepth,
+                                _stationShadowBinaryView, _stationShadowDeltaView,
+                                ShadowKernelRadiusFor(_shadowKernelMode),
+                                material.MaterialMap, recipe.BumpStrength);
+                        }
+                        else
+                        {
+                            _meshRenderer.DrawDynamicLitRange(
+                                hull.vb, hull.ib, range.StartIndex, range.IndexCount,
+                                world, view, proj, Color.White,
+                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                                recipe.SpecularStrength, recipe.SpecularShininess,
+                                material.Albedo, material.MaterialMap,
+                                recipe.BumpStrength);
+                        }
+                    }
+                }
+                else if (useShadow)
                 {
                     var ctx = _stationShadowContext!;
                     // Normalized depth units — StationShadowBiasMetres is expressed in
@@ -428,7 +501,7 @@ public sealed partial class SystemSpaceState
                     _meshRenderer.DrawDynamicLitShadowed(hull.vb, hull.ib, world, view, proj,
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                         specStrength, specShininess,
-                        mod.TextureInstance, _stationShadowMap!, mod.Transform,
+                        mod.TextureInstance!, _stationShadowMap!, mod.Transform,
                         ctx.StationLocalToLightView, ctx.MinXY, ctx.InvSize, ctx.Near,
                         ctx.DepthSpan,
                         new Vector2(1f / _stationShadowMapResolution, 1f / _stationShadowMapResolution),
@@ -497,6 +570,45 @@ public sealed partial class SystemSpaceState
                 // texture upload — White reads as a flat unlit panel, not a missing-texture
                 // artifact.
                 Texture2D tex = mod.TextureInstance ?? StationTextureRegistry.White;
+
+                if (mod.DecorationMaterialRanges.Count > 0 && systemMaterials != null)
+                {
+                    foreach (SystemMaterialDrawRange range in mod.DecorationMaterialRanges)
+                    {
+                        SystemMaterialResource material = systemMaterials.Get(range.FamilyId);
+                        SystemMaterialRecipe recipe = material.Recipe;
+                        if (useShadow)
+                        {
+                            var ctx = _stationShadowContext!;
+                            float shadowBiasDepth = StationShadowBiasMetres / ctx.DepthSpan;
+                            _meshRenderer.DrawDynamicLitShadowedRange(
+                                deco.vb, deco.ib, range.StartIndex, range.IndexCount,
+                                world, view, proj, Color.White,
+                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                                recipe.SpecularStrength, recipe.SpecularShininess,
+                                material.Albedo, _stationShadowMap!, mod.Transform,
+                                ctx.StationLocalToLightView, ctx.MinXY, ctx.InvSize,
+                                ctx.Near, ctx.DepthSpan,
+                                new Vector2(1f / _stationShadowMapResolution,
+                                    1f / _stationShadowMapResolution),
+                                StationShadowCorrectionLimit, shadowBiasDepth,
+                                _stationShadowBinaryView, _stationShadowDeltaView,
+                                ShadowKernelRadiusFor(_shadowKernelMode),
+                                material.MaterialMap, recipe.BumpStrength);
+                        }
+                        else
+                        {
+                            _meshRenderer.DrawDynamicLitRange(
+                                deco.vb, deco.ib, range.StartIndex, range.IndexCount,
+                                world, view, proj, Color.White,
+                                SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
+                                recipe.SpecularStrength, recipe.SpecularShininess,
+                                material.Albedo, material.MaterialMap,
+                                recipe.BumpStrength);
+                        }
+                    }
+                    continue;
+                }
 
                 // Brief U1: mod.Mesh is decoration only, for every module kind — a
                 // MeshFactory module's hull now lives in its own separate mesh (drawn in
@@ -587,7 +699,8 @@ public sealed partial class SystemSpaceState
     internal static bool UsesFullDecorationMeshInPass(PlacedModule module, DetailLevel level)
         => level == DetailLevel.Full
             || (level == DetailLevel.Medium && (module.HasNativeMegastationInfrastructure
-                || module.HasNativeMegastationMegaGreeble));
+                || module.HasNativeMegastationMegaGreeble
+                || module.HasNativeMegastationFabric));
 
     private void DrawMegastationInfrastructureDebugLines()
     {
@@ -608,7 +721,8 @@ public sealed partial class SystemSpaceState
             foreach (PlacedModule module in ResidentStationVisual!.Modules)
             {
                 VertexPositionColor[]? lines = module.NativeInfrastructureDebugLines
-                    ?? module.NativeMegaGreebleDebugLines;
+                    ?? module.NativeMegaGreebleDebugLines
+                    ?? module.NativeFabricDebugLines;
                 if (lines is not { Length: > 1 })
                     continue;
                 foreach (EffectPass pass in _effect.CurrentTechnique.Passes)

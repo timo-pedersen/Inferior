@@ -116,7 +116,9 @@ public static class MegastationPrototypeMeshBuilder
         StationModuleMesh mesh,
         MegastationDebugColorMode debugColorMode = MegastationDebugColorMode.StructuralVsUrban,
         MegastationPrototypeSettings? settings = null,
-        long topologyBuildMilliseconds = 0)
+        long topologyBuildMilliseconds = 0,
+        MegastationSemanticZoningResult? semanticZoning = null,
+        MegastationSystemMaterialAssignment? materialAssignment = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
         var stopwatch = new Stopwatch();
@@ -141,7 +143,14 @@ public static class MegastationPrototypeMeshBuilder
 
         stopwatch.Restart();
         ChamferPlan chamferPlan = BuildChamferPlan(topology, occupancy.Grid, settings);
-        int faceQuads = AddStructuralFaces(topology, occupancy, mesh, debugColorMode, chamferPlan);
+        int faceQuads = AddStructuralFaces(topology, occupancy, mesh, debugColorMode, chamferPlan,
+            semanticZoning, materialAssignment);
+        if (materialAssignment is { } assignment)
+        {
+            SystemMaterialBinding fallback = assignment.DefaultStructuralBinding;
+            mesh.CurrentMaterialFamily = fallback.FamilyId;
+            mesh.CurrentUvScaleMeters = SystemMaterialRecipes.Get(fallback.FamilyId).TileSizeMeters;
+        }
         int bevelQuads = AddBevels(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         int cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         mesh.ApplyIlluminationFlags();
@@ -211,7 +220,9 @@ public static class MegastationPrototypeMeshBuilder
         StructuralOccupancy occupancy,
         StationModuleMesh mesh,
         MegastationDebugColorMode debugColorMode,
-        ChamferPlan chamferPlan)
+        ChamferPlan chamferPlan,
+        MegastationSemanticZoningResult? semanticZoning,
+        MegastationSystemMaterialAssignment? materialAssignment)
     {
         foreach (var face in topology.Faces)
         {
@@ -219,10 +230,44 @@ public static class MegastationPrototypeMeshBuilder
             for (int i = 0; i < 4; i++)
                 p[i] = RetractedFaceVertex(topology, occupancy.Grid, face, face.Vertices[i], chamferPlan);
 
-            Color color = ColorFor(topology, occupancy, face, debugColorMode);
-            AddQuad(mesh, p[0], p[1], p[2], p[3], BoundaryTopologyBuilder.Normal(face.Direction), color);
+            Vector3 normal = BoundaryTopologyBuilder.Normal(face.Direction);
+            if (materialAssignment is { } assignment && semanticZoning != null)
+            {
+                SystemMaterialBinding binding = assignment.StructuralBinding(
+                    semanticZoning.ZoneByFace[face.Key]);
+                mesh.CurrentMaterialFamily = binding.FamilyId;
+                float tileSize = SystemMaterialRecipes.Get(binding.FamilyId).TileSizeMeters;
+                (Vector3 u, Vector3 v) = CanonicalUvAxes(face.Direction);
+                AddProjectedQuad(mesh, p[0], p[1], p[2], p[3], normal, u, v,
+                    tileSize, binding.Tint);
+            }
+            else
+            {
+                Color color = ColorFor(topology, occupancy, face, debugColorMode);
+                AddQuad(mesh, p[0], p[1], p[2], p[3], normal, color);
+            }
         }
         return topology.Faces.Count;
+    }
+
+    internal static (Vector3 U, Vector3 V) CanonicalUvAxes(GridDirection direction)
+        => direction switch
+        {
+            GridDirection.NegativeX or GridDirection.PositiveX => (Vector3.UnitZ, Vector3.UnitY),
+            GridDirection.NegativeY or GridDirection.PositiveY => (Vector3.UnitX, Vector3.UnitZ),
+            _ => (Vector3.UnitX, Vector3.UnitY),
+        };
+
+    private static void AddProjectedQuad(
+        StationModuleMesh mesh,
+        Vector3 a, Vector3 b, Vector3 c, Vector3 d,
+        Vector3 expectedNormal, Vector3 u, Vector3 v,
+        float tileSize, Color color)
+    {
+        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
+            mesh.AddQuadProjected(a, d, c, b, expectedNormal, u, v, tileSize, color);
+        else
+            mesh.AddQuadProjected(a, b, c, d, expectedNormal, u, v, tileSize, color);
     }
 
     private static Vector3 Retraction(BoundaryTopology topology, BoundaryFace face, BoundaryEdgeKey edgeKey, ChamferPlan chamferPlan)

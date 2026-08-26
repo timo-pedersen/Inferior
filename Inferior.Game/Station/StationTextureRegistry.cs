@@ -601,15 +601,7 @@ public static class StationTextureRegistry
     // generation (process-randomized for strings), but this is a plain arithmetic
     // function of two ints, not an object hash, so it's exempt and always reproducible.
     internal static float PixelNoise01(int x, int y)
-    {
-        unchecked
-        {
-            int h = x * 374761393 + y * 668265263;
-            h = (h ^ (h >> 13)) * 1274126177;
-            h ^= h >> 16;
-            return (h & 0xFFFFFF) / (float)0xFFFFFF;
-        }
-    }
+        => Megastations.ProceduralMaterialCpuGenerator.PixelNoise01(x, y);
 
     // Separable box blur, wrap-around (matches MaterialSampler's Wrap addressing — a
     // clamped blur would visibly seam at the UV wrap boundary). Flat regions (the vast
@@ -644,21 +636,10 @@ public static class StationTextureRegistry
     // ── Colour helpers ────────────────────────────────────────────────────────
 
     private static Color ShiftLuminance(Color c, float delta)
-    {
-        return new Color(
-            Math.Clamp(c.R + (int)delta, 0, 255),
-            Math.Clamp(c.G + (int)delta, 0, 255),
-            Math.Clamp(c.B + (int)delta, 0, 255));
-    }
+        => Megastations.ProceduralMaterialCpuGenerator.ShiftLuminance(c, delta);
 
     private static Color BlendColor(Color a, Color b, float t)
-    {
-        t = Math.Clamp(t, 0f, 1f);
-        return new Color(
-            (int)(a.R + (b.R - a.R) * t),
-            (int)(a.G + (b.G - a.G) * t),
-            (int)(a.B + (b.B - a.B) * t));
-    }
+        => Megastations.ProceduralMaterialCpuGenerator.Blend(a, b, t);
 
     // ── RNG seed mixing ───────────────────────────────────────────────────────
     // No longer a cache key (the shared static cache is gone, Brief S2b-1) — still used

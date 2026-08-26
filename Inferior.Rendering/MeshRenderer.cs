@@ -160,6 +160,46 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx);
     }
 
+    public void DrawDynamicLitShadowedRange(
+        VertexBuffer vb, IndexBuffer ib,
+        int startIndex, int indexCount,
+        Matrix world, Matrix view, Matrix projection,
+        Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        float specularStrength, float specularShininess,
+        Texture2D texture, Texture2D shadowMap,
+        Matrix moduleToStationLocal, Matrix stationLocalToLightView,
+        Vector2 shadowMinXY, Vector2 shadowInvSize,
+        float shadowNear, float shadowDepthSpan, Vector2 shadowTexelSize,
+        float shadowCorrectionLimit, float shadowBiasDepth,
+        bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
+        Texture2D? materialMap = null, float bumpStrength = 0f,
+        Vector3? eyePositionWorld = null)
+    {
+        if (startIndex < 0 || indexCount <= 0
+            || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
+            throw new ArgumentOutOfRangeException(nameof(indexCount),
+                "The indexed triangle range must lie within the index buffer.");
+
+        var fx = _litSurfaceEffect;
+        fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
+        fx.Parameters["World"].SetValue(world);
+        fx.Parameters["View"].SetValue(view);
+        fx.Parameters["Projection"].SetValue(projection);
+        fx.Parameters["SunDirection"].SetValue(sunDirection);
+        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
+        fx.Parameters["Ambient"].SetValue(ambient);
+        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
+        fx.Parameters["Texture"].SetValue(texture);
+        SetSpecularParameters(fx, specularStrength, specularShininess,
+            materialMap ?? _neutralMaterialTexture, bumpStrength,
+            eyePositionWorld ?? Vector3.Zero);
+        SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
+            shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
+            shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
+            shadowKernelRadius);
+        Draw(vb, ib, fx, startIndex, indexCount / 3);
+    }
+
     /// <summary>
     /// Pre-baked (albedo x AO) vertex-colour geometry (station decoration). Vertex alpha is
     /// the self-illumination floor S — see StationModuleMesh.ApplyIlluminationFlags.

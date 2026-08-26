@@ -105,6 +105,9 @@ public sealed record MegastationPrototypeCpuResult(
     StationModuleMesh InfrastructureMesh,
     MegastationMegaGreeblePlan MegaGreeblePlan,
     StationModuleMesh MegaGreebleMesh,
+    MegastationFabricPlan FabricPlan,
+    StationModuleMesh FabricMesh,
+    MegastationSystemMaterialAssignment? MaterialAssignment,
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
 
@@ -137,7 +140,8 @@ public static class MegastationPrototypeGenerator
         string persistenceId,
         MegastationPrototypeSettings? settings = null,
         Stopwatch? stopwatch = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SystemMaterialAssignmentContext? systemMaterials = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
         stopwatch ??= Stopwatch.StartNew();
@@ -179,6 +183,9 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             topology,
             faceResults);
+        MegastationSystemMaterialAssignment? materialAssignment = systemMaterials is { } materialContext
+            ? MegastationSystemMaterialAssignment.Create(materialContext, persistenceId)
+            : null;
         MegastationPlanarRegion[] planarRegions = MegastationPlanarRegionExtractor.Extract(
             grid,
             topology,
@@ -234,13 +241,21 @@ public static class MegastationPrototypeGenerator
         MegastationMegaGreebleMeshBuildResult megaGreebleMesh =
             MegastationMegaGreebleMeshBuilder.Build(megaGreeblePlan, cancellationToken);
         megaGreeblePlan = megaGreeblePlan with { Diagnostics = megaGreebleMesh.Diagnostics };
+        MegastationFabricPlan fabricPlan = MegastationFabricPlanner.Plan(
+            planarRegions, attachmentPlan, windowPlan, lightPlan, infrastructurePlan,
+            megaGreeblePlan, regularised.Occupancy, cancellationToken);
+        MegastationFabricMeshBuildResult fabricMesh =
+            MegastationFabricMeshBuilder.Build(fabricPlan, materialAssignment, cancellationToken);
+        fabricPlan = fabricPlan with { Diagnostics = fabricMesh.Diagnostics };
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(
             regularised.Occupancy,
             topology,
             mesh,
             settings: settings,
-            topologyBuildMilliseconds: topologyStopwatch.ElapsedMilliseconds);
+            topologyBuildMilliseconds: topologyStopwatch.ElapsedMilliseconds,
+            semanticZoning: semanticZoning,
+            materialAssignment: materialAssignment);
         cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
 
@@ -341,6 +356,9 @@ public static class MegastationPrototypeGenerator
             infrastructureMesh.Mesh,
             megaGreeblePlan,
             megaGreebleMesh.Mesh,
+            fabricPlan,
+            fabricMesh.Mesh,
+            materialAssignment,
             meshStats,
             diag);
     }
@@ -379,6 +397,7 @@ public static class MegastationPrototypeGenerator
             NativeInfrastructureDebugLines = infrastructureDebugLines,
             HullMesh = cpu.Mesh,
             GlassMesh = cpu.WindowGlassMesh,
+            HullMaterialRanges = cpu.Mesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
         module.GlowLights.AddRange(cpu.LightPlan.Lights.Select(light => light.ToStationLightInfo()));
         return module;
@@ -417,6 +436,42 @@ public static class MegastationPrototypeGenerator
             HasNativeMegastationMegaGreeble = true,
             IsHullLessPresentationLayer = true,
             NativeMegaGreebleDebugLines = debugLines,
+        };
+    }
+
+    public static PlacedModule? CreateFabricModule(MegastationPrototypeCpuResult cpu)
+    {
+        if (cpu.FabricMesh.IsEmpty)
+            return null;
+        Vector3 bounds = new(cpu.Grid.Dimension(GridAxis.X), cpu.Grid.Dimension(GridAxis.Y),
+            cpu.Grid.Dimension(GridAxis.Z));
+        var definition = new StationModuleDefinition
+        {
+            Id = "megastation-fabric-structures",
+            Category = "megastation-fabric-structures",
+            BoundingBox = bounds,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+#if DEBUG
+        VertexPositionColor[]? debugLines = MegastationFabricDebug.BuildLines(cpu.FabricPlan);
+#else
+        VertexPositionColor[]? debugLines = null;
+#endif
+        return new PlacedModule
+        {
+            Definition = definition,
+            Transform = Matrix.Identity,
+            Seed = MegastationSeed.Derive(cpu.Diagnostics.RootSeed, "fabric-structures:v1"),
+            ChamferDepth = 0f,
+            AabbMin = bounds * -0.5f,
+            AabbMax = bounds * 0.5f,
+            Mesh = cpu.FabricMesh,
+            HasNativeMegastationFabric = true,
+            IsHullLessPresentationLayer = true,
+            NativeFabricDebugLines = debugLines,
+            DecorationMaterialRanges = cpu.FabricMesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
     }
 

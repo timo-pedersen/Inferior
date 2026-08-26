@@ -78,6 +78,9 @@ public sealed class PlacedModule
     // G2 debug toggle is enabled.
     public          VertexPositionColor[]?  NativeInfrastructureDebugLines { get; init; }
     public          VertexPositionColor[]?  NativeMegaGreebleDebugLines { get; init; }
+    public          bool                    HasNativeMegastationFabric { get; init; }
+    // Debug-only combined candidate/accepted footprint lines for the Fabric layer.
+    public          VertexPositionColor[]?  NativeFabricDebugLines { get; init; }
     // Brief U1: only ever set for MeshFactory modules (a box module's hull is built
     // procedurally by StationGenerator.PrepareBoxHullMesh from Definition/ChamferDepth
     // alone, so it never needs storing here). Load-bearing hull geometry
@@ -86,9 +89,13 @@ public sealed class PlacedModule
     // lives in Mesh, same as a box module's.
     public          StationModuleMesh?      HullMesh        { get; set; }
     public          StationModuleMesh?      GlassMesh       { get; set; }
+    // Borrowed system materials are resolved by family at draw time. These ranges refer
+    // to the grouped visible index buffer and never transfer Texture2D ownership into a
+    // station package.
+    public          IReadOnlyList<Megastations.SystemMaterialDrawRange> HullMaterialRanges { get; set; } = [];
+    public          IReadOnlyList<Megastations.SystemMaterialDrawRange> DecorationMaterialRanges { get; set; } = [];
     public          Texture2D?             TextureInstance  { get; set; }
-    // Brief S2c-1: parallel material map (RGBA — R height, reserved for S2c-2, neutral
-    // for now; G gloss, this brief; B/A reserved, 0) for the SAME variant as
+    // Parallel material map (RGBA: R height, G gloss, B/A reserved) for the SAME variant as
     // TextureInstance. Assigned once per module in StationGenerator.AssignTextures and
     // never touched again — unlike TextureInstance, the core module's name-overlay swap
     // only replaces the albedo, so this must not be re-derived from TextureInstance.

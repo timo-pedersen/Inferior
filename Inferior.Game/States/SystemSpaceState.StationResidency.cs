@@ -84,6 +84,8 @@ public sealed partial class SystemSpaceState
             MegastationAttachmentDiagnostics? megastationAttachmentDiagnostics,
             MegastationInfrastructureDiagnostics? megastationInfrastructureDiagnostics,
             MegastationMegaGreebleDiagnostics? megastationMegaGreebleDiagnostics,
+            MegastationFabricDiagnostics? megastationFabricDiagnostics,
+            MegastationSystemMaterialDiagnostics? megastationSystemMaterialDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -101,6 +103,8 @@ public sealed partial class SystemSpaceState
             MegastationAttachmentDiagnostics = megastationAttachmentDiagnostics;
             MegastationInfrastructureDiagnostics = megastationInfrastructureDiagnostics;
             MegastationMegaGreebleDiagnostics = megastationMegaGreebleDiagnostics;
+            MegastationFabricDiagnostics = megastationFabricDiagnostics;
+            MegastationSystemMaterialDiagnostics = megastationSystemMaterialDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -119,6 +123,8 @@ public sealed partial class SystemSpaceState
         public MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics { get; }
         public MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics { get; }
         public MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics { get; }
+        public MegastationFabricDiagnostics? MegastationFabricDiagnostics { get; }
+        public MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -131,6 +137,8 @@ public sealed partial class SystemSpaceState
         public double InfrastructureShadowUploadMilliseconds { get; private set; }
         public double MegaGreebleVisibleUploadMilliseconds { get; private set; }
         public double MegaGreebleShadowUploadMilliseconds { get; private set; }
+        public double FabricVisibleUploadMilliseconds { get; private set; }
+        public double FabricShadowUploadMilliseconds { get; private set; }
         public Vector3 BoundsMin { get; }
         public Vector3 BoundsMax { get; }
         public double EnvelopeRadiusMeters { get; }
@@ -229,6 +237,8 @@ public sealed partial class SystemSpaceState
                 module.Mesh = null;
                 module.HullMesh = null;
                 module.GlassMesh = null;
+                module.HullMaterialRanges = [];
+                module.DecorationMaterialRanges = [];
                 module.TextureInstance = null;
                 module.MaterialInstance = null;
                 module.OpenPorts.Clear();
@@ -298,6 +308,10 @@ public sealed partial class SystemSpaceState
                 MegaGreebleVisibleUploadMilliseconds += elapsedMilliseconds;
             else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleShadow)
                 MegaGreebleShadowUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationFabricVisible)
+                FabricVisibleUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationFabricShadow)
+                FabricShadowUploadMilliseconds += elapsedMilliseconds;
         }
 
         public void RemoveAndDisposeTexture(Texture2D texture)
@@ -568,11 +582,13 @@ public sealed partial class SystemSpaceState
         _stationPreparationIdentity = descriptor.Identity;
         _stationPreparationSequence = action.RequestSequence;
         HashSet<DecorClass> enabledShadowCasters = ClassesForStage(_casterStage).ToHashSet();
+        SystemMaterialAssignmentContext? systemMaterials = SystemMaterials?.AssignmentContext;
         _stationPreparationTask = StationPreparationTask<PreparedStationVisualCpuResult>.Start(
             workerToken => PrepareStationVisualCpu(
                 descriptor,
                 enabledShadowCasters,
-                workerToken),
+                workerToken,
+                systemMaterials),
             token);
         LogStationResidencyChange(action, null, stale: false);
     }
@@ -580,13 +596,15 @@ public sealed partial class SystemSpaceState
     private static PreparedStationVisualCpuResult PrepareStationVisualCpu(
         StationVisualDescriptor descriptor,
         IReadOnlySet<DecorClass> enabledShadowCasters,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        SystemMaterialAssignmentContext? systemMaterials)
     {
         StationGenerationCpuResult generation = StationGenerator.PrepareCpu(
             descriptor.Station,
             descriptor.UseMegastationPrototype,
             cancellationToken,
-            enabledShadowCasters);
+            enabledShadowCasters,
+            systemMaterials);
         cancellationToken.ThrowIfCancellationRequested();
         ComputeStationBounds(
             generation.Modules,
@@ -694,6 +712,8 @@ public sealed partial class SystemSpaceState
             generation.MegastationAttachmentDiagnostics,
             generation.MegastationInfrastructureDiagnostics,
             generation.MegastationMegaGreebleDiagnostics,
+            generation.MegastationFabricDiagnostics,
+            generation.MegastationSystemMaterialDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -980,6 +1000,19 @@ public sealed partial class SystemSpaceState
                     package.UploadedResourceGpuBytes,
                     shadow);
             }
+            if (package.MegastationFabricDiagnostics is { } fabric)
+            {
+                StationShadowGpuParticipation shadow = GetNativeMegastationShadowParticipation(
+                    package, module => module.HasNativeMegastationFabric);
+                PublishMegastationFabricDiagnostics(package.Descriptor.Identity, fabric,
+                    package.FabricVisibleUploadMilliseconds, package.FabricShadowUploadMilliseconds,
+                    package.OwnedTextureCount, package.OwnedGpuBufferCount,
+                    package.UploadedResourceGpuBytes, shadow);
+            }
+            if (package.MegastationSystemMaterialDiagnostics is { } materials)
+                PublishMegastationStationMaterialDiagnostics(
+                    package.Descriptor.Identity,
+                    materials);
             if (package.MegastationInfrastructureDiagnostics is { } g2Shadow
                 && package.MegastationMegaGreebleDiagnostics is { } megaShadow)
             {
@@ -1244,6 +1277,8 @@ public sealed partial class SystemSpaceState
             module.Mesh = null;
             module.HullMesh = null;
             module.GlassMesh = null;
+            module.HullMaterialRanges = [];
+            module.DecorationMaterialRanges = [];
             module.TextureInstance = null;
             module.MaterialInstance = null;
             module.OpenPorts.Clear();

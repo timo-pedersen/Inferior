@@ -391,6 +391,7 @@ public sealed partial class SystemSpaceState : GameState
         // Keep only lightweight station descriptors at entry. Detailed procedural
         // geometry and texture pixels are prepared after the residency state requests one.
         ResetStationVisualResidency("state re-entry");
+        InitializeSystemMaterialLibrary();
         BuildStationVisualCatalog();
         if (explicitStationVisualIdentity != null)
             RequestExplicitStationVisual(
@@ -483,6 +484,7 @@ public sealed partial class SystemSpaceState : GameState
 
         _effect?.Dispose();
         ResetStationVisualResidency("state exit");
+        _systemMaterialLibrarySlot.Clear();
         foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
         _containers.Clear();
         _calibrationCubeVb?.Dispose();
@@ -754,7 +756,7 @@ public sealed partial class SystemSpaceState : GameState
             _megastationInfrastructureDebug = !_megastationInfrastructureDebug;
             _hudAlert.AddMessage(new SystemMessage(
                 _megastationInfrastructureDebug
-                    ? "Megastation detail debug enabled: G2 magenta/cyan/green/orange; mega-greeble yellow surface solar, cyan radial solar, magenta dishes."
+                    ? "Megastation detail debug enabled: G2 and mega-greeble markers; Fabric accepted archetypes in bright colours, rejected candidate footprints dark grey."
                     : "Megastation detail debug disabled.",
                 SystemMessagePriority.Info));
         }
