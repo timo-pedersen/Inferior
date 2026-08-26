@@ -433,6 +433,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `MegastationPrototypeGenerator.cs` — CPU/GPU entry point for megastation generation, diagnostics, and single-module station-model wrapping.
 - `MegastationPrototypeMeshBuilder.cs` — consumes regularised occupancy boundary topology, validates sharp/final meshes, and emits the current render mesh with debug colour modes.
 - `MegastationPrototypeSettings.cs` — generation settings, development-selection source, and generator/seed compatibility version declarations.
+- `MegastationServiceChannels.cs` — SC2/SC2a deterministic planar network planner (primary trunks, light/channel-rich secondary composition, turns, covered utility-junction variants, dead ends and bridges), full-footprint support/reservation rejection, false-trench and node visible/caster emission, M1 material grouping, diagnostics, and Debug route/node lines.
 - `MegastationSeed.cs` — stable semantic FNV-style seed derivation for megastation subsystems.
 - `RegionPlans.cs` — stable region identities and edge/corner plan records.
 - `SliceGrid.cs` — deterministic non-uniform rectilinear grid, core ranges, exterior layers, and cell coordinate helpers.

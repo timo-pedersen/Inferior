@@ -95,6 +95,8 @@ public enum StationVisualUploadDiagnosticPurpose
     MegastationMegaGreebleShadow,
     MegastationFabricVisible,
     MegastationFabricShadow,
+    MegastationServiceChannelVisible,
+    MegastationServiceChannelShadow,
 }
 
 public sealed record StationVisualUploadPlanItem(

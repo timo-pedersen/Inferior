@@ -107,6 +107,8 @@ public sealed record MegastationPrototypeCpuResult(
     StationModuleMesh MegaGreebleMesh,
     MegastationFabricPlan FabricPlan,
     StationModuleMesh FabricMesh,
+    MegastationServiceChannelPlan ServiceChannelPlan,
+    StationModuleMesh ServiceChannelMesh,
     MegastationSystemMaterialAssignment? MaterialAssignment,
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
@@ -247,6 +249,16 @@ public static class MegastationPrototypeGenerator
         MegastationFabricMeshBuildResult fabricMesh =
             MegastationFabricMeshBuilder.Build(fabricPlan, materialAssignment, cancellationToken);
         fabricPlan = fabricPlan with { Diagnostics = fabricMesh.Diagnostics };
+        MegastationServiceChannelPlan serviceChannelPlan =
+            MegastationServiceChannelPlanner.Plan(planarRegions, attachmentPlan, windowPlan,
+                lightPlan, infrastructurePlan, megaGreeblePlan, fabricPlan, cancellationToken);
+        MegastationServiceChannelMeshBuildResult serviceChannelMesh =
+            MegastationServiceChannelMeshBuilder.Build(
+                serviceChannelPlan, materialAssignment, cancellationToken);
+        serviceChannelPlan = serviceChannelPlan with
+        {
+            Diagnostics = serviceChannelMesh.Diagnostics,
+        };
         var mesh = new StationModuleMesh();
         var meshStats = MegastationPrototypeMeshBuilder.Build(
             regularised.Occupancy,
@@ -358,6 +370,8 @@ public static class MegastationPrototypeGenerator
             megaGreebleMesh.Mesh,
             fabricPlan,
             fabricMesh.Mesh,
+            serviceChannelPlan,
+            serviceChannelMesh.Mesh,
             materialAssignment,
             meshStats,
             diag);
@@ -472,6 +486,44 @@ public static class MegastationPrototypeGenerator
             IsHullLessPresentationLayer = true,
             NativeFabricDebugLines = debugLines,
             DecorationMaterialRanges = cpu.FabricMesh.PrepareMaterialGroups()?.Ranges ?? [],
+        };
+    }
+
+    public static PlacedModule? CreateServiceChannelModule(MegastationPrototypeCpuResult cpu)
+    {
+        if (cpu.ServiceChannelMesh.IsEmpty)
+            return null;
+        Vector3 bounds = new(cpu.Grid.Dimension(GridAxis.X), cpu.Grid.Dimension(GridAxis.Y),
+            cpu.Grid.Dimension(GridAxis.Z));
+        var definition = new StationModuleDefinition
+        {
+            Id = "megastation-service-channels-sc2",
+            Category = "megastation-service-channels",
+            BoundingBox = bounds,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+#if DEBUG
+        VertexPositionColor[]? debugLines =
+            MegastationServiceChannelDebug.BuildLines(cpu.ServiceChannelPlan);
+#else
+        VertexPositionColor[]? debugLines = null;
+#endif
+        return new PlacedModule
+        {
+            Definition = definition,
+            Transform = Matrix.Identity,
+            Seed = MegastationSeed.Derive(cpu.Diagnostics.RootSeed, "service-channels:sc2"),
+            ChamferDepth = 0f,
+            AabbMin = bounds * -.5f,
+            AabbMax = bounds * .5f,
+            Mesh = cpu.ServiceChannelMesh,
+            HasNativeMegastationServiceChannels = true,
+            IsHullLessPresentationLayer = true,
+            NativeServiceChannelDebugLines = debugLines,
+            DecorationMaterialRanges =
+                cpu.ServiceChannelMesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
     }
 

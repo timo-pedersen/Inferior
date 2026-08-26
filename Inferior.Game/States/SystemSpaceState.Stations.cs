@@ -300,6 +300,39 @@ public sealed partial class SystemSpaceState
             SystemMessagePriority.NB);
     }
 
+    private static void PublishMegastationServiceChannelDiagnostics(
+        string stationIdentity, MegastationServiceChannelDiagnostics d,
+        double visibleUploadMilliseconds, double shadowUploadMilliseconds,
+        int ownedTextures, int gpuBuffers, long uploadedResourceGpuBytes,
+        StationShadowGpuParticipation shadow)
+    {
+        string roles = string.Join(',', d.ByRole.Select(pair => $"{pair.Key}:{pair.Value}"));
+        PublishStationResidencyMessage(
+            $"[MegastationServiceChannels] station={stationIdentity}; area={d.EligibleArea:F0}; " +
+            $"regions={d.EligibleRegionCount}; candidates={d.CandidateSurfaceCount}; networks={d.NetworkSurfaceCount}; " +
+            $"primary={d.PrimaryTrunkCount}; secondary={d.SecondaryBranchCount}; segments={d.RunSegmentCount}; " +
+            $"nodes=turn:{d.TurnCount},t:{d.TJunctionCount},four:{d.FourWayJunctionCount},dead:{d.DeadEndCount}; " +
+            $"coveredNodes=t:{d.CoveredTJunctionCount},minorT:{d.UncoveredTJunctionCount},four:{d.CoveredFourWayJunctionCount}; " +
+            $"length={d.TotalChannelLength:F0}m; primaryLength={d.MinimumPrimaryLength:F1}/{d.MedianPrimaryLength:F1}/{d.MaximumPrimaryLength:F1}m; " +
+            $"bridges={d.BridgeCount}; roles={roles}; " +
+            $"rejects=mask:{d.ExactMaskRejectCount},g1:{d.G1RejectCount},windows:{d.WindowRejectCount}," +
+            $"lights:{d.LightRejectCount},g2:{d.G2RejectCount},mega:{d.MegaGreebleRejectCount}," +
+            $"fabric:{d.FabricRejectCount},density:{d.DensityRejectCount},cap:{d.CapRejectCount}; " +
+            $"visible={d.VisibleVertexCount}v/{d.VisibleTriangleCount}t/{d.VisibleMeshBytes}B; " +
+            $"shadow={d.ShadowVertexCount}v/{d.ShadowTriangleCount}t/{d.ShadowMeshBytes}B; " +
+            $"coveredNodeGeometry={d.CoveredNodeVisibleVertexCount}v/{d.CoveredNodeVisibleTriangleCount}t," +
+            $"caster:{d.CoveredNodeShadowVertexCount}v/{d.CoveredNodeShadowTriangleCount}t; " +
+            $"materials={d.MaterialRangeCount}; timing=plan:{d.PlanningMilliseconds}ms," +
+            $"mesh:{d.MeshBuildMilliseconds}ms,visibleUpload:{visibleUploadMilliseconds:F1}ms," +
+            $"shadowUpload:{shadowUploadMilliseconds:F1}ms; " +
+            $"gpuShadow=uploaded:{shadow.GpuCasterUploaded},traversed:{shadow.ModuleInShadowTraversal}," +
+            $"fitBounds:{shadow.FitBoundsUploaded},{shadow.GpuCasterVertices}v/{shadow.GpuCasterTriangles}t; " +
+            $"ownedTextureDelta={d.OwnedTextureDelta}; gpuBufferDelta={d.GpuBufferDelta}; " +
+            $"packageOwnedTextures={ownedTextures}; packageGpuBuffers={gpuBuffers}; " +
+            $"uploadedResourceGpuBytes={uploadedResourceGpuBytes}; signature={d.PlanSignature}",
+            SystemMessagePriority.NB);
+    }
+
     // ── 3D drawing ────────────────────────────────────────────────────────────
 
     // ── Station drawing ───────────────────────────────────────────────────────
@@ -700,7 +733,8 @@ public sealed partial class SystemSpaceState
         => level == DetailLevel.Full
             || (level == DetailLevel.Medium && (module.HasNativeMegastationInfrastructure
                 || module.HasNativeMegastationMegaGreeble
-                || module.HasNativeMegastationFabric));
+                || module.HasNativeMegastationFabric
+                || module.HasNativeMegastationServiceChannels));
 
     private void DrawMegastationInfrastructureDebugLines()
     {
@@ -722,7 +756,8 @@ public sealed partial class SystemSpaceState
             {
                 VertexPositionColor[]? lines = module.NativeInfrastructureDebugLines
                     ?? module.NativeMegaGreebleDebugLines
-                    ?? module.NativeFabricDebugLines;
+                    ?? module.NativeFabricDebugLines
+                    ?? module.NativeServiceChannelDebugLines;
                 if (lines is not { Length: > 1 })
                     continue;
                 foreach (EffectPass pass in _effect.CurrentTechnique.Passes)

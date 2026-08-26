@@ -85,6 +85,7 @@ public sealed partial class SystemSpaceState
             MegastationInfrastructureDiagnostics? megastationInfrastructureDiagnostics,
             MegastationMegaGreebleDiagnostics? megastationMegaGreebleDiagnostics,
             MegastationFabricDiagnostics? megastationFabricDiagnostics,
+            MegastationServiceChannelDiagnostics? megastationServiceChannelDiagnostics,
             MegastationSystemMaterialDiagnostics? megastationSystemMaterialDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
@@ -104,6 +105,7 @@ public sealed partial class SystemSpaceState
             MegastationInfrastructureDiagnostics = megastationInfrastructureDiagnostics;
             MegastationMegaGreebleDiagnostics = megastationMegaGreebleDiagnostics;
             MegastationFabricDiagnostics = megastationFabricDiagnostics;
+            MegastationServiceChannelDiagnostics = megastationServiceChannelDiagnostics;
             MegastationSystemMaterialDiagnostics = megastationSystemMaterialDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
@@ -124,6 +126,7 @@ public sealed partial class SystemSpaceState
         public MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics { get; }
         public MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics { get; }
         public MegastationFabricDiagnostics? MegastationFabricDiagnostics { get; }
+        public MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics { get; }
         public MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
@@ -139,6 +142,8 @@ public sealed partial class SystemSpaceState
         public double MegaGreebleShadowUploadMilliseconds { get; private set; }
         public double FabricVisibleUploadMilliseconds { get; private set; }
         public double FabricShadowUploadMilliseconds { get; private set; }
+        public double ServiceChannelVisibleUploadMilliseconds { get; private set; }
+        public double ServiceChannelShadowUploadMilliseconds { get; private set; }
         public Vector3 BoundsMin { get; }
         public Vector3 BoundsMax { get; }
         public double EnvelopeRadiusMeters { get; }
@@ -312,6 +317,10 @@ public sealed partial class SystemSpaceState
                 FabricVisibleUploadMilliseconds += elapsedMilliseconds;
             else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationFabricShadow)
                 FabricShadowUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationServiceChannelVisible)
+                ServiceChannelVisibleUploadMilliseconds += elapsedMilliseconds;
+            else if (purpose == StationVisualUploadDiagnosticPurpose.MegastationServiceChannelShadow)
+                ServiceChannelShadowUploadMilliseconds += elapsedMilliseconds;
         }
 
         public void RemoveAndDisposeTexture(Texture2D texture)
@@ -713,6 +722,7 @@ public sealed partial class SystemSpaceState
             generation.MegastationInfrastructureDiagnostics,
             generation.MegastationMegaGreebleDiagnostics,
             generation.MegastationFabricDiagnostics,
+            generation.MegastationServiceChannelDiagnostics,
             generation.MegastationSystemMaterialDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
@@ -1006,6 +1016,17 @@ public sealed partial class SystemSpaceState
                     package, module => module.HasNativeMegastationFabric);
                 PublishMegastationFabricDiagnostics(package.Descriptor.Identity, fabric,
                     package.FabricVisibleUploadMilliseconds, package.FabricShadowUploadMilliseconds,
+                    package.OwnedTextureCount, package.OwnedGpuBufferCount,
+                    package.UploadedResourceGpuBytes, shadow);
+            }
+            if (package.MegastationServiceChannelDiagnostics is { } serviceChannels)
+            {
+                StationShadowGpuParticipation shadow = GetNativeMegastationShadowParticipation(
+                    package, module => module.HasNativeMegastationServiceChannels);
+                PublishMegastationServiceChannelDiagnostics(
+                    package.Descriptor.Identity, serviceChannels,
+                    package.ServiceChannelVisibleUploadMilliseconds,
+                    package.ServiceChannelShadowUploadMilliseconds,
                     package.OwnedTextureCount, package.OwnedGpuBufferCount,
                     package.UploadedResourceGpuBytes, shadow);
             }

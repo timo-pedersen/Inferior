@@ -60,6 +60,7 @@ public sealed record StationGenerationCpuResult(
     MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics = null,
     MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics = null,
     MegastationFabricDiagnostics? MegastationFabricDiagnostics = null,
+    MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics = null,
     MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics = null);
 
 /// <summary>
@@ -128,6 +129,8 @@ public sealed class StationGenerator
             PlacedModule structure = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
             PlacedModule? megaGreeble = MegastationPrototypeGenerator.CreateMegaGreebleModule(cpu);
             PlacedModule? fabric = MegastationPrototypeGenerator.CreateFabricModule(cpu);
+            PlacedModule? serviceChannels =
+                MegastationPrototypeGenerator.CreateServiceChannelModule(cpu);
             List<PlacedModule> secondaryModules =
                 MegastationAttachmentPlanner.CreatePlacedModules(cpu.AttachmentPlan);
             StationDecorator.DecorateSecondaryModules(secondaryModules);
@@ -168,6 +171,7 @@ public sealed class StationGenerator
             List<PlacedModule> megaModules = [structure];
             if (fabric is not null) megaModules.Add(fabric);
             if (megaGreeble is not null) megaModules.Add(megaGreeble);
+            if (serviceChannels is not null) megaModules.Add(serviceChannels);
             megaModules.AddRange(secondaryModules);
             IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
                 megaModules,
@@ -197,9 +201,11 @@ public sealed class StationGenerator
                 megaCompacted.Diagnostics with
                 {
                     ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount
-                        + 2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)),
+                        + 2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
+                            + (serviceChannels is null ? 0 : 1)),
                     SharedFallbackReferenceCount =
-                        2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)),
+                        2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
+                            + (serviceChannels is null ? 0 : 1)),
                 },
                 UsesSharedMegastationFallbackTextures: true,
                 MegastationSemanticZoning: cpu.SemanticZoning,
@@ -209,6 +215,7 @@ public sealed class StationGenerator
                 MegastationInfrastructureDiagnostics: cpu.InfrastructurePlan.Diagnostics,
                 MegastationMegaGreebleDiagnostics: cpu.MegaGreeblePlan.Diagnostics,
                 MegastationFabricDiagnostics: cpu.FabricPlan.Diagnostics,
+                MegastationServiceChannelDiagnostics: cpu.ServiceChannelPlan.Diagnostics,
                 MegastationSystemMaterialDiagnostics: materialDiagnostics);
         }
 
@@ -505,7 +512,16 @@ public sealed class StationGenerator
                                     StationVisualUploadDiagnosticPurpose.MegastationFabricShadow,
                                 _ => StationVisualUploadDiagnosticPurpose.None,
                             }
-                            : StationVisualUploadDiagnosticPurpose.None);
+                            : module.HasNativeMegastationServiceChannels
+                                ? kind switch
+                                {
+                                    StationVisualUploadResourceKind.DecorationMesh =>
+                                        StationVisualUploadDiagnosticPurpose.MegastationServiceChannelVisible,
+                                    StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                                        StationVisualUploadDiagnosticPurpose.MegastationServiceChannelShadow,
+                                    _ => StationVisualUploadDiagnosticPurpose.None,
+                                }
+                                : StationVisualUploadDiagnosticPurpose.None);
 
         static StationMeshCpuData? PrepareMesh(StationModuleMesh? mesh)
         {

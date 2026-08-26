@@ -135,7 +135,7 @@ public sealed class StationTextureCompactionTests
         Assert.True(prepared.UsesSharedMegastationFallbackTextures);
         Assert.True(prepared.Modules.Count > 1);
         Assert.NotEmpty(prepared.Textures);
-        Assert.Equal(prepared.Modules.Count - 3, prepared.TextureAssignments.Count);
+        Assert.Equal(prepared.Modules.Count - 4, prepared.TextureAssignments.Count);
         Assert.Equal(prepared.Textures.Count,
             prepared.UploadPlan.Count(item => item.Texture != null));
         PlacedModule structural = prepared.Modules[0];
@@ -143,13 +143,17 @@ public sealed class StationTextureCompactionTests
             module => module.HasNativeMegastationMegaGreeble);
         PlacedModule fabric = Assert.Single(prepared.Modules,
             module => module.HasNativeMegastationFabric);
+        PlacedModule serviceChannels = Assert.Single(prepared.Modules,
+            module => module.HasNativeMegastationServiceChannels);
         Assert.DoesNotContain(prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, structural)
                 || ReferenceEquals(assignment.Module, megaGreeble)
-                || ReferenceEquals(assignment.Module, fabric));
+                || ReferenceEquals(assignment.Module, fabric)
+                || ReferenceEquals(assignment.Module, serviceChannels));
         Assert.All(prepared.Modules.Where(module => !ReferenceEquals(module, structural)
             && !ReferenceEquals(module, megaGreeble)
-            && !ReferenceEquals(module, fabric)), module => Assert.Single(
+            && !ReferenceEquals(module, fabric)
+            && !ReferenceEquals(module, serviceChannels)), module => Assert.Single(
             prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, module)));
         Assert.All(prepared.Modules, module =>
@@ -161,12 +165,12 @@ public sealed class StationTextureCompactionTests
             > prepared.TextureDiagnostics.SelectedUniqueTextureCount);
         Assert.Equal(prepared.Textures.Count,
             prepared.TextureDiagnostics.SelectedUniqueTextureCount);
-        Assert.Equal(prepared.TextureAssignments.Count * 2 + 6,
+        Assert.Equal(prepared.TextureAssignments.Count * 2 + 8,
             prepared.TextureDiagnostics.ModuleTextureBindingCount);
-        Assert.Equal(6, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        Assert.Equal(8, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
         MegastationAttachmentDiagnostics attachments = Assert.IsType<MegastationAttachmentDiagnostics>(
             prepared.MegastationAttachmentDiagnostics);
-        Assert.Equal(prepared.Modules.Count - 3, attachments.PlacedModuleCount);
+        Assert.Equal(prepared.Modules.Count - 4, attachments.PlacedModuleCount);
         MegastationWindowDiagnostics windows = Assert.IsType<MegastationWindowDiagnostics>(
             prepared.MegastationWindowDiagnostics);
         StationVisualUploadPlanItem glass = Assert.Single(
@@ -213,6 +217,19 @@ public sealed class StationTextureCompactionTests
         Assert.Same(fabric, fabricShadow.Module);
         Assert.Equal(fabricDiagnostics.VisibleMeshBytes, fabricVisible.EstimatedBytes);
         Assert.Equal(fabricDiagnostics.ShadowMeshBytes, fabricShadow.EstimatedBytes);
+        MegastationServiceChannelDiagnostics serviceDiagnostics =
+            Assert.IsType<MegastationServiceChannelDiagnostics>(
+                prepared.MegastationServiceChannelDiagnostics);
+        StationVisualUploadPlanItem serviceVisible = Assert.Single(prepared.UploadPlan,
+            item => item.DiagnosticPurpose ==
+                StationVisualUploadDiagnosticPurpose.MegastationServiceChannelVisible);
+        StationVisualUploadPlanItem serviceShadow = Assert.Single(prepared.UploadPlan,
+            item => item.DiagnosticPurpose ==
+                StationVisualUploadDiagnosticPurpose.MegastationServiceChannelShadow);
+        Assert.Same(serviceChannels, serviceVisible.Module);
+        Assert.Same(serviceChannels, serviceShadow.Module);
+        Assert.Equal(serviceDiagnostics.VisibleMeshBytes, serviceVisible.EstimatedBytes);
+        Assert.Equal(serviceDiagnostics.ShadowMeshBytes, serviceShadow.EstimatedBytes);
         Assert.True(prepared.UploadPlan.Sum(item => item.EstimatedBytes)
             > 3_965_952 + windows.MeshBytes);
         Console.WriteLine(

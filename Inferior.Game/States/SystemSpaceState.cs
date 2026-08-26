@@ -756,7 +756,7 @@ public sealed partial class SystemSpaceState : GameState
             _megastationInfrastructureDebug = !_megastationInfrastructureDebug;
             _hudAlert.AddMessage(new SystemMessage(
                 _megastationInfrastructureDebug
-                    ? "Megastation detail debug enabled: G2 and mega-greeble markers; Fabric accepted archetypes in bright colours, rejected candidate footprints dark grey."
+                    ? "Megastation detail debug enabled: G2 and mega-greeble markers; Fabric archetypes; service-channel primary/secondary routes and junction nodes."
                     : "Megastation detail debug disabled.",
                 SystemMessagePriority.Info));
         }

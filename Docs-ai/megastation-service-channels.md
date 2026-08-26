@@ -2,9 +2,26 @@
 
 ## Status
 
-Future megastation visual-development concept.
+SC1's false-trench visual language, winding, full-length cable bundles, materials, and selective
+shadows are visually accepted. SC2 planar service-channel networks are visually promising. SC2a
+junction-node presentation and channel-rich surface density are implemented in the current
+uncommitted working tree and await Timo's in-engine visual acceptance.
 
-Deferred until the current G2a native-infrastructure pass is corrected, visually accepted, and committed.
+Current SC2 uses the canonical planar-region substrate after accepted Fabric planning. Each
+selected surface receives one deterministic rectilinear network with a long primary trunk,
+secondary branches, occasional turns and T/four-way junctions, intentional dead-end treatments,
+and sparse service bridges. Planning rejects existing G1/G2/mega-greeble/Fabric/window/light
+content. Geometry remains one material-grouped visible mesh plus one selective caster mesh,
+borrows M1 materials, and owns zero textures. It does not modify structural occupancy, topology,
+collision, or any accepted upstream plan.
+
+SC2a classifies selected networks as light or channel-rich without changing semantic surface-role
+weighting. Channel-rich networks retain the SC2 primary trunk and add deterministic secondary
+route opportunities. Most supported T junctions receive one of three substantial covered utility
+node variants; four-way junctions use the same grammar. The planned node record owns authoritative
+orientation and dimensions, and full housing footprints reject exact-mask/upstream/node collisions.
+Covered machinery hides the internal cable split, remains in the combined material mesh, and adds
+only major masses to the existing selective caster. Bridges reject covered-node footprints.
 
 This concept is intentionally separate from structural megastation topology.
 
@@ -58,9 +75,10 @@ Typical conceptual dimensions:
 
 Exact dimensions require visual tuning.
 
-## Local, not global, routing
+## Local planar networks, not global routing
 
-Service channels do not need to form a station-wide network.
+Service channels form coherent networks only within one canonical planar region. They do not form
+a station-wide graph, cross region boundaries, wrap corners, or use general pathfinding.
 
 They may:
 

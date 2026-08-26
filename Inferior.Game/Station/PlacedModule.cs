@@ -81,6 +81,9 @@ public sealed class PlacedModule
     public          bool                    HasNativeMegastationFabric { get; init; }
     // Debug-only combined candidate/accepted footprint lines for the Fabric layer.
     public          VertexPositionColor[]?  NativeFabricDebugLines { get; init; }
+    public          bool                    HasNativeMegastationServiceChannels { get; init; }
+    // Debug-only SC1 footprint and local-axis lines. Absent from Release builds.
+    public          VertexPositionColor[]?  NativeServiceChannelDebugLines { get; init; }
     // Brief U1: only ever set for MeshFactory modules (a box module's hull is built
     // procedurally by StationGenerator.PrepareBoxHullMesh from Definition/ChamferDepth
     // alone, so it never needs storing here). Load-bearing hull geometry
