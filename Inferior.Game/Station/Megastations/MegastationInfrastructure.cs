@@ -73,7 +73,9 @@ public sealed record MegastationInfrastructureCluster(
     float MaxV,
     Vector3 AabbMin,
     Vector3 AabbMax,
-    IReadOnlyList<MegastationInfrastructureInstance> Instances);
+    IReadOnlyList<MegastationInfrastructureInstance> Instances,
+    MegastationChannelAssociationKind ChannelAssociation = MegastationChannelAssociationKind.Independent,
+    string? ChannelFeatureIdentity = null);
 
 public sealed record MegastationInfrastructureRoleDiagnostics(
     int ClusterCount,
@@ -109,7 +111,12 @@ public sealed record MegastationInfrastructureDiagnostics(
     long ShadowMeshBytes,
     long MeshBuildMilliseconds,
     IReadOnlyList<MegastationShadowFamilyDiagnostics> ShadowByFamily,
-    IReadOnlyDictionary<MegastationZoneRole, MegastationInfrastructureRoleDiagnostics> ByRole);
+    IReadOnlyDictionary<MegastationZoneRole, MegastationInfrastructureRoleDiagnostics> ByRole,
+    int IndependentPlacementCount = 0,
+    int ChannelEdgePlacementCount = 0,
+    int ChannelNodePlacementCount = 0,
+    int ChannelEndpointPlacementCount = 0,
+    int RejectedChannelAwareAttemptCount = 0);
 
 public sealed record MegastationInfrastructurePlan(
     IReadOnlyList<MegastationInfrastructureSurface> Surfaces,
@@ -183,7 +190,10 @@ public static class MegastationInfrastructurePlanner
         MegastationInfrastructureArchetype Archetype,
         Vector3 SurfacePosition,
         Vector3 AabbMin,
-        Vector3 AabbMax);
+        Vector3 AabbMax,
+        bool AlongU,
+        MegastationChannelAssociationKind ChannelAssociation,
+        string? ChannelFeatureIdentity);
 
     public static MegastationInfrastructurePlan Plan(
         IReadOnlyList<MegastationPlanarRegion> planarRegions,
@@ -197,6 +207,20 @@ public static class MegastationInfrastructurePlanner
             windowPlan,
             lightPlan,
             MegastationInfrastructureTuning.Default,
+            null,
+            null,
+            cancellationToken);
+
+    public static MegastationInfrastructurePlan Plan(
+        IReadOnlyList<MegastationPlanarRegion> planarRegions,
+        MegastationAttachmentPlan attachmentPlan,
+        MegastationWindowPlan windowPlan,
+        MegastationLightPlan lightPlan,
+        MegastationServiceChannelPlan serviceChannels,
+        MegastationMegaGreeblePlan megaGreeble,
+        CancellationToken cancellationToken = default)
+        => Plan(planarRegions, attachmentPlan, windowPlan, lightPlan,
+            MegastationInfrastructureTuning.Default, serviceChannels, megaGreeble,
             cancellationToken);
 
     internal static MegastationInfrastructurePlan Plan(
@@ -205,6 +229,8 @@ public static class MegastationInfrastructurePlanner
         MegastationWindowPlan windowPlan,
         MegastationLightPlan lightPlan,
         MegastationInfrastructureTuning tuning,
+        MegastationServiceChannelPlan? serviceChannels = null,
+        MegastationMegaGreeblePlan? megaGreeble = null,
         CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -219,6 +245,7 @@ public static class MegastationInfrastructurePlanner
         int exactMaskRejects = 0;
         int topologyRejects = 0;
         int densityRejects = 0;
+        int rejectedChannelAwareAttempts = 0;
 
         foreach (MegastationInfrastructureSurface infrastructureSurface in surfaces)
         {
@@ -251,18 +278,61 @@ public static class MegastationInfrastructurePlanner
                     region.ZoneRole,
                     MegastationSeed.Derive(cellSeed, "archetype"));
                 (float width, float height, float outwardDepth) = ClusterEnvelope(archetype);
-                float minU = u - width * 0.5f;
-                float maxU = u + width * 0.5f;
-                float minV = v - height * 0.5f;
-                float maxV = v + height * 0.5f;
-                if (!MegastationPlanarRegionExtractor.ContainsFootprint(
-                        region, minU, maxU, minV, maxV, tuning.FootprintMarginMetres))
+                bool alongU = true;
+                MegastationChannelAssociationKind association =
+                    MegastationChannelAssociationKind.Independent;
+                string? channelFeatureIdentity = null;
+                float originalU = u, originalV = v;
+                if (serviceChannels is not null
+                    && MegastationChannelComposition.TryPlace(
+                        region, serviceChannels, cellSeed, u, v, width, height,
+                        ChannelAllocation(region.ZoneRole), false, out var channelPlacement))
                 {
-                    exactMaskRejects++;
-                    continue;
+                    u = channelPlacement.U;
+                    v = channelPlacement.V;
+                    alongU = channelPlacement.AlongU;
+                    association = channelPlacement.Kind;
+                    channelFeatureIdentity = channelPlacement.FeatureIdentity;
+                }
+                float spanU = alongU ? width : height;
+                float spanV = alongU ? height : width;
+                float minU = u - spanU * 0.5f;
+                float maxU = u + spanU * 0.5f;
+                float minV = v - spanV * 0.5f;
+                float maxV = v + spanV * 0.5f;
+                if (!MegastationPlanarRegionExtractor.ContainsFootprint(
+                        region, minU, maxU, minV, maxV, tuning.FootprintMarginMetres)
+                    || (serviceChannels is not null
+                        && MegastationChannelComposition.OverlapsReserved(
+                            region, serviceChannels, minU, maxU, minV, maxV, 3.6f)))
+                {
+                    if (association != MegastationChannelAssociationKind.Independent)
+                    {
+                        rejectedChannelAwareAttempts++;
+                        association = MegastationChannelAssociationKind.Independent;
+                        channelFeatureIdentity = null;
+                        alongU = true;
+                        u = originalU;
+                        v = originalV;
+                        spanU = width;
+                        spanV = height;
+                        minU = u - width * .5f;
+                        maxU = u + width * .5f;
+                        minV = v - height * .5f;
+                        maxV = v + height * .5f;
+                    }
+                    if (!MegastationPlanarRegionExtractor.ContainsFootprint(
+                            region, minU, maxU, minV, maxV, tuning.FootprintMarginMetres)
+                        || (serviceChannels is not null
+                            && MegastationChannelComposition.OverlapsReserved(
+                                region, serviceChannels, minU, maxU, minV, maxV, 3.6f)))
+                    {
+                        exactMaskRejects++;
+                        continue;
+                    }
                 }
                 float density = tuning.RoleDensity.GetValueOrDefault(region.ZoneRole);
-                float g1Affinity = NearG1(region, u, v, attachmentPlan) ? 0.14f : 0f;
+                float g1Affinity = NearG1(region, originalU, originalV, attachmentPlan) ? 0.14f : 0f;
                 float threshold = Math.Clamp(
                     density * infrastructureSurface.TopologySuitability + g1Affinity, 0f, 0.90f);
                 if (Sample(cellSeed, "selected") >= threshold)
@@ -278,8 +348,8 @@ public static class MegastationInfrastructurePlanner
                     region.OutwardNormal,
                     region.TangentU,
                     region.TangentV,
-                    width,
-                    height,
+                    spanU,
+                    spanV,
                     outwardDepth);
                 string identity = $"{region.StableId}/{AlgorithmKey}/cell:{cellU}:{cellV}/cluster:0";
                 candidates.Add(new(
@@ -299,7 +369,10 @@ public static class MegastationInfrastructurePlanner
                     archetype,
                     surfacePosition,
                     aabbMin,
-                    aabbMax));
+                    aabbMax,
+                    alongU,
+                    association,
+                    channelFeatureIdentity));
             }
         }
 
@@ -314,7 +387,9 @@ public static class MegastationInfrastructurePlanner
         int zoneCapRejects = 0;
 
         foreach (Candidate candidate in candidates
-                     .OrderByDescending(candidate => candidate.Priority)
+                     .OrderBy(candidate => candidate.ChannelAssociation ==
+                         MegastationChannelAssociationKind.Independent ? 1 : 0)
+                     .ThenByDescending(candidate => candidate.Priority)
                      .ThenBy(candidate => candidate.Identity, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -346,6 +421,11 @@ public static class MegastationInfrastructurePlanner
                 lightRejects++;
                 continue;
             }
+            if (megaGreeble is not null && OverlapsMegaGreeble(candidate, megaGreeble))
+            {
+                spacingRejects++;
+                continue;
+            }
             if (accepted.Any(cluster => Collides(candidate, cluster,
                     SeparationForRole(tuning.MinimumClusterSeparationMetres, candidate.Region.ZoneRole))))
             {
@@ -364,15 +444,17 @@ public static class MegastationInfrastructurePlanner
                 candidate.Archetype,
                 candidate.SurfacePosition,
                 candidate.Region.OutwardNormal,
-                candidate.Region.TangentU,
-                candidate.Region.TangentV,
+                candidate.AlongU ? candidate.Region.TangentU : candidate.Region.TangentV,
+                candidate.AlongU ? candidate.Region.TangentV : -candidate.Region.TangentU,
                 candidate.MinU,
                 candidate.MaxU,
                 candidate.MinV,
                 candidate.MaxV,
                 candidate.AabbMin,
                 candidate.AabbMax,
-                instances));
+                instances,
+                candidate.ChannelAssociation,
+                candidate.ChannelFeatureIdentity));
             zoneCounts[candidate.Region.ZoneId] = zoneCount + 1;
             roleCounts[candidate.Region.ZoneRole] = roleCount + 1;
         }
@@ -418,7 +500,20 @@ public static class MegastationInfrastructurePlanner
             zoneCapRejects,
             stopwatch.ElapsedMilliseconds,
             0, 0, 0, 0, 0, 0, 0, [],
-            byRole);
+            byRole,
+            orderedClusters.Count(cluster => cluster.ChannelAssociation ==
+                MegastationChannelAssociationKind.Independent),
+            orderedClusters.Count(cluster => cluster.ChannelAssociation ==
+                MegastationChannelAssociationKind.ChannelEdge),
+            orderedClusters.Count(cluster => cluster.ChannelAssociation ==
+                MegastationChannelAssociationKind.ChannelNode),
+            orderedClusters.Count(cluster => cluster.ChannelAssociation ==
+                MegastationChannelAssociationKind.ChannelEndpoint),
+            rejectedChannelAwareAttempts
+                + candidates.Count(candidate => candidate.ChannelAssociation !=
+                    MegastationChannelAssociationKind.Independent)
+                - orderedClusters.Count(cluster => cluster.ChannelAssociation !=
+                    MegastationChannelAssociationKind.Independent));
         return new(surfaces, orderedClusters, orderedInstances, diagnostics);
     }
 
@@ -489,6 +584,10 @@ public static class MegastationInfrastructurePlanner
     {
         var result = new List<MegastationInfrastructureInstance>();
         (Color primary, Color secondary) = Palette(candidate.Seed);
+        Vector3 tangentU = candidate.AlongU
+            ? candidate.Region.TangentU : candidate.Region.TangentV;
+        Vector3 tangentV = candidate.AlongU
+            ? candidate.Region.TangentV : -candidate.Region.TangentU;
         int primitive = 0;
 
         void Add(
@@ -505,8 +604,8 @@ public static class MegastationInfrastructurePlanner
             int seed = MegastationSeed.Derive(candidate.Seed, identity);
             float scale = 0.88f + Sample(seed, "scale") * 0.24f;
             Vector3 position = candidate.SurfacePosition
-                + candidate.Region.TangentU * offsetU
-                + candidate.Region.TangentV * offsetV;
+                + tangentU * offsetU
+                + tangentV * offsetV;
             result.Add(new(
                 identity,
                 candidate.Identity,
@@ -514,8 +613,8 @@ public static class MegastationInfrastructurePlanner
                 variant,
                 position,
                 candidate.Region.OutwardNormal,
-                candidate.Region.TangentU,
-                candidate.Region.TangentV,
+                tangentU,
+                tangentV,
                 width * scale,
                 height * scale,
                 depth * scale,
@@ -644,6 +743,29 @@ public static class MegastationInfrastructurePlanner
         }
         return false;
     }
+
+    private static bool OverlapsMegaGreeble(
+        Candidate candidate,
+        MegastationMegaGreeblePlan plan)
+        => plan.Instances.Any(instance => Intersects(
+            candidate.AabbMin,
+            candidate.AabbMax,
+            WorldBounds(instance.SurfacePosition, instance.Normal, instance.TangentU,
+                instance.TangentV, instance.MaxU - instance.MinU,
+                instance.MaxV - instance.MinV, instance.Protrusion).Min,
+            WorldBounds(instance.SurfacePosition, instance.Normal, instance.TangentU,
+                instance.TangentV, instance.MaxU - instance.MinU,
+                instance.MaxV - instance.MinV, instance.Protrusion).Max));
+
+    private static float ChannelAllocation(MegastationZoneRole role) => role switch
+    {
+        MegastationZoneRole.Industrial => .68f,
+        MegastationZoneRole.Utilities => .66f,
+        MegastationZoneRole.Logistics => .56f,
+        MegastationZoneRole.Habitation => .30f,
+        MegastationZoneRole.Strategic => .28f,
+        _ => 0f,
+    };
 
     private static bool Collides(
         Candidate candidate,

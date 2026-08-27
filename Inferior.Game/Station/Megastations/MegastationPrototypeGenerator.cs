@@ -224,34 +224,71 @@ public static class MegastationPrototypeGenerator
             attachmentPlan,
             suppressedWindows,
             suppressedLights);
-        MegastationInfrastructurePlan infrastructurePlan = MegastationInfrastructurePlanner.Plan(
+        MegastationInfrastructurePlan baselineInfrastructurePlan = MegastationInfrastructurePlanner.Plan(
             planarRegions,
             attachmentPlan,
             windowPlan,
             lightPlan,
             cancellationToken);
+        MegastationMegaGreeblePlan megaGreeblePlan = MegastationMegaGreeblePlanner.Plan(
+            planarRegions, attachmentPlan, windowPlan, lightPlan, baselineInfrastructurePlan,
+            regularised.Occupancy, style,
+            cancellationToken);
+        MegastationMegaGreebleMeshBuildResult megaGreebleMesh =
+            MegastationMegaGreebleMeshBuilder.Build(megaGreeblePlan, cancellationToken);
+        megaGreeblePlan = megaGreeblePlan with { Diagnostics = megaGreebleMesh.Diagnostics };
+        MegastationFabricPlan baselineFabricPlan = MegastationFabricPlanner.Plan(
+            planarRegions, attachmentPlan, windowPlan, lightPlan, baselineInfrastructurePlan,
+            megaGreeblePlan, regularised.Occupancy, cancellationToken);
+        MegastationServiceChannelPlan serviceChannelPlan =
+            MegastationServiceChannelPlanner.Plan(planarRegions, attachmentPlan, windowPlan,
+                lightPlan, baselineInfrastructurePlan, megaGreeblePlan, baselineFabricPlan,
+                cancellationToken);
+        MegastationInfrastructurePlan infrastructurePlan = MegastationInfrastructurePlanner.Plan(
+            planarRegions, attachmentPlan, windowPlan, lightPlan, serviceChannelPlan,
+            megaGreeblePlan, cancellationToken);
         MegastationInfrastructureMeshBuildResult infrastructureMesh =
             MegastationInfrastructureMeshBuilder.Build(infrastructurePlan, cancellationToken);
         infrastructurePlan = infrastructurePlan with
         {
             Diagnostics = infrastructureMesh.Diagnostics,
         };
-        MegastationMegaGreeblePlan megaGreeblePlan = MegastationMegaGreeblePlanner.Plan(
-            planarRegions, attachmentPlan, windowPlan, lightPlan, infrastructurePlan,
-            regularised.Occupancy, style,
-            cancellationToken);
-        MegastationMegaGreebleMeshBuildResult megaGreebleMesh =
-            MegastationMegaGreebleMeshBuilder.Build(megaGreeblePlan, cancellationToken);
-        megaGreeblePlan = megaGreeblePlan with { Diagnostics = megaGreebleMesh.Diagnostics };
         MegastationFabricPlan fabricPlan = MegastationFabricPlanner.Plan(
             planarRegions, attachmentPlan, windowPlan, lightPlan, infrastructurePlan,
-            megaGreeblePlan, regularised.Occupancy, cancellationToken);
+            megaGreeblePlan, regularised.Occupancy, serviceChannelPlan, cancellationToken);
         MegastationFabricMeshBuildResult fabricMesh =
             MegastationFabricMeshBuilder.Build(fabricPlan, materialAssignment, cancellationToken);
         fabricPlan = fabricPlan with { Diagnostics = fabricMesh.Diagnostics };
-        MegastationServiceChannelPlan serviceChannelPlan =
-            MegastationServiceChannelPlanner.Plan(planarRegions, attachmentPlan, windowPlan,
-                lightPlan, infrastructurePlan, megaGreeblePlan, fabricPlan, cancellationToken);
+        HashSet<string> developedFeatures = infrastructurePlan.Clusters
+            .Where(cluster => cluster.ChannelFeatureIdentity is not null)
+            .Select(cluster => cluster.ChannelFeatureIdentity!)
+            .Concat(fabricPlan.Instances
+                .Where(instance => instance.ChannelFeatureIdentity is not null)
+                .Select(instance => instance.ChannelFeatureIdentity!))
+            .ToHashSet(StringComparer.Ordinal);
+        serviceChannelPlan = serviceChannelPlan with
+        {
+            Diagnostics = serviceChannelPlan.Diagnostics with
+            {
+                ChannelBearingSurfaceCount = serviceChannelPlan.Networks.Count,
+                RunsWithAdjacentG2Count = infrastructurePlan.Clusters
+                    .Where(cluster => cluster.ChannelAssociation ==
+                        MegastationChannelAssociationKind.ChannelEdge)
+                    .Select(cluster => cluster.ChannelFeatureIdentity)
+                    .Where(identity => identity is not null).Distinct(StringComparer.Ordinal).Count(),
+                RunsWithAdjacentFabricCount = fabricPlan.Instances
+                    .Where(instance => instance.ChannelAssociation ==
+                        MegastationChannelAssociationKind.ChannelEdge)
+                    .Select(instance => instance.ChannelFeatureIdentity)
+                    .Where(identity => identity is not null).Distinct(StringComparer.Ordinal).Count(),
+                JunctionsWithDevelopmentCount = serviceChannelPlan.Nodes.Count(node =>
+                    (node.Kind is MegastationServiceChannelNodeKind.TJunction
+                        or MegastationServiceChannelNodeKind.FourWay)
+                    && developedFeatures.Contains(node.Identity)),
+                EndpointsWithDevelopmentCount = serviceChannelPlan.Nodes.Count(node =>
+                    node.Endpoint.HasValue && developedFeatures.Contains(node.Identity)),
+            },
+        };
         MegastationServiceChannelMeshBuildResult serviceChannelMesh =
             MegastationServiceChannelMeshBuilder.Build(
                 serviceChannelPlan, materialAssignment, cancellationToken);

@@ -50,7 +50,9 @@ public sealed class MegastationInfrastructureTests
             a.PlanarRegions.Reverse().ToArray(),
             a.AttachmentPlan,
             a.WindowPlan,
-            a.LightPlan);
+            a.LightPlan,
+            a.ServiceChannelPlan,
+            a.MegaGreeblePlan);
         MegastationInfrastructureMeshBuildResult rebuilt = MegastationInfrastructureMeshBuilder.Build(b);
 
         Assert.Equal(a.InfrastructurePlan.Clusters.Select(ClusterSignature), b.Clusters.Select(ClusterSignature));

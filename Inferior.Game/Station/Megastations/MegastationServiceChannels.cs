@@ -74,7 +74,13 @@ public sealed record MegastationServiceChannelDiagnostics(
     int CoveredNodeShadowVertexCount, int CoveredNodeShadowTriangleCount,
     long PlanningMilliseconds, long MeshBuildMilliseconds,
     int OwnedTextureDelta, int GpuBufferDelta, int MaterialRangeCount,
-    string PlanSignature);
+    string PlanSignature,
+    int ChannelBearingSurfaceCount = 0,
+    int RunsWithAdjacentG2Count = 0,
+    int RunsWithAdjacentFabricCount = 0,
+    int JunctionsWithDevelopmentCount = 0,
+    int EndpointsWithDevelopmentCount = 0,
+    int ParallelClearanceRejectCount = 0);
 
 public sealed record MegastationServiceChannelPlan(
     IReadOnlyList<MegastationServiceChannelNetwork> Networks,
@@ -106,7 +112,7 @@ public static class MegastationServiceChannelPlanner
         float Priority, MegastationServiceChannelNetwork Network);
     private sealed class RejectCounts
     {
-        public int Mask, G1, Window, Light, G2, Mega, Fabric;
+        public int Mask, G1, Window, Light, G2, Mega, Fabric, Parallel;
         public void Add(BlockerKind kind)
         {
             switch (kind)
@@ -199,7 +205,8 @@ public static class MegastationServiceChannelPlanner
                 role => networks.Count(n => n.ZoneRole == role)),
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             timer.ElapsedMilliseconds, 0, 0, 0, 0,
-            Signature(networks));
+            Signature(networks),
+            ParallelClearanceRejectCount: rejects.Parallel);
 #if DEBUG
         MegastationServiceChannelDebugRun[] debug = networks.SelectMany(network =>
             network.Runs.Select(run => new MegastationServiceChannelDebugRun(
@@ -440,10 +447,21 @@ public static class MegastationServiceChannelPlanner
         BuildTopology(string networkIdentity, int seed, IReadOnlyList<RawRoute> routes,
             MegastationPlanarRegion region, IReadOnlyList<Blocker> blockers, RejectCounts rejects)
     {
-        RawLeg[] legs = routes.SelectMany(route => route.Points.Zip(route.Points.Skip(1),
+        RawLeg[] rawLegs = routes.SelectMany(route => route.Points.Zip(route.Points.Skip(1),
                 (a, b) => new RawLeg(route.Identity, route.Scale, route.Width, route.Depth,
                     route.CableCount, a, b)))
             .Where(leg => Vector2.DistanceSquared(leg.Start, leg.End) > 1f).ToArray();
+        var acceptedLegs = new List<RawLeg>();
+        foreach (RawLeg leg in rawLegs)
+        {
+            if (acceptedLegs.Any(existing => ParallelOverlapTooClose(existing, leg)))
+            {
+                rejects.Parallel++;
+                continue;
+            }
+            acceptedLegs.Add(leg);
+        }
+        RawLeg[] legs = acceptedLegs.ToArray();
         var points = new Dictionary<string, Vector2>(StringComparer.Ordinal);
         void AddPoint(Vector2 point) => points[PointKey(point)] = point;
         foreach (RawLeg leg in legs) { AddPoint(leg.Start); AddPoint(leg.End); }
@@ -593,6 +611,23 @@ public static class MegastationServiceChannelPlanner
         RawLeg h = aHorizontal ? a : b, v = aHorizontal ? b : a;
         point = new(v.Start.X, h.Start.Y);
         return Between(point.X, h.Start.X, h.End.X) && Between(point.Y, v.Start.Y, v.End.Y);
+    }
+
+    private static bool ParallelOverlapTooClose(RawLeg a, RawLeg b)
+    {
+        bool aAlongU = MathF.Abs(a.End.X - a.Start.X) >= MathF.Abs(a.End.Y - a.Start.Y);
+        bool bAlongU = MathF.Abs(b.End.X - b.Start.X) >= MathF.Abs(b.End.Y - b.Start.Y);
+        if (aAlongU != bAlongU)
+            return false;
+        float aCross = aAlongU ? a.Start.Y : a.Start.X;
+        float bCross = bAlongU ? b.Start.Y : b.Start.X;
+        if (MathF.Abs(aCross - bCross) > MathF.Max(a.Width, b.Width))
+            return false;
+        float a0 = aAlongU ? MathF.Min(a.Start.X, a.End.X) : MathF.Min(a.Start.Y, a.End.Y);
+        float a1 = aAlongU ? MathF.Max(a.Start.X, a.End.X) : MathF.Max(a.Start.Y, a.End.Y);
+        float b0 = bAlongU ? MathF.Min(b.Start.X, b.End.X) : MathF.Min(b.Start.Y, b.End.Y);
+        float b1 = bAlongU ? MathF.Max(b.Start.X, b.End.X) : MathF.Max(b.Start.Y, b.End.Y);
+        return MathF.Min(a1, b1) - MathF.Max(a0, b0) > .01f;
     }
 
     private static bool OnSegment(Vector2 p, Vector2 a, Vector2 b)
@@ -747,8 +782,8 @@ public static class MegastationServiceChannelMeshBuilder
         NodeGeometryStats nodeGeometry = default;
         foreach (MegastationServiceChannelRun run in network.Runs)
         {
-            MegastationServiceChannelNode startNode = network.Nodes.Single(n => Near(n.Position, run.Start));
-            MegastationServiceChannelNode endNode = network.Nodes.Single(n => Near(n.Position, run.End));
+            MegastationServiceChannelNode startNode = FindEndpointNode(network, run, run.Start);
+            MegastationServiceChannelNode endNode = FindEndpointNode(network, run, run.End);
             EmitRun(network, run, startNode, endNode, mesh, floor, structure, internalColour);
         }
         foreach (MegastationServiceChannelNode node in network.Nodes)
@@ -761,6 +796,12 @@ public static class MegastationServiceChannelMeshBuilder
         }
         return nodeGeometry;
     }
+
+    private static MegastationServiceChannelNode FindEndpointNode(
+        MegastationServiceChannelNetwork network, MegastationServiceChannelRun run,
+        Vector2 endpoint)
+        => network.Nodes.Single(node => node.IncidentRunIdentities.Contains(run.Identity)
+            && node.Position == endpoint);
 
     private static void EmitRun(MegastationServiceChannelNetwork network,
         MegastationServiceChannelRun run, MegastationServiceChannelNode startNode,
@@ -844,6 +885,17 @@ public static class MegastationServiceChannelMeshBuilder
         Box(mesh, frame, corner, -corner, depth * .5f, size, size, depth, structure);
         Box(mesh, frame, -corner, corner, depth * .5f, size, size, depth, structure);
         Box(mesh, frame, corner, corner, depth * .5f, size, size, depth, structure);
+        if (node.Kind is MegastationServiceChannelNodeKind.Turn
+            or MegastationServiceChannelNodeKind.TJunction
+            or MegastationServiceChannelNodeKind.FourWay)
+        {
+            float roofThickness = Math.Clamp(width * .045f, .45f, .90f);
+            float roofSpan = corner * 2f;
+            // Roof corners meet the pier centres; half the roof thickness is recessed
+            // below the pier tops so their outer corners remain visible from above.
+            Box(mesh, frame, 0f, 0f, depth, roofSpan, roofSpan,
+                roofThickness, secondary);
+        }
         return default;
     }
 

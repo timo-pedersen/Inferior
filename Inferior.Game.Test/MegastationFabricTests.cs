@@ -39,7 +39,8 @@ public sealed class MegastationFabricTests
         MegastationFabricPlan replay = MegastationFabricPlanner.Plan(
             result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
             result.WindowPlan, result.LightPlan, result.InfrastructurePlan,
-            result.MegaGreeblePlan, result.RegularisedOccupancy);
+            result.MegaGreeblePlan, result.RegularisedOccupancy,
+            result.ServiceChannelPlan);
         MegastationFabricMeshBuildResult mesh = MegastationFabricMeshBuilder.Build(replay);
         Assert.Equal(result.FabricPlan.Diagnostics.PlanSignature, replay.Diagnostics.PlanSignature);
         Assert.Equal(result.FabricPlan.Instances, replay.Instances);

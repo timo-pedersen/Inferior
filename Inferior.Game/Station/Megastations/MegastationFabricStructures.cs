@@ -32,7 +32,9 @@ public sealed record MegastationFabricInstance(
     Vector3 TangentU, Vector3 TangentV, float MinU, float MaxU, float MinV, float MaxV,
     float Width, float Length, float Height, int QuarterTurn,
     Color PrimaryColour, Color SecondaryColour, Color AccentColour,
-    Vector3 AabbMin, Vector3 AabbMax);
+    Vector3 AabbMin, Vector3 AabbMax,
+    MegastationChannelAssociationKind ChannelAssociation = MegastationChannelAssociationKind.Independent,
+    string? ChannelFeatureIdentity = null);
 
 public sealed record MegastationFabricRegionSummary(
     string SurfaceStableId, string ZoneId, MegastationZoneRole Role,
@@ -58,7 +60,13 @@ public sealed record MegastationFabricDiagnostics(
     int ShadowVertexCount, int ShadowTriangleCount, long ShadowMeshBytes,
     long PlanningMilliseconds, long MeshBuildMilliseconds,
     int OwnedTextureDelta, int GpuBufferDelta, string PlanSignature,
-    IReadOnlyList<MegastationFabricRegionSummary> DensestRegions);
+    IReadOnlyList<MegastationFabricRegionSummary> DensestRegions,
+    int IndependentStructureCount = 0,
+    int ChannelRowStructureCount = 0,
+    int ChannelClusterStructureCount = 0,
+    int ChannelNodeStructureCount = 0,
+    int ChannelEndpointStructureCount = 0,
+    int RejectedChannelAwareAttemptCount = 0);
 
 public sealed record MegastationFabricPlan(
     IReadOnlyList<MegastationFabricInstance> Instances,
@@ -78,7 +86,9 @@ public static class MegastationFabricPlanner
         MegastationFabricArchetype Archetype, MegastationFabricPattern Pattern,
         float U, float V, float MinU, float MaxU, float MinV, float MaxV,
         float Width, float Length, float Height, int QuarterTurn,
-        float Priority, Vector3 Position, Vector3 AabbMin, Vector3 AabbMax);
+        float Priority, Vector3 Position, Vector3 AabbMin, Vector3 AabbMax,
+        MegastationChannelAssociationKind ChannelAssociation,
+        string? ChannelFeatureIdentity);
 
     public static MegastationFabricPlan Plan(
         IReadOnlyList<MegastationPlanarRegion> regions,
@@ -89,6 +99,32 @@ public static class MegastationFabricPlanner
         MegastationMegaGreeblePlan megaGreeble,
         StructuralOccupancy occupancy,
         CancellationToken cancellationToken = default)
+        => PlanCore(regions, attachments, windows, lights, infrastructure, megaGreeble,
+            occupancy, null, cancellationToken);
+
+    public static MegastationFabricPlan Plan(
+        IReadOnlyList<MegastationPlanarRegion> regions,
+        MegastationAttachmentPlan attachments,
+        MegastationWindowPlan windows,
+        MegastationLightPlan lights,
+        MegastationInfrastructurePlan infrastructure,
+        MegastationMegaGreeblePlan megaGreeble,
+        StructuralOccupancy occupancy,
+        MegastationServiceChannelPlan serviceChannels,
+        CancellationToken cancellationToken = default)
+        => PlanCore(regions, attachments, windows, lights, infrastructure, megaGreeble,
+            occupancy, serviceChannels, cancellationToken);
+
+    private static MegastationFabricPlan PlanCore(
+        IReadOnlyList<MegastationPlanarRegion> regions,
+        MegastationAttachmentPlan attachments,
+        MegastationWindowPlan windows,
+        MegastationLightPlan lights,
+        MegastationInfrastructurePlan infrastructure,
+        MegastationMegaGreeblePlan megaGreeble,
+        StructuralOccupancy occupancy,
+        MegastationServiceChannelPlan? serviceChannels,
+        CancellationToken cancellationToken)
     {
         var timer = Stopwatch.StartNew();
         MegastationPlanarRegion[] eligible = regions
@@ -96,7 +132,7 @@ public static class MegastationFabricPlanner
                 && r.PhysicalExtents.X >= 12f && r.PhysicalExtents.Y >= 12f)
             .OrderBy(r => r.StableId, StringComparer.Ordinal).ToArray();
         var candidates = new List<Candidate>();
-        int exact = 0, density = 0;
+        int exact = 0, density = 0, rejectedChannelAware = 0;
 
         foreach (MegastationPlanarRegion region in eligible)
         {
@@ -133,11 +169,60 @@ public static class MegastationFabricPlanner
                 { density++; continue; }
                 if (nearG1 && Sample(cellSeed, "g1-associated-promote") < .38f)
                     pattern = MegastationFabricPattern.G1Associated;
+                float originalU = u, originalV = v;
+                float originalWidth = width, originalLength = length;
+                int originalTurn = turn;
+                MegastationChannelAssociationKind association =
+                    MegastationChannelAssociationKind.Independent;
+                string? channelFeatureIdentity = null;
+                if (serviceChannels is not null
+                    && MegastationChannelComposition.TryPlace(
+                        region, serviceChannels, cellSeed, u, v,
+                        MathF.Max(width, length), MathF.Min(width, length),
+                        ChannelAllocation(region.ZoneRole), true, out var channelPlacement))
+                {
+                    u = channelPlacement.U;
+                    v = channelPlacement.V;
+                    association = channelPlacement.Kind;
+                    channelFeatureIdentity = channelPlacement.FeatureIdentity;
+                    float major = MathF.Max(width, length);
+                    float minor = MathF.Min(width, length);
+                    width = channelPlacement.AlongU ? major : minor;
+                    length = channelPlacement.AlongU ? minor : major;
+                    turn = channelPlacement.AlongU ? 0 : 1;
+                    pattern = association == MegastationChannelAssociationKind.ChannelEdge
+                        ? (Sample(cellSeed, "sc3:edge-pattern") < .62f
+                            ? MegastationFabricPattern.Rows : MegastationFabricPattern.Cluster)
+                        : MegastationFabricPattern.Cluster;
+                }
                 float minU = u - width * .5f, maxU = u + width * .5f;
                 float minV = v - length * .5f, maxV = v + length * .5f;
                 if (!MegastationPlanarRegionExtractor.ContainsFootprint(
-                        region, minU, maxU, minV, maxV, 1.25f))
-                { exact++; continue; }
+                        region, minU, maxU, minV, maxV, 1.25f)
+                    || (serviceChannels is not null
+                        && MegastationChannelComposition.OverlapsReserved(
+                            region, serviceChannels, minU, maxU, minV, maxV, 3.6f)))
+                {
+                    if (association != MegastationChannelAssociationKind.Independent)
+                    {
+                        rejectedChannelAware++;
+                        association = MegastationChannelAssociationKind.Independent;
+                        channelFeatureIdentity = null;
+                        u = originalU;
+                        v = originalV;
+                        width = originalWidth;
+                        length = originalLength;
+                        turn = originalTurn;
+                        minU = u - width * .5f; maxU = u + width * .5f;
+                        minV = v - length * .5f; maxV = v + length * .5f;
+                    }
+                    if (!MegastationPlanarRegionExtractor.ContainsFootprint(
+                            region, minU, maxU, minV, maxV, 1.25f)
+                        || (serviceChannels is not null
+                            && MegastationChannelComposition.OverlapsReserved(
+                                region, serviceChannels, minU, maxU, minV, maxV, 3.6f)))
+                    { exact++; continue; }
+                }
                 Vector3 position = region.OutwardNormal * region.PlaneCoordinateMetres
                     + region.TangentU * u + region.TangentV * v;
                 (Vector3 aabbMin, Vector3 aabbMax) = Bounds(position, region.OutwardNormal,
@@ -146,13 +231,17 @@ public static class MegastationFabricPlanner
                 float priority = threshold + .15f * Sample(cellSeed, "priority");
                 candidates.Add(new(identity, cellSeed, region, archetype, pattern,
                     u, v, minU, maxU, minV, maxV, width, length, height, turn,
-                    priority, position, aabbMin, aabbMax));
+                    priority, position, aabbMin, aabbMax, association,
+                    channelFeatureIdentity));
             }
         }
 
         var accepted = new List<Candidate>();
         int g1 = 0, window = 0, light = 0, g2 = 0, mega = 0, self = 0, structural = 0;
-        foreach (Candidate c in candidates.OrderByDescending(c => c.Priority)
+        foreach (Candidate c in candidates
+                     .OrderBy(c => c.ChannelAssociation ==
+                         MegastationChannelAssociationKind.Independent ? 1 : 0)
+                     .ThenByDescending(c => c.Priority)
                      .ThenBy(c => c.Identity, StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -178,7 +267,8 @@ public static class MegastationFabricPlanner
                     c.Region.StableId, c.Region.ZoneId, c.Region.ZoneRole, c.Position,
                     c.Region.OutwardNormal, c.Region.TangentU, c.Region.TangentV,
                     c.MinU, c.MaxU, c.MinV, c.MaxV, c.Width, c.Length, c.Height, c.QuarterTurn,
-                    primary, secondary, accent, c.AabbMin, c.AabbMax);
+                    primary, secondary, accent, c.AabbMin, c.AabbMax,
+                    c.ChannelAssociation, c.ChannelFeatureIdentity);
             }).ToArray();
         timer.Stop();
         float[] widths = instances.Select(i => i.Width).Order().ToArray();
@@ -202,7 +292,19 @@ public static class MegastationFabricPlanner
             Enum.GetValues<MegastationFabricPattern>().ToDictionary(p => p, p => instances.Count(i => i.Pattern == p)),
             Min(widths), Median(widths), Max(widths), Min(lengths), Median(lengths), Max(lengths),
             Min(heights), Median(heights), Max(heights), 0, 0, 0, 0, 0, 0,
-            timer.ElapsedMilliseconds, 0, 0, 0, Signature(instances), dense);
+            timer.ElapsedMilliseconds, 0, 0, 0, Signature(instances), dense,
+            instances.Count(i => i.ChannelAssociation == MegastationChannelAssociationKind.Independent),
+            instances.Count(i => i.ChannelAssociation == MegastationChannelAssociationKind.ChannelEdge
+                && i.Pattern == MegastationFabricPattern.Rows),
+            instances.Count(i => i.ChannelAssociation == MegastationChannelAssociationKind.ChannelEdge
+                && i.Pattern != MegastationFabricPattern.Rows),
+            instances.Count(i => i.ChannelAssociation == MegastationChannelAssociationKind.ChannelNode),
+            instances.Count(i => i.ChannelAssociation == MegastationChannelAssociationKind.ChannelEndpoint),
+            rejectedChannelAware
+                + candidates.Count(candidate => candidate.ChannelAssociation !=
+                    MegastationChannelAssociationKind.Independent)
+                - instances.Count(instance => instance.ChannelAssociation !=
+                    MegastationChannelAssociationKind.Independent));
 #if DEBUG
         HashSet<string> acceptedIdentities = instances.Select(i => i.Identity)
             .ToHashSet(StringComparer.Ordinal);
@@ -278,6 +380,16 @@ public static class MegastationFabricPlanner
         MegastationZoneRole.Logistics => .46f,
         MegastationZoneRole.Habitation => .25f,
         MegastationZoneRole.Strategic => .14f,
+        _ => 0f,
+    };
+
+    private static float ChannelAllocation(MegastationZoneRole role) => role switch
+    {
+        MegastationZoneRole.Industrial => .54f,
+        MegastationZoneRole.Utilities => .55f,
+        MegastationZoneRole.Logistics => .48f,
+        MegastationZoneRole.Habitation => .24f,
+        MegastationZoneRole.Strategic => .22f,
         _ => 0f,
     };
 
@@ -395,7 +507,9 @@ public static class MegastationFabricPlanner
         var text = new StringBuilder();
         foreach (var i in instances) text.Append(i.Identity).Append('|').Append(i.Archetype)
             .Append('|').Append(i.Pattern).Append('|').Append(i.Width).Append('|').Append(i.Length)
-            .Append('|').Append(i.Height).Append('\n');
+            .Append('|').Append(i.Height).Append('|').Append(i.SurfacePosition)
+            .Append('|').Append(i.ChannelAssociation).Append('|').Append(i.ChannelFeatureIdentity)
+            .Append('\n');
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
     }
     private static int FloorDiv(int value,int divisor) => value >= 0 ? value/divisor : -((-value+divisor-1)/divisor);

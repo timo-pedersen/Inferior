@@ -199,6 +199,10 @@ public sealed partial class SystemSpaceState
             $"candidateArea={diagnostics.CandidateArea:F0}; activeArea={diagnostics.ActiveArea:F0}; " +
             $"regions={diagnostics.CandidateRegionCount}; cells={diagnostics.CandidateCellCount}; " +
             $"clusters={diagnostics.ClusterCount}; primitives={diagnostics.PrimitiveCount}; " +
+            $"composition=independent:{diagnostics.IndependentPlacementCount}," +
+            $"edge:{diagnostics.ChannelEdgePlacementCount},junction:{diagnostics.ChannelNodePlacementCount}," +
+            $"endpoint:{diagnostics.ChannelEndpointPlacementCount}," +
+            $"rejectedChannelAware:{diagnostics.RejectedChannelAwareAttemptCount}; " +
             $"housings={diagnostics.HousingCount}; vents={diagnostics.VentCount}; tanks={diagnostics.TankCount}; " +
             $"roles={roles}; rejects=exactMask:{diagnostics.ExactMaskRejectCount}," +
             $"g1:{diagnostics.G1RejectCount},windows:{diagnostics.WindowRejectCount}," +
@@ -281,6 +285,10 @@ public sealed partial class SystemSpaceState
         PublishStationResidencyMessage(
             $"[MegastationFabric] station={stationIdentity}; area={d.EligibleArea:F0}; " +
             $"regions={d.EligibleRegionCount}; candidates={d.CandidateCount}; accepted={d.AcceptedCount}; " +
+            $"composition=independent:{d.IndependentStructureCount},row:{d.ChannelRowStructureCount}," +
+            $"cluster:{d.ChannelClusterStructureCount},junction:{d.ChannelNodeStructureCount}," +
+            $"endpoint:{d.ChannelEndpointStructureCount}," +
+            $"rejectedChannelAware:{d.RejectedChannelAwareAttemptCount}; " +
             $"archetypes={archetypes}; roles={roles}; patterns={patterns}; " +
             $"sizeWxLxH={d.MinimumWidth:F1}/{d.MedianWidth:F1}/{d.MaximumWidth:F1}x" +
             $"{d.MinimumLength:F1}/{d.MedianLength:F1}/{d.MaximumLength:F1}x" +
@@ -315,9 +323,13 @@ public sealed partial class SystemSpaceState
             $"coveredNodes=t:{d.CoveredTJunctionCount},minorT:{d.UncoveredTJunctionCount},four:{d.CoveredFourWayJunctionCount}; " +
             $"length={d.TotalChannelLength:F0}m; primaryLength={d.MinimumPrimaryLength:F1}/{d.MedianPrimaryLength:F1}/{d.MaximumPrimaryLength:F1}m; " +
             $"bridges={d.BridgeCount}; roles={roles}; " +
+            $"utilization=surfaces:{d.ChannelBearingSurfaceCount}," +
+            $"runsG2:{d.RunsWithAdjacentG2Count},runsFabric:{d.RunsWithAdjacentFabricCount}," +
+            $"junctions:{d.JunctionsWithDevelopmentCount},endpoints:{d.EndpointsWithDevelopmentCount}; " +
             $"rejects=mask:{d.ExactMaskRejectCount},g1:{d.G1RejectCount},windows:{d.WindowRejectCount}," +
             $"lights:{d.LightRejectCount},g2:{d.G2RejectCount},mega:{d.MegaGreebleRejectCount}," +
-            $"fabric:{d.FabricRejectCount},density:{d.DensityRejectCount},cap:{d.CapRejectCount}; " +
+            $"fabric:{d.FabricRejectCount},parallel:{d.ParallelClearanceRejectCount}," +
+            $"density:{d.DensityRejectCount},cap:{d.CapRejectCount}; " +
             $"visible={d.VisibleVertexCount}v/{d.VisibleTriangleCount}t/{d.VisibleMeshBytes}B; " +
             $"shadow={d.ShadowVertexCount}v/{d.ShadowTriangleCount}t/{d.ShadowMeshBytes}B; " +
             $"coveredNodeGeometry={d.CoveredNodeVisibleVertexCount}v/{d.CoveredNodeVisibleTriangleCount}t," +

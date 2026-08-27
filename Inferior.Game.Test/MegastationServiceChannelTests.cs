@@ -54,10 +54,17 @@ public sealed class MegastationServiceChannelTests
     public void PlanAndMaterialGroupedGeometryAreTraversalIndependent()
     {
         MegastationPrototypeCpuResult result = Result.Value;
+        MegastationInfrastructurePlan baselineInfrastructure =
+            MegastationInfrastructurePlanner.Plan(result.PlanarRegions.Reverse().ToArray(),
+                result.AttachmentPlan, result.WindowPlan, result.LightPlan);
+        MegastationFabricPlan baselineFabric = MegastationFabricPlanner.Plan(
+            result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            result.MegaGreeblePlan, result.RegularisedOccupancy);
         MegastationServiceChannelPlan replay = MegastationServiceChannelPlanner.Plan(
             result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
-            result.WindowPlan, result.LightPlan, result.InfrastructurePlan,
-            result.MegaGreeblePlan, result.FabricPlan);
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            result.MegaGreeblePlan, baselineFabric);
         MegastationServiceChannelMeshBuildResult replayMesh =
             MegastationServiceChannelMeshBuilder.Build(replay, result.MaterialAssignment);
 
@@ -69,6 +76,82 @@ public sealed class MegastationServiceChannelTests
             replayMesh.Mesh.ToIntArrays().verts);
         Assert.Equal(result.ServiceChannelMesh.ToIntArrays().indices,
             replayMesh.Mesh.ToIntArrays().indices);
+    }
+
+    [Fact]
+    public void GeometryEndpointResolutionUsesTopologyIdentityWhenDistinctNodesAreVeryClose()
+    {
+        var runA = new MegastationServiceChannelRun("run-a", "route-a",
+            MegastationServiceChannelRunScale.Primary,
+            Vector2.Zero, new Vector2(10f, 0f), 10f, 2f, 4);
+        var runB = new MegastationServiceChannelRun("run-b", "route-b",
+            MegastationServiceChannelRunScale.Secondary,
+            new Vector2(.05f, 0f), new Vector2(.05f, 10f), 10f, 2f, 4);
+        MegastationServiceChannelNode Node(string id, Vector2 position, string run) => new(
+            id, position, MegastationServiceChannelNodeKind.DeadEnd,
+            MegastationServiceChannelNodeVariant.Exposed,
+            MainAlongU: false, HousingWidth: 0f, HousingLength: 0f, HousingHeight: 0f,
+            IncidentRunIdentities: [run], Endpoint: MegastationServiceChannelEndpoint.SealedCap);
+        var network = new MegastationServiceChannelNetwork(
+            "close-node-network", 1, "surface", "zone", MegastationZoneRole.Utilities,
+            MegastationServiceChannelDensity.Light, GridDirection.PositiveZ,
+            0f, Vector3.UnitZ, Vector3.UnitX, Vector3.UnitY, 10f,
+            [runA, runB],
+            [
+                Node("a-start", runA.Start, runA.Identity),
+                Node("a-end", runA.End, runA.Identity),
+                Node("b-start", runB.Start, runB.Identity),
+                Node("b-end", runB.End, runB.Identity),
+            ], []);
+        var plan = new MegastationServiceChannelPlan([network],
+            Result.Value.ServiceChannelPlan.Diagnostics, []);
+
+        MegastationServiceChannelMeshBuildResult built =
+            MegastationServiceChannelMeshBuilder.Build(plan, Result.Value.MaterialAssignment);
+
+        Assert.False(built.Mesh.IsEmpty);
+        AssertMesh(built.Mesh);
+    }
+
+    [Theory]
+    [InlineData(MegastationServiceChannelNodeKind.Turn, 2)]
+    [InlineData(MegastationServiceChannelNodeKind.TJunction, 3)]
+    [InlineData(MegastationServiceChannelNodeKind.FourWay, 4)]
+    public void ExposedTurnAndJunctionPiersReceiveARecessedRoof(
+        MegastationServiceChannelNodeKind kind, int armCount)
+    {
+        Vector2[] directions = [Vector2.UnitX, Vector2.UnitY, -Vector2.UnitX, -Vector2.UnitY];
+        MegastationServiceChannelRun[] runs = Enumerable.Range(0, armCount).Select(index =>
+            new MegastationServiceChannelRun($"run:{index}", $"route:{index}",
+                MegastationServiceChannelRunScale.Secondary, Vector2.Zero,
+                directions[index] * 20f, 10f, 2f, 4)).ToArray();
+        var nodes = new List<MegastationServiceChannelNode>
+        {
+            new("centre", Vector2.Zero, kind, MegastationServiceChannelNodeVariant.Exposed,
+                MainAlongU: runs.Count(run => run.AlongU) >= 2,
+                HousingWidth: 0f, HousingLength: 0f, HousingHeight: 0f,
+                IncidentRunIdentities: runs.Select(run => run.Identity).ToArray(), Endpoint: null),
+        };
+        nodes.AddRange(runs.Select((run, index) => new MegastationServiceChannelNode(
+            $"end:{index}", run.End, MegastationServiceChannelNodeKind.DeadEnd,
+            MegastationServiceChannelNodeVariant.Exposed, run.AlongU, 0f, 0f, 0f,
+            [run.Identity], MegastationServiceChannelEndpoint.SealedCap)));
+        var network = new MegastationServiceChannelNetwork(
+            $"roof:{kind}", 1, "surface", "zone", MegastationZoneRole.Utilities,
+            MegastationServiceChannelDensity.Light, GridDirection.PositiveZ,
+            0f, Vector3.UnitZ, Vector3.UnitX, Vector3.UnitY, 10f, runs, nodes, []);
+        var plan = new MegastationServiceChannelPlan([network],
+            Result.Value.ServiceChannelPlan.Diagnostics, []);
+
+        StationModuleMesh mesh = MegastationServiceChannelMeshBuilder.Build(
+            plan, Result.Value.MaterialAssignment).Mesh;
+        StationMeshCpuData cpu = new(mesh.ToIntArrays().verts, mesh.ToIntArrays().indices);
+
+        Assert.True(cpu.Vertices.Count(vertex =>
+            MathF.Abs(vertex.Position.Z - 2.225f) < .001f
+            && MathF.Abs(MathF.Abs(vertex.Position.X) - 4f) < .001f
+            && MathF.Abs(MathF.Abs(vertex.Position.Y) - 4f) < .001f) >= 4);
+        AssertMesh(mesh);
     }
 
     [Fact]
@@ -147,6 +230,38 @@ public sealed class MegastationServiceChannelTests
                 node => Assert.Null(node.Endpoint));
             Assert.All(network.Nodes.Where(node => node.Kind == MegastationServiceChannelNodeKind.DeadEnd),
                 node => Assert.NotNull(node.Endpoint));
+        });
+    }
+
+    [Fact]
+    public void ParallelRunsWithOverlappingExtentsClearTheWidestChannel()
+    {
+        Assert.All(Result.Value.ServiceChannelPlan.Networks, network =>
+        {
+            for (int a = 0; a < network.Runs.Count; a++)
+            for (int b = a + 1; b < network.Runs.Count; b++)
+            {
+                MegastationServiceChannelRun first = network.Runs[a];
+                MegastationServiceChannelRun second = network.Runs[b];
+                if (first.AlongU != second.AlongU)
+                    continue;
+                float first0 = first.AlongU ? MathF.Min(first.Start.X, first.End.X)
+                    : MathF.Min(first.Start.Y, first.End.Y);
+                float first1 = first.AlongU ? MathF.Max(first.Start.X, first.End.X)
+                    : MathF.Max(first.Start.Y, first.End.Y);
+                float second0 = second.AlongU ? MathF.Min(second.Start.X, second.End.X)
+                    : MathF.Min(second.Start.Y, second.End.Y);
+                float second1 = second.AlongU ? MathF.Max(second.Start.X, second.End.X)
+                    : MathF.Max(second.Start.Y, second.End.Y);
+                if (MathF.Min(first1, second1) - MathF.Max(first0, second0) <= .01f)
+                    continue;
+                float separation = first.AlongU
+                    ? MathF.Abs(first.Start.Y - second.Start.Y)
+                    : MathF.Abs(first.Start.X - second.Start.X);
+                Assert.True(separation > MathF.Max(first.Width, second.Width),
+                    $"{network.Identity}: {first.Identity} and {second.Identity} " +
+                    $"are {separation:F2}m apart for {MathF.Max(first.Width, second.Width):F2}m width");
+            }
         });
     }
 
@@ -275,6 +390,145 @@ public sealed class MegastationServiceChannelTests
             < Result.Value.ServiceChannelPlan.Diagnostics.EligibleRegionCount / 4);
     }
 
+    [Fact]
+    public void Sc3CompositionIsSemanticSupportedReservedAndDensityNeutral()
+    {
+        MegastationPrototypeCpuResult result = Result.Value;
+        MegastationInfrastructureDiagnostics g2 = result.InfrastructurePlan.Diagnostics;
+        MegastationFabricDiagnostics fabric = result.FabricPlan.Diagnostics;
+        Assert.Equal(g2.ClusterCount, g2.IndependentPlacementCount
+            + g2.ChannelEdgePlacementCount + g2.ChannelNodePlacementCount
+            + g2.ChannelEndpointPlacementCount);
+        Assert.Equal(fabric.AcceptedCount, fabric.IndependentStructureCount
+            + fabric.ChannelRowStructureCount + fabric.ChannelClusterStructureCount
+            + fabric.ChannelNodeStructureCount + fabric.ChannelEndpointStructureCount);
+        Assert.True(g2.ChannelEdgePlacementCount + g2.ChannelNodePlacementCount
+            + g2.ChannelEndpointPlacementCount > 0);
+        Assert.True(fabric.ChannelRowStructureCount + fabric.ChannelClusterStructureCount
+            + fabric.ChannelNodeStructureCount + fabric.ChannelEndpointStructureCount > 0);
+        Assert.True(g2.ChannelNodePlacementCount + fabric.ChannelNodeStructureCount > 0);
+        Assert.True(g2.ChannelEndpointPlacementCount + fabric.ChannelEndpointStructureCount > 0);
+        Assert.True(g2.IndependentPlacementCount > 0);
+        Assert.True(fabric.IndependentStructureCount > 0);
+        Assert.Contains(result.FabricPlan.Instances
+                .Where(instance => instance.ChannelAssociation ==
+                    MegastationChannelAssociationKind.ChannelEdge)
+                .GroupBy(instance => instance.ChannelFeatureIdentity),
+            group => group.Count() >= 2);
+
+        Dictionary<string, MegastationPlanarRegion> regions = result.PlanarRegions
+            .ToDictionary(region => region.StableId, StringComparer.Ordinal);
+        Dictionary<string, MegastationServiceChannelRun> runs = result.ServiceChannelPlan.Runs
+            .ToDictionary(run => run.Identity, StringComparer.Ordinal);
+        HashSet<string> nodes = result.ServiceChannelPlan.Nodes
+            .Select(node => node.Identity).ToHashSet(StringComparer.Ordinal);
+        Assert.All(result.InfrastructurePlan.Clusters.Where(cluster =>
+                cluster.ChannelAssociation != MegastationChannelAssociationKind.Independent), cluster =>
+        {
+            Assert.NotNull(cluster.ChannelFeatureIdentity);
+            Assert.True(cluster.ChannelAssociation == MegastationChannelAssociationKind.ChannelEdge
+                ? runs.ContainsKey(cluster.ChannelFeatureIdentity!)
+                : nodes.Contains(cluster.ChannelFeatureIdentity!));
+            MegastationPlanarRegion region = regions[cluster.SurfaceStableId];
+            Assert.True(MegastationPlanarRegionExtractor.ContainsFootprint(region,
+                cluster.MinU, cluster.MaxU, cluster.MinV, cluster.MaxV, 1f));
+            Assert.False(MegastationChannelComposition.OverlapsReserved(region,
+                result.ServiceChannelPlan, cluster.MinU, cluster.MaxU,
+                cluster.MinV, cluster.MaxV, 3.6f));
+            if (cluster.ChannelAssociation == MegastationChannelAssociationKind.ChannelEdge)
+            {
+                MegastationServiceChannelRun run = runs[cluster.ChannelFeatureIdentity!];
+                Vector3 expected = run.AlongU ? region.TangentU : region.TangentV;
+                Assert.True(MathF.Abs(Vector3.Dot(expected, cluster.TangentU)) > .999f);
+            }
+        });
+        Assert.All(result.FabricPlan.Instances.Where(instance =>
+                instance.ChannelAssociation != MegastationChannelAssociationKind.Independent), instance =>
+        {
+            Assert.NotNull(instance.ChannelFeatureIdentity);
+            Assert.True(instance.ChannelAssociation == MegastationChannelAssociationKind.ChannelEdge
+                ? runs.ContainsKey(instance.ChannelFeatureIdentity!)
+                : nodes.Contains(instance.ChannelFeatureIdentity!));
+            MegastationPlanarRegion region = regions[instance.SurfaceStableId];
+            Assert.True(MegastationPlanarRegionExtractor.ContainsFootprint(region,
+                instance.MinU, instance.MaxU, instance.MinV, instance.MaxV, 1.25f));
+            Assert.False(MegastationChannelComposition.OverlapsReserved(region,
+                result.ServiceChannelPlan, instance.MinU, instance.MaxU,
+                instance.MinV, instance.MaxV, 3.6f));
+            if (instance.ChannelAssociation == MegastationChannelAssociationKind.ChannelEdge)
+            {
+                MegastationServiceChannelRun run = runs[instance.ChannelFeatureIdentity!];
+                Assert.Equal(run.AlongU, instance.Width >= instance.Length);
+            }
+        });
+
+        MegastationInfrastructurePlan baselineInfrastructure =
+            MegastationInfrastructurePlanner.Plan(result.PlanarRegions,
+                result.AttachmentPlan, result.WindowPlan, result.LightPlan);
+        MegastationFabricPlan baselineFabric = MegastationFabricPlanner.Plan(
+            result.PlanarRegions, result.AttachmentPlan, result.WindowPlan, result.LightPlan,
+            baselineInfrastructure, result.MegaGreeblePlan, result.RegularisedOccupancy);
+        Assert.InRange(result.InfrastructurePlan.Clusters.Count,
+            (int)(baselineInfrastructure.Clusters.Count * .70f), baselineInfrastructure.Clusters.Count);
+        Assert.InRange(result.FabricPlan.Instances.Count,
+            (int)(baselineFabric.Instances.Count * .70f), baselineFabric.Instances.Count);
+        Assert.Equal(0, fabric.OwnedTextureDelta);
+        Assert.True(result.ServiceChannelPlan.Diagnostics.RunsWithAdjacentG2Count > 0);
+        Assert.True(result.ServiceChannelPlan.Diagnostics.RunsWithAdjacentFabricCount > 0);
+
+        HashSet<string> channelSurfaces = result.ServiceChannelPlan.Networks
+            .Select(network => network.SurfaceStableId).ToHashSet(StringComparer.Ordinal);
+        int g2OnChannelSurfaces = result.InfrastructurePlan.Clusters.Count(cluster =>
+            channelSurfaces.Contains(cluster.SurfaceStableId));
+        int fabricOnChannelSurfaces = result.FabricPlan.Instances.Count(instance =>
+            channelSurfaces.Contains(instance.SurfaceStableId));
+        Console.WriteLine($"SC3 G2={g2.ClusterCount} " +
+            $"(ind:{g2.IndependentPlacementCount},edge:{g2.ChannelEdgePlacementCount}," +
+            $"node:{g2.ChannelNodePlacementCount},end:{g2.ChannelEndpointPlacementCount}," +
+            $"channelSurface:{g2OnChannelSurfaces}); " +
+            $"Fabric={fabric.AcceptedCount} (ind:{fabric.IndependentStructureCount}," +
+            $"row:{fabric.ChannelRowStructureCount},cluster:{fabric.ChannelClusterStructureCount}," +
+            $"node:{fabric.ChannelNodeStructureCount},end:{fabric.ChannelEndpointStructureCount}," +
+            $"channelSurface:{fabricOnChannelSurfaces}); " +
+            $"utilization=runsG2:{result.ServiceChannelPlan.Diagnostics.RunsWithAdjacentG2Count}," +
+            $"runsFabric:{result.ServiceChannelPlan.Diagnostics.RunsWithAdjacentFabricCount}," +
+            $"junctions:{result.ServiceChannelPlan.Diagnostics.JunctionsWithDevelopmentCount}," +
+            $"endpoints:{result.ServiceChannelPlan.Diagnostics.EndpointsWithDevelopmentCount}");
+    }
+
+    [Fact]
+    public void Sc3LeavesLockedMegaGreebleAndChannelPlansUnchanged()
+    {
+        MegastationPrototypeCpuResult result = Result.Value;
+        MegastationInfrastructurePlan baselineInfrastructure =
+            MegastationInfrastructurePlanner.Plan(result.PlanarRegions.Reverse().ToArray(),
+                result.AttachmentPlan, result.WindowPlan, result.LightPlan);
+        MegastationMegaGreeblePlan replayMega = MegastationMegaGreeblePlanner.Plan(
+            result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            result.RegularisedOccupancy, result.Style);
+        MegastationFabricPlan baselineFabric = MegastationFabricPlanner.Plan(
+            result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            replayMega, result.RegularisedOccupancy);
+        MegastationServiceChannelPlan replayChannels = MegastationServiceChannelPlanner.Plan(
+            result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            replayMega, baselineFabric);
+
+        Assert.Equal(result.MegaGreeblePlan.Diagnostics.PlanSignature,
+            replayMega.Diagnostics.PlanSignature);
+        Assert.Equal(result.MegaGreeblePlan.Instances, replayMega.Instances);
+        Assert.Equal(result.ServiceChannelPlan.Diagnostics.PlanSignature,
+            replayChannels.Diagnostics.PlanSignature);
+        Assert.Equal(result.ServiceChannelPlan.Networks.Select(network => network.Identity),
+            replayChannels.Networks.Select(network => network.Identity));
+        Assert.Equal(result.ServiceChannelPlan.Runs.Select(run => run.Identity),
+            replayChannels.Runs.Select(run => run.Identity));
+        Assert.Equal(result.ServiceChannelPlan.Nodes.Select(node => node.Identity),
+            replayChannels.Nodes.Select(node => node.Identity));
+    }
+
     [Theory]
     [InlineData("Gaanis:Gaanis II:Omega Beacon")]
     [InlineData("Araris:Araris I:Swift Depot")]
@@ -282,10 +536,17 @@ public sealed class MegastationServiceChannelTests
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(
             identity, systemMaterials: Materials);
+        MegastationInfrastructurePlan baselineInfrastructure =
+            MegastationInfrastructurePlanner.Plan(result.PlanarRegions.Reverse().ToArray(),
+                result.AttachmentPlan, result.WindowPlan, result.LightPlan);
+        MegastationFabricPlan baselineFabric = MegastationFabricPlanner.Plan(
+            result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            result.MegaGreeblePlan, result.RegularisedOccupancy);
         MegastationServiceChannelPlan replay = MegastationServiceChannelPlanner.Plan(
             result.PlanarRegions.Reverse().ToArray(), result.AttachmentPlan,
-            result.WindowPlan, result.LightPlan, result.InfrastructurePlan,
-            result.MegaGreeblePlan, result.FabricPlan);
+            result.WindowPlan, result.LightPlan, baselineInfrastructure,
+            result.MegaGreeblePlan, baselineFabric);
         Assert.Equal(result.ServiceChannelPlan.Diagnostics.PlanSignature,
             replay.Diagnostics.PlanSignature);
         Assert.Equal(0, result.ServiceChannelPlan.Diagnostics.OwnedTextureDelta);
@@ -427,7 +688,8 @@ public sealed class MegastationServiceChannelTests
            $"shadow={d.ShadowVertexCount}v/{d.ShadowTriangleCount}t/{d.ShadowMeshBytes}B; " +
            $"nodeMesh={d.CoveredNodeVisibleVertexCount}v/{d.CoveredNodeVisibleTriangleCount}t," +
            $"caster:{d.CoveredNodeShadowVertexCount}v/{d.CoveredNodeShadowTriangleCount}t; " +
-           $"rejects=mask:{d.ExactMaskRejectCount},g1:{d.G1RejectCount},windows:{d.WindowRejectCount}," +
+           $"rejects=mask:{d.ExactMaskRejectCount},parallel:{d.ParallelClearanceRejectCount}," +
+           $"g1:{d.G1RejectCount},windows:{d.WindowRejectCount}," +
            $"lights:{d.LightRejectCount},g2:{d.G2RejectCount},mega:{d.MegaGreebleRejectCount}," +
            $"fabric:{d.FabricRejectCount},density:{d.DensityRejectCount},cap:{d.CapRejectCount}; " +
            $"time={d.PlanningMilliseconds}+{d.MeshBuildMilliseconds}ms; signature={d.PlanSignature}";
