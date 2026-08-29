@@ -18,7 +18,8 @@ public sealed class MegastationSemanticZoningTests
         MegastationMeshStats stats = MegastationPrototypeMeshBuilder.Build(
             result.RegularisedOccupancy,
             result.BoundaryTopology,
-            rebuilt);
+            rebuilt,
+            interiorPlan: result.InteriorPlan);
         var (expectedVertices, expectedIndices) = result.Mesh.ToIntArrays();
         var (actualVertices, actualIndices) = rebuilt.ToIntArrays();
 
@@ -180,9 +181,19 @@ public sealed class MegastationSemanticZoningTests
             .ToDictionary(role => role, _ => new List<int>());
         for (int face = 0; face < result.BoundaryTopology.Faces.Count; face++)
         {
-            MegastationZoneRole role = zoning.ZoneByFace[result.BoundaryTopology.Faces[face].Key].Role;
+            BoundaryFace boundaryFace = result.BoundaryTopology.Faces[face];
+            MegastationZoneRole role = zoning.ZoneByFace.TryGetValue(boundaryFace.Key, out MegastationSemanticZone? zone)
+                ? zone.Role
+                : MegastationZoneRole.Structural;
             expectedByRole[role].AddRange(productionIndices.Skip(face * 6).Take(6));
         }
+
+        Assert.All(
+            result.BoundaryTopology.Faces.Where(face => face.SpaceKind == MegastationBoundarySpaceKind.ExteriorBoundary),
+            face => Assert.True(zoning.ZoneByFace.ContainsKey(face.Key)));
+        Assert.All(
+            result.BoundaryTopology.Faces.Where(face => face.SpaceKind != MegastationBoundarySpaceKind.ExteriorBoundary),
+            face => Assert.False(zoning.ZoneByFace.ContainsKey(face.Key)));
 
         int[] groupedIndices = zoning.DebugIndexGroups.SelectMany(group => group.Indices).ToArray();
         Assert.Equal(result.BoundaryTopology.Faces.Count * 6, groupedIndices.Length);

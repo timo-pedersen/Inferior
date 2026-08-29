@@ -135,7 +135,7 @@ public sealed class StationTextureCompactionTests
         Assert.True(prepared.UsesSharedMegastationFallbackTextures);
         Assert.True(prepared.Modules.Count > 1);
         Assert.NotEmpty(prepared.Textures);
-        Assert.Equal(prepared.Modules.Count - 4, prepared.TextureAssignments.Count);
+        Assert.Equal(prepared.Modules.Count - 5, prepared.TextureAssignments.Count);
         Assert.Equal(prepared.Textures.Count,
             prepared.UploadPlan.Count(item => item.Texture != null));
         PlacedModule structural = prepared.Modules[0];
@@ -145,15 +145,19 @@ public sealed class StationTextureCompactionTests
             module => module.HasNativeMegastationFabric);
         PlacedModule serviceChannels = Assert.Single(prepared.Modules,
             module => module.HasNativeMegastationServiceChannels);
+        PlacedModule interior = Assert.Single(prepared.Modules,
+            module => module.HasNativeMegastationInterior);
         Assert.DoesNotContain(prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, structural)
                 || ReferenceEquals(assignment.Module, megaGreeble)
                 || ReferenceEquals(assignment.Module, fabric)
-                || ReferenceEquals(assignment.Module, serviceChannels));
+                || ReferenceEquals(assignment.Module, serviceChannels)
+                || ReferenceEquals(assignment.Module, interior));
         Assert.All(prepared.Modules.Where(module => !ReferenceEquals(module, structural)
             && !ReferenceEquals(module, megaGreeble)
             && !ReferenceEquals(module, fabric)
-            && !ReferenceEquals(module, serviceChannels)), module => Assert.Single(
+            && !ReferenceEquals(module, serviceChannels)
+            && !ReferenceEquals(module, interior)), module => Assert.Single(
             prepared.TextureAssignments,
             assignment => ReferenceEquals(assignment.Module, module)));
         Assert.All(prepared.Modules, module =>
@@ -165,12 +169,12 @@ public sealed class StationTextureCompactionTests
             > prepared.TextureDiagnostics.SelectedUniqueTextureCount);
         Assert.Equal(prepared.Textures.Count,
             prepared.TextureDiagnostics.SelectedUniqueTextureCount);
-        Assert.Equal(prepared.TextureAssignments.Count * 2 + 8,
+        Assert.Equal(prepared.TextureAssignments.Count * 2 + 10,
             prepared.TextureDiagnostics.ModuleTextureBindingCount);
-        Assert.Equal(8, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
+        Assert.Equal(10, prepared.TextureDiagnostics.SharedFallbackReferenceCount);
         MegastationAttachmentDiagnostics attachments = Assert.IsType<MegastationAttachmentDiagnostics>(
             prepared.MegastationAttachmentDiagnostics);
-        Assert.Equal(prepared.Modules.Count - 4, attachments.PlacedModuleCount);
+        Assert.Equal(prepared.Modules.Count - 5, attachments.PlacedModuleCount);
         MegastationWindowDiagnostics windows = Assert.IsType<MegastationWindowDiagnostics>(
             prepared.MegastationWindowDiagnostics);
         StationVisualUploadPlanItem glass = Assert.Single(

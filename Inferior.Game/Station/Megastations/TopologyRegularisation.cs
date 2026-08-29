@@ -187,6 +187,7 @@ public static class TopologyRegulariser
         {
             if (!occupancy.Grid.Contains(coord.X, coord.Y, coord.Z) ||
                 occupancy.IsOccupied(coord.X, coord.Y, coord.Z) ||
+                occupancy.IsProtectedVoid(coord.X, coord.Y, coord.Z) ||
                 ContinuityScore(occupancy, coord) == 0)
                 continue;
             yield return coord;

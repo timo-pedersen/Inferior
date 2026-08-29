@@ -61,7 +61,8 @@ public sealed record StationGenerationCpuResult(
     MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics = null,
     MegastationFabricDiagnostics? MegastationFabricDiagnostics = null,
     MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics = null,
-    MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics = null);
+    MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics = null,
+    MegastationInteriorPlan? MegastationInterior = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -127,6 +128,7 @@ public sealed class StationGenerator
                 systemMaterials: systemMaterials);
             stopwatch.Start();
             PlacedModule structure = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
+            PlacedModule interior = MegastationPrototypeGenerator.CreateInteriorModule(cpu);
             PlacedModule? megaGreeble = MegastationPrototypeGenerator.CreateMegaGreebleModule(cpu);
             PlacedModule? fabric = MegastationPrototypeGenerator.CreateFabricModule(cpu);
             PlacedModule? serviceChannels =
@@ -168,7 +170,7 @@ public sealed class StationGenerator
                 generatedTextures,
                 generatedAssignments,
                 generatedVariantPairCount: generatedTextures.Count / 2);
-            List<PlacedModule> megaModules = [structure];
+            List<PlacedModule> megaModules = [structure, interior];
             if (fabric is not null) megaModules.Add(fabric);
             if (megaGreeble is not null) megaModules.Add(megaGreeble);
             if (serviceChannels is not null) megaModules.Add(serviceChannels);
@@ -201,10 +203,10 @@ public sealed class StationGenerator
                 megaCompacted.Diagnostics with
                 {
                     ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount
-                        + 2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
+                        + 2 * (2 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
                             + (serviceChannels is null ? 0 : 1)),
                     SharedFallbackReferenceCount =
-                        2 * (1 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
+                        2 * (2 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
                             + (serviceChannels is null ? 0 : 1)),
                 },
                 UsesSharedMegastationFallbackTextures: true,
@@ -216,7 +218,8 @@ public sealed class StationGenerator
                 MegastationMegaGreebleDiagnostics: cpu.MegaGreeblePlan.Diagnostics,
                 MegastationFabricDiagnostics: cpu.FabricPlan.Diagnostics,
                 MegastationServiceChannelDiagnostics: cpu.ServiceChannelPlan.Diagnostics,
-                MegastationSystemMaterialDiagnostics: materialDiagnostics);
+                MegastationSystemMaterialDiagnostics: materialDiagnostics,
+                MegastationInterior: cpu.InteriorPlan);
         }
 
         int seed = NameHash(station.Name);
@@ -432,11 +435,13 @@ public sealed class StationGenerator
         foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!hullMeshes.TryGetValue(module, out StationMeshCpuData? mesh))
+            if (!hullMeshes.TryGetValue(module, out StationMeshCpuData? visibleMesh))
                 continue;
+            StationMeshCpuData mesh = PrepareMesh(module.HullShadowMesh) ?? visibleMesh;
             (Vector3 Min, Vector3 Max)? bounds = module.Definition.MeshFactory == null
                 ? (-module.Definition.BoundingBox * 0.5f, module.Definition.BoundingBox * 0.5f)
-                : module.HullMesh?.ComputeFaceRangeBounds(0, module.HullMesh.FaceCount);
+                : (module.HullShadowMesh ?? module.HullMesh)?.ComputeFaceRangeBounds(
+                    0, (module.HullShadowMesh ?? module.HullMesh)?.FaceCount ?? 0);
             plan.Add(MeshItem(
                 StationVisualUploadResourceKind.ShadowHullMesh,
                 module,

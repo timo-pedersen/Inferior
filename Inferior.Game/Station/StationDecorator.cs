@@ -229,7 +229,8 @@ public static partial class StationDecorator
     // the active rollout-stage classes to CPU preparation.
     public static readonly DecorClass[] MegastationCasterClasses =
         [DecorClass.MegastationInfrastructureMajor, DecorClass.MegastationMegaGreebleMajor,
-         DecorClass.MegastationFabricMajor, DecorClass.MegastationServiceChannelMajor];
+         DecorClass.MegastationFabricMajor, DecorClass.MegastationServiceChannelMajor,
+         DecorClass.MegastationInteriorMajor];
 
     // Docs/station-lighting-pipeline-spec.md §10 Phase C: the executable form of the
     // "documented casting policy." SystemSpaceState.Shadows.cs reads this to decide which
@@ -259,6 +260,8 @@ public static partial class StationDecorator
             [DecorClass.MegastationFabricMajor] = true,  // substantial background building masses
             [DecorClass.MegastationServiceChannelMinor] = false, // floor and internal conduit runs
             [DecorClass.MegastationServiceChannelMajor] = true,  // lips, terminals and bridges
+            [DecorClass.MegastationInteriorMinor] = false, // illuminated gate markers and small guidance detail
+            [DecorClass.MegastationInteriorMajor] = true,  // portal frame and major buttresses
 
             // C1 — structural. Landed: gated via F8 overlay + Timo's in-engine screenshots.
             [DecorClass.Pipes]        = true,

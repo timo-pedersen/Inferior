@@ -30,6 +30,7 @@ public enum DecorClass
     MegastationMegaGreebleMajor, MegastationMegaGreebleMinor,
     MegastationFabricMajor, MegastationFabricMinor,
     MegastationServiceChannelMajor, MegastationServiceChannelMinor,
+    MegastationInteriorMajor, MegastationInteriorMinor,
 
     // C1 — structural
     Pipes, SurfacePipes, PipeBrackets,

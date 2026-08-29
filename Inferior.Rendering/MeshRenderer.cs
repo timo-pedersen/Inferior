@@ -64,7 +64,8 @@ public sealed class MeshRenderer : IDisposable
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
         Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f,
-        Vector3? eyePositionWorld = null)
+        Vector3? eyePositionWorld = null,
+        float vertexIlluminationScale = 0f)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
@@ -76,6 +77,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
+        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         Draw(vb, ib, fx);
     }
@@ -87,7 +89,9 @@ public sealed class MeshRenderer : IDisposable
         Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
         float specularStrength, float specularShininess,
         Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f,
-        Vector3? eyePositionWorld = null)
+        Vector3? eyePositionWorld = null,
+        float vertexIlluminationScale = 0f,
+        float presentationDepthBias = 0f)
     {
         if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
             throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
@@ -102,8 +106,9 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
+        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
-        Draw(vb, ib, fx, startIndex, indexCount / 3);
+        Draw(vb, ib, fx, startIndex, indexCount / 3, presentationDepthBias);
     }
 
     public void DrawDebugFlatColorRange(
@@ -140,7 +145,8 @@ public sealed class MeshRenderer : IDisposable
         float shadowCorrectionLimit, float shadowBiasDepth,
         bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
         Texture2D? materialMap = null, float bumpStrength = 0f,
-        Vector3? eyePositionWorld = null)
+        Vector3? eyePositionWorld = null,
+        float vertexIlluminationScale = 0f)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
@@ -152,6 +158,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
+        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
@@ -173,7 +180,9 @@ public sealed class MeshRenderer : IDisposable
         float shadowCorrectionLimit, float shadowBiasDepth,
         bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
         Texture2D? materialMap = null, float bumpStrength = 0f,
-        Vector3? eyePositionWorld = null)
+        Vector3? eyePositionWorld = null,
+        float vertexIlluminationScale = 0f,
+        float presentationDepthBias = 0f)
     {
         if (startIndex < 0 || indexCount <= 0
             || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
@@ -190,6 +199,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["Ambient"].SetValue(ambient);
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
+        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
         SetSpecularParameters(fx, specularStrength, specularShininess,
             materialMap ?? _neutralMaterialTexture, bumpStrength,
             eyePositionWorld ?? Vector3.Zero);
@@ -197,7 +207,7 @@ public sealed class MeshRenderer : IDisposable
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
             shadowCorrectionLimit, shadowBiasDepth, binaryShadowView, deltaShadowView,
             shadowKernelRadius);
-        Draw(vb, ib, fx, startIndex, indexCount / 3);
+        Draw(vb, ib, fx, startIndex, indexCount / 3, presentationDepthBias);
     }
 
     /// <summary>
@@ -263,13 +273,15 @@ public sealed class MeshRenderer : IDisposable
         IndexBuffer ib,
         Effect effect,
         int startIndex = 0,
-        int? primitiveCount = null)
+        int? primitiveCount = null,
+        float presentationDepthBias = 0f)
     {
         var gd = _gd;
         gd.SetVertexBuffer(vb);
         gd.Indices            = ib;
         gd.RasterizerState    = RasterizerState.CullCounterClockwise;
         gd.DepthStencilState  = DepthStencilState.Default;
+        effect.Parameters["PresentationDepthBias"].SetValue(presentationDepthBias);
 
         foreach (var pass in effect.CurrentTechnique.Passes)
         {

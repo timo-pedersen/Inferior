@@ -13,6 +13,7 @@ public enum GlowType
     AviationWarning,
     AmbientMarker,
     DockGuidance,
+    MegastationEntranceGuidance,
 }
 
 public enum LightPattern
@@ -38,6 +39,9 @@ public sealed record StationLightInfo(
     // Optional presentation metadata for lights mounted directly on a known surface.
     // Ordinary station lights predate this field and retain their existing behaviour.
     public Vector3? SurfaceNormal { get; init; }
+    public float? PresentationSizePixels { get; init; }
+    public float? PresentationFadeStartMeters { get; init; }
+    public float? PresentationFadeEndMeters { get; init; }
 }
 
 public sealed class OpenPort
@@ -82,8 +86,20 @@ public sealed class PlacedModule
     // Debug-only combined candidate/accepted footprint lines for the Fabric layer.
     public          VertexPositionColor[]?  NativeFabricDebugLines { get; init; }
     public          bool                    HasNativeMegastationServiceChannels { get; init; }
+    public          bool                    HasNativeMegastationInterior { get; init; }
+    // H1/H1a structural hulls opt into the vertex-alpha artificial readability floor.
+    // Ordinary DynamicLit hulls leave it disabled, preserving their established response.
+    public          bool                    UsesHullVertexIllumination { get; init; }
+    // H1b luminous navigation geometry uses the same general vertex-alpha capability
+    // while its ordinary liner/rib faces retain alpha zero and normal stellar lighting.
+    public          bool                    UsesDecorationVertexIllumination { get; init; }
+    // Presentation-only geometry sharing an authoritative structural surface can opt
+    // into a minute clip-depth offset without changing station-local geometry/clearance.
+    public          bool                    UsesCoplanarStructuralOverlay { get; init; }
     // Debug-only SC1 footprint and local-axis lines. Absent from Release builds.
     public          VertexPositionColor[]?  NativeServiceChannelDebugLines { get; init; }
+    // Debug-only H1 portal/throat/flight-volume/interior-boundary line overlay.
+    public          VertexPositionColor[]?  NativeInteriorDebugLines { get; init; }
     // Brief U1: only ever set for MeshFactory modules (a box module's hull is built
     // procedurally by StationGenerator.PrepareBoxHullMesh from Definition/ChamferDepth
     // alone, so it never needs storing here). Load-bearing hull geometry
@@ -91,6 +107,9 @@ public sealed class PlacedModule
     // the factory itself seeds, e.g. a docking bay's door frame/chamfer/interior walls)
     // lives in Mesh, same as a box module's.
     public          StationModuleMesh?      HullMesh        { get; set; }
+    // Optional deliberately filtered hull caster. H1 keeps exterior and entrance-throat
+    // structure in the global station map while excluding deep interior faces.
+    public          StationModuleMesh?      HullShadowMesh  { get; set; }
     public          StationModuleMesh?      GlassMesh       { get; set; }
     // Borrowed system materials are resolved by family at draw time. These ranges refer
     // to the grouped visible index buffer and never transfer Texture2D ownership into a

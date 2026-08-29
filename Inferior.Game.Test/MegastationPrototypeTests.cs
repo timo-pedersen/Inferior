@@ -151,7 +151,7 @@ public sealed class MegastationPrototypeTests
     public void PositiveYAcceptedFace_DepthMapMatchesPrototypeASeedPath()
     {
         var result = GenerateRawCpu(StationId);
-        Assert.Equal(4, result.Diagnostics.GeneratorVersion);
+        Assert.Equal(5, result.Diagnostics.GeneratorVersion);
         Assert.Equal(1, result.Diagnostics.SeedCompatibilityVersion);
         UrbanGrowthResult positiveY = PositiveYFace(result);
 
@@ -178,42 +178,42 @@ public sealed class MegastationPrototypeTests
             new MassingFixture(
                 "forced starter",
                 StarterStationId,
-                "4C2603CB147B0DC3BF280D4D21558DDA6FEA75D572E1B73293335A1F7EEC2E5E",
+                "F436051F892776AB0E1D2BE68B30232F73C9A720EC6E03E1C419DE1534FBF0CB",
                 "BDF65C8AA6211665A4538F136F6F04C0D6ACE2F0B16166FD6E0BBB7954549C43",
                 "CE435ACF5AF0BE63CC8CD60F724AA94EFCC557EE9166C7F367F3B935E8E1465B",
                 "E36C0EF1F4D190D1CB011F24A80B377CC8D0C9C33CE337F08ACF3D70B70933BF",
-                "3D9CC8EB3D43C72AB651FE59C7F21E1A282CF7E384F637D1D6DE8B0CBA5F14DB",
-                "733ED14AE0D25742A7C0C528670B65C7D0A7631B7ADD75014F0A5E691C222EB7",
+                "6A7E81F69B65ADB126DA258EB17205A3CD4FEBC8FA4B8CEF916FF083726308C5",
+                "F2B33F5B024E676515F8121049124279CE922CB106598D3B10983E3D98B53F4F",
                 7728, 6083, 5731, 482, 25, 25, 0, 0, 0, 1, false),
             new MassingFixture(
                 "representative",
                 StationId,
-                "D507F9DCBF6EA8A0A39A30CA752FB52D83EEE1DB0A9451951E8A3FFD53CC6581",
+                "7343B4CA2FC4F7BDE971E78ADEE41FEFFAB80BE838A8180AD2B8CFCDF80513B1",
                 "CA3560409FDA6B54281415730A84F77DF1EE66E2F7998C425612385AFDB73F5C",
                 "F2AC444329E4EE09E93EEF214E568BD7BA85FF282DF95280C3E1FB13A620752C",
                 "207D2E70186629E818AC6524BA31E0392A2BB47F0E6A70CB4EA1D7DA7DC77B9F",
-                "666EDB5EF626AF943533154BF7187BC2D27038473C9D7B760C7C145909FB53F6",
-                "BC714D42D83CEEDF74038CDCF642B006AAF20446AC3135FE5276969C310C28F2",
-                11200, 7344, 3412, 364, 63, 59, 0, 0, 0, 1, false),
+                "F961960C9D337E8EF4DCB599D177A902D7F57A19B298FE986A3BC9BCD7414DD6",
+                "93ED95869874529A6C5E2F80745C5E8A05B20B0944C2668F36E6834D855865DB",
+                11200, 7344, 3412, 364, 62, 58, 0, 0, 0, 1, false),
             new MassingFixture(
                 "strong edge",
                 "Test Star:Test Parent:Edge Strong 0001",
-                "74E544AD6B2AB243BB3130AECFF4F524DFB04E6AD2B84CBE3D01623E4DA74739",
+                "68944059BE43330343B72537C1C75BA08EC19B6A175207069A1E1583564B517F",
                 "BB89097CC731B836DE9AA1909F644BA5E51B59BAD6F67BB7D21EC7126A45ED85",
                 "2631049EC90414E57CD073A7313BA95DB59278312C04310CA13EFCA38241B245",
                 "5B09F96CE77FE99324C8D435D20359D1AC5D9779A5FBF096A6BC878F7B099D5C",
-                "AC1FB670B5D9BDF53C9312F77F623052C68224CCC52D5A18893A7A6A8C4E5CEA",
-                "A74E8524E66856E0C22921935FA614E4208C593C7B3B20B258CF59B785F26ED7",
-                8550, 6517, 5027, 575, 48, 51, 0, 0, 0, 1, false),
+                "1054608A6E2E20EDF64800E1E4958E4E67D208C9638376903649DC2043C21B47",
+                "B93A4C117900E88FF780FA5952FFABA4493DE3F7A7FE4D78CBC2FD7E4B0123F8",
+                8550, 6517, 5027, 575, 46, 48, 0, 0, 0, 1, false),
             new MassingFixture(
                 "broken edge",
                 "Test Star:Test Parent:Broken Edge 0001",
-                "5916392866F1FD8A694781F752B4DA246E4E6B22DB763D47A5453211F0431F5A",
+                "CDFEEF01C7E1A0981D3020EE1968CD42FE6DF7142A12F50065DB517E8D2DB876",
                 "B11ED8D9B5D73068E8CEA7F81CC74AD600EAD1CCABCF1F4283D95A58DCD41B85",
                 "8C9F3040F0DADE91EF561F12B904EE707F8AB2F41D7C9202B9B45DBD915E0256",
                 "50C3A2EAB26308AF9B743BAF5CB7072F54F8B1D10C50B0241E5911DAF968AA85",
-                "68055B3D2327D89390953360907243F9CD5845CFD6428027930A489FB5D05AA2",
-                "2C4A4D56D8EA51AF210E1A8117C72806459774E3251A6A52AFCD144B139102B8",
+                "1267982DB1FD235877C12B69A305368C6E16881F2EEFFD1DA1C885D920AEED6F",
+                "53D9F247D570930AFCF89AE998E739FABCB299373FFEB41A872719D7040947EE",
                 9216, 5882, 1872, 121, 49, 51, 0, 0, 0, 1, false),
         };
 
@@ -224,10 +224,11 @@ public sealed class MegastationPrototypeTests
 
             var structuralSolidSignature = MegastationMassingSignatureBuilder.ComputeStructuralSolid(result);
 
-            Assert.Equal(4, result.Diagnostics.GeneratorVersion);
+            Assert.Equal(5, result.Diagnostics.GeneratorVersion);
             Assert.Equal(1, result.Diagnostics.SeedCompatibilityVersion);
-            Assert.Equal(1, result.Diagnostics.TopologyRegularisationAlgorithmVersion);
-            Assert.Equal(1, result.Diagnostics.BoundaryTopologyAlgorithmVersion);
+            Assert.Equal(1, result.Diagnostics.InteriorAlgorithmVersion);
+            Assert.Equal(2, result.Diagnostics.TopologyRegularisationAlgorithmVersion);
+            Assert.Equal(2, result.Diagnostics.BoundaryTopologyAlgorithmVersion);
             Assert.Equal(1, result.Diagnostics.StructuralChamferAlgorithmVersion);
             Assert.Equal(fixture.CompleteSignature, signature.Complete);
             Assert.Equal(fixture.BodySignature, signature.Body);
@@ -245,7 +246,11 @@ public sealed class MegastationPrototypeTests
             Assert.Equal(fixture.VertexCriticalAfter, result.TopologyRegularisation.VertexCriticalAfter);
             Assert.Equal(fixture.RepairAddedCells, result.TopologyRegularisation.RepairAddedCells);
             Assert.Equal(0, result.TopologyRegularisation.RepairRemovedCells);
-            Assert.Equal(result.Occupancy.TotalOccupiedCount + fixture.RepairAddedCells, result.RegularisedOccupancy.TotalOccupiedCount);
+            Assert.Equal(
+                result.Occupancy.TotalOccupiedCount
+                - result.InteriorPlan.Diagnostics.RemovedStructuralCellCount
+                + fixture.RepairAddedCells,
+                result.RegularisedOccupancy.TotalOccupiedCount);
             Assert.Equal(fixture.ConnectedComponents, result.Diagnostics.ConnectedComponentsBeforeValidation);
             Assert.Equal(fixture.ConnectedComponents, result.TopologyRegularisation.ConnectedComponentsAfter);
             Assert.Equal(fixture.HasSealedCavity, result.Diagnostics.HasSealedCavity);
@@ -254,7 +259,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
-    public void PrototypeC2Version4_UsesSeedCompatibilityVersion1ForAcceptedRawMassing()
+    public void PrototypeH1Version5_UsesSeedCompatibilityVersion1ForAcceptedRawMassing()
     {
         var current = GenerateRawCpu(StationId);
         var explicitCompatibility = MegastationPrototypeGenerator.GenerateCpu(
@@ -262,9 +267,9 @@ public sealed class MegastationPrototypeTests
             RawMassingSettings with { GeneratorVersion = 99, SeedCompatibilityVersion = 1 });
         var incompatibleSeed = MegastationPrototypeGenerator.GenerateCpu(
             StationId,
-            RawMassingSettings with { GeneratorVersion = 4, SeedCompatibilityVersion = 2 });
+            RawMassingSettings with { GeneratorVersion = 5, SeedCompatibilityVersion = 2 });
 
-        Assert.Equal(4, current.Diagnostics.GeneratorVersion);
+        Assert.Equal(5, current.Diagnostics.GeneratorVersion);
         Assert.Equal(1, current.Diagnostics.SeedCompatibilityVersion);
         Assert.Equal(MegastationMassingSignatureBuilder.Compute(current).Body,
             MegastationMassingSignatureBuilder.Compute(explicitCompatibility).Body);

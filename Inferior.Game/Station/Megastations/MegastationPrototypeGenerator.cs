@@ -11,6 +11,7 @@ public sealed record MegastationPrototypeDiagnostics(
     string BuildIdentifier,
     int GeneratorVersion,
     int SeedCompatibilityVersion,
+    int InteriorAlgorithmVersion,
     int TopologyRegularisationAlgorithmVersion,
     int BoundaryTopologyAlgorithmVersion,
     int StructuralChamferAlgorithmVersion,
@@ -87,6 +88,8 @@ public sealed record MegastationPrototypeCpuResult(
     SliceGrid Grid,
     StructuralOccupancy Occupancy,
     StructuralOccupancy RegularisedOccupancy,
+    MegastationInteriorPlan InteriorPlan,
+    MegastationInteriorPresentationPlan InteriorPresentationPlan,
     TopologyRegularisationReport TopologyRegularisation,
     BoundaryTopology BoundaryTopology,
     MegastationSemanticZoningResult SemanticZoning,
@@ -98,6 +101,8 @@ public sealed record MegastationPrototypeCpuResult(
     IReadOnlyList<EdgeRegionPlan> Edges,
     IReadOnlyList<CornerRegionPlan> Corners,
     StationModuleMesh Mesh,
+    StationModuleMesh StructuralShadowMesh,
+    StationModuleMesh InteriorMesh,
     MegastationWindowPlan WindowPlan,
     StationModuleMesh WindowGlassMesh,
     MegastationLightPlan LightPlan,
@@ -122,19 +127,22 @@ public static class MegastationPrototypeGenerator
         string id = station.PersistenceId ?? station.Name;
         MegastationPrototypeCpuResult cpu = GenerateCpu(id, settings, sw);
         PlacedModule module = CreatePlacedModule(cpu);
+        PlacedModule interior = CreateInteriorModule(cpu);
         PlacedModule? megaGreeble = CreateMegaGreebleModule(cpu);
 
         var albedo = MakeFlat(gd, Color.White);
         var material = MakeFlat(gd, new Color(128, 255, 0, 0));
         module.TextureInstance = albedo;
         module.MaterialInstance = material;
+        interior.TextureInstance = albedo;
+        interior.MaterialInstance = material;
         if (megaGreeble != null)
         {
             megaGreeble.TextureInstance = albedo;
             megaGreeble.MaterialInstance = material;
         }
         return new MegastationPrototypeResult(
-            megaGreeble == null ? [module] : [module, megaGreeble],
+            megaGreeble == null ? [module, interior] : [module, interior, megaGreeble],
             [albedo, material], cpu.Diagnostics);
     }
 
@@ -174,9 +182,18 @@ public static class MegastationPrototypeGenerator
 
         var validation = MegastationConnectivity.Validate(occupancy);
         cancellationToken.ThrowIfCancellationRequested();
+        StructuralOccupancy hollowedOccupancy = occupancy.Clone();
+        MegastationInteriorPlan interiorPlan = MegastationInteriorPlanner.PlanAndApply(
+            hollowedOccupancy,
+            rootSeed,
+            cancellationToken);
+        ExteriorSpace.ClassifyExternallyAccessibleEmpty(hollowedOccupancy);
         var regularised = settings.EnableTopologyRegularisation
-            ? TopologyRegulariser.Regularise(occupancy, settings)
-            : BuildDisabledRegularisationResult(occupancy, settings, validation);
+            ? TopologyRegulariser.Regularise(hollowedOccupancy, settings)
+            : BuildDisabledRegularisationResult(
+                hollowedOccupancy,
+                settings,
+                MegastationConnectivity.Validate(hollowedOccupancy));
         var topologyStopwatch = Stopwatch.StartNew();
         BoundaryTopology topology = BoundaryTopologyBuilder.Build(regularised.Occupancy, settings);
         topologyStopwatch.Stop();
@@ -188,6 +205,33 @@ public static class MegastationPrototypeGenerator
         MegastationSystemMaterialAssignment? materialAssignment = systemMaterials is { } materialContext
             ? MegastationSystemMaterialAssignment.Create(materialContext, persistenceId)
             : null;
+        MegastationInteriorPresentationPlan interiorPresentation =
+            MegastationInteriorPresentationPlanner.Plan(
+                interiorPlan,
+                regularised.Occupancy,
+                materialAssignment);
+        MegastationInteriorMeshBuildResult interiorMesh = MegastationInteriorMeshBuilder.Build(
+            interiorPlan,
+            materialAssignment,
+            interiorPresentation,
+            cancellationToken);
+        StationModuleMesh structuralShadowMesh = MegastationInteriorMeshBuilder.BuildStructuralCaster(
+            regularised.Occupancy,
+            topology);
+        int throatBoundaryFaces = topology.Faces.Count(face =>
+            face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary);
+        int interiorBoundaryFaces = topology.Faces.Count(face =>
+            face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary);
+        interiorPlan = interiorPlan with
+        {
+            Diagnostics = interiorMesh.Diagnostics with
+            {
+                ThroatBoundaryFaceCount = throatBoundaryFaces,
+                InteriorBoundaryFaceCount = interiorBoundaryFaces,
+                InteriorStructuralVertexCount = (throatBoundaryFaces + interiorBoundaryFaces) * 4,
+                InteriorStructuralTriangleCount = (throatBoundaryFaces + interiorBoundaryFaces) * 2,
+            },
+        };
         MegastationPlanarRegion[] planarRegions = MegastationPlanarRegionExtractor.Extract(
             grid,
             topology,
@@ -198,6 +242,19 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             planarRegions,
             cancellationToken);
+        attachmentPlan = MegastationAttachmentPlanner.ApplyEntrancePriority(
+            attachmentPlan,
+            planarRegions,
+            interiorPresentation.Precinct);
+        interiorPlan = interiorPlan with
+        {
+            Diagnostics = interiorPlan.Diagnostics with
+            {
+                EntrancePrecinctReservationCount = attachmentPlan.Reservations.Count(
+                    reservation => reservation.PlacementIdentity.StartsWith(
+                        "interior/entrance-precinct/", StringComparison.Ordinal)),
+            },
+        };
         MegastationWindowPlan windowPlan = MegastationWindowPlanner.Plan(
             grid,
             topology,
@@ -304,7 +361,8 @@ public static class MegastationPrototypeGenerator
             settings: settings,
             topologyBuildMilliseconds: topologyStopwatch.ElapsedMilliseconds,
             semanticZoning: semanticZoning,
-            materialAssignment: materialAssignment);
+            materialAssignment: materialAssignment,
+            interiorPlan: interiorPlan);
         cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
 
@@ -316,6 +374,7 @@ public static class MegastationPrototypeGenerator
             BuildIdentifier(),
             settings.GeneratorVersion,
             settings.SeedCompatibilityVersion,
+            settings.InteriorAlgorithmVersion,
             settings.TopologyRegularisationAlgorithmVersion,
             settings.BoundaryTopologyAlgorithmVersion,
             settings.StructuralChamferAlgorithmVersion,
@@ -387,6 +446,8 @@ public static class MegastationPrototypeGenerator
             grid,
             occupancy,
             regularised.Occupancy,
+            interiorPlan,
+            interiorPresentation,
             regularised.Report,
             topology,
             semanticZoning,
@@ -398,6 +459,8 @@ public static class MegastationPrototypeGenerator
             edges,
             corners,
             mesh,
+            structuralShadowMesh,
+            interiorMesh.Mesh,
             windowPlan,
             windowMesh.Mesh,
             lightPlan,
@@ -447,12 +510,68 @@ public static class MegastationPrototypeGenerator
             HasNativeMegastationInfrastructure = true,
             NativeInfrastructureDebugLines = infrastructureDebugLines,
             HullMesh = cpu.Mesh,
+            HullShadowMesh = cpu.StructuralShadowMesh,
+            UsesHullVertexIllumination = true,
             GlassMesh = cpu.WindowGlassMesh,
             HullMaterialRanges = cpu.Mesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
         module.GlowLights.AddRange(cpu.LightPlan.Lights.Select(light => light.ToStationLightInfo()));
+        module.GlowLights.AddRange(CreateInteriorGuidanceLights(cpu.InteriorPresentationPlan));
         return module;
     }
+
+    public static PlacedModule CreateInteriorModule(MegastationPrototypeCpuResult cpu)
+    {
+        Vector3 bounds = new(
+            cpu.Grid.Dimension(GridAxis.X),
+            cpu.Grid.Dimension(GridAxis.Y),
+            cpu.Grid.Dimension(GridAxis.Z));
+        var definition = new StationModuleDefinition
+        {
+            Id = "megastation-interior-h1",
+            Category = "megastation-interior",
+            BoundingBox = bounds,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+        return new PlacedModule
+        {
+            Definition = definition,
+            Transform = Matrix.Identity,
+            Seed = MegastationSeed.Derive(cpu.Diagnostics.RootSeed, "interior presentation"),
+            ChamferDepth = 0f,
+            AabbMin = bounds * -.5f,
+            AabbMax = bounds * .5f,
+            Mesh = cpu.InteriorMesh,
+            IsHullLessPresentationLayer = true,
+            HasNativeMegastationInterior = true,
+            UsesDecorationVertexIllumination = true,
+            UsesCoplanarStructuralOverlay = true,
+            NativeInteriorDebugLines = MegastationInteriorDebug.BuildLines(
+                cpu.InteriorPlan,
+                cpu.BoundaryTopology,
+                cpu.Grid),
+            DecorationMaterialRanges = cpu.InteriorMesh.PrepareMaterialGroups()?.Ranges ?? [],
+        };
+    }
+
+    private static IEnumerable<StationLightInfo> CreateInteriorGuidanceLights(
+        MegastationInteriorPresentationPlan presentation)
+        => presentation.Markers.Select(marker => new StationLightInfo(
+            marker.Position,
+            marker.Colour,
+            GlowType.MegastationEntranceGuidance,
+            marker.Intensity,
+            0f,
+            0f,
+            LightPattern.Continuous)
+        {
+            SurfaceNormal = marker.SurfaceNormal,
+            PresentationSizePixels = marker.GlowSizePixels,
+            PresentationFadeStartMeters = marker.GlowFadeStartMeters,
+            PresentationFadeEndMeters = marker.GlowFadeEndMeters,
+        });
 
     public static PlacedModule? CreateMegaGreebleModule(MegastationPrototypeCpuResult cpu)
     {

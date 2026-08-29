@@ -168,6 +168,7 @@ public sealed partial class SystemSpaceState : GameState
     private bool _semanticHullDebug;
     private bool _megastationZoningDebug;
     private bool _megastationInfrastructureDebug;
+    private bool _megastationInteriorDebug;
     private bool _engineModuleDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
@@ -634,7 +635,14 @@ public sealed partial class SystemSpaceState : GameState
                           && keys.IsKeyDown(Keys.F3)
                           && !_prevKeys.IsKeyDown(Keys.F3);
         bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
+        bool ctrlShiftF5JustPressed = ctrlDown
+            && shiftDown
+            && keys.IsKeyDown(Keys.F5)
+            && !(prevCtrlDown
+                && (_prevKeys.IsKeyDown(Keys.LeftShift) || _prevKeys.IsKeyDown(Keys.RightShift))
+                && _prevKeys.IsKeyDown(Keys.F5));
         bool ctrlF5JustPressed = ctrlDown
+            && !shiftDown
             && keys.IsKeyDown(Keys.F5)
             && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F5));
         bool shiftF5JustPressed = !ctrlDown && shiftDown
@@ -742,7 +750,16 @@ public sealed partial class SystemSpaceState : GameState
                     : "Ship simulation position marker disabled.",
                 SystemMessagePriority.Info));
         }
-        if (ctrlF5JustPressed)
+        if (ctrlShiftF5JustPressed)
+        {
+            _megastationInteriorDebug = !_megastationInteriorDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _megastationInteriorDebug
+                    ? "H1 interior debug enabled: portal cyan, throat amber, flight volume green, interior boundary magenta."
+                    : "H1 interior debug disabled.",
+                SystemMessagePriority.Info));
+        }
+        else if (ctrlF5JustPressed)
         {
             _megastationZoningDebug = !_megastationZoningDebug;
             _hudAlert.AddMessage(new SystemMessage(

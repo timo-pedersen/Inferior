@@ -240,6 +240,8 @@ public sealed class MegastationAttachmentTests
             result.RegularisedOccupancy,
             result.BoundaryTopology,
             result.SemanticZoning);
+        replanned = MegastationAttachmentPlanner.ApplyEntrancePriority(
+            replanned, result.PlanarRegions, result.InteriorPresentationPlan.Precinct);
         MegastationWindowPlan originalWindows = MegastationWindowPlanner.Plan(
             result.Grid, result.BoundaryTopology, result.SemanticZoning);
         MegastationLightPlan originalLights = MegastationLightingPlanner.Plan(

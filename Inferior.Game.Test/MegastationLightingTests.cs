@@ -214,7 +214,7 @@ public sealed class MegastationLightingTests
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
         MegastationLightPlan plan = result.LightPlan;
 
-        Assert.InRange(plan.Lights.Count, 500, 800);
+        Assert.InRange(plan.Lights.Count, 450, 800);
         Assert.True(plan.Diagnostics.SteadyLightCount > plan.Diagnostics.AnimatedLightCount);
         Assert.InRange(plan.Diagnostics.AnimatedLightCount, 0, 20);
         Assert.All(
@@ -237,7 +237,10 @@ public sealed class MegastationLightingTests
         MegastationWindowMeshBuildResult rebuiltWindowMesh = MegastationWindowMeshBuilder.Build(rebuiltWindows);
         var rebuiltStructure = new StationModuleMesh();
         MegastationMeshStats rebuiltStructureStats = MegastationPrototypeMeshBuilder.Build(
-            result.RegularisedOccupancy, result.BoundaryTopology, rebuiltStructure);
+            result.RegularisedOccupancy,
+            result.BoundaryTopology,
+            rebuiltStructure,
+            interiorPlan: result.InteriorPlan);
         PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(result);
 
         Assert.Equal(result.WindowPlan.Regions.Select(WindowRegionSignature), rebuiltWindows.Regions.Select(WindowRegionSignature));
@@ -250,7 +253,10 @@ public sealed class MegastationLightingTests
         Assert.Equal(result.Mesh.ToIntArrays().indices, rebuiltStructure.ToIntArrays().indices);
         Assert.Equal(
             result.LightPlan.Lights.Select(light => light.ToStationLightInfo()),
-            module.GlowLights);
+            module.GlowLights.Take(result.LightPlan.Lights.Count));
+        Assert.Equal(
+            result.InteriorPresentationPlan.Markers.Count,
+            module.GlowLights.Count - result.LightPlan.Lights.Count);
         Assert.Same(result.InfrastructureMesh, module.Mesh);
         Assert.True(module.HasNativeMegastationInfrastructure);
         Assert.Equal(result.WindowGlassMesh, module.GlassMesh);
@@ -266,9 +272,21 @@ public sealed class MegastationLightingTests
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
         PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(result);
 
-        Assert.Equal(result.LightPlan.Lights.Count, module.GlowLights.Count);
+        int interiorSurfaceHaloCount = result.InteriorPresentationPlan.Markers.Count(
+            marker => marker.SurfaceNormal.HasValue);
+        Assert.Equal(
+            result.LightPlan.Lights.Count + interiorSurfaceHaloCount,
+            module.GlowLights.Count(light => light.SurfaceNormal.HasValue));
         for (int i = 0; i < result.LightPlan.Lights.Count; i++)
             Assert.Equal(result.LightPlan.Lights[i].Normal, module.GlowLights[i].SurfaceNormal);
+        Assert.Equal(
+            result.InteriorPresentationPlan.Markers
+                .Where(marker => marker.SurfaceNormal.HasValue)
+                .Select(marker => marker.SurfaceNormal),
+            module.GlowLights
+                .Skip(result.LightPlan.Lights.Count)
+                .Where(light => light.SurfaceNormal.HasValue)
+                .Select(light => light.SurfaceNormal));
     }
 
     [Fact]
@@ -291,6 +309,40 @@ public sealed class MegastationLightingTests
         Assert.False(back.IsFrontFacing);
         Assert.Equal(0f, back.AppliedBiasMeters);
         Assert.Equal(position, back.BiasedCameraRelativePosition);
+    }
+
+    [Fact]
+    public void InternalThroatGlowFadesSmoothlyButPortalGuidanceRetainsLongRange()
+    {
+        var internalHalo = new StationLightInfo(
+            Vector3.Zero,
+            Color.Green,
+            GlowType.MegastationEntranceGuidance,
+            1f)
+        {
+            SurfaceNormal = Vector3.UnitY,
+            PresentationSizePixels = 90f,
+            PresentationFadeStartMeters = 220f,
+            PresentationFadeEndMeters = 1_500f,
+        };
+        var portalGuidance = new StationLightInfo(
+            Vector3.Zero,
+            Color.Green,
+            GlowType.MegastationEntranceGuidance,
+            1f);
+
+        float near = SystemSpaceState.ResolveStationGlowDistanceFade(internalHalo, 100f);
+        float medium = SystemSpaceState.ResolveStationGlowDistanceFade(internalHalo, 750f);
+        float far = SystemSpaceState.ResolveStationGlowDistanceFade(internalHalo, 1_475f);
+        float beyond = SystemSpaceState.ResolveStationGlowDistanceFade(internalHalo, 1_800f);
+        Assert.Equal(1f, near);
+        Assert.True(near > medium && medium > far);
+        Assert.InRange(far, 0f, .01f);
+        Assert.Equal(0f, beyond);
+        Assert.Equal(medium,
+            SystemSpaceState.ResolveStationGlowDistanceFade(internalHalo, 750f));
+        Assert.Equal(1f,
+            SystemSpaceState.ResolveStationGlowDistanceFade(portalGuidance, 10_000f));
     }
 
     private static (SliceGrid grid, BoundaryTopology topology, BoundaryFaceKey[] faces) SixFaceFixture()

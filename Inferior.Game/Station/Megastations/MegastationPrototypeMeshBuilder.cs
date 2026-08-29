@@ -118,7 +118,8 @@ public static class MegastationPrototypeMeshBuilder
         MegastationPrototypeSettings? settings = null,
         long topologyBuildMilliseconds = 0,
         MegastationSemanticZoningResult? semanticZoning = null,
-        MegastationSystemMaterialAssignment? materialAssignment = null)
+        MegastationSystemMaterialAssignment? materialAssignment = null,
+        MegastationInteriorPlan? interiorPlan = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
         var stopwatch = new Stopwatch();
@@ -154,6 +155,7 @@ public static class MegastationPrototypeMeshBuilder
         int bevelQuads = AddBevels(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         int cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         mesh.ApplyIlluminationFlags();
+        ApplyInteriorIllumination(mesh, topology, occupancy.Grid, interiorPlan);
         stopwatch.Stop();
 
         var (_, indices) = mesh.ToIntArrays();
@@ -233,8 +235,12 @@ public static class MegastationPrototypeMeshBuilder
             Vector3 normal = BoundaryTopologyBuilder.Normal(face.Direction);
             if (materialAssignment is { } assignment && semanticZoning != null)
             {
-                SystemMaterialBinding binding = assignment.StructuralBinding(
-                    semanticZoning.ZoneByFace[face.Key]);
+                SystemMaterialBinding binding = face.SpaceKind switch
+                {
+                    MegastationBoundarySpaceKind.EntranceThroatBoundary => assignment.EntranceThroatBinding,
+                    MegastationBoundarySpaceKind.InteriorBoundary => assignment.InteriorStructuralBinding,
+                    _ => assignment.StructuralBinding(semanticZoning.ZoneByFace[face.Key]),
+                };
                 mesh.CurrentMaterialFamily = binding.FamilyId;
                 float tileSize = SystemMaterialRecipes.Get(binding.FamilyId).TileSizeMeters;
                 (Vector3 u, Vector3 v) = CanonicalUvAxes(face.Direction);
@@ -248,6 +254,48 @@ public static class MegastationPrototypeMeshBuilder
             }
         }
         return topology.Faces.Count;
+    }
+
+    private static void ApplyInteriorIllumination(
+        StationModuleMesh mesh,
+        BoundaryTopology topology,
+        SliceGrid grid,
+        MegastationInteriorPlan? plan)
+    {
+        if (plan == null) return;
+        float maximumDepth = MathF.Max(1f, MathF.Max(
+            MathF.Abs(Vector3.Dot(
+                plan.PortalCentre - plan.CavityEnvelope.Minimum,
+                plan.OutwardNormal)),
+            MathF.Abs(Vector3.Dot(
+                plan.PortalCentre - plan.CavityEnvelope.Maximum,
+                plan.OutwardNormal))));
+        for (int faceIndex = 0; faceIndex < topology.Faces.Count; faceIndex++)
+        {
+            BoundaryFace face = topology.Faces[faceIndex];
+            if (face.SpaceKind == MegastationBoundarySpaceKind.ExteriorBoundary) continue;
+            Vector3 centre = face.Vertices
+                .Select(vertex => BoundaryTopologyBuilder.Position(grid, vertex))
+                .Aggregate(Vector3.Zero, (sum, point) => sum + point) * .25f;
+            float depth = MathF.Max(0f, Vector3.Dot(
+                plan.PortalCentre - centre, plan.OutwardNormal));
+            float portalProximity = 1f - MathHelper.Clamp(depth / maximumDepth, 0f, 1f);
+            Vector3 normal = BoundaryTopologyBuilder.Normal(face.Direction);
+            float ceilingCue = MathF.Max(0f, Vector3.Dot(normal, plan.InteriorDownDirection));
+            float floor;
+            if (face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary)
+            {
+                floor = MathHelper.Clamp(.12f + portalProximity * .10f, .10f, .24f);
+            }
+            else
+            {
+                floor = MathHelper.Clamp(
+                    .50f + portalProximity * .18f + ceilingCue * .08f,
+                    .46f,
+                    .88f);
+            }
+            mesh.SetFaceIllumination(faceIndex, floor);
+        }
     }
 
     internal static (Vector3 U, Vector3 V) CanonicalUvAxes(GridDirection direction)

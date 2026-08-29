@@ -141,6 +141,97 @@ public static class MegastationAttachmentPlanner
     private const float MinimumSurfaceSpan = 18f;
     private const float ContactTolerance = 0.02f;
 
+    public static MegastationAttachmentPlan ApplyEntrancePriority(
+        MegastationAttachmentPlan plan,
+        IReadOnlyList<MegastationPlanarRegion> planarRegions,
+        MegastationEntrancePrecinct precinct)
+    {
+        MegastationAttachmentPlacement[] placements = plan.Placements
+            .Where(placement => !precinct.Intersects(placement.AabbMin, placement.AabbMax))
+            .ToArray();
+        HashSet<string> retained = placements
+            .Select(placement => placement.Identity)
+            .ToHashSet(StringComparer.Ordinal);
+        var reservations = plan.Reservations
+            .Where(reservation => retained.Contains(reservation.PlacementIdentity))
+            .ToList();
+        foreach (MegastationPlanarRegion region in planarRegions
+                     .OrderBy(region => region.StableId, StringComparer.Ordinal))
+        {
+            if (!TryEntranceReservation(region, precinct, out MegastationAttachmentReservation reservation))
+                continue;
+            reservations.Add(reservation);
+        }
+
+        int removed = plan.Placements.Count - placements.Length;
+        MegastationAttachmentDiagnostics d = plan.Diagnostics with
+        {
+            PlacedModuleCount = placements.Length,
+            RejectedClearanceCount = plan.Diagnostics.RejectedClearanceCount + removed,
+            HabitationCount = placements.Count(p => p.ZoneRole == MegastationZoneRole.Habitation),
+            IndustrialCount = placements.Count(p => p.ZoneRole == MegastationZoneRole.Industrial),
+            LogisticsCount = placements.Count(p => p.ZoneRole == MegastationZoneRole.Logistics),
+            UtilitiesCount = placements.Count(p => p.ZoneRole == MegastationZoneRole.Utilities),
+            StrategicCount = placements.Count(p => p.ZoneRole == MegastationZoneRole.Strategic),
+            ModuleFamilyCounts = placements
+                .GroupBy(p => ModuleFamily(p.ModuleDefinitionId), StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
+        };
+        return new(plan.CandidateSurfaces, placements, reservations, d);
+    }
+
+    private static bool TryEntranceReservation(
+        MegastationPlanarRegion region,
+        MegastationEntrancePrecinct precinct,
+        out MegastationAttachmentReservation reservation)
+    {
+        Vector3[] corners = BoundsCorners(precinct.Minimum, precinct.Maximum);
+        float planeMin = corners.Min(corner => Vector3.Dot(corner, region.OutwardNormal));
+        float planeMax = corners.Max(corner => Vector3.Dot(corner, region.OutwardNormal));
+        if (region.PlaneCoordinateMetres < planeMin - .1f
+            || region.PlaneCoordinateMetres > planeMax + .1f)
+        {
+            reservation = null!;
+            return false;
+        }
+        float minU = corners.Min(corner => Vector3.Dot(corner, region.TangentU));
+        float maxU = corners.Max(corner => Vector3.Dot(corner, region.TangentU));
+        float minV = corners.Min(corner => Vector3.Dot(corner, region.TangentV));
+        float maxV = corners.Max(corner => Vector3.Dot(corner, region.TangentV));
+        if (maxU <= region.MinU || minU >= region.MaxU
+            || maxV <= region.MinV || minV >= region.MaxV)
+        {
+            reservation = null!;
+            return false;
+        }
+        reservation = new(
+            $"interior/entrance-precinct/{region.StableId}",
+            region.Direction,
+            region.PlaneCoordinateMetres,
+            region.OutwardNormal,
+            region.TangentU,
+            region.TangentV,
+            MathF.Max(minU, region.MinU),
+            MathF.Min(maxU, region.MaxU),
+            MathF.Max(minV, region.MinV),
+            MathF.Min(maxV, region.MaxV));
+        return true;
+    }
+
+    private static Vector3[] BoundsCorners(Vector3 minimum, Vector3 maximum)
+        =>
+        [
+            new(minimum.X, minimum.Y, minimum.Z),
+            new(maximum.X, minimum.Y, minimum.Z),
+            new(minimum.X, maximum.Y, minimum.Z),
+            new(maximum.X, maximum.Y, minimum.Z),
+            new(minimum.X, minimum.Y, maximum.Z),
+            new(maximum.X, minimum.Y, maximum.Z),
+            new(minimum.X, maximum.Y, maximum.Z),
+            new(maximum.X, maximum.Y, maximum.Z),
+        ];
+
     public static MegastationAttachmentPlan Plan(
         SliceGrid grid,
         StructuralOccupancy occupancy,

@@ -60,6 +60,13 @@ public enum BoundaryVertexClass
     NonManifold,
 }
 
+public enum MegastationBoundarySpaceKind
+{
+    ExteriorBoundary,
+    EntranceThroatBoundary,
+    InteriorBoundary,
+}
+
 public enum ChamferEligibility
 {
     Ineligible,
@@ -75,7 +82,8 @@ public sealed record BoundaryFace(
     GridVertexKey[] Vertices,
     BoundaryEdgeKey[] Edges,
     MegacellOwner Owner,
-    string RegionId);
+    string RegionId,
+    MegastationBoundarySpaceKind SpaceKind);
 
 public sealed record BoundaryEdgeSegment(
     BoundaryEdgeKey Key,
@@ -235,10 +243,27 @@ public static class BoundaryTopologyBuilder
                 vertices,
                 edges,
                 occupancy.Owner(x, y, z),
-                occupancy.RegionId(x, y, z) ?? string.Empty));
+                occupancy.RegionId(x, y, z) ?? string.Empty,
+                BoundarySpaceKind(occupancy, x, y, z, direction)));
         }
 
         return faces.OrderBy(f => f.Key).ToArray();
+    }
+
+    private static MegastationBoundarySpaceKind BoundarySpaceKind(
+        StructuralOccupancy occupancy,
+        int x,
+        int y,
+        int z,
+        GridDirection direction)
+    {
+        var (dx, dy, dz) = Direction.Offset(direction);
+        return occupancy.VoidKind(x + dx, y + dy, z + dz) switch
+        {
+            MegacellVoidKind.EntranceThroat => MegastationBoundarySpaceKind.EntranceThroatBoundary,
+            MegacellVoidKind.InteriorFlightVolume => MegastationBoundarySpaceKind.InteriorBoundary,
+            _ => MegastationBoundarySpaceKind.ExteriorBoundary,
+        };
     }
 
     private static GridVertexKey[] FaceVertices(int x, int y, int z, GridDirection d)

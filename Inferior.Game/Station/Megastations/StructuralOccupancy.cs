@@ -19,11 +19,19 @@ public enum MegacellOwner : byte
     TopologyRegularisation,
 }
 
+public enum MegacellVoidKind : byte
+{
+    None,
+    EntranceThroat,
+    InteriorFlightVolume,
+}
+
 public sealed class StructuralOccupancy
 {
     private readonly MegacellFlags[] _cells;
     private readonly MegacellOwner[] _owners;
     private readonly string?[] _regionIds;
+    private readonly MegacellVoidKind[] _voidKinds;
 
     public StructuralOccupancy(SliceGrid grid)
     {
@@ -31,6 +39,7 @@ public sealed class StructuralOccupancy
         _cells = new MegacellFlags[grid.CellCount];
         _owners = new MegacellOwner[grid.CellCount];
         _regionIds = new string?[grid.CellCount];
+        _voidKinds = new MegacellVoidKind[grid.CellCount];
     }
 
     public SliceGrid Grid { get; }
@@ -42,6 +51,7 @@ public sealed class StructuralOccupancy
     public int EdgeRegionOccupiedCount => CountOwner(MegacellOwner.EdgeRegion);
     public int CornerRegionOccupiedCount => CountOwner(MegacellOwner.CornerRegion);
     public int TopologyRegularisationOccupiedCount => CountOwner(MegacellOwner.TopologyRegularisation);
+    public int ProtectedVoidCellCount => _voidKinds.Count(kind => kind != MegacellVoidKind.None);
 
     public MegacellFlags this[int x, int y, int z]
     {
@@ -60,6 +70,9 @@ public sealed class StructuralOccupancy
 
     public MegacellOwner Owner(int x, int y, int z) => _owners[Grid.Index(x, y, z)];
     public string? RegionId(int x, int y, int z) => _regionIds[Grid.Index(x, y, z)];
+    public MegacellVoidKind VoidKind(int x, int y, int z)
+        => Grid.Contains(x, y, z) ? _voidKinds[Grid.Index(x, y, z)] : MegacellVoidKind.None;
+    public bool IsProtectedVoid(int x, int y, int z) => VoidKind(x, y, z) != MegacellVoidKind.None;
 
     public StructuralOccupancy Clone()
     {
@@ -71,6 +84,7 @@ public sealed class StructuralOccupancy
         Array.Copy(_cells, clone._cells, _cells.Length);
         Array.Copy(_owners, clone._owners, _owners.Length);
         Array.Copy(_regionIds, clone._regionIds, _regionIds.Length);
+        Array.Copy(_voidKinds, clone._voidKinds, _voidKinds.Length);
         return clone;
     }
 
@@ -85,6 +99,8 @@ public sealed class StructuralOccupancy
     public void MarkStructural(int x, int y, int z)
     {
         int index = Grid.Index(x, y, z);
+        if (_voidKinds[index] != MegacellVoidKind.None)
+            throw new InvalidOperationException($"Protected void cell ({x},{y},{z}) cannot be refilled as structure.");
         var current = this[x, y, z];
         if ((current & MegacellFlags.Structural) == 0) StructuralOccupiedCount++;
         this[x, y, z] = current | MegacellFlags.Structural;
@@ -98,6 +114,8 @@ public sealed class StructuralOccupancy
             throw new ArgumentException("Urban occupancy requires a generated region owner.", nameof(owner));
 
         int index = Grid.Index(x, y, z);
+        if (_voidKinds[index] != MegacellVoidKind.None)
+            throw new InvalidOperationException($"Protected void cell ({x},{y},{z}) cannot be refilled as urban mass.");
         var current = this[x, y, z];
         if ((current & (MegacellFlags.Structural | MegacellFlags.Urban)) == 0) UrbanOccupiedCount++;
         else if ((current & MegacellFlags.Urban) != 0 && _owners[index] != owner)
@@ -111,6 +129,26 @@ public sealed class StructuralOccupancy
 
     public void MarkTopologyRegularisation(int x, int y, int z, string? regionId = null)
         => MarkUrban(x, y, z, MegacellOwner.TopologyRegularisation, regionId ?? "topology-regularisation");
+
+    public bool ProtectEmpty(int x, int y, int z, MegacellVoidKind kind)
+    {
+        if (kind == MegacellVoidKind.None)
+            throw new ArgumentException("A protected empty cell requires a semantic void kind.", nameof(kind));
+        if (!Grid.Contains(x, y, z))
+            throw new ArgumentOutOfRangeException(nameof(x), "Protected void must lie inside the slice grid.");
+
+        int index = Grid.Index(x, y, z);
+        MegacellFlags current = _cells[index];
+        bool removed = (current & (MegacellFlags.Structural | MegacellFlags.Urban)) != 0;
+        if ((current & MegacellFlags.Structural) != 0) StructuralOccupiedCount--;
+        if ((current & MegacellFlags.Urban) != 0) UrbanOccupiedCount--;
+        _cells[index] = current & ~(MegacellFlags.Structural | MegacellFlags.Urban | MegacellFlags.ExternallyAccessible);
+        _owners[index] = MegacellOwner.None;
+        _regionIds[index] = null;
+        if (_voidKinds[index] == MegacellVoidKind.None || kind == MegacellVoidKind.InteriorFlightVolume)
+            _voidKinds[index] = kind;
+        return removed;
+    }
 
     public void ClearExternalFlags()
     {

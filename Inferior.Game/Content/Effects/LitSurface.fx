@@ -69,6 +69,12 @@ float    SpecularShininess;
 // neutral MaterialMap is a flat 1x1 texture, so ddx/ddy of its sampled height is always
 // exactly zero no matter what BumpStrength is).
 float    BumpStrength;
+// Explicit per-draw opt-in. H1 structural vertices use alpha as an artificial
+// readability floor; every established DynamicLit caller leaves this at zero.
+float    VertexIlluminationScale;
+// Render-only coplanar presentation offset. H1b's constructed liner occupies the exact
+// protected-volume boundary without consuming physical clearance. Zero elsewhere.
+float    PresentationDepthBias;
 
 float4x4 ModuleToStationLocal;
 float4x4 StationLocalToLightView;
@@ -158,6 +164,7 @@ VertexOutput VS(VertexInput input)
     float4 worldPos = mul(input.Position, World);
     float4 viewPos  = mul(worldPos, View);
     o.Position    = mul(viewPos, Projection);
+    o.Position.z -= PresentationDepthBias * o.Position.w;
     o.WorldNormal = normalize(mul(input.Normal, (float3x3)World));
     o.Color       = input.Color;
     o.TexCoord    = input.TexCoord;
@@ -416,7 +423,8 @@ float4 PS_DynamicLit(VertexOutput input) : COLOR0
     float3 n = PerturbNormalFromHeight(normalize(input.WorldNormal), input.RenderPos, material.r, BumpStrength);
 
     float  nl  = saturate(dot(n, SunDirection));
-    float3 lit = Ambient + SunColour * nl * EclipseFactor;
+    float  artificialFloor = input.Color.a * VertexIlluminationScale;
+    float3 lit = max(Ambient + SunColour * nl * EclipseFactor, artificialFloor.xxx);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
@@ -444,7 +452,8 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
     if (ShadowBinaryView > 0.5)
         return float4(shadow, shadow, shadow, 1.0);
 
-    float3 lit = Ambient + SunColour * nl * shadow * EclipseFactor;
+    float  artificialFloor = input.Color.a * VertexIlluminationScale;
+    float3 lit = max(Ambient + SunColour * nl * shadow * EclipseFactor, artificialFloor.xxx);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;

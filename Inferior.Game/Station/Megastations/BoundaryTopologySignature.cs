@@ -26,6 +26,7 @@ public static class BoundaryTopologySignatureBuilder
             writer.WriteInt32((int)face.Key.Direction);
             writer.WriteByte((byte)face.Owner);
             writer.WriteString(face.RegionId);
+            writer.WriteInt32((int)face.SpaceKind);
         }
 
         writer.WriteInt32(topology.EdgeSegments.Count);

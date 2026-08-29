@@ -87,6 +87,7 @@ public sealed partial class SystemSpaceState
             MegastationFabricDiagnostics? megastationFabricDiagnostics,
             MegastationServiceChannelDiagnostics? megastationServiceChannelDiagnostics,
             MegastationSystemMaterialDiagnostics? megastationSystemMaterialDiagnostics,
+            MegastationInteriorPlan? megastationInterior,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -107,6 +108,7 @@ public sealed partial class SystemSpaceState
             MegastationFabricDiagnostics = megastationFabricDiagnostics;
             MegastationServiceChannelDiagnostics = megastationServiceChannelDiagnostics;
             MegastationSystemMaterialDiagnostics = megastationSystemMaterialDiagnostics;
+            MegastationInterior = megastationInterior;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -128,6 +130,7 @@ public sealed partial class SystemSpaceState
         public MegastationFabricDiagnostics? MegastationFabricDiagnostics { get; }
         public MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics { get; }
         public MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics { get; }
+        public MegastationInteriorPlan? MegastationInterior { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -241,6 +244,7 @@ public sealed partial class SystemSpaceState
             {
                 module.Mesh = null;
                 module.HullMesh = null;
+                module.HullShadowMesh = null;
                 module.GlassMesh = null;
                 module.HullMaterialRanges = [];
                 module.DecorationMaterialRanges = [];
@@ -724,6 +728,7 @@ public sealed partial class SystemSpaceState
             generation.MegastationFabricDiagnostics,
             generation.MegastationServiceChannelDiagnostics,
             generation.MegastationSystemMaterialDiagnostics,
+            generation.MegastationInterior,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -972,6 +977,10 @@ public sealed partial class SystemSpaceState
                 PublishMegastationPrototypeDiagnostics(
                     diagnostics,
                     MegastationPrototypeSettings.DevelopmentSelection.Mode);
+            if (package.MegastationInterior is { } interior)
+                PublishMegastationInteriorDiagnostics(
+                    package.Descriptor.Identity,
+                    interior.Diagnostics);
             if (package.MegastationSemanticZoning is { } zoning)
                 PublishMegastationSemanticZoningDiagnostics(
                     package.Descriptor.Identity,
@@ -1297,6 +1306,7 @@ public sealed partial class SystemSpaceState
         {
             module.Mesh = null;
             module.HullMesh = null;
+            module.HullShadowMesh = null;
             module.GlassMesh = null;
             module.HullMaterialRanges = [];
             module.DecorationMaterialRanges = [];

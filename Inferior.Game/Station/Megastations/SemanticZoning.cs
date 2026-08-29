@@ -113,10 +113,15 @@ public static class MegastationSemanticZoningBuilder
     {
         var stopwatch = Stopwatch.StartNew();
         var adjacency = BuildAdjacency(topology);
+        BoundaryFace[] exteriorFaces = topology.Faces
+            .Where(face => face.SpaceKind == MegastationBoundarySpaceKind.ExteriorBoundary)
+            .ToArray();
         var anchorByFace = new Dictionary<BoundaryFaceKey, MegastationStructuralAnchor>();
         var repairFaces = new HashSet<BoundaryFaceKey>();
 
-        foreach (BoundaryFace face in topology.Faces.OrderBy(f => f.Key))
+        foreach (BoundaryFace face in topology.Faces
+                     .Where(face => face.SpaceKind == MegastationBoundarySpaceKind.ExteriorBoundary)
+                     .OrderBy(f => f.Key))
         {
             MegastationStructuralAnchor? anchor = DirectAnchor(face, faceGrowth);
             if (anchor == null)
@@ -168,16 +173,19 @@ public static class MegastationSemanticZoningBuilder
                 anchorByFace.Add(key, inherited);
         }
 
-        var preliminaryMetrics = topology.Faces.ToDictionary(
+        var preliminaryMetrics = exteriorFaces.ToDictionary(
             face => face.Key,
             face => BaseMetrics(occupancy, topology, face, anchorByFace[face.Key], adjacency[face.Key]));
         var planarAreas = ComputePlanarConnectedAreas(topology, adjacency, preliminaryMetrics);
-        var surfaces = topology.Faces
+        var surfaces = exteriorFaces
             .OrderBy(face => face.Key)
             .Select(face =>
             {
                 MegastationSurfaceMetrics metric = preliminaryMetrics[face.Key];
-                BoundaryFaceKey[] neighbours = adjacency[face.Key].OrderBy(k => k).ToArray();
+                BoundaryFaceKey[] neighbours = adjacency[face.Key]
+                    .Where(preliminaryMetrics.ContainsKey)
+                    .OrderBy(k => k)
+                    .ToArray();
                 float neighbourProminence = neighbours.Length == 0
                     ? metric.Prominence
                     : neighbours.Average(n => preliminaryMetrics[n].Prominence);
@@ -220,7 +228,7 @@ public static class MegastationSemanticZoningBuilder
             .ToDictionary(role => role, role => zones.Where(zone => zone.Role == role).Sum(zone => zone.TotalPhysicalArea));
         MegastationStructuralAnchor[] anchorsResult = zones.Select(zone => zone.Anchor).ToArray();
         var diagnostics = new MegastationSemanticZoningDiagnostics(
-            topology.Faces.Count,
+            exteriorFaces.Length,
             zones.Length,
             totalArea,
             anchorsResult.Count(a => a.Kind == MegastationStructuralAnchorKind.CoreComponent),
@@ -422,7 +430,7 @@ public static class MegastationSemanticZoningBuilder
         IReadOnlyDictionary<BoundaryFaceKey, MegastationSurfaceMetrics> metrics)
     {
         var result = new Dictionary<BoundaryFaceKey, float>();
-        var unseen = topology.Faces.Select(face => face.Key).ToHashSet();
+        var unseen = metrics.Keys.ToHashSet();
         while (unseen.Count > 0)
         {
             BoundaryFaceKey start = unseen.Min();
@@ -435,7 +443,9 @@ public static class MegastationSemanticZoningBuilder
                 BoundaryFaceKey current = queue.Dequeue();
                 component.Add(current);
                 foreach (BoundaryFaceKey next in adjacency[current].OrderBy(key => key))
-                    if (next.Direction == start.Direction && unseen.Remove(next))
+                    if (metrics.ContainsKey(next)
+                        && next.Direction == start.Direction
+                        && unseen.Remove(next))
                         queue.Enqueue(next);
             }
             float area = component.Sum(face => metrics[face].PhysicalArea);
@@ -541,7 +551,9 @@ public static class MegastationSemanticZoningBuilder
             .ToDictionary(role => role, _ => new List<int>());
         for (int i = 0; i < topology.Faces.Count; i++)
         {
-            MegastationZoneRole role = zoneByFace[topology.Faces[i].Key].Role;
+            MegastationZoneRole role = zoneByFace.TryGetValue(topology.Faces[i].Key, out MegastationSemanticZone? zone)
+                ? zone.Role
+                : MegastationZoneRole.Structural;
             int vertex = i * 4;
             indicesByRole[role].AddRange([vertex, vertex + 2, vertex + 1, vertex, vertex + 3, vertex + 2]);
         }

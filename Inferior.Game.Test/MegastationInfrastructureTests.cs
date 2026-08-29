@@ -24,6 +24,8 @@ public sealed class MegastationInfrastructureTests
             result.Grid,
             result.RegularisedOccupancy,
             reversed);
+        rebuilt = MegastationAttachmentPlanner.ApplyEntrancePriority(
+            rebuilt, reversed, result.InteriorPresentationPlan.Precinct);
 
         Assert.Equal(result.PlanarRegions.Select(RegionSignature), reversed.Select(RegionSignature));
         Assert.True(result.PlanarRegions.Count > result.AttachmentPlan.CandidateSurfaces.Count);

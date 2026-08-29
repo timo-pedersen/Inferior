@@ -176,7 +176,10 @@ public sealed class MegastationWindowTests
         string structuralBefore = MegastationMassingSignatureBuilder.ComputeStructuralSolid(result).Body;
         var rebuilt = new StationModuleMesh();
         MegastationMeshStats rebuiltStats = MegastationPrototypeMeshBuilder.Build(
-            result.RegularisedOccupancy, result.BoundaryTopology, rebuilt);
+            result.RegularisedOccupancy,
+            result.BoundaryTopology,
+            rebuilt,
+            interiorPlan: result.InteriorPlan);
         MegastationSemanticZoningResult rebuiltZoning = MegastationSemanticZoningBuilder.Build(
             result.Diagnostics.RootSeed, result.RegularisedOccupancy, result.BoundaryTopology, result.Faces);
 

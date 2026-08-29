@@ -423,6 +423,14 @@ public sealed class MegastationSystemMaterialAssignment
     public SystemMaterialBinding DefaultStructuralBinding
         => new(SystemMaterialFamilyId.DullStructuralMetal, Palette.DominantTint);
 
+    public SystemMaterialBinding InteriorStructuralBinding
+        => new(SystemMaterialFamilyId.HeavyIndustrialPlate,
+            ProceduralMaterialCpuGenerator.Blend(Palette.DominantTint, Color.Black, .32f));
+
+    public SystemMaterialBinding EntranceThroatBinding
+        => new(SystemMaterialFamilyId.CleanTechnicalAlloy,
+            ProceduralMaterialCpuGenerator.Blend(Palette.AccentTint, Palette.DominantTint, .28f));
+
     private Color TintFor(SystemMaterialFamilyId family) => family switch
     {
         SystemMaterialFamilyId.DullStructuralMetal => Palette.DominantTint,

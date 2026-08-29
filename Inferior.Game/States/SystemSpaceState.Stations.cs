@@ -70,7 +70,7 @@ public sealed partial class SystemSpaceState
         MegastationPrototypeSelectionMode mode)
     {
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
-            $"Megastation Prototype C2 [{mode}] id={d.StationPersistenceId}; build={d.BuildIdentifier}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; topoReg={d.TopologyRegularisationAlgorithmVersion}; boundary={d.BoundaryTopologyAlgorithmVersion}; chamfer={d.StructuralChamferAlgorithmVersion}; path={d.MeshPath}; " +
+            $"Megastation H1 [{mode}] id={d.StationPersistenceId}; build={d.BuildIdentifier}; v={d.GeneratorVersion}; seedCompat={d.SeedCompatibilityVersion}; interior={d.InteriorAlgorithmVersion}; topoReg={d.TopologyRegularisationAlgorithmVersion}; boundary={d.BoundaryTopologyAlgorithmVersion}; chamfer={d.StructuralChamferAlgorithmVersion}; path={d.MeshPath}; " +
             $"seed={d.RootSeed}; slices={d.XSliceCount}x{d.YSliceCount}x{d.ZSliceCount}; " +
             $"cells={d.GridCellCount}; structural={d.StructuralOccupiedCellCount}; rawUrban={d.UrbanOccupiedCellCount}; regularised={d.RegularisedOccupiedCellCount}; repairs+={d.TopologyRepairAddedCellCount}; " +
             $"faces={d.UrbanizedFaceCount}; faceCells={d.FaceRegionOccupiedCellCount}; edgeCells={d.EdgeRegionOccupiedCellCount}; cornerCells={d.CornerRegionOccupiedCellCount}; " +
@@ -81,6 +81,36 @@ public sealed partial class SystemSpaceState
             $"eligible={d.EligibleChamferSegmentCount}; suppressed={d.SuppressedConvexSegmentCount}; runs={d.ChamferRunCount}/{d.SuppressedChamferRunCount}; renderedBevels={d.BevelQuadCount}; renderedCaps={d.CornerCapCount}; chamferSemantic taperOnly/nearZero/missingRetract={d.ChamferSemanticValidation.TaperOnlyRenderedRunCount}/{d.ChamferSemanticValidation.NearZeroAreaRenderedRunCount}/{d.ChamferSemanticValidation.MissingFaceRetractionRunCount}; quads={d.ExposedQuadCount}; " +
             $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; topoMs={d.BoundaryTopologyBuildMilliseconds}; meshMs={d.BoundaryMeshBuildMilliseconds}; genMs={d.GenerationMilliseconds}",
             SystemMessagePriority.NB));
+    }
+
+    private static void PublishMegastationInteriorDiagnostics(
+        string stationIdentity,
+        MegastationInteriorDiagnostics d)
+    {
+        PublishStationResidencyMessage(
+            $"[MegastationInterior] station={stationIdentity}; version={d.AlgorithmVersion}; " +
+            $"count={d.InteriorCount}; portal={d.PortalDirection}; " +
+            $"clear={d.PortalClearWidth:F1}x{d.PortalClearHeight:F1}m; " +
+            $"throatLength={d.ThroatLength:F1}m; " +
+            $"flightClear={d.MainFlightClearSize.X:F1}x{d.MainFlightClearSize.Y:F1}x{d.MainFlightClearSize.Z:F1}m; " +
+            $"protectedCells={d.ProtectedVoidCellCount}; removedCells={d.RemovedStructuralCellCount}; " +
+            $"boundaryFaces=throat:{d.ThroatBoundaryFaceCount},interior:{d.InteriorBoundaryFaceCount}; " +
+            $"structural={d.InteriorStructuralVertexCount}v/{d.InteriorStructuralTriangleCount}t; " +
+            $"portal={d.PortalVisibleVertexCount}v/{d.PortalVisibleTriangleCount}t; " +
+            $"portalCaster={d.PortalCasterVertexCount}v/{d.PortalCasterTriangleCount}t; " +
+            $"guidance=portal:{d.PortalGuidanceElementCount},throat:{d.ThroatGuidanceElementCount}," +
+            $"landmarks:{d.InteriorLandmarkElementCount},glows:{d.GuidanceGlowCount}; " +
+            $"guidanceGeometry={d.GuidanceVisibleVertexCount}v/{d.GuidanceVisibleTriangleCount}t; " +
+            $"constructedThroat=walls:{d.ThroatTubeWallElementCount},crown:{d.ThroatCrownElementCount}," +
+            $"fixtures:{d.ThroatFixtureElementCount},ribs:{d.ThroatRibElementCount}," +
+            $"casters:{d.ThroatCasterElementCount}; " +
+            $"projectedEntrance={d.EntranceProjectionLength:F1}m; " +
+            $"localSkyline={d.EntranceLocalSkylineHeight:F1}m; " +
+            $"skylineFraction={d.EntranceProjectionHeightFraction:P0}; " +
+            $"palette={d.EntrancePaletteIdentity}; precinctReservations={d.EntrancePrecinctReservationCount}; " +
+            $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
+            $"signature={d.Signature}",
+            SystemMessagePriority.NB);
     }
 
     private static void PublishMegastationSemanticZoningDiagnostics(
@@ -483,7 +513,8 @@ public sealed partial class SystemSpaceState
                             proj,
                             MegastationZoneDebugColor(group.Role));
                     }
-                    int semanticIndexCount = zoning.Diagnostics.SurfaceFaceCount * 6;
+                    int semanticIndexCount = ResidentStationVisual.MegastationDiagnostics?.BoundaryFaceCount * 6
+                        ?? zoning.Diagnostics.SurfaceFaceCount * 6;
                     if (semanticIndexCount < hull.ib.IndexCount)
                     {
                         _meshRenderer.DrawDebugFlatColorRange(
@@ -522,7 +553,8 @@ public sealed partial class SystemSpaceState
                                 StationShadowCorrectionLimit, shadowBiasDepth,
                                 _stationShadowBinaryView, _stationShadowDeltaView,
                                 ShadowKernelRadiusFor(_shadowKernelMode),
-                                material.MaterialMap, recipe.BumpStrength);
+                                material.MaterialMap, recipe.BumpStrength,
+                                vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
                         }
                         else
                         {
@@ -532,7 +564,8 @@ public sealed partial class SystemSpaceState
                                 SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                                 recipe.SpecularStrength, recipe.SpecularShininess,
                                 material.Albedo, material.MaterialMap,
-                                recipe.BumpStrength);
+                                recipe.BumpStrength,
+                                vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
                         }
                     }
                 }
@@ -553,14 +586,16 @@ public sealed partial class SystemSpaceState
                         StationShadowCorrectionLimit, shadowBiasDepth,
                         _stationShadowBinaryView, _stationShadowDeltaView,
                         ShadowKernelRadiusFor(_shadowKernelMode),
-                        mod.MaterialInstance, StationBumpStrength);
+                        mod.MaterialInstance, StationBumpStrength,
+                        vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
                 }
                 else
                 {
                     _meshRenderer.DrawDynamicLit(hull.vb, hull.ib, world, view, proj,
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                         specStrength, specShininess,
-                        mod.TextureInstance, mod.MaterialInstance, StationBumpStrength);
+                        mod.TextureInstance, mod.MaterialInstance, StationBumpStrength,
+                        vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
                 }
             }
         }
@@ -639,7 +674,10 @@ public sealed partial class SystemSpaceState
                                 StationShadowCorrectionLimit, shadowBiasDepth,
                                 _stationShadowBinaryView, _stationShadowDeltaView,
                                 ShadowKernelRadiusFor(_shadowKernelMode),
-                                material.MaterialMap, recipe.BumpStrength);
+                                material.MaterialMap, recipe.BumpStrength,
+                                vertexIlluminationScale: mod.UsesDecorationVertexIllumination ? 1f : 0f,
+                                presentationDepthBias: mod.UsesCoplanarStructuralOverlay
+                                    ? H1CoplanarOverlayClipDepthBias : 0f);
                         }
                         else
                         {
@@ -649,7 +687,10 @@ public sealed partial class SystemSpaceState
                                 SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                                 recipe.SpecularStrength, recipe.SpecularShininess,
                                 material.Albedo, material.MaterialMap,
-                                recipe.BumpStrength);
+                                recipe.BumpStrength,
+                                vertexIlluminationScale: mod.UsesDecorationVertexIllumination ? 1f : 0f,
+                                presentationDepthBias: mod.UsesCoplanarStructuralOverlay
+                                    ? H1CoplanarOverlayClipDepthBias : 0f);
                         }
                     }
                     continue;
@@ -727,7 +768,7 @@ public sealed partial class SystemSpaceState
             }
         }
 
-        if (_megastationInfrastructureDebug)
+        if (_megastationInfrastructureDebug || _megastationInteriorDebug)
             DrawMegastationInfrastructureDebugLines();
 
         _effect.TextureEnabled     = false;
@@ -741,12 +782,15 @@ public sealed partial class SystemSpaceState
         _gd.DepthStencilState = DepthStencilState.Default;
     }
 
+    internal const float H1CoplanarOverlayClipDepthBias = .00002f;
+
     internal static bool UsesFullDecorationMeshInPass(PlacedModule module, DetailLevel level)
         => level == DetailLevel.Full
             || (level == DetailLevel.Medium && (module.HasNativeMegastationInfrastructure
                 || module.HasNativeMegastationMegaGreeble
                 || module.HasNativeMegastationFabric
-                || module.HasNativeMegastationServiceChannels));
+                || module.HasNativeMegastationServiceChannels
+                || module.HasNativeMegastationInterior));
 
     private void DrawMegastationInfrastructureDebugLines()
     {
@@ -766,17 +810,26 @@ public sealed partial class SystemSpaceState
                 * Matrix.CreateTranslation(renderPosition);
             foreach (PlacedModule module in ResidentStationVisual!.Modules)
             {
-                VertexPositionColor[]? lines = module.NativeInfrastructureDebugLines
-                    ?? module.NativeMegaGreebleDebugLines
-                    ?? module.NativeFabricDebugLines
-                    ?? module.NativeServiceChannelDebugLines;
-                if (lines is not { Length: > 1 })
-                    continue;
-                foreach (EffectPass pass in _effect.CurrentTechnique.Passes)
+                if (_megastationInfrastructureDebug)
                 {
-                    pass.Apply();
-                    _gd.DrawUserPrimitives(PrimitiveType.LineList, lines, 0, lines.Length / 2);
+                    VertexPositionColor[]? detailLines = module.NativeInfrastructureDebugLines
+                        ?? module.NativeMegaGreebleDebugLines
+                        ?? module.NativeFabricDebugLines
+                        ?? module.NativeServiceChannelDebugLines;
+                    DrawLines(detailLines);
                 }
+                if (_megastationInteriorDebug)
+                    DrawLines(module.NativeInteriorDebugLines);
+            }
+        }
+
+        void DrawLines(VertexPositionColor[]? lines)
+        {
+            if (lines is not { Length: > 1 }) return;
+            foreach (EffectPass pass in _effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                _gd.DrawUserPrimitives(PrimitiveType.LineList, lines, 0, lines.Length / 2);
             }
         }
     }
@@ -902,7 +955,8 @@ public sealed partial class SystemSpaceState
                     Vector2? screen = TargetingSystem.ProjectToScreen(relPos, viewProj, viewport);
                     if (screen == null) continue;
 
-                    float intensity = ComputeGlowIntensity(light);
+                    float intensity = ComputeGlowIntensity(light)
+                        * ResolveStationGlowDistanceFade(light, distance);
                     float baseSize = light.Type switch
                     {
                         StationGen.GlowType.NavigationLight => 1200f,
@@ -910,11 +964,13 @@ public sealed partial class SystemSpaceState
                         StationGen.GlowType.AviationWarning => 800f,
                         StationGen.GlowType.AmbientMarker   => 400f,
                         StationGen.GlowType.DockGuidance    => 600f,   // AmbientMarker x1.5, per Timo's ask
+                        StationGen.GlowType.MegastationEntranceGuidance => 18_000f,
                         _                                   => 400f,
                     };
-                    float size = light.SurfaceNormal != null
-                        ? MegastationGlowSizePixels
-                        : MathHelper.Clamp(baseSize / distance, 6f, 140f);
+                    float size = light.PresentationSizePixels
+                        ?? (light.SurfaceNormal != null
+                            ? MegastationGlowSizePixels
+                            : MathHelper.Clamp(baseSize / distance, 6f, 140f));
                     float scale = size / _navGlowTex.Width;
 
                     if (intensity < 0.01f) continue;
@@ -995,6 +1051,22 @@ public sealed partial class SystemSpaceState
             facing,
             MegastationGlowCameraDepthBiasMeters,
             biasedPosition);
+    }
+
+    internal static float ResolveStationGlowDistanceFade(
+        StationLightInfo light,
+        float cameraDistanceMeters)
+    {
+        if (light.PresentationFadeStartMeters is not { } start
+            || light.PresentationFadeEndMeters is not { } end)
+            return 1f;
+        if (cameraDistanceMeters <= start) return 1f;
+        if (cameraDistanceMeters >= end) return 0f;
+        float range = end - start;
+        if (range <= 0f) return 0f;
+        float t = MathHelper.Clamp((cameraDistanceMeters - start) / range, 0f, 1f);
+        float smooth = t * t * (3f - 2f * t);
+        return 1f - smooth;
     }
 
     private static float ComputeGlowIntensity(StationLightInfo light)
