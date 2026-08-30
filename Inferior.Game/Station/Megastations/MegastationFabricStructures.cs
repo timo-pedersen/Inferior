@@ -406,7 +406,8 @@ public static class MegastationFabricPlanner
     }
 
     private static bool OverlapsG1(Candidate c, MegastationAttachmentPlan plan)
-        => plan.Placements.Any(p => Intersects(c.AabbMin, c.AabbMax, p.AabbMin, p.AabbMax))
+        => plan.EffectiveProtectedVolumes.Any(volume => volume.Intersects(c.AabbMin, c.AabbMax))
+            || plan.Placements.Any(p => Intersects(c.AabbMin, c.AabbMax, p.AabbMin, p.AabbMax))
             || plan.Reservations.Any(r => Vector3.Dot(r.Normal, c.Region.OutwardNormal) > .999f
                 && MathF.Abs(r.PlaneCoordinateMetres - c.Region.PlaneCoordinateMetres) < .2f
                 && Rects(c.MinU, c.MaxU, c.MinV, c.MaxV, r.MinU - 2, r.MaxU + 2, r.MinV - 2, r.MaxV + 2));

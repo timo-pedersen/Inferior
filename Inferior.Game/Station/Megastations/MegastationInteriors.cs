@@ -86,7 +86,11 @@ public sealed record MegastationInteriorDiagnostics(
     float BayClearWidth = 0f,
     float EntranceWidthFraction = 0f,
     float LargeUprightVerticalClearance = 0f,
-    float LargeRolledVerticalClearance = 0f);
+    float LargeRolledVerticalClearance = 0f,
+    float CrownOuterWidth = 0f,
+    float CrownOuterHeight = 0f,
+    float EntranceClearanceMargin = 0f,
+    int EntranceAssemblyRemovedCellCount = 0);
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -103,6 +107,7 @@ public sealed record MegastationInteriorPlan(
     MegastationInteriorVolume ThroatVolume,
     MegastationInteriorVolume MainFlightVolume,
     MegastationInteriorVolume CavityEnvelope,
+    MegastationEntrancePrecinct EntrancePrecinct,
     IReadOnlyList<MegastationProtectedVoidCell> ProtectedCells,
     MegastationInteriorDiagnostics Diagnostics);
 
@@ -179,7 +184,12 @@ public sealed record MegastationEntrancePalette(
 public sealed record MegastationEntrancePrecinct(
     Vector3 Minimum,
     Vector3 Maximum,
+    Vector3 AssemblyMinimum,
+    Vector3 AssemblyMaximum,
     Vector3 OuterMouthCentre,
+    float CrownOuterWidth,
+    float CrownOuterHeight,
+    float ClearanceMargin,
     float LocalObstructionProjection,
     float ProjectionLength,
     float LocalSkylineHeight,
@@ -194,6 +204,11 @@ public sealed record MegastationEntrancePrecinct(
         => point.X >= Minimum.X && point.X <= Maximum.X
             && point.Y >= Minimum.Y && point.Y <= Maximum.Y
             && point.Z >= Minimum.Z && point.Z <= Maximum.Z;
+
+    public bool AssemblyIntersects(Vector3 minimum, Vector3 maximum)
+        => minimum.X < AssemblyMaximum.X && maximum.X > AssemblyMinimum.X
+            && minimum.Y < AssemblyMaximum.Y && maximum.Y > AssemblyMinimum.Y
+            && minimum.Z < AssemblyMaximum.Z && maximum.Z > AssemblyMinimum.Z;
 }
 
 public sealed record MegastationInteriorPresentationPlan(
@@ -416,6 +431,23 @@ public static class MegastationInteriorPlanner
                 ? portalPlane - cavityVolume.Maximum.Component(entranceAxis)
                 : cavityVolume.Minimum.Component(entranceAxis) - portalPlane);
 
+        MegastationEntrancePrecinct entrancePrecinct =
+            MegastationInteriorPresentationPlanner.BuildEntrancePrecinct(
+                siteSeed,
+                portalCentre,
+                normal,
+                right,
+                up,
+                throatVolume,
+                throatWallThickness,
+                occupancy);
+        int assemblyRemoved = ProtectEntranceAssembly(
+            occupancy,
+            entrancePrecinct,
+            protectedCells,
+            cancellationToken);
+        removed += assemblyRemoved;
+
         stopwatch.Stop();
         var diagnostics = new MegastationInteriorDiagnostics(
             AlgorithmVersion,
@@ -435,7 +467,11 @@ public static class MegastationInteriorPlanner
             BayClearWidth: bayClearWidth,
             EntranceWidthFraction: portalClear.X / bayClearWidth,
             LargeUprightVerticalClearance: portalClear.Y - LargeEnvelopeHeight,
-            LargeRolledVerticalClearance: portalClear.Y - LargeEnvelopeWidth);
+            LargeRolledVerticalClearance: portalClear.Y - LargeEnvelopeWidth,
+            CrownOuterWidth: entrancePrecinct.CrownOuterWidth,
+            CrownOuterHeight: entrancePrecinct.CrownOuterHeight,
+            EntranceClearanceMargin: entrancePrecinct.ClearanceMargin,
+            EntranceAssemblyRemovedCellCount: assemblyRemoved);
         var plan = new MegastationInteriorPlan(
             entranceType == MegastationEntranceType.Standard
                 ? $"interior:v{AlgorithmVersion}:{Direction.Id(portalDirection)}"
@@ -453,6 +489,7 @@ public static class MegastationInteriorPlanner
             throatVolume,
             flightVolume,
             cavityVolume,
+            entrancePrecinct,
             protectedCells
                 .OrderBy(pair => pair.Key.X)
                 .ThenBy(pair => pair.Key.Y)
@@ -531,6 +568,38 @@ public static class MegastationInteriorPlanner
         => unchecked((uint)MegastationSeed.Derive(seed, semanticIdentity))
             / (float)uint.MaxValue;
 
+    private static int ProtectEntranceAssembly(
+        StructuralOccupancy occupancy,
+        MegastationEntrancePrecinct precinct,
+        Dictionary<MegacellCoord, MegacellVoidKind> protectedCells,
+        CancellationToken cancellationToken)
+    {
+        SliceGrid grid = occupancy.Grid;
+        int removed = 0;
+        for (int x = 0; x < grid.XCount; x++)
+        for (int y = 0; y < grid.YCount; y++)
+        for (int z = 0; z < grid.ZCount; z++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Vector3 minimum = new(
+                grid.GetCellMinimum(GridAxis.X, x),
+                grid.GetCellMinimum(GridAxis.Y, y),
+                grid.GetCellMinimum(GridAxis.Z, z));
+            Vector3 maximum = new(
+                grid.GetCellMaximum(GridAxis.X, x),
+                grid.GetCellMaximum(GridAxis.Y, y),
+                grid.GetCellMaximum(GridAxis.Z, z));
+            if (!precinct.Intersects(minimum, maximum))
+                continue;
+            if (occupancy.ProtectEmpty(x, y, z, MegacellVoidKind.EntranceThroat))
+                removed++;
+            protectedCells.TryAdd(
+                new MegacellCoord(x, y, z),
+                MegacellVoidKind.EntranceThroat);
+        }
+        return removed;
+    }
+
     private static MegastationInteriorVolume Volume(
         SliceGrid grid,
         GridAxis a, MegastationGridRange ar,
@@ -579,6 +648,13 @@ public static class MegastationInteriorPlanner
 
 public static class MegastationInteriorPresentationPlanner
 {
+    private const float EntranceClearanceMargin = 6f;
+    private const float ApproachPlateDepth = 2.2f;
+    private const float ApproachHousingDepth = 7f;
+    private const float ApproachBarrelDepth = 5f;
+    private const float ApproachEmitterDepth = .9f;
+    private const float ApproachSourceClearance = .15f;
+
     public static Color ApproachUpColour { get; } = new(62, 186, 255);
     public static Color ApproachDownColour { get; } = new(255, 174, 42);
 
@@ -608,7 +684,6 @@ public static class MegastationInteriorPresentationPlanner
 
     public static MegastationInteriorPresentationPlan Plan(
         MegastationInteriorPlan interior,
-        StructuralOccupancy? occupancy = null,
         MegastationSystemMaterialAssignment? materialAssignment = null)
     {
         int portalSeed = MegastationSeed.Derive(interior.Seed, "portal-guidance");
@@ -634,7 +709,7 @@ public static class MegastationInteriorPresentationPlanner
             ReadableStructure(dominant, 76),
             ReadableStructure(secondary, 88),
             ReadableStructure(Color.Lerp(dominant, secondary, .35f), 96));
-        MegastationEntrancePrecinct precinct = BuildEntrancePrecinct(interior, occupancy);
+        MegastationEntrancePrecinct precinct = interior.EntrancePrecinct;
         var elements = new List<MegastationInteriorGuidanceElement>();
         var markers = new List<MegastationInteriorGuidanceMarker>();
         var approachBeams = new List<MegastationApproachGuidanceBeam>(4);
@@ -697,16 +772,32 @@ public static class MegastationInteriorPresentationPlanner
             palette, precinct, elements, markers, approachBeams);
     }
 
-    private static MegastationEntrancePrecinct BuildEntrancePrecinct(
-        MegastationInteriorPlan interior,
+    public static MegastationEntrancePrecinct BuildEntrancePrecinct(
+        int interiorSeed,
+        Vector3 portalCentre,
+        Vector3 outwardNormal,
+        Vector3 portalRight,
+        Vector3 portalUp,
+        MegastationInteriorVolume throatVolume,
+        float wallThickness,
         StructuralOccupancy? occupancy)
     {
-        const float skylineLateralMargin = 65f;
         const float approachLength = 90f;
         const float minimumProjection = 55f;
-        float halfWidth = interior.PortalClearSize.X * .5f;
-        float halfHeight = interior.PortalClearSize.Y * .5f;
-        float portalProjection = Vector3.Dot(interior.PortalCentre, interior.OutwardNormal);
+        float structuralVoidWidth = throatVolume.Size.ComponentAlong(portalRight);
+        float structuralVoidHeight = throatVolume.Size.ComponentAlong(portalUp);
+        float clearWidth = structuralVoidWidth - wallThickness * 2f;
+        float clearHeight = structuralVoidHeight - wallThickness * 2f;
+        float crownMember = MathHelper.Clamp(
+            MathF.Min(clearWidth, clearHeight) * .17f,
+            20f,
+            30f);
+        float crownDepth = MathHelper.Clamp(crownMember * 1.35f, 28f, 42f);
+        float crownOuterWidth = structuralVoidWidth + crownMember * 2f;
+        float crownOuterHeight = structuralVoidHeight + crownMember * 2f;
+        float protectedHalfWidth = crownOuterWidth * .5f + EntranceClearanceMargin;
+        float protectedHalfHeight = crownOuterHeight * .5f + EntranceClearanceMargin;
+        float portalProjection = Vector3.Dot(portalCentre, outwardNormal);
         float obstructionProjection = portalProjection;
 
         if (occupancy != null)
@@ -728,16 +819,16 @@ public static class MegastationInteriorPresentationPlanner
                 Vector3 centre = (minimum + maximum) * .5f;
                 Vector3 half = (maximum - minimum) * .5f;
                 float lateralRight = MathF.Abs(Vector3.Dot(
-                    centre - interior.PortalCentre, interior.PortalRight));
+                    centre - portalCentre, portalRight));
                 float lateralUp = MathF.Abs(Vector3.Dot(
-                    centre - interior.PortalCentre, interior.PortalUp));
-                float cellRight = half.ComponentAlong(interior.PortalRight);
-                float cellUp = half.ComponentAlong(interior.PortalUp);
-                if (lateralRight - cellRight > halfWidth + skylineLateralMargin
-                    || lateralUp - cellUp > halfHeight + skylineLateralMargin)
+                    centre - portalCentre, portalUp));
+                float cellRight = half.ComponentAlong(portalRight);
+                float cellUp = half.ComponentAlong(portalUp);
+                if (lateralRight - cellRight > protectedHalfWidth
+                    || lateralUp - cellUp > protectedHalfHeight)
                     continue;
-                float outwardExtent = Vector3.Dot(centre, interior.OutwardNormal)
-                    + half.ComponentAlong(interior.OutwardNormal);
+                float outwardExtent = Vector3.Dot(centre, outwardNormal)
+                    + half.ComponentAlong(outwardNormal);
                 if (outwardExtent >= portalProjection)
                     obstructionProjection = MathF.Max(obstructionProjection, outwardExtent);
             }
@@ -745,23 +836,48 @@ public static class MegastationInteriorPresentationPlanner
 
         float skylineHeight = MathF.Max(0f, obstructionProjection - portalProjection);
         float projectionHeightFraction = MathHelper.Lerp(.25f, .75f,
-            Sample(interior.Seed, "entrance-projection-height:v1"));
+            Sample(interiorSeed, "entrance-projection-height:v1"));
         float projectionLength = MathF.Max(
             minimumProjection,
             skylineHeight * projectionHeightFraction);
-        Vector3 mouth = interior.PortalCentre + interior.OutwardNormal * projectionLength;
+        Vector3 mouth = portalCentre + outwardNormal * projectionLength;
         float corridorStart = -24f;
-        float corridorEnd = projectionLength + approachLength;
+        // Clear through every local obstruction in front of the crown, even when
+        // the accepted partial skyline embedding leaves the mouth below that peak.
+        // This keeps the approach fixtures and the first visible beam segment out
+        // of surviving structural mass without changing entrance elevation.
+        float corridorEnd = MathF.Max(
+            projectionLength + approachLength,
+            skylineHeight + EntranceClearanceMargin);
         float corridorLength = corridorEnd - corridorStart;
-        Vector3 corridorCentre = interior.PortalCentre
-            + interior.OutwardNormal * ((corridorStart + corridorEnd) * .5f);
-        Vector3 boundsHalf = Abs(interior.PortalRight) * (halfWidth + skylineLateralMargin)
-            + Abs(interior.PortalUp) * (halfHeight + skylineLateralMargin)
-            + Abs(interior.OutwardNormal) * (corridorLength * .5f);
+        Vector3 corridorCentre = portalCentre
+            + outwardNormal * ((corridorStart + corridorEnd) * .5f);
+        Vector3 boundsHalf = Abs(portalRight) * protectedHalfWidth
+            + Abs(portalUp) * protectedHalfHeight
+            + Abs(outwardNormal) * (corridorLength * .5f);
+
+        // The crown is the lateral authority. Axially, include the complete crown and
+        // its four fixed approach fixtures, plus the same restrained safety margin.
+        const float approachFixtureDepth = ApproachPlateDepth + ApproachHousingDepth
+            + ApproachBarrelDepth + ApproachEmitterDepth + ApproachSourceClearance;
+        float assemblyStart = projectionLength - crownDepth * .15f - EntranceClearanceMargin;
+        float assemblyEnd = projectionLength + crownDepth * .85f
+            + approachFixtureDepth + EntranceClearanceMargin;
+        float assemblyLength = assemblyEnd - assemblyStart;
+        Vector3 assemblyCentre = portalCentre
+            + outwardNormal * ((assemblyStart + assemblyEnd) * .5f);
+        Vector3 assemblyHalf = Abs(portalRight) * protectedHalfWidth
+            + Abs(portalUp) * protectedHalfHeight
+            + Abs(outwardNormal) * (assemblyLength * .5f);
         return new(
             corridorCentre - boundsHalf,
             corridorCentre + boundsHalf,
+            assemblyCentre - assemblyHalf,
+            assemblyCentre + assemblyHalf,
             mouth,
+            crownOuterWidth,
+            crownOuterHeight,
+            EntranceClearanceMargin,
             obstructionProjection,
             projectionLength,
             skylineHeight,
@@ -1095,10 +1211,10 @@ public static class MegastationInteriorPresentationPlanner
 
         void AddCrown()
         {
-            float member = MathHelper.Clamp(MathF.Min(width, height) * .17f, 20f, 30f);
+            float member = (precinct.CrownOuterWidth - outerWidth) * .5f;
             float depth = MathHelper.Clamp(member * 1.35f, 28f, 42f);
-            float crownOuterWidth = outerWidth + member * 2f;
-            float crownOuterHeight = outerHeight + member * 2f;
+            float crownOuterWidth = precinct.CrownOuterWidth;
+            float crownOuterHeight = precinct.CrownOuterHeight;
             Vector3 centre = outerEnd + outward * (depth * .35f);
             Add("entrance/crown/left", MegastationInteriorGuidanceKind.ThroatTransition,
                 CreateFrame(right, up, outward, centre - right * (outerWidth * .5f + member * .5f)),
@@ -1155,12 +1271,12 @@ public static class MegastationInteriorPresentationPlanner
                     1.2f,
                     Sample(approachSeed, "half-angle"));
                 float plateSpan = MathHelper.Clamp(member * .52f, 11f, 15f);
-                float plateDepth = 2.2f;
+                float plateDepth = ApproachPlateDepth;
                 float housingSpan = plateSpan * .68f;
-                float housingDepth = 7f;
+                float housingDepth = ApproachHousingDepth;
                 float barrelSpan = housingSpan * .55f;
-                float barrelDepth = 5f;
-                float emitterDepth = .9f;
+                float barrelDepth = ApproachBarrelDepth;
+                float emitterDepth = ApproachEmitterDepth;
                 Vector3 crownFront = centre + outward * (depth * .5f);
                 float cornerRight = outerWidth * .5f + member * .5f;
                 float cornerUp = outerHeight * .5f + member * .5f;
@@ -1183,7 +1299,8 @@ public static class MegastationInteriorPresentationPlanner
                     Vector3 emitterCentre = mountingPoint
                         + outward * (plateDepth + housingDepth + barrelDepth
                             + emitterDepth * .5f);
-                    Vector3 source = emitterCentre + outward * (emitterDepth * .5f + .15f);
+                    Vector3 source = emitterCentre
+                        + outward * (emitterDepth * .5f + ApproachSourceClearance);
 
                     Add($"entrance/approach/fixture:{corner}/mount",
                         MegastationInteriorGuidanceKind.ApproachFixture,
@@ -1534,7 +1651,14 @@ public static class MegastationInteriorSignatureBuilder
             .Append(plan.PortalCentre).Append('|').Append(plan.PortalClearSize).Append('|')
             .Append(plan.ThroatVolume).Append('|')
             .Append(plan.MainFlightVolume).Append('|')
-            .Append(plan.CavityEnvelope);
+            .Append(plan.CavityEnvelope).Append('|')
+            .Append(plan.EntrancePrecinct.Minimum).Append('|')
+            .Append(plan.EntrancePrecinct.Maximum).Append('|')
+            .Append(plan.EntrancePrecinct.AssemblyMinimum).Append('|')
+            .Append(plan.EntrancePrecinct.AssemblyMaximum).Append('|')
+            .Append(plan.EntrancePrecinct.CrownOuterWidth).Append('|')
+            .Append(plan.EntrancePrecinct.CrownOuterHeight).Append('|')
+            .Append(plan.EntrancePrecinct.ClearanceMargin);
         foreach (MegastationProtectedVoidCell cell in plan.ProtectedCells)
             text.Append('|').Append(cell.Cell.X).Append(',').Append(cell.Cell.Y).Append(',')
                 .Append(cell.Cell.Z).Append(':').Append((int)cell.Kind);

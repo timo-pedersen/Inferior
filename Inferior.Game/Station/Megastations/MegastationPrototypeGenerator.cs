@@ -209,7 +209,6 @@ public static class MegastationPrototypeGenerator
         MegastationInteriorPresentationPlan interiorPresentation =
             MegastationInteriorPresentationPlanner.Plan(
                 interiorPlan,
-                regularised.Occupancy,
                 materialAssignment);
         MegastationInteriorMeshBuildResult interiorMesh = MegastationInteriorMeshBuilder.Build(
             interiorPlan,

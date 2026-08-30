@@ -72,6 +72,17 @@ public sealed record MegastationAttachmentPlacement(
     Vector3 AabbMax,
     MegastationAttachmentReservation Reservation);
 
+public sealed record MegastationProtectedVolume(
+    string Identity,
+    Vector3 Minimum,
+    Vector3 Maximum)
+{
+    public bool Intersects(Vector3 minimum, Vector3 maximum)
+        => minimum.X < Maximum.X && maximum.X > Minimum.X
+            && minimum.Y < Maximum.Y && maximum.Y > Minimum.Y
+            && minimum.Z < Maximum.Z && maximum.Z > Minimum.Z;
+}
+
 public sealed record MegastationAttachmentDiagnostics(
     int CandidateSurfaceCount,
     int SelectedCandidateCount,
@@ -94,7 +105,12 @@ public sealed record MegastationAttachmentPlan(
     IReadOnlyList<MegastationAttachmentSurface> CandidateSurfaces,
     IReadOnlyList<MegastationAttachmentPlacement> Placements,
     IReadOnlyList<MegastationAttachmentReservation> Reservations,
-    MegastationAttachmentDiagnostics Diagnostics);
+    MegastationAttachmentDiagnostics Diagnostics,
+    IReadOnlyList<MegastationProtectedVolume>? ProtectedVolumes = null)
+{
+    public IReadOnlyList<MegastationProtectedVolume> EffectiveProtectedVolumes
+        => ProtectedVolumes ?? [];
+}
 
 public static class MegastationAttachmentTransform
 {
@@ -178,7 +194,15 @@ public static class MegastationAttachmentPlanner
                 .OrderBy(group => group.Key, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal),
         };
-        return new(plan.CandidateSurfaces, placements, reservations, d);
+        return new(
+            plan.CandidateSurfaces,
+            placements,
+            reservations,
+            d,
+            [new MegastationProtectedVolume(
+                "interior/entrance-precinct",
+                precinct.Minimum,
+                precinct.Maximum)]);
     }
 
     private static bool TryEntranceReservation(

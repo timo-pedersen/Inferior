@@ -94,6 +94,9 @@ public sealed partial class SystemSpaceState
             $"bayWidth={d.BayClearWidth:F1}m; widthFraction={d.EntranceWidthFraction:P0}; " +
             $"largeClearance=upright:{d.LargeUprightVerticalClearance:F1}m," +
             $"rolled90:{d.LargeRolledVerticalClearance:F1}m; " +
+            $"crown={d.CrownOuterWidth:F1}x{d.CrownOuterHeight:F1}m; " +
+            $"entranceMargin={d.EntranceClearanceMargin:F1}m; " +
+            $"assemblyClearedCells={d.EntranceAssemblyRemovedCellCount}; " +
             $"throatLength={d.ThroatLength:F1}m; " +
             $"flightClear={d.MainFlightClearSize.X:F1}x{d.MainFlightClearSize.Y:F1}x{d.MainFlightClearSize.Z:F1}m; " +
             $"protectedCells={d.ProtectedVoidCellCount}; removedCells={d.RemovedStructuralCellCount}; " +

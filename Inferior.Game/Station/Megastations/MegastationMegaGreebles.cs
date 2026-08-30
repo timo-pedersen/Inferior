@@ -428,10 +428,12 @@ public static class MegastationMegaGreeblePlanner
 
     private static bool OverlapsG1(Candidate c, MegastationAttachmentPlan plan)
     {
+        (Vector3 min, Vector3 max) = Bounds(c);
+        if (plan.EffectiveProtectedVolumes.Any(volume => volume.Intersects(min, max)))
+            return true;
         if (plan.Reservations.Any(r => Coplanar(c, r.Normal, r.PlaneCoordinateMetres)
             && Rects(c.MinU, c.MaxU, c.MinV, c.MaxV, r.MinU - 3f, r.MaxU + 3f, r.MinV - 3f, r.MaxV + 3f)))
             return true;
-        (Vector3 min, Vector3 max) = Bounds(c);
         return plan.Placements.Any(p => AabbIntersects(min,max,p.AabbMin,p.AabbMax));
     }
 

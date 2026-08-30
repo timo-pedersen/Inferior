@@ -679,6 +679,10 @@ public static class MegastationInfrastructurePlanner
 
     private static bool OverlapsG1(Candidate candidate, MegastationAttachmentPlan plan)
     {
+        if (plan.EffectiveProtectedVolumes.Any(volume => volume.Intersects(
+                candidate.AabbMin,
+                candidate.AabbMax)))
+            return true;
         foreach (MegastationAttachmentReservation reservation in plan.Reservations)
         {
             if (Vector3.Dot(reservation.Normal, candidate.Region.OutwardNormal) < 0.999f

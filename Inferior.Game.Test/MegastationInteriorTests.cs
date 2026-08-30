@@ -35,7 +35,7 @@ public sealed class MegastationInteriorTests
         MegastationPrototypeCpuResult result = NovaResult.Value;
         Assert.Equal(MegastationEntranceType.Standard, result.InteriorPlan.EntranceType);
         Assert.Equal(
-            "975B42A249B3F861917E9AA0863C206B4CFE63D305A9BF4DD54E47A74C43927A",
+            "FFC928024C07BDA30BADE311F5FA86DDFA26EA35EA8253C98840FE02FE7AAC31",
             result.InteriorPlan.Diagnostics.Signature);
         Assert.InRange(result.InteriorPlan.PortalClearSize.X, 163.6f, 163.8f);
         Assert.InRange(result.InteriorPlan.PortalClearSize.Y, 125.6f, 125.8f);
@@ -84,12 +84,106 @@ public sealed class MegastationInteriorTests
         Assert.Equal(4, presentation.ApproachBeams.Count);
         Assert.Equal(16, presentation.ApproachFixtureElementCount);
         Assert.True(presentation.ThroatFixtureCount >= 20);
-        Assert.True(result.InteriorPlan.Diagnostics.EntrancePrecinctReservationCount > 0);
+        Assert.Contains(result.AttachmentPlan.EffectiveProtectedVolumes,
+            volume => volume.Identity == "interior/entrance-precinct");
         Assert.All(presentation.ApproachBeams, beam =>
             Assert.True(Vector3.Dot(beam.Axis, result.InteriorPlan.OutwardNormal) > .9999f));
         PlacedModule module = MegastationPrototypeGenerator.CreateInteriorModule(result);
         Assert.Null(module.TextureInstance);
         Assert.Null(module.MaterialInstance);
+    }
+
+    [Fact]
+    public void CompleteEntranceAssemblyIsContainedByStandardAndGrandPrecincts()
+    {
+        foreach (MegastationPrototypeCpuResult result in new[]
+                 {
+                     NovaResult.Value,
+                     GrandResult.Value,
+                 })
+        {
+            MegastationInteriorPlan interior = result.InteriorPlan;
+            MegastationEntrancePrecinct precinct = interior.EntrancePrecinct;
+            Assert.Equal(precinct, result.InteriorPresentationPlan.Precinct);
+            Assert.True(precinct.ClearanceMargin > 0f);
+
+            MegastationInteriorGuidanceElement[] crown = result.InteriorPresentationPlan.Elements
+                .Where(element => element.Identity.StartsWith(
+                    "entrance/crown/", StringComparison.Ordinal)
+                    && element.Kind == MegastationInteriorGuidanceKind.ThroatTransition)
+                .ToArray();
+            Assert.Equal(4, crown.Length);
+            Vector3[] crownCorners = crown.SelectMany(ElementCorners).ToArray();
+            float crownWidth = AxisSpan(crownCorners, interior.PortalRight);
+            float crownHeight = AxisSpan(crownCorners, interior.PortalUp);
+            Assert.Equal(precinct.CrownOuterWidth, crownWidth, 3);
+            Assert.Equal(precinct.CrownOuterHeight, crownHeight, 3);
+
+            MegastationInteriorGuidanceElement[] assembly = result.InteriorPresentationPlan.Elements
+                .Where(element => element.Identity.StartsWith(
+                    "entrance/crown/", StringComparison.Ordinal)
+                    || element.Identity.StartsWith(
+                        "entrance/approach/fixture:", StringComparison.Ordinal))
+                .ToArray();
+            Assert.NotEmpty(assembly);
+            Assert.All(assembly, element =>
+            {
+                (Vector3 minimum, Vector3 maximum) = ElementBounds(element);
+                AssertBoundsContain(
+                    precinct.AssemblyMinimum,
+                    precinct.AssemblyMaximum,
+                    minimum,
+                    maximum);
+            });
+            Assert.All(result.InteriorPresentationPlan.Markers.Where(marker =>
+                    marker.Identity.StartsWith(
+                        "entrance/approach/source:", StringComparison.Ordinal)),
+                marker => Assert.True(PointInsideBounds(
+                    marker.Position,
+                    precinct.AssemblyMinimum,
+                    precinct.AssemblyMaximum)));
+
+            Vector3 protectedSize = precinct.Maximum - precinct.Minimum;
+            Assert.Equal(
+                precinct.CrownOuterWidth + precinct.ClearanceMargin * 2f,
+                Vector3.Dot(Abs(interior.PortalRight), protectedSize),
+                3);
+            Assert.Equal(
+                precinct.CrownOuterHeight + precinct.ClearanceMargin * 2f,
+                Vector3.Dot(Abs(interior.PortalUp), protectedSize),
+                3);
+        }
+    }
+
+    [Fact]
+    public void StructuralTruthAndExteriorCompositionRespectStandardAndGrandAssemblyClearance()
+    {
+        foreach (MegastationPrototypeCpuResult result in new[]
+                 {
+                     NovaResult.Value,
+                     GrandResult.Value,
+                 })
+        {
+            MegastationEntrancePrecinct precinct = result.InteriorPlan.EntrancePrecinct;
+            SliceGrid grid = result.Grid;
+            for (int x = 0; x < grid.XCount; x++)
+            for (int y = 0; y < grid.YCount; y++)
+            for (int z = 0; z < grid.ZCount; z++)
+            {
+                if (!result.RegularisedOccupancy.IsOccupied(x, y, z)) continue;
+                Vector3 minimum = new(
+                    grid.GetCellMinimum(GridAxis.X, x),
+                    grid.GetCellMinimum(GridAxis.Y, y),
+                    grid.GetCellMinimum(GridAxis.Z, z));
+                Vector3 maximum = new(
+                    grid.GetCellMaximum(GridAxis.X, x),
+                    grid.GetCellMaximum(GridAxis.Y, y),
+                    grid.GetCellMaximum(GridAxis.Z, z));
+                Assert.False(precinct.Intersects(minimum, maximum));
+            }
+            Assert.True(result.InteriorPlan.Diagnostics.EntranceAssemblyRemovedCellCount > 0);
+            AssertExteriorCompositionRespectsPrecinct(result);
+        }
     }
 
     [Fact]
@@ -259,7 +353,7 @@ public sealed class MegastationInteriorTests
     {
         MegastationPrototypeCpuResult result = NovaResult.Value;
         Assert.Equal(
-            "975B42A249B3F861917E9AA0863C206B4CFE63D305A9BF4DD54E47A74C43927A",
+            "FFC928024C07BDA30BADE311F5FA86DDFA26EA35EA8253C98840FE02FE7AAC31",
             result.InteriorPlan.Diagnostics.Signature);
         Assert.Equal(
             "BDF65C8AA6211665A4538F136F6F04C0D6ACE2F0B16166FD6E0BBB7954549C43",
@@ -759,11 +853,11 @@ public sealed class MegastationInteriorTests
     }
 
     [Fact]
-    public void ConstructedThroatDoesNotChangeProtectedClearanceOrStructuralSignatures()
+    public void ConstructedThroatPreservesFlightClearanceAndTracksEntranceStructuralSignature()
     {
         MegastationPrototypeCpuResult result = NovaResult.Value;
         Assert.Equal(
-            "975B42A249B3F861917E9AA0863C206B4CFE63D305A9BF4DD54E47A74C43927A",
+            "FFC928024C07BDA30BADE311F5FA86DDFA26EA35EA8253C98840FE02FE7AAC31",
             result.InteriorPlan.Diagnostics.Signature);
         Assert.Equal(
             "BDF65C8AA6211665A4538F136F6F04C0D6ACE2F0B16166FD6E0BBB7954549C43",
@@ -823,31 +917,7 @@ public sealed class MegastationInteriorTests
         Assert.Equal(4, crown.Length);
         Assert.All(crown, element => Assert.False(
             IntersectsOpenBounds(element, clearMinimum, clearMaximum)));
-        Assert.Contains(result.AttachmentPlan.Reservations, reservation =>
-            reservation.PlacementIdentity.StartsWith(
-                "interior/entrance-precinct/", StringComparison.Ordinal));
-        Assert.All(result.AttachmentPlan.Placements, placement => Assert.False(
-            precinct.Intersects(placement.AabbMin, placement.AabbMax)));
-        Assert.All(result.WindowPlan.Windows, window => Assert.False(
-            precinct.Contains(window.Centre)));
-        Assert.All(result.LightPlan.Lights, light => Assert.False(
-            precinct.Contains(light.SurfacePosition)));
-        Assert.All(result.InfrastructurePlan.Clusters, cluster => Assert.False(
-            precinct.Intersects(cluster.AabbMin, cluster.AabbMax)));
-        Assert.All(result.FabricPlan.Instances, instance => Assert.False(
-            precinct.Intersects(instance.AabbMin, instance.AabbMax)));
-        Assert.All(result.MegaGreeblePlan.Instances, instance => Assert.False(
-            precinct.Contains(instance.SurfacePosition)));
-        Assert.All(result.ServiceChannelPlan.Networks, network =>
-        {
-            Assert.All(network.Runs, run =>
-            {
-                Assert.False(precinct.Contains(ServicePoint(network, run.Start)));
-                Assert.False(precinct.Contains(ServicePoint(network, run.End)));
-            });
-            Assert.All(network.Nodes, node => Assert.False(
-                precinct.Contains(ServicePoint(network, node.Position))));
-        });
+        AssertExteriorCompositionRespectsPrecinct(result);
     }
 
     [Fact]
@@ -947,6 +1017,101 @@ public sealed class MegastationInteriorTests
 
     private static bool IsFinite(Vector3 value)
         => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private static Vector3[] ElementCorners(MegastationInteriorGuidanceElement element)
+    {
+        Vector3 x = new(element.Frame.M11, element.Frame.M12, element.Frame.M13);
+        Vector3 y = new(element.Frame.M21, element.Frame.M22, element.Frame.M23);
+        Vector3 z = new(element.Frame.M31, element.Frame.M32, element.Frame.M33);
+        Vector3 halfX = x * element.Size.X * .5f;
+        Vector3 halfY = y * element.Size.Y * .5f;
+        Vector3 halfZ = z * element.Size.Z * .5f;
+        return
+        [
+            element.Centre - halfX - halfY - halfZ,
+            element.Centre + halfX - halfY - halfZ,
+            element.Centre - halfX + halfY - halfZ,
+            element.Centre + halfX + halfY - halfZ,
+            element.Centre - halfX - halfY + halfZ,
+            element.Centre + halfX - halfY + halfZ,
+            element.Centre - halfX + halfY + halfZ,
+            element.Centre + halfX + halfY + halfZ,
+        ];
+    }
+
+    private static (Vector3 Minimum, Vector3 Maximum) ElementBounds(
+        MegastationInteriorGuidanceElement element)
+    {
+        Vector3[] corners = ElementCorners(element);
+        return (
+            new Vector3(
+                corners.Min(point => point.X),
+                corners.Min(point => point.Y),
+                corners.Min(point => point.Z)),
+            new Vector3(
+                corners.Max(point => point.X),
+                corners.Max(point => point.Y),
+                corners.Max(point => point.Z)));
+    }
+
+    private static float AxisSpan(IEnumerable<Vector3> points, Vector3 axis)
+    {
+        float[] projections = points.Select(point => Vector3.Dot(point, axis)).ToArray();
+        return projections.Max() - projections.Min();
+    }
+
+    private static void AssertBoundsContain(
+        Vector3 outerMinimum,
+        Vector3 outerMaximum,
+        Vector3 innerMinimum,
+        Vector3 innerMaximum)
+    {
+        const float tolerance = .01f;
+        Assert.True(innerMinimum.X >= outerMinimum.X - tolerance);
+        Assert.True(innerMinimum.Y >= outerMinimum.Y - tolerance);
+        Assert.True(innerMinimum.Z >= outerMinimum.Z - tolerance);
+        Assert.True(innerMaximum.X <= outerMaximum.X + tolerance);
+        Assert.True(innerMaximum.Y <= outerMaximum.Y + tolerance);
+        Assert.True(innerMaximum.Z <= outerMaximum.Z + tolerance);
+    }
+
+    private static bool PointInsideBounds(Vector3 point, Vector3 minimum, Vector3 maximum)
+        => point.X >= minimum.X && point.X <= maximum.X
+            && point.Y >= minimum.Y && point.Y <= maximum.Y
+            && point.Z >= minimum.Z && point.Z <= maximum.Z;
+
+    private static void AssertExteriorCompositionRespectsPrecinct(
+        MegastationPrototypeCpuResult result)
+    {
+        MegastationEntrancePrecinct precinct = result.InteriorPlan.EntrancePrecinct;
+        MegastationProtectedVolume protectedVolume = Assert.Single(
+            result.AttachmentPlan.EffectiveProtectedVolumes,
+            volume => volume.Identity == "interior/entrance-precinct");
+        Assert.Equal(precinct.Minimum, protectedVolume.Minimum);
+        Assert.Equal(precinct.Maximum, protectedVolume.Maximum);
+        Assert.All(result.AttachmentPlan.Placements, placement => Assert.False(
+            precinct.Intersects(placement.AabbMin, placement.AabbMax)));
+        Assert.All(result.WindowPlan.Windows, window => Assert.False(
+            precinct.Contains(window.Centre)));
+        Assert.All(result.LightPlan.Lights, light => Assert.False(
+            precinct.Contains(light.SurfacePosition)));
+        Assert.All(result.InfrastructurePlan.Clusters, cluster => Assert.False(
+            precinct.Intersects(cluster.AabbMin, cluster.AabbMax)));
+        Assert.All(result.FabricPlan.Instances, instance => Assert.False(
+            precinct.Intersects(instance.AabbMin, instance.AabbMax)));
+        Assert.All(result.MegaGreeblePlan.Instances, instance => Assert.False(
+            precinct.Contains(instance.SurfacePosition)));
+        Assert.All(result.ServiceChannelPlan.Networks, network =>
+        {
+            Assert.All(network.Runs, run =>
+            {
+                Assert.False(precinct.Contains(ServicePoint(network, run.Start)));
+                Assert.False(precinct.Contains(ServicePoint(network, run.End)));
+            });
+            Assert.All(network.Nodes, node => Assert.False(
+                precinct.Contains(ServicePoint(network, node.Position))));
+        });
+    }
 
     private static float TubeWallThickness(MegastationInteriorPresentationPlan presentation)
         => presentation.Elements.First(element =>
