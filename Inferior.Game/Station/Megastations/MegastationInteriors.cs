@@ -28,6 +28,12 @@ public readonly record struct MegastationProtectedVoidCell(
     MegacellCoord Cell,
     MegacellVoidKind Kind);
 
+public enum MegastationEntranceType
+{
+    Standard,
+    Grand,
+}
+
 public sealed record MegastationInteriorDiagnostics(
     int AlgorithmVersion,
     int InteriorCount,
@@ -75,7 +81,12 @@ public sealed record MegastationInteriorDiagnostics(
     int ApproachBeamVertexCount = 0,
     int ApproachBeamTriangleCount = 0,
     Vector3 EntrancePortalUp = default,
-    Vector3 EntrancePortalRight = default);
+    Vector3 EntrancePortalRight = default,
+    MegastationEntranceType EntranceType = MegastationEntranceType.Standard,
+    float BayClearWidth = 0f,
+    float EntranceWidthFraction = 0f,
+    float LargeUprightVerticalClearance = 0f,
+    float LargeRolledVerticalClearance = 0f);
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -86,6 +97,8 @@ public sealed record MegastationInteriorPlan(
     Vector3 PortalRight,
     Vector3 PortalUp,
     Vector3 InteriorDownDirection,
+    MegastationEntranceType EntranceType,
+    float ThroatWallThickness,
     Vector2 PortalClearSize,
     MegastationInteriorVolume ThroatVolume,
     MegastationInteriorVolume MainFlightVolume,
@@ -229,6 +242,9 @@ public sealed record MegastationInteriorPresentationPlan(
 public static class MegastationInteriorPlanner
 {
     private const int AlgorithmVersion = 1;
+    private const float LargeEnvelopeWidth = 36f;
+    private const float LargeEnvelopeHeight = 20f;
+    private const float GrandSelectionProbability = .32f;
 
     public static MegastationInteriorPlan PlanAndApply(
         StructuralOccupancy occupancy,
@@ -255,10 +271,75 @@ public static class MegastationInteriorPlanner
             grid, widthAxis, cavityWidth, 440f);
         MegastationGridRange flightHeight = CentredSubrange(
             grid, upAxis, cavityHeight, 240f);
-        MegastationGridRange throatWidth = CentredSubrange(
+        MegastationGridRange standardThroatWidth = CentredSubrange(
             grid, widthAxis, flightWidth, 160f);
-        MegastationGridRange throatHeight = CentredSubrange(
+        MegastationGridRange standardThroatHeight = CentredSubrange(
             grid, upAxis, flightHeight, 110f);
+        int morphologySeed = MegastationSeed.Derive(rootSeed, "entrance morphology:v1");
+        float bayClearWidth = Span(grid, widthAxis, flightWidth);
+        float requestedGrandWidthFraction = MathHelper.Lerp(
+            .70f,
+            .95f,
+            Sample(morphologySeed, "grand width fraction"));
+        float requestedGrandHeight = MathHelper.Lerp(
+            40f,
+            46f,
+            Sample(morphologySeed, "grand clear height"));
+
+        // H1's authoritative void remains grid-aligned. The tube wall absorbs the
+        // coarse final slice increment so Grand's rendered clear height can still
+        // follow the documented Large envelope instead of a particular ship mesh.
+        MegastationGridRange grandThroatHeight = CentredSubrange(
+            grid,
+            upAxis,
+            flightHeight,
+            requestedGrandHeight + 32f);
+        float grandStructuralHeight = Span(grid, upAxis, grandThroatHeight);
+        float baseGrandWallThickness = MegastationInteriorPresentationPlanner.ComputeWallThickness(
+            siteSeed,
+            grandStructuralHeight,
+            grandStructuralHeight);
+        float grandWallThickness = MathF.Max(
+            baseGrandWallThickness,
+            (grandStructuralHeight - requestedGrandHeight) * .5f);
+        MegastationGridRange grandThroatWidth = CentredSubrange(
+            grid,
+            widthAxis,
+            flightWidth,
+            bayClearWidth * requestedGrandWidthFraction + grandWallThickness * 2f);
+        float grandStructuralWidth = Span(grid, widthAxis, grandThroatWidth);
+        float grandClearWidth = grandStructuralWidth - grandWallThickness * 2f;
+        float grandClearHeight = grandStructuralHeight - grandWallThickness * 2f;
+        float grandWidthFraction = grandClearWidth / bayClearWidth;
+        float standardStructuralWidth = Span(grid, widthAxis, standardThroatWidth);
+        bool grandEligible = grandClearWidth >= standardStructuralWidth * 1.75f
+            && grandWidthFraction >= .68f
+            && grandWidthFraction <= .98f
+            && grandClearHeight >= 40f
+            && grandClearHeight <= 46.01f
+            && grandWallThickness <= 48f
+            && grandClearHeight > LargeEnvelopeWidth;
+
+        // Selection has its own semantic domain: presentation palette, recessed
+        // lights, and approach-beam revisions cannot switch entrance morphology.
+        bool selectGrand = grandEligible
+            && Sample(morphologySeed, "grand selection") < GrandSelectionProbability;
+        MegastationEntranceType entranceType = selectGrand
+            ? MegastationEntranceType.Grand
+            : MegastationEntranceType.Standard;
+        MegastationGridRange throatWidth = selectGrand
+            ? grandThroatWidth
+            : standardThroatWidth;
+        MegastationGridRange throatHeight = selectGrand
+            ? grandThroatHeight
+            : standardThroatHeight;
+        float standardWallThickness = MegastationInteriorPresentationPlanner.ComputeWallThickness(
+            siteSeed,
+            Span(grid, widthAxis, standardThroatWidth),
+            Span(grid, upAxis, standardThroatHeight));
+        float throatWallThickness = selectGrand
+            ? grandWallThickness
+            : standardWallThickness;
 
         int shapeSeed = MegastationSeed.Derive(rootSeed, "cavity shape");
         int removed = 0;
@@ -320,9 +401,16 @@ public static class MegastationInteriorPlanner
         Vector3 portalCentre = AxisVector(entranceAxis) * portalPlane
             + AxisVector(widthAxis) * Centre(grid, widthAxis, throatWidth)
             + AxisVector(upAxis) * Centre(grid, upAxis, throatHeight);
-        Vector2 portalClear = new(
-            Span(grid, widthAxis, throatWidth),
-            Span(grid, upAxis, throatHeight));
+        float structuralThroatWidth = Span(grid, widthAxis, throatWidth);
+        float structuralThroatHeight = Span(grid, upAxis, throatHeight);
+        float clearWidth = structuralThroatWidth;
+        float clearHeight = structuralThroatHeight;
+        if (selectGrand)
+        {
+            clearWidth -= throatWallThickness * 2f;
+            clearHeight -= throatWallThickness * 2f;
+        }
+        Vector2 portalClear = new(clearWidth, clearHeight);
         float throatLength = MathF.Abs(
             Direction.Sign(portalDirection) > 0
                 ? portalPlane - cavityVolume.Maximum.Component(entranceAxis)
@@ -342,9 +430,16 @@ public static class MegastationInteriorPlanner
             0, 0, 0, 0, 0, 0, 0, 0,
             stopwatch.ElapsedMilliseconds,
             0,
-            string.Empty);
+            string.Empty,
+            EntranceType: entranceType,
+            BayClearWidth: bayClearWidth,
+            EntranceWidthFraction: portalClear.X / bayClearWidth,
+            LargeUprightVerticalClearance: portalClear.Y - LargeEnvelopeHeight,
+            LargeRolledVerticalClearance: portalClear.Y - LargeEnvelopeWidth);
         var plan = new MegastationInteriorPlan(
-            $"interior:v{AlgorithmVersion}:{Direction.Id(portalDirection)}",
+            entranceType == MegastationEntranceType.Standard
+                ? $"interior:v{AlgorithmVersion}:{Direction.Id(portalDirection)}"
+                : $"interior:v{AlgorithmVersion}:{Direction.Id(portalDirection)}:grand",
             siteSeed,
             portalDirection,
             portalCentre,
@@ -352,6 +447,8 @@ public static class MegastationInteriorPlanner
             right,
             up,
             -up,
+            entranceType,
+            throatWallThickness,
             portalClear,
             throatVolume,
             flightVolume,
@@ -430,6 +527,10 @@ public static class MegastationInteriorPlanner
     private static float Centre(SliceGrid grid, GridAxis axis, MegastationGridRange range)
         => (grid.GetCellMinimum(axis, range.Start) + grid.GetCellMaximum(axis, range.End - 1)) * .5f;
 
+    private static float Sample(int seed, string semanticIdentity)
+        => unchecked((uint)MegastationSeed.Derive(seed, semanticIdentity))
+            / (float)uint.MaxValue;
+
     private static MegastationInteriorVolume Volume(
         SliceGrid grid,
         GridAxis a, MegastationGridRange ar,
@@ -480,6 +581,19 @@ public static class MegastationInteriorPresentationPlanner
 {
     public static Color ApproachUpColour { get; } = new(62, 186, 255);
     public static Color ApproachDownColour { get; } = new(255, 174, 42);
+
+    public static float ComputeWallThickness(
+        int interiorSeed,
+        float structuralVoidWidth,
+        float structuralVoidHeight)
+    {
+        var linerRng = new Random(MegastationSeed.Derive(interiorSeed, "throat-liner"));
+        return MathHelper.Clamp(
+            MathF.Min(structuralVoidWidth, structuralVoidHeight)
+                * (.085f + (float)linerRng.NextDouble() * .015f),
+            10f,
+            16f);
+    }
 
     private static readonly (string Id, Color Main, Color Highlight, Color Accent)[] Palettes =
     [
@@ -688,7 +802,6 @@ public static class MegastationInteriorPresentationPlanner
         List<MegastationInteriorGuidanceMarker> markers,
         List<MegastationApproachGuidanceBeam> approachBeams)
     {
-        var linerRng = new Random(linerSeed);
         var ribRng = new Random(ribsSeed);
         var fixtureRng = new Random(fixturesSeed);
         Vector3 right = interior.PortalRight;
@@ -698,11 +811,7 @@ public static class MegastationInteriorPresentationPlanner
         float structuralVoidHeight = interior.ThroatVolume.Size.ComponentAlong(up);
         float internalLength = interior.Diagnostics.ThroatLength;
         float length = internalLength + precinct.ProjectionLength;
-        float wallThickness = MathHelper.Clamp(
-            MathF.Min(structuralVoidWidth, structuralVoidHeight)
-                * (.085f + (float)linerRng.NextDouble() * .015f),
-            10f,
-            16f);
+        float wallThickness = interior.ThroatWallThickness;
         float width = structuralVoidWidth - wallThickness * 2f;
         float height = structuralVoidHeight - wallThickness * 2f;
         Debug.Assert(width > 0f && height > 0f);

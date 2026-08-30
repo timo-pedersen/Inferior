@@ -12,9 +12,10 @@ namespace Inferior.Game.Test;
 public sealed class MegastationInteriorTests
 {
     private const string Nova = "Oranae:Oranae I:Nova Anchorage";
-    private const float LargestShipWidth = 34.10f;
-    private const float LargestShipHeight = 17.08f;
-    private const float LargestShipLength = 99.22f;
+    private const string GrandFixture = "Zydaan:Zydaan I:Delta Anchorage";
+    private const float LargestShipWidth = 36f;
+    private const float LargestShipHeight = 20f;
+    private const float LargestShipLength = 72f;
     private static readonly SystemMaterialAssignmentContext MaterialContext =
         SystemMaterialCpuLibraryGenerator.CreateAssignmentContext(
             GalaxyGenerator.SystemSeed(
@@ -23,6 +24,89 @@ public sealed class MegastationInteriorTests
         new(() => MegastationPrototypeGenerator.GenerateCpu(
             Nova,
             systemMaterials: MaterialContext));
+    private static readonly Lazy<MegastationPrototypeCpuResult> GrandResult =
+        new(() => MegastationPrototypeGenerator.GenerateCpu(
+            GrandFixture,
+            systemMaterials: MaterialContext));
+
+    [Fact]
+    public void StandardEntranceFixtureRetainsAcceptedH1Output()
+    {
+        MegastationPrototypeCpuResult result = NovaResult.Value;
+        Assert.Equal(MegastationEntranceType.Standard, result.InteriorPlan.EntranceType);
+        Assert.Equal(
+            "975B42A249B3F861917E9AA0863C206B4CFE63D305A9BF4DD54E47A74C43927A",
+            result.InteriorPlan.Diagnostics.Signature);
+        Assert.InRange(result.InteriorPlan.PortalClearSize.X, 163.6f, 163.8f);
+        Assert.InRange(result.InteriorPlan.PortalClearSize.Y, 125.6f, 125.8f);
+    }
+
+    [Fact]
+    public void GrandEntranceUsesBayWidthAndLargeEnvelopeHeight()
+    {
+        MegastationPrototypeCpuResult result = GrandResult.Value;
+        MegastationInteriorPlan interior = result.InteriorPlan;
+        MegastationInteriorDiagnostics diagnostics = interior.Diagnostics;
+        Assert.Equal(MegastationEntranceType.Grand, interior.EntranceType);
+        Assert.Equal(MegastationEntranceType.Grand, diagnostics.EntranceType);
+        Assert.InRange(diagnostics.EntranceWidthFraction, .68f, .98f);
+        Assert.Equal(interior.PortalClearSize.X / diagnostics.BayClearWidth,
+            diagnostics.EntranceWidthFraction, 4);
+        Assert.InRange(interior.PortalClearSize.Y, 40f, 46.01f);
+        Assert.True(interior.PortalClearSize.Y > LargestShipWidth);
+        Assert.Equal(interior.PortalClearSize.Y - LargestShipHeight,
+            diagnostics.LargeUprightVerticalClearance, 3);
+        Assert.Equal(interior.PortalClearSize.Y - LargestShipWidth,
+            diagnostics.LargeRolledVerticalClearance, 3);
+
+        float structuralWidth = Vector3.Dot(Abs(interior.PortalRight), interior.ThroatVolume.Size);
+        float structuralHeight = Vector3.Dot(Abs(interior.PortalUp), interior.ThroatVolume.Size);
+        float wallThickness = interior.ThroatWallThickness;
+        Assert.Equal(structuralWidth - wallThickness * 2f, interior.PortalClearSize.X, 3);
+        Assert.Equal(structuralHeight - wallThickness * 2f, interior.PortalClearSize.Y, 3);
+        Console.WriteLine(
+            $"H1f {GrandFixture}: clear={interior.PortalClearSize.X:F1}x{interior.PortalClearSize.Y:F1}m; "
+            + $"bay={diagnostics.BayClearWidth:F1}m; widthFraction={diagnostics.EntranceWidthFraction:P1}; "
+            + $"wall={wallThickness:F1}m; uprightClearance={diagnostics.LargeUprightVerticalClearance:F1}m; "
+            + $"rolled90Clearance={diagnostics.LargeRolledVerticalClearance:F1}m; "
+            + $"throat={diagnostics.ThroatLength:F1}m; "
+            + $"mesh={diagnostics.PortalVisibleVertexCount}v/{diagnostics.PortalVisibleTriangleCount}t; "
+            + $"caster={diagnostics.PortalCasterVertexCount}v/{diagnostics.PortalCasterTriangleCount}t; "
+            + $"fixtures={diagnostics.ThroatFixtureElementCount}; glows={diagnostics.GuidanceGlowCount}");
+    }
+
+    [Fact]
+    public void GrandEntranceReusesCrownLightsBeamsAndReservationArchitecture()
+    {
+        MegastationPrototypeCpuResult result = GrandResult.Value;
+        MegastationInteriorPresentationPlan presentation = result.InteriorPresentationPlan;
+        Assert.Equal(4, presentation.ThroatCrownCount);
+        Assert.Equal(4, presentation.ApproachBeams.Count);
+        Assert.Equal(16, presentation.ApproachFixtureElementCount);
+        Assert.True(presentation.ThroatFixtureCount >= 20);
+        Assert.True(result.InteriorPlan.Diagnostics.EntrancePrecinctReservationCount > 0);
+        Assert.All(presentation.ApproachBeams, beam =>
+            Assert.True(Vector3.Dot(beam.Axis, result.InteriorPlan.OutwardNormal) > .9999f));
+        PlacedModule module = MegastationPrototypeGenerator.CreateInteriorModule(result);
+        Assert.Null(module.TextureInstance);
+        Assert.Null(module.MaterialInstance);
+    }
+
+    [Fact]
+    public void GrandEntranceMorphologyAndProtectedVolumeAreDeterministic()
+    {
+        MegastationPrototypeCpuResult first = GrandResult.Value;
+        MegastationPrototypeCpuResult second = MegastationPrototypeGenerator.GenerateCpu(
+            GrandFixture,
+            systemMaterials: MaterialContext);
+        Assert.Equal(first.InteriorPlan.EntranceType, second.InteriorPlan.EntranceType);
+        Assert.Equal(first.InteriorPlan.PortalClearSize, second.InteriorPlan.PortalClearSize);
+        Assert.Equal(first.InteriorPlan.ThroatVolume, second.InteriorPlan.ThroatVolume);
+        Assert.Equal(first.InteriorPlan.ProtectedCells, second.InteriorPlan.ProtectedCells);
+        Assert.Equal(first.InteriorPlan.Diagnostics.Signature,
+            second.InteriorPlan.Diagnostics.Signature);
+        Assert.True(ProtectedCellsAreConnected(first.InteriorPlan));
+    }
 
     [Fact]
     public void H1AlwaysPublishesOneConnectedProtectedInteriorAndEntrance()
@@ -797,31 +881,38 @@ public sealed class MegastationInteriorTests
     [Fact]
     public void PortalPresentationMeshHasFiniteNonDegenerateTriangles()
     {
-        Assert.All(NovaResult.Value.InteriorPresentationPlan.Elements, element =>
+        foreach (MegastationPrototypeCpuResult result in new[]
+                 {
+                     NovaResult.Value,
+                     GrandResult.Value,
+                 })
         {
-            Vector3 x = new(element.Frame.M11, element.Frame.M12, element.Frame.M13);
-            Vector3 y = new(element.Frame.M21, element.Frame.M22, element.Frame.M23);
-            Vector3 z = new(element.Frame.M31, element.Frame.M32, element.Frame.M33);
-            Assert.True(Vector3.Dot(Vector3.Cross(x, y), z) > .999f,
-                $"Mirrored presentation frame: {element.Identity}");
-        });
+            Assert.All(result.InteriorPresentationPlan.Elements, element =>
+            {
+                Vector3 x = new(element.Frame.M11, element.Frame.M12, element.Frame.M13);
+                Vector3 y = new(element.Frame.M21, element.Frame.M22, element.Frame.M23);
+                Vector3 z = new(element.Frame.M31, element.Frame.M32, element.Frame.M33);
+                Assert.True(Vector3.Dot(Vector3.Cross(x, y), z) > .999f,
+                    $"Mirrored presentation frame: {element.Identity}");
+            });
 
-        StationModuleMesh mesh = NovaResult.Value.InteriorMesh;
-        var (vertices, indices) = mesh.ToIntArrays();
-        Assert.NotEmpty(vertices);
-        Assert.Equal(0, indices.Length % 3);
-        Assert.All(indices, index => Assert.InRange(index, 0, vertices.Length - 1));
-        Assert.All(vertices, vertex =>
-        {
-            Assert.True(IsFinite(vertex.Position));
-            Assert.True(IsFinite(vertex.Normal));
-        });
-        for (int index = 0; index < indices.Length; index += 3)
-        {
-            Vector3 a = vertices[indices[index]].Position;
-            Vector3 b = vertices[indices[index + 1]].Position;
-            Vector3 c = vertices[indices[index + 2]].Position;
-            Assert.True(Vector3.Cross(b - a, c - a).LengthSquared() > 1e-6f);
+            StationModuleMesh mesh = result.InteriorMesh;
+            var (vertices, indices) = mesh.ToIntArrays();
+            Assert.NotEmpty(vertices);
+            Assert.Equal(0, indices.Length % 3);
+            Assert.All(indices, index => Assert.InRange(index, 0, vertices.Length - 1));
+            Assert.All(vertices, vertex =>
+            {
+                Assert.True(IsFinite(vertex.Position));
+                Assert.True(IsFinite(vertex.Normal));
+            });
+            for (int index = 0; index < indices.Length; index += 3)
+            {
+                Vector3 a = vertices[indices[index]].Position;
+                Vector3 b = vertices[indices[index + 1]].Position;
+                Vector3 c = vertices[indices[index + 2]].Position;
+                Assert.True(Vector3.Cross(b - a, c - a).LengthSquared() > 1e-6f);
+            }
         }
     }
 

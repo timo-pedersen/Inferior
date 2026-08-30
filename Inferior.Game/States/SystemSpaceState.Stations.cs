@@ -89,8 +89,11 @@ public sealed partial class SystemSpaceState
     {
         PublishStationResidencyMessage(
             $"[MegastationInterior] station={stationIdentity}; version={d.AlgorithmVersion}; " +
-            $"count={d.InteriorCount}; portal={d.PortalDirection}; " +
+            $"count={d.InteriorCount}; entranceType={d.EntranceType}; portal={d.PortalDirection}; " +
             $"clear={d.PortalClearWidth:F1}x{d.PortalClearHeight:F1}m; " +
+            $"bayWidth={d.BayClearWidth:F1}m; widthFraction={d.EntranceWidthFraction:P0}; " +
+            $"largeClearance=upright:{d.LargeUprightVerticalClearance:F1}m," +
+            $"rolled90:{d.LargeRolledVerticalClearance:F1}m; " +
             $"throatLength={d.ThroatLength:F1}m; " +
             $"flightClear={d.MainFlightClearSize.X:F1}x{d.MainFlightClearSize.Y:F1}x{d.MainFlightClearSize.Z:F1}m; " +
             $"protectedCells={d.ProtectedVoidCellCount}; removedCells={d.RemovedStructuralCellCount}; " +
