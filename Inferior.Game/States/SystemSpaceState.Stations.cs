@@ -107,6 +107,11 @@ public sealed partial class SystemSpaceState
             $"projectedEntrance={d.EntranceProjectionLength:F1}m; " +
             $"localSkyline={d.EntranceLocalSkylineHeight:F1}m; " +
             $"skylineFraction={d.EntranceProjectionHeightFraction:P0}; " +
+            $"approachBeams={d.ApproachBeamCount}; fixtureParts={d.ApproachFixtureElementCount}; " +
+            $"beamLength={d.ApproachBeamLength:F1}m; " +
+            $"beamHalfAngle={d.ApproachBeamHalfAngleDegrees:F2}deg; " +
+            $"beamGeometry={d.ApproachBeamVertexCount}v/{d.ApproachBeamTriangleCount}t; " +
+            $"portalUp={d.EntrancePortalUp}; portalRight={d.EntrancePortalRight}; " +
             $"palette={d.EntrancePaletteIdentity}; precinctReservations={d.EntrancePrecinctReservationCount}; " +
             $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
             $"signature={d.Signature}",
@@ -780,6 +785,57 @@ public sealed partial class SystemSpaceState
         // and ShipMeshRenderer.Draw's post-draw restore).
         _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
+    }
+
+    private void DrawMegastationApproachBeams(DetailLevel level)
+    {
+        if (ResidentStationVisual == null || !ResidentVisualIntersectsDepthTier(level))
+            return;
+
+        float renderScale = (float)Camera3D.RenderScale;
+        _effect.TextureEnabled = false;
+        _effect.LightingEnabled = false;
+        _effect.VertexColorEnabled = true;
+        _effect.DiffuseColor = Vector3.One;
+        _effect.Alpha = 1f;
+        _gd.BlendState = BlendState.Additive;
+        _gd.DepthStencilState = DepthStencilState.DepthRead;
+        _gd.RasterizerState = RasterizerState.CullNone;
+
+        foreach ((Galaxy.Station station, DVec3 universePosition) in ResidentStationEntries())
+        {
+            Vector3 renderPosition = _camera.ToRenderSpace(universePosition);
+            Quaternion orientation = station.GetOrientation(_gameTimeSeconds);
+            Matrix stationRotation = Matrix.CreateFromQuaternion(new Quaternion(
+                orientation.X,
+                orientation.Y,
+                orientation.Z,
+                orientation.W));
+            _effect.World = Matrix.CreateScale(renderScale)
+                * stationRotation
+                * Matrix.CreateTranslation(renderPosition);
+
+            foreach (PlacedModule module in ResidentStationVisual.Modules)
+            {
+                VertexPositionColor[]? vertices = module.NativeApproachBeamVertices;
+                if (vertices is not { Length: >= 3 }) continue;
+                foreach (EffectPass pass in _effect.CurrentTechnique.Passes)
+                {
+                    pass.Apply();
+                    _gd.DrawUserPrimitives(
+                        PrimitiveType.TriangleList,
+                        vertices,
+                        0,
+                        vertices.Length / 3);
+                }
+            }
+        }
+
+        _effect.VertexColorEnabled = false;
+        _effect.LightingEnabled = true;
+        _gd.BlendState = BlendState.Opaque;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        _gd.RasterizerState = RasterizerState.CullCounterClockwise;
     }
 
     internal const float H1CoplanarOverlayClipDepthBias = .00002f;

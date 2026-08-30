@@ -100,6 +100,9 @@ public sealed class PlacedModule
     public          VertexPositionColor[]?  NativeServiceChannelDebugLines { get; init; }
     // Debug-only H1 portal/throat/flight-volume/interior-boundary line overlay.
     public          VertexPositionColor[]?  NativeInteriorDebugLines { get; init; }
+    // H1e's tiny combined additive beam primitive. Station-local CPU vertices are reused
+    // directly by the existing depth-tier draw path; no texture or per-beam GPU object.
+    public          VertexPositionColor[]?  NativeApproachBeamVertices { get; init; }
     // Brief U1: only ever set for MeshFactory modules (a box module's hull is built
     // procedurally by StationGenerator.PrepareBoxHullMesh from Definition/ChamferDepth
     // alone, so it never needs storing here). Load-bearing hull geometry

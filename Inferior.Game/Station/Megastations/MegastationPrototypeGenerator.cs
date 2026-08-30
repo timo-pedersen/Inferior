@@ -103,6 +103,7 @@ public sealed record MegastationPrototypeCpuResult(
     StationModuleMesh Mesh,
     StationModuleMesh StructuralShadowMesh,
     StationModuleMesh InteriorMesh,
+    VertexPositionColor[] ApproachBeamVertices,
     MegastationWindowPlan WindowPlan,
     StationModuleMesh WindowGlassMesh,
     MegastationLightPlan LightPlan,
@@ -215,6 +216,8 @@ public static class MegastationPrototypeGenerator
             materialAssignment,
             interiorPresentation,
             cancellationToken);
+        VertexPositionColor[] approachBeamVertices =
+            MegastationApproachBeamMeshBuilder.Build(interiorPresentation);
         StationModuleMesh structuralShadowMesh = MegastationInteriorMeshBuilder.BuildStructuralCaster(
             regularised.Occupancy,
             topology);
@@ -461,6 +464,7 @@ public static class MegastationPrototypeGenerator
             mesh,
             structuralShadowMesh,
             interiorMesh.Mesh,
+            approachBeamVertices,
             windowPlan,
             windowMesh.Mesh,
             lightPlan,
@@ -552,6 +556,7 @@ public static class MegastationPrototypeGenerator
                 cpu.InteriorPlan,
                 cpu.BoundaryTopology,
                 cpu.Grid),
+            NativeApproachBeamVertices = cpu.ApproachBeamVertices,
             DecorationMaterialRanges = cpu.InteriorMesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
     }

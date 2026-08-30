@@ -4,6 +4,7 @@ using Inferior.Game.States;
 using Inferior.Galaxy;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Xunit;
 
 namespace Inferior.Game.Test;
@@ -53,6 +54,15 @@ public sealed class MegastationInteriorTests
                 Assert.Equal(cell.Kind, result.RegularisedOccupancy.VoidKind(
                     cell.Cell.X, cell.Cell.Y, cell.Cell.Z));
             });
+            Assert.Equal(4, result.InteriorPresentationPlan.ApproachBeams.Count);
+            Assert.Equal(2, result.InteriorPresentationPlan.ApproachBeams.Count(beam =>
+                beam.Vertical == MegastationApproachBeamVertical.Upper
+                && beam.Colour == MegastationInteriorPresentationPlanner.ApproachUpColour));
+            Assert.Equal(2, result.InteriorPresentationPlan.ApproachBeams.Count(beam =>
+                beam.Vertical == MegastationApproachBeamVertical.Lower
+                && beam.Colour == MegastationInteriorPresentationPlanner.ApproachDownColour));
+            Assert.All(result.InteriorPresentationPlan.ApproachBeams, beam =>
+                Assert.True(Vector3.Dot(beam.Axis, plan.OutwardNormal) > .9999f));
             AssertLargeShipClearance(plan);
             Console.WriteLine(
                 $"H1 {identity}: portal={plan.PortalClearSize.X:F1}x{plan.PortalClearSize.Y:F1}m; "
@@ -203,10 +213,12 @@ public sealed class MegastationInteriorTests
         Assert.Equal(a.ThroatRibsSeed, b.ThroatRibsSeed);
         Assert.Equal(a.ThroatMarkingsSeed, b.ThroatMarkingsSeed);
         Assert.Equal(a.ThroatFixturesSeed, b.ThroatFixturesSeed);
+        Assert.Equal(a.ApproachGuidanceSeed, b.ApproachGuidanceSeed);
         Assert.Equal(a.Palette, b.Palette);
         Assert.Equal(a.Precinct, b.Precinct);
         Assert.Equal(a.Elements, b.Elements);
         Assert.Equal(a.Markers, b.Markers);
+        Assert.Equal(a.ApproachBeams, b.ApproachBeams);
         Assert.Equal(0, a.PortalElementCount);
         Assert.True(a.ThroatElementCount >= 20);
         Assert.Equal(3, a.InteriorLandmarkCount);
@@ -215,6 +227,8 @@ public sealed class MegastationInteriorTests
         Assert.Equal(0, a.ThroatRibCount);
         Assert.Equal(4, a.ThroatCrownCount);
         Assert.True(a.ThroatFixtureCount >= 20);
+        Assert.Equal(16, a.ApproachFixtureElementCount);
+        Assert.Equal(4, a.ApproachBeams.Count);
         Assert.True(a.ThroatMarkingCount > 0);
 
         MegastationInteriorPlan interior = first.InteriorPlan;
@@ -252,7 +266,7 @@ public sealed class MegastationInteriorTests
         Assert.All(guidanceLights, light =>
             Assert.Equal(GlowType.MegastationEntranceGuidance, light.Type));
         StationLightInfo[] recessHalos = guidanceLights
-            .Where(light => light.SurfaceNormal != null)
+            .Where(light => light.PresentationSizePixels == 90f)
             .ToArray();
         Assert.Equal(a.Markers.Count(marker => marker.Identity.StartsWith(
             "throat/recess:", StringComparison.Ordinal)), recessHalos.Length);
@@ -265,11 +279,128 @@ public sealed class MegastationInteriorTests
             Assert.Equal(1_500f, light.PresentationFadeEndMeters);
         });
         Assert.All(a.Markers.Where(marker => marker.Identity.StartsWith(
-            "entrance/mouth/", StringComparison.Ordinal)), marker =>
+            "entrance/approach/source:", StringComparison.Ordinal)), marker =>
         {
-            Assert.Null(marker.GlowFadeStartMeters);
-            Assert.Null(marker.GlowFadeEndMeters);
+            Assert.Equal(24f, marker.GlowSizePixels);
+            Assert.Equal(500f, marker.GlowFadeStartMeters);
+            Assert.Equal(3_000f, marker.GlowFadeEndMeters);
         });
+    }
+
+    [Fact]
+    public void ApproachBeamsUsePortalFrameUniversalColoursAndClearCrownMountedFixtures()
+    {
+        MegastationPrototypeCpuResult result = NovaResult.Value;
+        MegastationInteriorPlan interior = result.InteriorPlan;
+        MegastationInteriorPresentationPlan presentation = result.InteriorPresentationPlan;
+        MegastationApproachGuidanceBeam[] beams = presentation.ApproachBeams.ToArray();
+        MegastationInteriorGuidanceMarker[] sourceMarkers = presentation.Markers
+            .Where(marker => marker.Identity.StartsWith(
+                "entrance/approach/source:",
+                StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(4, beams.Length);
+        Assert.Equal(4, sourceMarkers.Length);
+        Assert.Equal(2, sourceMarkers.Count(marker =>
+            marker.Colour == MegastationInteriorPresentationPlanner.ApproachUpColour));
+        Assert.Equal(2, sourceMarkers.Count(marker =>
+            marker.Colour == MegastationInteriorPresentationPlanner.ApproachDownColour));
+        Assert.Equal(2, beams.Count(beam =>
+            beam.Vertical == MegastationApproachBeamVertical.Upper));
+        Assert.Equal(2, beams.Count(beam =>
+            beam.Vertical == MegastationApproachBeamVertical.Lower));
+        Assert.Equal(new[] { -1, 1 }, beams.Select(beam => beam.HorizontalSign)
+            .Distinct().Order().ToArray());
+        Assert.All(beams, beam =>
+        {
+            Assert.True(Vector3.Dot(Vector3.Normalize(beam.Axis), interior.OutwardNormal) > .9999f);
+            Assert.True(Vector3.Dot(Vector3.Normalize(beam.RadialUp), interior.PortalUp) > .9999f);
+            Assert.True(Vector3.Dot(Vector3.Normalize(beam.RadialRight), interior.PortalRight) > .9999f);
+            Assert.InRange(beam.Length, 1_400f, 1_600f);
+            Assert.InRange(beam.HalfAngleDegrees, .7f, 1.2f);
+            Assert.Equal(
+                beam.Vertical == MegastationApproachBeamVertical.Upper
+                    ? MegastationInteriorPresentationPlanner.ApproachUpColour
+                    : MegastationInteriorPresentationPlanner.ApproachDownColour,
+                beam.Colour);
+
+            Vector3 fromMouth = beam.Source - presentation.Precinct.OuterMouthCentre;
+            Assert.True(Vector3.Dot(fromMouth, interior.OutwardNormal) > 0f);
+            Assert.True(MathF.Abs(Vector3.Dot(fromMouth, interior.PortalRight))
+                > interior.PortalClearSize.X * .5f);
+            float signedUp = Vector3.Dot(fromMouth, interior.PortalUp);
+            Assert.True(MathF.Abs(signedUp) > interior.PortalClearSize.Y * .5f);
+            Assert.Equal(beam.Vertical == MegastationApproachBeamVertical.Upper,
+                signedUp > 0f);
+        });
+
+        MegastationInteriorGuidanceElement[] fixtureParts = presentation.Elements
+            .Where(element => element.Kind == MegastationInteriorGuidanceKind.ApproachFixture)
+            .ToArray();
+        Assert.Equal(16, fixtureParts.Length);
+        float wallThickness = TubeWallThickness(presentation);
+        Vector3 extensionCentre = (interior.PortalCentre
+            + presentation.Precinct.OuterMouthCentre) * .5f;
+        Vector3 clearHalf = Abs(interior.PortalRight)
+                * (interior.PortalClearSize.X * .5f - wallThickness)
+            + Abs(interior.PortalUp)
+                * (interior.PortalClearSize.Y * .5f - wallThickness)
+            + Abs(interior.OutwardNormal)
+                * (presentation.Precinct.ProjectionLength * .5f);
+        Assert.All(fixtureParts, element => Assert.False(IntersectsOpenBounds(
+            element,
+            extensionCentre - clearHalf,
+            extensionCentre + clearHalf)));
+
+        Assert.Equal(4, result.InteriorPlan.Diagnostics.ApproachBeamCount);
+        Assert.Equal(16, result.InteriorPlan.Diagnostics.ApproachFixtureElementCount);
+        Assert.Equal(result.ApproachBeamVertices.Length,
+            result.InteriorPlan.Diagnostics.ApproachBeamVertexCount);
+        Assert.Equal(result.ApproachBeamVertices.Length / 3,
+            result.InteriorPlan.Diagnostics.ApproachBeamTriangleCount);
+        Assert.Equal(interior.PortalUp, result.InteriorPlan.Diagnostics.EntrancePortalUp);
+        Assert.Equal(interior.PortalRight, result.InteriorPlan.Diagnostics.EntrancePortalRight);
+    }
+
+    [Fact]
+    public void ApproachBeamMeshIsFiniteSoftFadedAndAddsNoTextureOwnership()
+    {
+        MegastationPrototypeCpuResult result = NovaResult.Value;
+        VertexPositionColor[] vertices = result.ApproachBeamVertices;
+        Assert.NotEmpty(vertices);
+        Assert.Equal(0, vertices.Length % 3);
+        Assert.All(vertices, vertex =>
+        {
+            Assert.True(float.IsFinite(vertex.Position.X));
+            Assert.True(float.IsFinite(vertex.Position.Y));
+            Assert.True(float.IsFinite(vertex.Position.Z));
+        });
+        Assert.Contains(vertices, vertex => vertex.Color.A == 0);
+        Assert.Contains(vertices, vertex => vertex.Color.A > 0);
+
+        foreach (MegastationApproachGuidanceBeam beam in result.InteriorPresentationPlan.ApproachBeams)
+        {
+            VertexPositionColor[] colourVertices = vertices.Where(vertex =>
+                    vertex.Color.R == beam.Colour.R
+                    && vertex.Color.G == beam.Colour.G
+                    && vertex.Color.B == beam.Colour.B)
+                .ToArray();
+            Assert.NotEmpty(colourVertices);
+            float maximumAxial = colourVertices.Max(vertex => Vector3.Dot(
+                vertex.Position - beam.Source,
+                beam.Axis));
+            Assert.Equal(beam.Length, maximumAxial, 2);
+            Assert.Contains(colourVertices, vertex =>
+                vertex.Color.A == 0
+                && Vector3.Dot(vertex.Position - beam.Source, beam.Axis)
+                    >= beam.Length - .01f);
+        }
+
+        PlacedModule module = MegastationPrototypeGenerator.CreateInteriorModule(result);
+        Assert.Same(result.ApproachBeamVertices, module.NativeApproachBeamVertices);
+        Assert.Null(module.TextureInstance);
+        Assert.Null(module.MaterialInstance);
     }
 
     [Fact]

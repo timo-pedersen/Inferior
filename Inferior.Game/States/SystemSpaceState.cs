@@ -1151,6 +1151,7 @@ public sealed partial class SystemSpaceState : GameState
             _celestialBodies.DrawPlanet(_camera, body, pos, level);
 
         DrawStations(level);
+        DrawMegastationApproachBeams(level);
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierFar, float.MaxValue);
     }
 
@@ -1181,6 +1182,7 @@ public sealed partial class SystemSpaceState : GameState
                 _frameShipSnap.Cockpit);
             WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
         }
+        DrawMegastationApproachBeams(level);
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 
@@ -1193,6 +1195,7 @@ public sealed partial class SystemSpaceState : GameState
         DrawStations(level);
         DrawContainers(level);
         DrawCalibrationCube(level);
+        DrawMegastationApproachBeams(level);
         DrawStationGlows(_frameSpriteBatch!, 0f, (float)NearTierFar);
     }
 

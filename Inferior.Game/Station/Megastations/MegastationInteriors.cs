@@ -67,7 +67,15 @@ public sealed record MegastationInteriorDiagnostics(
     int EntrancePrecinctReservationCount = 0,
     int ThroatTubeWallElementCount = 0,
     int ThroatCrownElementCount = 0,
-    int ThroatFixtureElementCount = 0);
+    int ThroatFixtureElementCount = 0,
+    int ApproachBeamCount = 0,
+    int ApproachFixtureElementCount = 0,
+    float ApproachBeamLength = 0f,
+    float ApproachBeamHalfAngleDegrees = 0f,
+    int ApproachBeamVertexCount = 0,
+    int ApproachBeamTriangleCount = 0,
+    Vector3 EntrancePortalUp = default,
+    Vector3 EntrancePortalRight = default);
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -101,7 +109,26 @@ public enum MegastationInteriorGuidanceKind
     ThroatRib,
     ThroatTransition,
     ThroatMarking,
+    ApproachFixture,
 }
+
+public enum MegastationApproachBeamVertical
+{
+    Upper,
+    Lower,
+}
+
+public sealed record MegastationApproachGuidanceBeam(
+    string Identity,
+    MegastationApproachBeamVertical Vertical,
+    int HorizontalSign,
+    Vector3 Source,
+    Vector3 Axis,
+    Vector3 RadialRight,
+    Vector3 RadialUp,
+    Color Colour,
+    float Length,
+    float HalfAngleDegrees);
 
 public sealed record MegastationInteriorGuidanceElement(
     string Identity,
@@ -164,10 +191,12 @@ public sealed record MegastationInteriorPresentationPlan(
     int ThroatRibsSeed,
     int ThroatMarkingsSeed,
     int ThroatFixturesSeed,
+    int ApproachGuidanceSeed,
     MegastationEntrancePalette Palette,
     MegastationEntrancePrecinct Precinct,
     IReadOnlyList<MegastationInteriorGuidanceElement> Elements,
-    IReadOnlyList<MegastationInteriorGuidanceMarker> Markers)
+    IReadOnlyList<MegastationInteriorGuidanceMarker> Markers,
+    IReadOnlyList<MegastationApproachGuidanceBeam> ApproachBeams)
 {
     public int PortalElementCount => Elements.Count(element => element.Kind is
         MegastationInteriorGuidanceKind.PortalEdge
@@ -190,6 +219,8 @@ public sealed record MegastationInteriorPresentationPlan(
     public int ThroatFixtureCount => Elements.Count(element =>
         element.Kind == MegastationInteriorGuidanceKind.ThroatBand
         && element.Identity.StartsWith("throat/fixture:", StringComparison.Ordinal));
+    public int ApproachFixtureElementCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ApproachFixture);
     public int ThroatMarkingCount => Elements.Count(element =>
         element.Kind == MegastationInteriorGuidanceKind.ThroatMarking);
     public int ThroatCasterCount => Elements.Count(element => element.CastsShadow);
@@ -447,6 +478,9 @@ public static class MegastationInteriorPlanner
 
 public static class MegastationInteriorPresentationPlanner
 {
+    public static Color ApproachUpColour { get; } = new(62, 186, 255);
+    public static Color ApproachDownColour { get; } = new(255, 174, 42);
+
     private static readonly (string Id, Color Main, Color Highlight, Color Accent)[] Palettes =
     [
         ("amber", new Color(255, 166, 38), new Color(255, 224, 142), new Color(122, 83, 34)),
@@ -470,6 +504,9 @@ public static class MegastationInteriorPresentationPlanner
         int ribsSeed = MegastationSeed.Derive(interior.Seed, "throat-ribs");
         int markingsSeed = MegastationSeed.Derive(interior.Seed, "throat-markings");
         int fixturesSeed = MegastationSeed.Derive(interior.Seed, "throat-fixtures");
+        int approachSeed = MegastationSeed.Derive(
+            interior.Seed,
+            "approach-guidance-beams:v1");
         var selectedPalette = Palettes[PositiveMod(
             MegastationSeed.Derive(interior.Seed, "entrance-guidance-palette:v1"),
             Palettes.Length)];
@@ -486,6 +523,7 @@ public static class MegastationInteriorPresentationPlanner
         MegastationEntrancePrecinct precinct = BuildEntrancePrecinct(interior, occupancy);
         var elements = new List<MegastationInteriorGuidanceElement>();
         var markers = new List<MegastationInteriorGuidanceMarker>();
+        var approachBeams = new List<MegastationApproachGuidanceBeam>(4);
         float halfWidth = interior.PortalClearSize.X * .5f;
         float halfHeight = interior.PortalClearSize.Y * .5f;
         float strip = MathHelper.Clamp(MathF.Min(halfWidth, halfHeight) * .075f, 3.5f, 6f);
@@ -495,20 +533,8 @@ public static class MegastationInteriorPresentationPlanner
             interior.PortalRight, interior.PortalUp, interior.OutwardNormal, centre);
 
         AddConstructedThroat(interior, precinct, palette,
-            linerSeed, ribsSeed, markingsSeed, fixturesSeed, elements, markers);
-        foreach (int side in new[] { -1, 1 })
-        foreach (int vertical in new[] { -1, 1 })
-        {
-            markers.Add(new(
-                $"entrance/mouth/corner:{side}:{vertical}",
-                MegastationInteriorGuidanceKind.PortalCorner,
-                precinct.OuterMouthCentre
-                    + interior.PortalRight * side * (halfWidth + strip * .55f)
-                    + interior.PortalUp * vertical * (halfHeight + strip * .55f)
-                    + interior.OutwardNormal * 2f,
-                palette.Guidance,
-                .95f));
-        }
+            linerSeed, ribsSeed, markingsSeed, fixturesSeed, approachSeed,
+            elements, markers, approachBeams);
 
         Vector3 cavityCentre = (interior.CavityEnvelope.Minimum + interior.CavityEnvelope.Maximum) * .5f;
         float cavityDepth = MathF.Abs(Vector3.Dot(
@@ -553,8 +579,8 @@ public static class MegastationInteriorPresentationPlanner
             .62f));
 
         return new(portalSeed, throatSeed, landmarkSeed,
-            linerSeed, ribsSeed, markingsSeed, fixturesSeed,
-            palette, precinct, elements, markers);
+            linerSeed, ribsSeed, markingsSeed, fixturesSeed, approachSeed,
+            palette, precinct, elements, markers, approachBeams);
     }
 
     private static MegastationEntrancePrecinct BuildEntrancePrecinct(
@@ -657,8 +683,10 @@ public static class MegastationInteriorPresentationPlanner
         int ribsSeed,
         int markingsSeed,
         int fixturesSeed,
+        int approachSeed,
         List<MegastationInteriorGuidanceElement> elements,
-        List<MegastationInteriorGuidanceMarker> markers)
+        List<MegastationInteriorGuidanceMarker> markers,
+        List<MegastationApproachGuidanceBeam> approachBeams)
     {
         var linerRng = new Random(linerSeed);
         var ribRng = new Random(ribsSeed);
@@ -1004,6 +1032,96 @@ public static class MegastationInteriorPresentationPlanner
                 CreateFrame(right, up, outward, lightCentre - up * (outerHeight * .5f + lightDepth * .5f)),
                 new(topSpan, lightDepth, 1.2f), palette.Highlight,
                 SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+
+            AddApproachGuidanceFixtures();
+
+            void AddApproachGuidanceFixtures()
+            {
+                float beamLength = MathHelper.Lerp(
+                    1_400f,
+                    1_600f,
+                    Sample(approachSeed, "length"));
+                float halfAngle = MathHelper.Lerp(
+                    .7f,
+                    1.2f,
+                    Sample(approachSeed, "half-angle"));
+                float plateSpan = MathHelper.Clamp(member * .52f, 11f, 15f);
+                float plateDepth = 2.2f;
+                float housingSpan = plateSpan * .68f;
+                float housingDepth = 7f;
+                float barrelSpan = housingSpan * .55f;
+                float barrelDepth = 5f;
+                float emitterDepth = .9f;
+                Vector3 crownFront = centre + outward * (depth * .5f);
+                float cornerRight = outerWidth * .5f + member * .5f;
+                float cornerUp = outerHeight * .5f + member * .5f;
+
+                foreach (int horizontal in new[] { -1, 1 })
+                foreach (int vertical in new[] { -1, 1 })
+                {
+                    string corner = $"{horizontal}:{vertical}";
+                    Color beamColour = vertical > 0
+                        ? ApproachUpColour
+                        : ApproachDownColour;
+                    Vector3 mountingPoint = crownFront
+                        + right * horizontal * cornerRight
+                        + up * vertical * cornerUp;
+                    Vector3 plateCentre = mountingPoint + outward * (plateDepth * .5f);
+                    Vector3 housingCentre = mountingPoint
+                        + outward * (plateDepth + housingDepth * .5f);
+                    Vector3 barrelCentre = mountingPoint
+                        + outward * (plateDepth + housingDepth + barrelDepth * .5f);
+                    Vector3 emitterCentre = mountingPoint
+                        + outward * (plateDepth + housingDepth + barrelDepth
+                            + emitterDepth * .5f);
+                    Vector3 source = emitterCentre + outward * (emitterDepth * .5f + .15f);
+
+                    Add($"entrance/approach/fixture:{corner}/mount",
+                        MegastationInteriorGuidanceKind.ApproachFixture,
+                        CreateFrame(right, up, outward, plateCentre),
+                        new(plateSpan, plateSpan, plateDepth), palette.CrownStructure,
+                        SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+                    Add($"entrance/approach/fixture:{corner}/housing",
+                        MegastationInteriorGuidanceKind.ApproachFixture,
+                        CreateFrame(right, up, outward, housingCentre),
+                        new(housingSpan, housingSpan, housingDepth), palette.StructuralAccent,
+                        SystemMaterialFamilyId.CleanTechnicalAlloy, true);
+                    Add($"entrance/approach/fixture:{corner}/barrel",
+                        MegastationInteriorGuidanceKind.ApproachFixture,
+                        CreateFrame(right, up, outward, barrelCentre),
+                        new(barrelSpan, barrelSpan, barrelDepth), palette.OuterStructure,
+                        SystemMaterialFamilyId.HeavyIndustrialPlate, false);
+                    Add($"entrance/approach/fixture:{corner}/emitter",
+                        MegastationInteriorGuidanceKind.ApproachFixture,
+                        CreateFrame(right, up, outward, emitterCentre),
+                        new(barrelSpan * .86f, barrelSpan * .86f, emitterDepth), beamColour,
+                        SystemMaterialFamilyId.CleanTechnicalAlloy, false, .98f);
+
+                    approachBeams.Add(new(
+                        $"entrance/approach/beam:{corner}",
+                        vertical > 0
+                            ? MegastationApproachBeamVertical.Upper
+                            : MegastationApproachBeamVertical.Lower,
+                        horizontal,
+                        source,
+                        outward,
+                        right,
+                        up,
+                        beamColour,
+                        beamLength,
+                        halfAngle));
+                    markers.Add(new(
+                        $"entrance/approach/source:{corner}",
+                        MegastationInteriorGuidanceKind.ApproachFixture,
+                        source,
+                        beamColour,
+                        .82f,
+                        outward,
+                        24f,
+                        500f,
+                        3_000f));
+                }
+            }
         }
     }
 
@@ -1020,6 +1138,105 @@ public static class MegastationInteriorPresentationPlanner
 
     private static float ComponentAlong(this Vector3 size, Vector3 axis)
         => MathF.Abs(size.X * axis.X) + MathF.Abs(size.Y * axis.Y) + MathF.Abs(size.Z * axis.Z);
+}
+
+public static class MegastationApproachBeamMeshBuilder
+{
+    private const int RadialFinCount = 6;
+
+    private static readonly float[] LongitudinalFractions =
+        [0f, .08f, .24f, .48f, .72f, 1f];
+
+    private static readonly float[] CentreAlpha =
+        [.09f, .08f, .064f, .043f, .021f, 0f];
+
+    public static VertexPositionColor[] Build(
+        MegastationInteriorPresentationPlan presentation)
+    {
+        var vertices = new List<VertexPositionColor>(
+            presentation.ApproachBeams.Count
+            * RadialFinCount
+            * (LongitudinalFractions.Length - 1)
+            * 12);
+        foreach (MegastationApproachGuidanceBeam beam in presentation.ApproachBeams)
+            EmitBeam(beam, vertices);
+        return vertices.ToArray();
+    }
+
+    public static int VertexCount(MegastationInteriorPresentationPlan presentation)
+        => presentation.ApproachBeams.Count
+            * RadialFinCount
+            * (LongitudinalFractions.Length - 1)
+            * 12;
+
+    private static void EmitBeam(
+        MegastationApproachGuidanceBeam beam,
+        List<VertexPositionColor> vertices)
+    {
+        Vector3 axis = Vector3.Normalize(beam.Axis);
+        Vector3 radialRight = Vector3.Normalize(beam.RadialRight);
+        Vector3 radialUp = Vector3.Normalize(beam.RadialUp);
+        float tangent = MathF.Tan(MathHelper.ToRadians(beam.HalfAngleDegrees));
+        const float sourceRadius = 1.25f;
+
+        for (int fin = 0; fin < RadialFinCount; fin++)
+        {
+            float angle = MathF.PI * fin / RadialFinCount;
+            Vector3 radial = Vector3.Normalize(
+                radialRight * MathF.Cos(angle) + radialUp * MathF.Sin(angle));
+            for (int segment = 0; segment < LongitudinalFractions.Length - 1; segment++)
+            {
+                CrossSection a = Section(segment);
+                CrossSection b = Section(segment + 1);
+                AddTriangle(vertices, a.Left, a.Centre, b.Centre,
+                    a.EdgeColour, a.CentreColour, b.CentreColour);
+                AddTriangle(vertices, a.Left, b.Centre, b.Left,
+                    a.EdgeColour, b.CentreColour, b.EdgeColour);
+                AddTriangle(vertices, a.Centre, a.Right, b.Right,
+                    a.CentreColour, a.EdgeColour, b.EdgeColour);
+                AddTriangle(vertices, a.Centre, b.Right, b.Centre,
+                    a.CentreColour, b.EdgeColour, b.CentreColour);
+            }
+
+            CrossSection Section(int index)
+            {
+                float distance = beam.Length * LongitudinalFractions[index];
+                float radius = sourceRadius + distance * tangent;
+                Vector3 centre = beam.Source + axis * distance;
+                return new(
+                    centre - radial * radius,
+                    centre,
+                    centre + radial * radius,
+                    WithAlpha(beam.Colour, 0f),
+                    WithAlpha(beam.Colour, CentreAlpha[index]));
+            }
+        }
+    }
+
+    private static void AddTriangle(
+        List<VertexPositionColor> vertices,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Color colourA,
+        Color colourB,
+        Color colourC)
+    {
+        vertices.Add(new(a, colourA));
+        vertices.Add(new(b, colourB));
+        vertices.Add(new(c, colourC));
+    }
+
+    private static Color WithAlpha(Color colour, float alpha)
+        => new(colour.R, colour.G, colour.B,
+            (byte)MathF.Round(255f * MathHelper.Clamp(alpha, 0f, 1f)));
+
+    private readonly record struct CrossSection(
+        Vector3 Left,
+        Vector3 Centre,
+        Vector3 Right,
+        Color EdgeColour,
+        Color CentreColour);
 }
 
 public static class MegastationInteriorMeshBuilder
@@ -1140,6 +1357,17 @@ public static class MegastationInteriorMeshBuilder
             ThroatTubeWallElementCount = presentation.ThroatTubeWallCount,
             ThroatCrownElementCount = presentation.ThroatCrownCount,
             ThroatFixtureElementCount = presentation.ThroatFixtureCount,
+            ApproachBeamCount = presentation.ApproachBeams.Count,
+            ApproachFixtureElementCount = presentation.ApproachFixtureElementCount,
+            ApproachBeamLength = presentation.ApproachBeams.FirstOrDefault()?.Length ?? 0f,
+            ApproachBeamHalfAngleDegrees =
+                presentation.ApproachBeams.FirstOrDefault()?.HalfAngleDegrees ?? 0f,
+            ApproachBeamVertexCount = MegastationApproachBeamMeshBuilder.VertexCount(
+                presentation),
+            ApproachBeamTriangleCount = MegastationApproachBeamMeshBuilder.VertexCount(
+                presentation) / 3,
+            EntrancePortalUp = plan.PortalUp,
+            EntrancePortalRight = plan.PortalRight,
             EntranceProjectionLength = presentation.Precinct.ProjectionLength,
             EntranceLocalObstructionProjection = presentation.Precinct.LocalObstructionProjection,
             EntranceLocalSkylineHeight = presentation.Precinct.LocalSkylineHeight,
