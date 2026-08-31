@@ -17,7 +17,8 @@ public sealed partial class SystemSpaceState
         string Identity,
         StationVisualClassification Classification,
         double ConservativeEnvelopeRadiusMeters,
-        bool UseMegastationPrototype);
+        bool UseMegastationPrototype,
+        MegastationArchetype MegastationArchetype);
 
     private sealed record PreparedStationVisualCpuResult(
         StationGenerationCpuResult Generation,
@@ -88,6 +89,7 @@ public sealed partial class SystemSpaceState
             MegastationServiceChannelDiagnostics? megastationServiceChannelDiagnostics,
             MegastationSystemMaterialDiagnostics? megastationSystemMaterialDiagnostics,
             MegastationInteriorPlan? megastationInterior,
+            BolonMegastationDiagnostics? bolonMegastationDiagnostics,
             StationTexturePreparationDiagnostics textureDiagnostics,
             double generationMilliseconds,
             Vector3 boundsMin,
@@ -109,6 +111,7 @@ public sealed partial class SystemSpaceState
             MegastationServiceChannelDiagnostics = megastationServiceChannelDiagnostics;
             MegastationSystemMaterialDiagnostics = megastationSystemMaterialDiagnostics;
             MegastationInterior = megastationInterior;
+            BolonMegastationDiagnostics = bolonMegastationDiagnostics;
             TextureDiagnostics = textureDiagnostics;
             GenerationMilliseconds = generationMilliseconds;
             BoundsMin = boundsMin;
@@ -131,6 +134,7 @@ public sealed partial class SystemSpaceState
         public MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics { get; }
         public MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics { get; }
         public MegastationInteriorPlan? MegastationInterior { get; }
+        public BolonMegastationDiagnostics? BolonMegastationDiagnostics { get; }
         public StationTexturePreparationDiagnostics TextureDiagnostics { get; }
         public double GenerationMilliseconds { get; }
         public double UploadMilliseconds { get; set; }
@@ -484,19 +488,24 @@ public sealed partial class SystemSpaceState
         foreach (Galaxy.Station station in _system.Stations)
         {
             string identity = station.PersistenceId ?? station.Name;
-            bool useMega = ShouldUseMegastationPrototype(station, starter, selection);
+            MegastationSelection mega =
+                MegastationDevelopmentPolicy.Resolve(station, starter, selection);
+            bool useMega = mega.IsMegastation;
             StationVisualClassification classification = useMega
                 ? StationVisualClassification.Megastation
                 : StationVisualClassification.Standard;
             double radius = useMega
-                ? MegastationPrototypeGenerator.EstimateConservativeEnvelopeRadius(identity)
+                ? mega.Archetype == MegastationArchetype.Standard
+                    ? MegastationPrototypeGenerator.EstimateConservativeEnvelopeRadius(identity)
+                    : BolonMegastationGenerator.ConservativeEnvelopeRadiusMeters
                 : SpaceSimulation.StationPhysicalRadius(station);
             _stationVisualCatalog[identity] = new(
                 station,
                 identity,
                 classification,
                 radius,
-                useMega);
+                useMega,
+                mega.Archetype);
         }
     }
 
@@ -617,7 +626,8 @@ public sealed partial class SystemSpaceState
             descriptor.UseMegastationPrototype,
             cancellationToken,
             enabledShadowCasters,
-            systemMaterials);
+            systemMaterials,
+            descriptor.MegastationArchetype);
         cancellationToken.ThrowIfCancellationRequested();
         ComputeStationBounds(
             generation.Modules,
@@ -729,6 +739,7 @@ public sealed partial class SystemSpaceState
             generation.MegastationServiceChannelDiagnostics,
             generation.MegastationSystemMaterialDiagnostics,
             generation.MegastationInterior,
+            generation.BolonMegastationDiagnostics,
             generation.TextureDiagnostics,
             generation.GenerationMilliseconds,
             prepared.BoundsMin,
@@ -977,6 +988,8 @@ public sealed partial class SystemSpaceState
                 PublishMegastationPrototypeDiagnostics(
                     diagnostics,
                     MegastationPrototypeSettings.DevelopmentSelection.Mode);
+            if (package.BolonMegastationDiagnostics is { } bolon)
+                PublishBolonMegastationDiagnostics(bolon);
             if (package.MegastationInterior is { } interior)
                 PublishMegastationInteriorDiagnostics(
                     package.Descriptor.Identity,

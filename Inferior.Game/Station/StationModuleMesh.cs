@@ -396,6 +396,29 @@ public sealed class StationModuleMesh
         _faces.Add((b, 3));
     }
 
+    // Material-history surfaces sometimes require one coherent physical projection
+    // across adjacent non-coplanar facets. Explicit UVs preserve that projection while
+    // winding remains the sole authority for the flat geometric normal.
+    public void AddTriangleWithUv(
+        Vector3 v0, Vector2 uv0,
+        Vector3 v1, Vector2 uv1,
+        Vector3 v2, Vector2 uv2,
+        Color color)
+    {
+        int b = _verts.Count;
+        Vector3 normal = Vector3.Cross(v1 - v0, v2 - v0);
+        float length = normal.Length();
+        if (length > 1e-6f)
+            normal /= length;
+        _verts.Add(new VertexPositionNormalColorTexture(v0, normal, color, uv0));
+        _verts.Add(new VertexPositionNormalColorTexture(v1, normal, color, uv1));
+        _verts.Add(new VertexPositionNormalColorTexture(v2, normal, color, uv2));
+        int indexStart = _idx.Count;
+        _idx.AddRange([b, b + 2, b + 1]);
+        RecordDecorClassRange(indexStart, _idx.Count - indexStart);
+        _faces.Add((b, 3));
+    }
+
     // Per-vertex colour triangle — used for glass gradients.
     public void AddTriangleGradient(Vector3 v0, Color c0, Vector3 v1, Color c1, Vector3 v2, Color c2)
     {

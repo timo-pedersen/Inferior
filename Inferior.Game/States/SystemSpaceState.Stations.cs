@@ -33,38 +33,6 @@ internal readonly record struct StationGlowDepthDecision(
 
 public sealed partial class SystemSpaceState
 {
-    private static bool ShouldUseMegastationPrototype(
-        Galaxy.Station station,
-        Galaxy.Station? starterStation,
-        MegastationDevelopmentSelection selection)
-    {
-        if (selection.ForceStarterStation && starterStation != null && ReferenceEquals(station, starterStation))
-            return true;
-
-        return selection.Mode switch
-        {
-            MegastationPrototypeSelectionMode.Frequent =>
-                StableProbability(station.PersistenceId ?? station.Name) < selection.MegastationProbability,
-            MegastationPrototypeSelectionMode.ForceStarterStation =>
-                starterStation != null && ReferenceEquals(station, starterStation),
-            _ => false,
-        };
-    }
-
-    private static double StableProbability(string value)
-    {
-        unchecked
-        {
-            uint h = 2166136261u;
-            foreach (char c in value)
-            {
-                h ^= c;
-                h *= 16777619u;
-            }
-            return (h % 10_000u) / 10_000.0;
-        }
-    }
-
     private static void PublishMegastationPrototypeDiagnostics(
         MegastationPrototypeDiagnostics d,
         MegastationPrototypeSelectionMode mode)
@@ -80,6 +48,26 @@ public sealed partial class SystemSpaceState
             $"vertices simple/straight/concave/complex/nonmanifold={d.SimpleConvexVertexCount}/{d.StraightConvexContinuationVertexCount}/{d.SimpleConcaveVertexCount}/{d.ComplexVertexCount}/{d.NonManifoldVertexCount}; " +
             $"eligible={d.EligibleChamferSegmentCount}; suppressed={d.SuppressedConvexSegmentCount}; runs={d.ChamferRunCount}/{d.SuppressedChamferRunCount}; renderedBevels={d.BevelQuadCount}; renderedCaps={d.CornerCapCount}; chamferSemantic taperOnly/nearZero/missingRetract={d.ChamferSemanticValidation.TaperOnlyRenderedRunCount}/{d.ChamferSemanticValidation.NearZeroAreaRenderedRunCount}/{d.ChamferSemanticValidation.MissingFaceRetractionRunCount}; quads={d.ExposedQuadCount}; " +
             $"tris={d.TriangleCount}; verts={d.VertexCount}; pages={d.MeshPageCount}; topoMs={d.BoundaryTopologyBuildMilliseconds}; meshMs={d.BoundaryMeshBuildMilliseconds}; genMs={d.GenerationMilliseconds}",
+            SystemMessagePriority.NB));
+    }
+
+    private static void PublishBolonMegastationDiagnostics(BolonMegastationDiagnostics d)
+    {
+        DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            $"[BolonMegastation] id={d.StationIdentity}; type={d.Archetype}; " +
+            $"vessels={d.VesselCount} (anchor:{d.AnchorVesselCount},standard:{d.StandardVesselCount},secondary:{d.SecondaryVesselCount}); " +
+            $"radius={d.MinimumVesselRadius:F1}-{d.MaximumVesselRadius:F1}m; " +
+            $"graph=edges:{d.RelationshipCount},maxDegree:{d.MaximumGraphDegree},connector:{d.ConnectorRelationshipCount},direct:{d.DirectJoinRelationshipCount}; " +
+            $"dimensions={d.OverallDimensions.X:F1}x{d.OverallDimensions.Y:F1}x{d.OverallDimensions.Z:F1}m; " +
+            $"mesh={d.VertexCount}v/{d.TriangleCount}t/{d.MeshBytes}B (surface:{d.SurfaceTriangleCount},apertureStructure:{d.ApertureStructureTriangleCount}); " +
+            $"surfaceHistory=regions:{d.SurfaceHistoryRegionCount},mature:{d.MatureRegionCount},polished:{d.PolishedRegionCount},brushed:{d.BrushedRegionCount},eroded:{d.ErodedRegionCount}; " +
+            $"apertures=groups:{d.ApertureGroupCount},optical:{d.ApertureCount},band:{d.BandGroupCount} (4-9-4:{d.FourNineFourGroupCount}),compact:{d.CompactGroupCount},corner:{d.CornerFanGroupCount},edge:{d.EdgeRunGroupCount},sparse:{d.SparseFieldGroupCount},blankHex:{d.BlankEligibleHexFaceCount}; " +
+            $"vents=groups:{d.VentGroupCount},1x:{d.OneXVentCount},2x:{d.TwoXVentCount},3x:{d.ThreeXVentCount},grilleTriangles:{d.VentGrilleTriangleCount}; " +
+            $"palettes=ruby:{d.RubyGroupCount},violet:{d.VioletGroupCount},other:{d.RareOtherGroupCount}; " +
+            $"apertureState=unlit:{d.UnlitApertureCount},dim:{d.DimApertureCount},luminous:{d.LuminousApertureCount},bright:{d.BrightApertureCount}; " +
+            $"apertureGlass={d.ApertureGlassVertexCount}v/{d.ApertureGlassTriangleCount}t/{d.ApertureGlassBytes}B; " +
+            $"planningMs={d.PlanningMilliseconds:F1}; meshMs={d.MeshBuildMilliseconds:F1}; " +
+            $"structuralSignature={d.StructuralSignature}; surfaceSignature={d.SurfaceHistorySignature}; apertureSignature={d.ApertureSignature}; apertureVisualSignature={d.ApertureVisualSignature}; vocabularySignature={d.ApertureVocabularySignature}",
             SystemMessagePriority.NB));
     }
 

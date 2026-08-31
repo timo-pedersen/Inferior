@@ -62,7 +62,8 @@ public sealed record StationGenerationCpuResult(
     MegastationFabricDiagnostics? MegastationFabricDiagnostics = null,
     MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics = null,
     MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics = null,
-    MegastationInteriorPlan? MegastationInterior = null);
+    MegastationInteriorPlan? MegastationInterior = null,
+    BolonMegastationDiagnostics? BolonMegastationDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -111,7 +112,8 @@ public sealed class StationGenerator
         bool useMegastationPrototype = false,
         CancellationToken cancellationToken = default,
         IReadOnlySet<DecorClass>? enabledShadowCasterClasses = null,
-        SystemMaterialAssignmentContext? systemMaterials = null)
+        SystemMaterialAssignmentContext? systemMaterials = null,
+        MegastationArchetype? megastationArchetype = null)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         enabledShadowCasterClasses ??= StationDecorator.DecorCastingPolicy
@@ -121,6 +123,15 @@ public sealed class StationGenerator
         if (useMegastationPrototype)
         {
             string identity = station.PersistenceId ?? station.Name;
+            MegastationArchetype resolvedArchetype =
+                megastationArchetype ?? station.MegastationArchetype;
+            if (resolvedArchetype != MegastationArchetype.Standard)
+                return PrepareBolonMegastation(
+                    identity,
+                    resolvedArchetype,
+                    stopwatch,
+                    enabledShadowCasterClasses,
+                    cancellationToken);
             MegastationPrototypeCpuResult cpu = MegastationPrototypeGenerator.GenerateCpu(
                 identity,
                 stopwatch: stopwatch,
@@ -281,6 +292,49 @@ public sealed class StationGenerator
             null,
             stopwatch.Elapsed.TotalMilliseconds,
             compacted.Diagnostics);
+    }
+
+    private static StationGenerationCpuResult PrepareBolonMegastation(
+        string identity,
+        MegastationArchetype archetype,
+        System.Diagnostics.Stopwatch stopwatch,
+        IReadOnlySet<DecorClass> enabledShadowCasterClasses,
+        CancellationToken cancellationToken)
+    {
+        BolonMegastationCpuResult cpu = BolonMegastationGenerator.GenerateCpu(
+            identity,
+            archetype,
+            cancellationToken);
+        PlacedModule module = BolonMegastationGenerator.CreatePlacedModule(cpu);
+        List<PlacedModule> modules = [module];
+        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
+            modules,
+            [],
+            [],
+            new Dictionary<PlacedModule, StationMeshCpuData>(),
+            enabledShadowCasterClasses,
+            cancellationToken);
+        stopwatch.Stop();
+        return new StationGenerationCpuResult(
+            modules,
+            [],
+            [],
+            new Dictionary<PlacedModule, StationMeshCpuData>(),
+            uploadPlan,
+            null,
+            stopwatch.Elapsed.TotalMilliseconds,
+            new StationTexturePreparationDiagnostics(
+                GeneratedTextureCount: 0,
+                GeneratedVariantPairCount: 0,
+                SelectedUniqueTextureCount: 0,
+                SelectedUniqueTexturePairCount: 0,
+                DiscardedTextureCount: 0,
+                UploadedAlbedoTextureCount: 0,
+                UploadedMaterialTextureCount: 0,
+                ModuleTextureBindingCount: 2,
+                SharedFallbackReferenceCount: 2),
+            UsesSharedMegastationFallbackTextures: true,
+            BolonMegastationDiagnostics: cpu.Diagnostics);
     }
 
     internal static StationTextureCompactionResult CompactSelectedTextures(

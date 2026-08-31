@@ -12,7 +12,8 @@ public enum MegastationPrototypeSelectionMode
 public sealed record MegastationDevelopmentSelection(
     MegastationPrototypeSelectionMode Mode,
     double MegastationProbability,
-    bool ForceStarterStation);
+    bool ForceStarterStation,
+    Inferior.Galaxy.MegastationArchetype? ForcedArchetype = null);
 
 public sealed record MegastationPrototypeSettings
 {

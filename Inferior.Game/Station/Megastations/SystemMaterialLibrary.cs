@@ -12,6 +12,19 @@ public enum SystemMaterialFamilyId
     PaintedCoatedMetal,
     HeavyIndustrialPlate,
     CleanTechnicalAlloy,
+    PolishedMetal,
+    BrushedMetal,
+    AgedMetal,
+    ErodedMetal,
+}
+
+public enum SystemMaterialSurfaceCharacter
+{
+    Panelled,
+    Smooth,
+    Brushed,
+    Aged,
+    Eroded,
 }
 
 public enum SystemMaterialTintPolicy
@@ -44,7 +57,8 @@ public sealed record SystemMaterialRecipe(
     float BumpStrength,
     SystemMaterialGenerationParameters Generation,
     SystemMaterialTintPolicy TintPolicy,
-    float Wear);
+    float Wear,
+    SystemMaterialSurfaceCharacter SurfaceCharacter = SystemMaterialSurfaceCharacter.Panelled);
 
 public sealed record SystemMaterialCpuResource(
     SystemMaterialRecipe Recipe,
@@ -143,36 +157,64 @@ internal static class ProceduralMaterialCpuGenerator
 
 public static class SystemMaterialRecipes
 {
-    public const int LibraryVersion = 1;
+    public const int LibraryVersion = 2;
     public const int TextureSize = 512;
 
     private static readonly IReadOnlyDictionary<SystemMaterialFamilyId, SystemMaterialRecipe> AllRecipes =
         new Dictionary<SystemMaterialFamilyId, SystemMaterialRecipe>
         {
             [SystemMaterialFamilyId.DullStructuralMetal] = new(
-                SystemMaterialFamilyId.DullStructuralMetal, LibraryVersion, TextureSize,
+                SystemMaterialFamilyId.DullStructuralMetal, 1, TextureSize,
                 TileSizeMeters: 16f, SpecularStrength: .16f, SpecularShininess: 18f,
                 BumpStrength: .22f,
                 new(224, .045f, 6, 5, 2, .11f, .055f, .075f, .58f, .08f),
                 SystemMaterialTintPolicy.DominantStructural, Wear: 0f),
             [SystemMaterialFamilyId.PaintedCoatedMetal] = new(
-                SystemMaterialFamilyId.PaintedCoatedMetal, LibraryVersion, TextureSize,
+                SystemMaterialFamilyId.PaintedCoatedMetal, 1, TextureSize,
                 TileSizeMeters: 6f, SpecularStrength: .24f, SpecularShininess: 28f,
                 BumpStrength: .10f,
                 new(242, .022f, 4, 4, 1, .045f, .025f, .025f, .70f, .045f),
                 SystemMaterialTintPolicy.ColourBearing, Wear: 0f),
             [SystemMaterialFamilyId.HeavyIndustrialPlate] = new(
-                SystemMaterialFamilyId.HeavyIndustrialPlate, LibraryVersion, TextureSize,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, 1, TextureSize,
                 TileSizeMeters: 10f, SpecularStrength: .34f, SpecularShininess: 32f,
                 BumpStrength: .32f,
                 new(210, .055f, 8, 7, 3, .18f, .075f, .13f, .61f, .11f),
                 SystemMaterialTintPolicy.Industrial, Wear: 0f),
             [SystemMaterialFamilyId.CleanTechnicalAlloy] = new(
-                SystemMaterialFamilyId.CleanTechnicalAlloy, LibraryVersion, TextureSize,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, 1, TextureSize,
                 TileSizeMeters: 8f, SpecularStrength: .48f, SpecularShininess: 72f,
                 BumpStrength: .14f,
                 new(248, .018f, 5, 5, 1, .035f, .018f, .035f, .82f, .035f),
                 SystemMaterialTintPolicy.TechnicalAccent, Wear: 0f),
+            [SystemMaterialFamilyId.PolishedMetal] = new(
+                SystemMaterialFamilyId.PolishedMetal, LibraryVersion, TextureSize,
+                TileSizeMeters: 48f, SpecularStrength: .78f, SpecularShininess: 112f,
+                BumpStrength: .055f,
+                new(250, .008f, 1, 1, 0, 0f, 0f, .018f, .91f, .025f),
+                SystemMaterialTintPolicy.TechnicalAccent, Wear: 0f,
+                SystemMaterialSurfaceCharacter.Smooth),
+            [SystemMaterialFamilyId.BrushedMetal] = new(
+                SystemMaterialFamilyId.BrushedMetal, LibraryVersion, TextureSize,
+                TileSizeMeters: 36f, SpecularStrength: .68f, SpecularShininess: 82f,
+                BumpStrength: .18f,
+                new(242, .012f, 1, 1, 0, 0f, 0f, .09f, .82f, .055f),
+                SystemMaterialTintPolicy.TechnicalAccent, Wear: 0f,
+                SystemMaterialSurfaceCharacter.Brushed),
+            [SystemMaterialFamilyId.AgedMetal] = new(
+                SystemMaterialFamilyId.AgedMetal, LibraryVersion, TextureSize,
+                TileSizeMeters: 56f, SpecularStrength: .52f, SpecularShininess: 48f,
+                BumpStrength: .25f,
+                new(232, .022f, 1, 1, 0, 0f, 0f, .14f, .65f, .11f),
+                SystemMaterialTintPolicy.DominantStructural, Wear: 0f,
+                SystemMaterialSurfaceCharacter.Aged),
+            [SystemMaterialFamilyId.ErodedMetal] = new(
+                SystemMaterialFamilyId.ErodedMetal, LibraryVersion, TextureSize,
+                TileSizeMeters: 64f, SpecularStrength: .39f, SpecularShininess: 30f,
+                BumpStrength: .48f,
+                new(220, .028f, 1, 1, 0, 0f, 0f, .28f, .48f, .15f),
+                SystemMaterialTintPolicy.DominantStructural, Wear: 0f,
+                SystemMaterialSurfaceCharacter.Eroded),
         };
 
     public static IReadOnlyList<SystemMaterialRecipe> All { get; } =
@@ -236,6 +278,9 @@ public static class SystemMaterialCpuLibraryGenerator
         int seed,
         CancellationToken cancellationToken)
     {
+        if (recipe.SurfaceCharacter != SystemMaterialSurfaceCharacter.Panelled)
+            return GenerateContinuousMetalPixels(recipe, seed, cancellationToken);
+
         int size = recipe.TextureSize;
         var albedo = new Color[size * size];
         var material = new Color[size * size];
@@ -281,6 +326,104 @@ public static class SystemMaterialCpuLibraryGenerator
             }
         }
         return (albedo, material);
+    }
+
+    private static (Color[] Albedo, Color[] Material) GenerateContinuousMetalPixels(
+        SystemMaterialRecipe recipe,
+        int seed,
+        CancellationToken cancellationToken)
+    {
+        int size = recipe.TextureSize;
+        var albedo = new Color[size * size];
+        var material = new Color[size * size];
+        SystemMaterialGenerationParameters p = recipe.Generation;
+        int noiseSeed = new SeededRandom(seed).Derive("continuous-metal").Seed;
+        for (int y = 0; y < size; y++)
+        {
+            if ((y & 31) == 0)
+                cancellationToken.ThrowIfCancellationRequested();
+            for (int x = 0; x < size; x++)
+            {
+                float fine = ProceduralMaterialCpuGenerator.PixelNoise01(
+                    x, y, noiseSeed) * 2f - 1f;
+                float broad = PeriodicValueNoise(x, y, 64, size, noiseSeed ^ 0x42524F44)
+                    * 2f - 1f;
+                float medium = PeriodicValueNoise(x, y, 32, size, noiseSeed ^ 0x4D454449)
+                    * 2f - 1f;
+                float height;
+                float gloss;
+                float luminance;
+                switch (recipe.SurfaceCharacter)
+                {
+                    case SystemMaterialSurfaceCharacter.Smooth:
+                        height = .5f + broad * .012f + fine * .006f;
+                        gloss = p.BaseGloss + broad * .018f + fine * p.GlossVariation;
+                        luminance = p.NeutralAlbedo + 255f * (broad * .008f + fine * .004f);
+                        break;
+                    case SystemMaterialSurfaceCharacter.Brushed:
+                    {
+                        float longGrain = MathF.Sin(y * .47f + broad * 2.4f)
+                            + .45f * MathF.Sin(y * 1.19f + medium * 1.8f);
+                        height = .5f + longGrain * .018f + fine * .012f;
+                        gloss = p.BaseGloss + longGrain * .018f
+                            + broad * .035f + fine * p.GlossVariation;
+                        luminance = p.NeutralAlbedo
+                            + 255f * (broad * .012f + longGrain * .006f + fine * .004f);
+                        break;
+                    }
+                    case SystemMaterialSurfaceCharacter.Eroded:
+                    {
+                        float clustered = medium * .62f + broad * .38f;
+                        float attacked = Math.Clamp((clustered - .18f) * 1.65f, 0f, 1f);
+                        attacked *= attacked * (3f - 2f * attacked);
+                        float dissolution = Math.Clamp((medium + fine * .22f - .05f) * 1.3f,
+                            0f, 1f);
+                        height = .56f - attacked * .25f - dissolution * .055f
+                            + broad * .025f;
+                        gloss = p.BaseGloss - attacked * .20f
+                            + broad * .05f + fine * p.GlossVariation;
+                        luminance = p.NeutralAlbedo
+                            + 255f * (broad * .025f - attacked * .075f + fine * .006f);
+                        break;
+                    }
+                    default:
+                        height = .5f + broad * .055f + medium * .028f + fine * .018f;
+                        gloss = p.BaseGloss + broad * .075f
+                            + medium * .035f + fine * p.GlossVariation;
+                        luminance = p.NeutralAlbedo
+                            + 255f * (broad * .025f + medium * .012f + fine * .006f);
+                        break;
+                }
+                byte value = (byte)Math.Clamp((int)MathF.Round(luminance), 0, 255);
+                albedo[y * size + x] = new Color(value, value, value, (byte)255);
+                material[y * size + x] = ProceduralMaterialCpuGenerator.PackMaterial(
+                    Math.Clamp(height, 0f, 1f), Math.Clamp(gloss, 0f, 1f));
+            }
+        }
+        return (albedo, material);
+    }
+
+    private static float PeriodicValueNoise(
+        int x,
+        int y,
+        int cellSize,
+        int textureSize,
+        int seed)
+    {
+        int cells = textureSize / cellSize;
+        int x0 = x / cellSize;
+        int y0 = y / cellSize;
+        int x1 = (x0 + 1) % cells;
+        int y1 = (y0 + 1) % cells;
+        float tx = (x % cellSize) / (float)cellSize;
+        float ty = (y % cellSize) / (float)cellSize;
+        tx = tx * tx * (3f - 2f * tx);
+        ty = ty * ty * (3f - 2f * ty);
+        float a = ProceduralMaterialCpuGenerator.PixelNoise01(x0, y0, seed);
+        float b = ProceduralMaterialCpuGenerator.PixelNoise01(x1, y0, seed);
+        float c = ProceduralMaterialCpuGenerator.PixelNoise01(x0, y1, seed);
+        float d = ProceduralMaterialCpuGenerator.PixelNoise01(x1, y1, seed);
+        return MathHelper.Lerp(MathHelper.Lerp(a, b, tx), MathHelper.Lerp(c, d, tx), ty);
     }
 
     private static (Color Dominant, Color Secondary, Color Accent) SystemTintBasis(SeededRandom seed)

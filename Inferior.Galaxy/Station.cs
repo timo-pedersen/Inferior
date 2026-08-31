@@ -11,6 +11,45 @@ public enum StationSize
     Large,
 }
 
+/// <summary>
+/// Civilizational/structural family used when this station is selected for
+/// megastation-scale presentation. This is deliberately independent of StationSize.
+/// </summary>
+public enum MegastationArchetype
+{
+    Standard,
+    Bolon,
+    RedBolon,
+}
+
+public static class MegastationArchetypeSelector
+{
+    public static MegastationArchetype ForIdentity(string persistenceId)
+    {
+        uint value = StableHash($"megastation-subtype:v1:{persistenceId}");
+        return (value % 4u) switch
+        {
+            0u or 1u => MegastationArchetype.Standard,
+            2u => MegastationArchetype.Bolon,
+            _ => MegastationArchetype.RedBolon,
+        };
+    }
+
+    private static uint StableHash(string value)
+    {
+        unchecked
+        {
+            uint hash = 2166136261u;
+            foreach (char c in value)
+            {
+                hash ^= c;
+                hash *= 16777619u;
+            }
+            return hash;
+        }
+    }
+}
+
 // ── Services available at a station ───────────────────────────────────────────
 
 [Flags]
@@ -37,6 +76,7 @@ public sealed class Station
 
     public string       Name     { get; init; } = "";
     public StationSize  Size     { get; init; }
+    public MegastationArchetype MegastationArchetype { get; init; }
     public StationService Services { get; init; }
 
     // ── Pads ──────────────────────────────────────────────────────────────────
@@ -159,6 +199,7 @@ public sealed class Station
         float  slowRot     = (float)(MathF.Tau / (hoursPerRev * 3600.0))
                              * (rng.NextBool(0.5) ? 1f : -1f);
 
+        string persistenceId = $"{starName}:{orbitParent?.Name ?? "star"}:{name}";
         var station = new Station
         {
             Name          = name,
@@ -173,7 +214,8 @@ public sealed class Station
             AxialTilt     = axialTilt,
             SlowRotation  = slowRot,
             SpinPhase     = (float)rng.NextAngle(),
-            PersistenceId = $"{starName}:{orbitParent?.Name ?? "star"}:{name}",
+            PersistenceId = persistenceId,
+            MegastationArchetype = MegastationArchetypeSelector.ForIdentity(persistenceId),
         };
 
         // Generate landing pads

@@ -130,7 +130,8 @@ public sealed class StationTextureCompactionTests
             station,
             useMegastationPrototype: true,
             enabledShadowCasterClasses: SystemSpaceState.ClassesForStage(
-                SystemSpaceState.CasterStage.AllClasses).ToHashSet());
+                SystemSpaceState.CasterStage.AllClasses).ToHashSet(),
+            megastationArchetype: MegastationArchetype.Standard);
 
         Assert.True(prepared.UsesSharedMegastationFallbackTextures);
         Assert.True(prepared.Modules.Count > 1);

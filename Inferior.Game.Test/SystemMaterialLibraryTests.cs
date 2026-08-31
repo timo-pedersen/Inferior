@@ -19,7 +19,7 @@ public sealed class SystemMaterialLibraryTests
         new(() => MegastationPrototypeGenerator.GenerateCpu(Nova, systemMaterials: Context));
 
     [Fact]
-    public void M1DefinesExactlyFourIndependentWearNeutralFamilies()
+    public void SharedLibraryDefinesM1AndB2WearNeutralFamilies()
     {
         Assert.Equal(
             [
@@ -27,6 +27,10 @@ public sealed class SystemMaterialLibraryTests
                 SystemMaterialFamilyId.PaintedCoatedMetal,
                 SystemMaterialFamilyId.HeavyIndustrialPlate,
                 SystemMaterialFamilyId.CleanTechnicalAlloy,
+                SystemMaterialFamilyId.PolishedMetal,
+                SystemMaterialFamilyId.BrushedMetal,
+                SystemMaterialFamilyId.AgedMetal,
+                SystemMaterialFamilyId.ErodedMetal,
             ],
             SystemMaterialRecipes.All.Select(recipe => recipe.FamilyId));
         Assert.All(SystemMaterialRecipes.All, recipe =>
@@ -38,8 +42,29 @@ public sealed class SystemMaterialLibraryTests
             Assert.True(recipe.SpecularShininess > 0f);
             Assert.True(recipe.BumpStrength > 0f);
         });
-        Assert.Equal(4, SystemMaterialRecipes.All.Select(r => r.SpecularStrength).Distinct().Count());
-        Assert.Equal(4, SystemMaterialRecipes.All.Select(r => r.SpecularShininess).Distinct().Count());
+        Assert.Equal(8, SystemMaterialRecipes.All.Select(r => r.SpecularStrength).Distinct().Count());
+        Assert.Equal(8, SystemMaterialRecipes.All.Select(r => r.SpecularShininess).Distinct().Count());
+    }
+
+    [Fact]
+    public void B2MetalFamiliesUseContinuousCharacterWithoutPanelSemantics()
+    {
+        SystemMaterialRecipe[] b2 = SystemMaterialRecipes.All
+            .Skip(4)
+            .ToArray();
+
+        Assert.Equal(4, b2.Length);
+        Assert.DoesNotContain(b2,
+            recipe => recipe.SurfaceCharacter == SystemMaterialSurfaceCharacter.Panelled);
+        Assert.All(b2, recipe =>
+        {
+            SystemMaterialCpuResource resource =
+                SystemMaterialCpuLibraryGenerator.GenerateFamily(482901, recipe.FamilyId);
+            Assert.Equal(recipe.TextureSize * recipe.TextureSize, resource.Albedo.Length);
+            Assert.Equal(recipe.TextureSize * recipe.TextureSize, resource.MaterialMap.Length);
+            Assert.True(resource.MaterialMap.Select(pixel => pixel.R).Distinct().Count() > 8);
+            Assert.True(resource.MaterialMap.Select(pixel => pixel.G).Distinct().Count() > 8);
+        });
     }
 
     [Fact]
