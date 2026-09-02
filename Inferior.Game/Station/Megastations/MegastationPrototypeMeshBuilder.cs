@@ -119,7 +119,8 @@ public static class MegastationPrototypeMeshBuilder
         long topologyBuildMilliseconds = 0,
         MegastationSemanticZoningResult? semanticZoning = null,
         MegastationSystemMaterialAssignment? materialAssignment = null,
-        MegastationInteriorPlan? interiorPlan = null)
+        MegastationInteriorPlan? interiorPlan = null,
+        MegastationArtificialLightingPlan? artificialLighting = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
         var stopwatch = new Stopwatch();
@@ -156,6 +157,7 @@ public static class MegastationPrototypeMeshBuilder
         int cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         mesh.ApplyIlluminationFlags();
         ApplyInteriorIllumination(mesh, topology, occupancy.Grid, interiorPlan);
+        ApplyInteriorArtificialLighting(mesh, topology, occupancy.Grid, artificialLighting);
         stopwatch.Stop();
 
         var (_, indices) = mesh.ToIntArrays();
@@ -289,12 +291,33 @@ public static class MegastationPrototypeMeshBuilder
             }
             else
             {
-                floor = MathHelper.Clamp(
-                    .50f + portalProximity * .18f + ceilingCue * .08f,
-                    .46f,
-                    .88f);
+                // H1c-A replaces the provisional uniform bay-readability floor with
+                // independent static incident-light RGB. The throat retains its accepted
+                // transition treatment; deep bay structure can now become genuinely dark.
+                floor = 0f;
             }
             mesh.SetFaceIllumination(faceIndex, floor);
+        }
+    }
+
+    private static void ApplyInteriorArtificialLighting(
+        StationModuleMesh mesh,
+        BoundaryTopology topology,
+        SliceGrid grid,
+        MegastationArtificialLightingPlan? lighting)
+    {
+        if (lighting == null) return;
+        for (int faceIndex = 0; faceIndex < topology.Faces.Count; faceIndex++)
+        {
+            BoundaryFace face = topology.Faces[faceIndex];
+            if (face.SpaceKind != MegastationBoundarySpaceKind.InteriorBoundary)
+                continue;
+            Vector3 normal = BoundaryTopologyBuilder.Normal(face.Direction);
+            Vector3[] samples = face.Vertices
+                .Select(vertex => MegastationArtificialLighting.Evaluate(
+                    BoundaryTopologyBuilder.Position(grid, vertex), normal, lighting.Lights))
+                .ToArray();
+            mesh.SetFaceArtificialLight(faceIndex, samples);
         }
     }
 

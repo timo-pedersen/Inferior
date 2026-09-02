@@ -349,7 +349,7 @@ public sealed class MegastationInteriorTests
     }
 
     [Fact]
-    public void H1aChangesPresentationWithoutChangingAcceptedH1Structure()
+    public void H1cArtificialLightingPreservesAcceptedH1StructureAndThroatFloor()
     {
         MegastationPrototypeCpuResult result = NovaResult.Value;
         Assert.Equal(
@@ -371,7 +371,7 @@ public sealed class MegastationInteriorTests
             else if (face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary)
                 Assert.All(alpha, value => Assert.InRange(value, (byte)25, (byte)62));
             else
-                Assert.All(alpha, value => Assert.InRange(value, (byte)117, byte.MaxValue));
+                Assert.All(alpha, value => Assert.Equal(0, value));
         }
     }
 

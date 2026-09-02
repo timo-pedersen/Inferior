@@ -105,20 +105,36 @@ public sealed record BolonMegastationDiagnostics(
     int ApertureGlassTriangleCount,
     long ApertureGlassBytes,
     int VentGrilleTriangleCount,
+    int BarePentagonCount,
+    int ReinforcementCollarCount,
+    int IrisHatchCount,
+    int ApparatusRosetteCount,
+    int ReinforcementCollarTriangleCount,
+    int IrisHatchTriangleCount,
+    int ApparatusRosetteTriangleCount,
     double PlanningMilliseconds,
     double MeshBuildMilliseconds,
     string StructuralSignature,
     string SurfaceHistorySignature,
     string ApertureSignature,
     string ApertureVisualSignature,
-    string ApertureVocabularySignature);
+    string ApertureVocabularySignature,
+    string PentagonalUtilitySignature)
+{
+    public BolonAmbassadorBayPlan? AmbassadorBay { get; init; }
+    public int AmbassadorTriangleCount { get; init; }
+}
 
 public sealed record BolonMegastationCpuResult(
     BolonMegastationPlan Plan,
     BolonSurfacePresentationPlan SurfacePlan,
+    BolonPentagonalUtilityPlan PentagonalUtilityPlan,
     StationModuleMesh Mesh,
     StationModuleMesh ApertureGlassMesh,
-    BolonMegastationDiagnostics Diagnostics);
+    BolonMegastationDiagnostics Diagnostics)
+{
+    public required BolonAmbassadorBayPlan AmbassadorBay { get; init; }
+}
 
 /// <summary>
 /// B1 plans a low-degree molecular graph whose edges own actual C60 attachment
@@ -183,12 +199,16 @@ public static class BolonMegastationGenerator
 
         var planning = System.Diagnostics.Stopwatch.StartNew();
         BolonMegastationPlan plan = Plan(stationIdentity, archetype, cancellationToken);
+        BolonAmbassadorBayPlan ambassadorBay = BolonAmbassadorBayPlanner.Plan(plan, cancellationToken);
         BolonSurfacePresentationPlan surfacePlan = BolonSurfacePresentationPlanner.Plan(
+            plan, cancellationToken);
+        surfacePlan = BolonSurfacePresentationPlanner.ReserveAmbassadorFace(surfacePlan, ambassadorBay);
+        BolonPentagonalUtilityPlan utilityPlan = BolonPentagonalUtilityPlanner.Plan(
             plan, cancellationToken);
         planning.Stop();
         var meshBuild = System.Diagnostics.Stopwatch.StartNew();
         BolonSurfaceMeshBuildResult meshes = BolonSurfaceMeshBuilder.Build(
-            plan, surfacePlan, cancellationToken);
+            plan, surfacePlan, utilityPlan, cancellationToken, ambassadorBay);
         meshBuild.Stop();
         StationModuleMesh mesh = meshes.HullMesh;
         StationModuleMesh glass = meshes.ApertureGlassMesh;
@@ -261,14 +281,30 @@ public static class BolonMegastationGenerator
             (long)glass.VertexCount * VertexPositionNormalColorTexture.VertexDeclaration.VertexStride
                 + (long)glass.IndexCount * sizeof(int),
             meshes.VentGrilleTriangleCount,
+            utilityPlan.BarePentagonCount,
+            utilityPlan.Fixtures.Count(fixture => fixture.Family
+                == BolonPentagonalUtilityFamily.ReinforcementCollar),
+            utilityPlan.Fixtures.Count(fixture => fixture.Family
+                == BolonPentagonalUtilityFamily.FiveLeafIris),
+            utilityPlan.Fixtures.Count(fixture => fixture.Family
+                == BolonPentagonalUtilityFamily.ApparatusRosette),
+            meshes.ReinforcementCollarTriangleCount,
+            meshes.IrisHatchTriangleCount,
+            meshes.ApparatusRosetteTriangleCount,
             planning.Elapsed.TotalMilliseconds,
             meshBuild.Elapsed.TotalMilliseconds,
             plan.StructuralSignature,
             surfacePlan.SurfaceHistorySignature,
             surfacePlan.ApertureSignature,
             surfacePlan.ApertureVisualSignature,
-            surfacePlan.ApertureVocabularySignature);
-        return new(plan, surfacePlan, mesh, glass, diagnostics);
+            surfacePlan.ApertureVocabularySignature,
+            utilityPlan.Signature);
+        diagnostics = diagnostics with
+        {
+            AmbassadorBay = ambassadorBay,
+            AmbassadorTriangleCount = meshes.AmbassadorTriangleCount,
+        };
+        return new(plan, surfacePlan, utilityPlan, mesh, glass, diagnostics) { AmbassadorBay = ambassadorBay };
     }
 
     public static PlacedModule CreatePlacedModule(BolonMegastationCpuResult cpu)
@@ -285,7 +321,7 @@ public static class BolonMegastationGenerator
             Ports = [],
             MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
         };
-        return new PlacedModule
+        var module = new PlacedModule
         {
             Definition = definition,
             Transform = Matrix.Identity,
@@ -295,11 +331,25 @@ public static class BolonMegastationGenerator
             AabbMax = cpu.Plan.Maximum + new Vector3(5f),
             HullMesh = cpu.Mesh,
             HullShadowMesh = cpu.Mesh,
+            UsesHullVertexIllumination = true,
+            NativeApproachBeamVertices = MegastationApproachBeamMeshBuilder.Build(
+                cpu.AmbassadorBay.ApproachFixtures().Select(f => f.Beam).ToArray()),
             GlassMesh = cpu.ApertureGlassMesh.VertexCount > 0
                 ? cpu.ApertureGlassMesh
                 : null,
             HullMaterialRanges = cpu.Mesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
+        // Old four flush point markers are gone. Only H1e's accepted emitter-source
+        // halos accompany the reused physical fixtures and long-range beam geometry.
+        module.GlowLights.AddRange(cpu.AmbassadorBay.ApproachFixtures().Select(f => new StationLightInfo(
+            f.Marker.Position, f.Marker.Colour, GlowType.MegastationEntranceGuidance, f.Marker.Intensity)
+        {
+            SurfaceNormal = f.Marker.SurfaceNormal,
+            PresentationSizePixels = f.Marker.GlowSizePixels,
+            PresentationFadeStartMeters = f.Marker.GlowFadeStartMeters,
+            PresentationFadeEndMeters = f.Marker.GlowFadeEndMeters,
+        }));
+        return module;
     }
 
     public static BolonMegastationPlan Plan(

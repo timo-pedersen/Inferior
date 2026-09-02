@@ -179,7 +179,8 @@ public sealed class MegastationWindowTests
             result.RegularisedOccupancy,
             result.BoundaryTopology,
             rebuilt,
-            interiorPlan: result.InteriorPlan);
+            interiorPlan: result.InteriorPlan,
+            artificialLighting: result.ArtificialLightingPlan);
         MegastationSemanticZoningResult rebuiltZoning = MegastationSemanticZoningBuilder.Build(
             result.Diagnostics.RootSeed, result.RegularisedOccupancy, result.BoundaryTopology, result.Faces);
 

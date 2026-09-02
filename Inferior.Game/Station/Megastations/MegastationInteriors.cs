@@ -90,7 +90,14 @@ public sealed record MegastationInteriorDiagnostics(
     float CrownOuterWidth = 0f,
     float CrownOuterHeight = 0f,
     float EntranceClearanceMargin = 0f,
-    int EntranceAssemblyRemovedCellCount = 0);
+    int EntranceAssemblyRemovedCellCount = 0,
+    int ArtificialLightAlgorithmVersion = 0,
+    int ArtificialLightSourceCount = 0,
+    float ArtificialLightMinimumRange = 0f,
+    float ArtificialLightMaximumRange = 0f,
+    float ArtificialIndirectStrength = 0f,
+    float ArtificialIndirectRangeScale = 0f,
+    string ArtificialLightSignature = "");
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -649,14 +656,14 @@ public static class MegastationInteriorPlanner
 public static class MegastationInteriorPresentationPlanner
 {
     private const float EntranceClearanceMargin = 6f;
-    private const float ApproachPlateDepth = 2.2f;
-    private const float ApproachHousingDepth = 7f;
-    private const float ApproachBarrelDepth = 5f;
-    private const float ApproachEmitterDepth = .9f;
-    private const float ApproachSourceClearance = .15f;
+    private const float ApproachPlateDepth = MegastationApproachFixtures.PlateDepth;
+    private const float ApproachHousingDepth = MegastationApproachFixtures.HousingDepth;
+    private const float ApproachBarrelDepth = MegastationApproachFixtures.BarrelDepth;
+    private const float ApproachEmitterDepth = MegastationApproachFixtures.EmitterDepth;
+    private const float ApproachSourceClearance = MegastationApproachFixtures.SourceClearance;
 
-    public static Color ApproachUpColour { get; } = new(62, 186, 255);
-    public static Color ApproachDownColour { get; } = new(255, 174, 42);
+    public static Color ApproachUpColour => MegastationApproachFixtures.UpColour;
+    public static Color ApproachDownColour => MegastationApproachFixtures.DownColour;
 
     public static float ComputeWallThickness(
         int interiorSeed,
@@ -1271,12 +1278,6 @@ public static class MegastationInteriorPresentationPlanner
                     1.2f,
                     Sample(approachSeed, "half-angle"));
                 float plateSpan = MathHelper.Clamp(member * .52f, 11f, 15f);
-                float plateDepth = ApproachPlateDepth;
-                float housingSpan = plateSpan * .68f;
-                float housingDepth = ApproachHousingDepth;
-                float barrelSpan = housingSpan * .55f;
-                float barrelDepth = ApproachBarrelDepth;
-                float emitterDepth = ApproachEmitterDepth;
                 Vector3 crownFront = centre + outward * (depth * .5f);
                 float cornerRight = outerWidth * .5f + member * .5f;
                 float cornerUp = outerHeight * .5f + member * .5f;
@@ -1284,68 +1285,16 @@ public static class MegastationInteriorPresentationPlanner
                 foreach (int horizontal in new[] { -1, 1 })
                 foreach (int vertical in new[] { -1, 1 })
                 {
-                    string corner = $"{horizontal}:{vertical}";
-                    Color beamColour = vertical > 0
-                        ? ApproachUpColour
-                        : ApproachDownColour;
                     Vector3 mountingPoint = crownFront
                         + right * horizontal * cornerRight
                         + up * vertical * cornerUp;
-                    Vector3 plateCentre = mountingPoint + outward * (plateDepth * .5f);
-                    Vector3 housingCentre = mountingPoint
-                        + outward * (plateDepth + housingDepth * .5f);
-                    Vector3 barrelCentre = mountingPoint
-                        + outward * (plateDepth + housingDepth + barrelDepth * .5f);
-                    Vector3 emitterCentre = mountingPoint
-                        + outward * (plateDepth + housingDepth + barrelDepth
-                            + emitterDepth * .5f);
-                    Vector3 source = emitterCentre
-                        + outward * (emitterDepth * .5f + ApproachSourceClearance);
-
-                    Add($"entrance/approach/fixture:{corner}/mount",
-                        MegastationInteriorGuidanceKind.ApproachFixture,
-                        CreateFrame(right, up, outward, plateCentre),
-                        new(plateSpan, plateSpan, plateDepth), palette.CrownStructure,
-                        SystemMaterialFamilyId.HeavyIndustrialPlate, true);
-                    Add($"entrance/approach/fixture:{corner}/housing",
-                        MegastationInteriorGuidanceKind.ApproachFixture,
-                        CreateFrame(right, up, outward, housingCentre),
-                        new(housingSpan, housingSpan, housingDepth), palette.StructuralAccent,
-                        SystemMaterialFamilyId.CleanTechnicalAlloy, true);
-                    Add($"entrance/approach/fixture:{corner}/barrel",
-                        MegastationInteriorGuidanceKind.ApproachFixture,
-                        CreateFrame(right, up, outward, barrelCentre),
-                        new(barrelSpan, barrelSpan, barrelDepth), palette.OuterStructure,
-                        SystemMaterialFamilyId.HeavyIndustrialPlate, false);
-                    Add($"entrance/approach/fixture:{corner}/emitter",
-                        MegastationInteriorGuidanceKind.ApproachFixture,
-                        CreateFrame(right, up, outward, emitterCentre),
-                        new(barrelSpan * .86f, barrelSpan * .86f, emitterDepth), beamColour,
-                        SystemMaterialFamilyId.CleanTechnicalAlloy, false, .98f);
-
-                    approachBeams.Add(new(
-                        $"entrance/approach/beam:{corner}",
-                        vertical > 0
-                            ? MegastationApproachBeamVertical.Upper
-                            : MegastationApproachBeamVertical.Lower,
-                        horizontal,
-                        source,
-                        outward,
-                        right,
-                        up,
-                        beamColour,
-                        beamLength,
-                        halfAngle));
-                    markers.Add(new(
-                        $"entrance/approach/source:{corner}",
-                        MegastationInteriorGuidanceKind.ApproachFixture,
-                        source,
-                        beamColour,
-                        .82f,
-                        outward,
-                        24f,
-                        500f,
-                        3_000f));
+                    MegastationApproachFixture fixture = MegastationApproachFixtures.Create(
+                        "entrance/approach", horizontal, vertical, mountingPoint, right, up, outward,
+                        plateSpan, palette.CrownStructure, palette.StructuralAccent, palette.OuterStructure,
+                        beamLength, halfAngle);
+                    elements.AddRange(fixture.Elements);
+                    approachBeams.Add(fixture.Beam);
+                    markers.Add(fixture.Marker);
                 }
             }
         }
@@ -1378,13 +1327,16 @@ public static class MegastationApproachBeamMeshBuilder
 
     public static VertexPositionColor[] Build(
         MegastationInteriorPresentationPlan presentation)
+        => Build(presentation.ApproachBeams);
+
+    public static VertexPositionColor[] Build(IReadOnlyList<MegastationApproachGuidanceBeam> beams)
     {
         var vertices = new List<VertexPositionColor>(
-            presentation.ApproachBeams.Count
+            beams.Count
             * RadialFinCount
             * (LongitudinalFractions.Length - 1)
             * 12);
-        foreach (MegastationApproachGuidanceBeam beam in presentation.ApproachBeams)
+        foreach (MegastationApproachGuidanceBeam beam in beams)
             EmitBeam(beam, vertices);
         return vertices.ToArray();
     }

@@ -157,7 +157,13 @@ public sealed record BolonSurfaceMeshBuildResult(
     int SurfaceTriangleCount,
     int ApertureCollarTriangleCount,
     int ApertureGlassTriangleCount,
-    int VentGrilleTriangleCount);
+    int VentGrilleTriangleCount,
+    int ReinforcementCollarTriangleCount,
+    int IrisHatchTriangleCount,
+    int ApparatusRosetteTriangleCount)
+{
+    public int AmbassadorTriangleCount { get; init; }
+}
 
 public static class BolonSurfacePresentationPlanner
 {
@@ -300,6 +306,23 @@ public static class BolonSurfacePresentationPlanner
             apertureSignature,
             apertureVisualSignature,
             vocabularySignature);
+    }
+
+    // Compose the entrance reservation AFTER deterministic B2 planning. Do not refill
+    // the removed host: doing so would change accepted groups on unrelated faces.
+    public static BolonSurfacePresentationPlan ReserveAmbassadorFace(
+        BolonSurfacePresentationPlan plan, BolonAmbassadorBayPlan bay)
+    {
+        BolonApertureGroup[] groups = plan.ApertureGroups
+            .Where(g => !bay.ReservesFace(g.VesselIndex, g.HostFaceIndex)).ToArray();
+        return plan with
+        {
+            ApertureGroups = groups,
+            BlankEligibleHexFaceCount = plan.BlankEligibleHexFaceCount + plan.ApertureGroups.Count - groups.Length,
+            ApertureSignature = ApertureSignature(plan.StationIdentity, groups),
+            ApertureVisualSignature = ApertureVisualSignature(plan.StationIdentity, groups),
+            ApertureVocabularySignature = ApertureVocabularySignature(plan.StationIdentity, groups),
+        };
     }
 
     public static string ResolveRegionIdentity(
@@ -1213,7 +1236,9 @@ public static class BolonSurfaceMeshBuilder
     public static BolonSurfaceMeshBuildResult Build(
         BolonMegastationPlan structuralPlan,
         BolonSurfacePresentationPlan surfacePlan,
-        CancellationToken cancellationToken = default)
+        BolonPentagonalUtilityPlan utilityPlan,
+        CancellationToken cancellationToken = default,
+        BolonAmbassadorBayPlan? ambassadorBay = null)
     {
         var hull = new StationModuleMesh();
         var glass = new StationModuleMesh();
@@ -1232,6 +1257,27 @@ public static class BolonSurfaceMeshBuilder
                     group => group.Key,
                     group => CreateCutouts(
                         structuralPlan.Vessels[group.Key.VesselIndex], group));
+        foreach (IGrouping<(int VesselIndex, int HostFaceIndex), BolonPentagonalUtilityFixture> group
+                     in utilityPlan.Fixtures
+                         .Where(fixture => fixture.Family
+                             == BolonPentagonalUtilityFamily.FiveLeafIris)
+                         .GroupBy(fixture => (fixture.VesselIndex, fixture.HostFaceIndex)))
+        {
+            ApertureCutout[] utilityCutouts = CreateUtilityCutouts(
+                structuralPlan.Vessels[group.Key.VesselIndex], group);
+            var key = (group.Key.VesselIndex, group.Key.HostFaceIndex);
+            cutouts[key] = cutouts.GetValueOrDefault(key, [])
+                .Concat(utilityCutouts)
+                .ToArray();
+        }
+        if (ambassadorBay is { } bay)
+        {
+            BolonVesselPlan vessel = structuralPlan.Vessels[bay.VesselIndex];
+            Quaternion inverse = Quaternion.Inverse(vessel.Orientation);
+            cutouts[(bay.VesselIndex, bay.HostFaceIndex)] = [new ApertureCutout(
+                Vector3.Transform(bay.Outward, inverse), bay.MouthCorners().Select(p =>
+                    Vector3.Transform(p - vessel.Position, inverse)).ToArray())];
+        }
         int surfaceTrianglesBefore = hull.IndexCount / 3;
         foreach (BolonVesselPlan vessel in structuralPlan.Vessels)
         {
@@ -1290,6 +1336,39 @@ public static class BolonSurfaceMeshBuilder
                     hull, glass, structuralPlan.Archetype, group, aperture);
         }
         int collarTriangles = hull.IndexCount / 3 - collarStart;
+        int reinforcementTriangles = 0;
+        int irisTriangles = 0;
+        int rosetteTriangles = 0;
+        foreach (BolonPentagonalUtilityFixture fixture in utilityPlan.Fixtures)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int start = hull.IndexCount / 3;
+            switch (fixture.Family)
+            {
+                case BolonPentagonalUtilityFamily.ReinforcementCollar:
+                    EmitReinforcementCollar(hull, fixture);
+                    reinforcementTriangles += hull.IndexCount / 3 - start;
+                    break;
+                case BolonPentagonalUtilityFamily.FiveLeafIris:
+                    EmitFiveLeafIris(hull, fixture);
+                    irisTriangles += hull.IndexCount / 3 - start;
+                    break;
+                case BolonPentagonalUtilityFamily.ApparatusRosette:
+                    EmitApparatusRosette(hull, fixture);
+                    rosetteTriangles += hull.IndexCount / 3 - start;
+                    break;
+            }
+        }
+        int ambassadorStart = hull.IndexCount / 3;
+        if (ambassadorBay != null)
+        {
+            // Previously DynamicLit ignored hull alpha. Zero all accepted exterior
+            // vertices before opting this combined mesh into the illumination floor.
+            hull.ApplyIlluminationFlags();
+            EmitAmbassadorChamfer(hull, structuralPlan, surfacePlan, ambassadorBay);
+            BolonAmbassadorBayMeshBuilder.Emit(hull, ambassadorBay);
+            MegastationApproachFixtures.Emit(hull, ambassadorBay.ApproachFixtures().SelectMany(f => f.Elements));
+        }
         hull.BaseFaceCount = hull.FaceCount;
         glass.BaseFaceCount = glass.FaceCount;
         return new(
@@ -1298,7 +1377,10 @@ public static class BolonSurfaceMeshBuilder
             surfaceTriangles,
             collarTriangles,
             glass.IndexCount / 3,
-            ventGrilleTriangles);
+            ventGrilleTriangles,
+            reinforcementTriangles,
+            irisTriangles,
+            rosetteTriangles) { AmbassadorTriangleCount = hull.IndexCount / 3 - ambassadorStart };
     }
 
     private static void EmitSurfacePatch(
@@ -1387,6 +1469,17 @@ public static class BolonSurfaceMeshBuilder
         // What remains is inside the opening and is deliberately discarded.
     }
 
+    internal static void EmitAmbassadorBulkhead(StationModuleMesh mesh, Vector3[] octagon,
+        Vector3[] opening, Vector3 normal, Color colour)
+    {
+        var pieces = new List<Vector3[]>();
+        Vector3 openingNormal = Vector3.Normalize(Vector3.Cross(opening[1] - opening[0], opening[2] - opening[0]));
+        SubtractConvexHole(octagon, new ApertureCutout(openingNormal, opening), pieces);
+        foreach (Vector3[] piece in pieces)
+        for (int i = 1; i < piece.Length - 1; i++)
+            BolonAmbassadorBayMeshBuilder.Triangle(mesh, piece[0], piece[i], piece[i + 1], normal, colour);
+    }
+
     private static void SplitByEdge(
         IReadOnlyList<Vector3> polygon,
         Vector3 edgeStart,
@@ -1444,15 +1537,19 @@ public static class BolonSurfaceMeshBuilder
         BolonVesselSurfaceHistory history,
         Vector3 localA,
         Vector3 localB,
-        Vector3 localC)
+        Vector3 localC,
+        Vector3? materialSamplePoint = null,
+        Vector3? expectedStationNormal = null)
     {
-        Vector3 sampleDirection = Vector3.Normalize((localA + localB + localC) / 3f);
+        Vector3 sampleDirection = Vector3.Normalize(materialSamplePoint ?? (localA + localB + localC) / 3f);
         SurfaceSample sample = Resolve(history, sampleDirection);
         SystemMaterialFamilyId family = MaterialFamily(sample.Finish);
         mesh.CurrentMaterialFamily = family;
         float tile = SystemMaterialRecipes.Get(family).TileSizeMeters;
         Color colour = SurfaceColour(
             plan.Archetype, vessel.Index, sample, plan.StationIdentity);
+        if (expectedStationNormal.HasValue)
+            colour.A = 0; // hull-matched B4a.1 reveal: no artificial illumination override
         Vector3 worldA = vessel.Position + Vector3.Transform(localA, vessel.Orientation);
         Vector3 worldB = vessel.Position + Vector3.Transform(localB, vessel.Orientation);
         Vector3 worldC = vessel.Position + Vector3.Transform(localC, vessel.Orientation);
@@ -1460,10 +1557,53 @@ public static class BolonSurfaceMeshBuilder
         Vector2 uvB = Project(localB, sample, tile);
         Vector2 uvC = Project(localC, sample, tile);
         if (Vector3.Dot(Vector3.Cross(worldB - worldA, worldC - worldA),
-                Vector3.Transform(sampleDirection, vessel.Orientation)) < 0f)
+                expectedStationNormal ?? Vector3.Transform(sampleDirection, vessel.Orientation)) < 0f)
             mesh.AddTriangleWithUv(worldA, uvA, worldC, uvC, worldB, uvB, colour);
         else
             mesh.AddTriangleWithUv(worldA, uvA, worldB, uvB, worldC, uvC, colour);
+    }
+
+    internal static void EmitAmbassadorChamfer(StationModuleMesh mesh, BolonMegastationPlan structural,
+        BolonSurfacePresentationPlan surfaces, BolonAmbassadorBayPlan bay)
+    {
+        var vessel = structural.Vessels[bay.VesselIndex];
+        var face = BolonMegastationGenerator.GetAttachmentFace(bay.HostFaceIndex);
+        Quaternion inverse = Quaternion.Inverse(vessel.Orientation);
+        Vector3[] mouth = bay.MouthCorners();
+        Vector3[] reveal = bay.Rectangle(bay.MouthWidth, bay.MouthHeight, bay.OuterRevealDepth);
+        Vector3[] inner = bay.Rectangle(bay.ClearWidth, bay.ClearHeight, bay.ChamferDepth);
+        Join(mouth, reveal);
+        Join(reveal, inner);
+
+        void Join(Vector3[] a, Vector3[] b)
+        {
+            for (int edge = 0; edge < 4; edge++)
+            {
+                int j = (edge + 1) % 4;
+                int steps = Math.Max(1, (int)MathF.Ceiling(Vector3.Distance(a[edge], a[j]) / 16f));
+                for (int segment = 0; segment < steps; segment++)
+                {
+                    float t0 = segment / (float)steps, t1 = (segment + 1f) / steps;
+                    Vector3 p0 = Vector3.Lerp(a[edge], a[j], t0), p1 = Vector3.Lerp(a[edge], a[j], t1);
+                    Vector3 p2 = Vector3.Lerp(b[edge], b[j], t1), p3 = Vector3.Lerp(b[edge], b[j], t0);
+                    Vector3 q = bay.Coordinates((p0 + p1 + p2 + p3) / 4f);
+                    Vector3 inward = -bay.Right * q.X - bay.Up * q.Y;
+                    Emit(p0, p1, p2, inward); Emit(p0, p2, p3, inward);
+                }
+            }
+        }
+        void Emit(Vector3 a, Vector3 b, Vector3 c, Vector3 inward)
+        {
+            Vector3 la = Vector3.Transform(a - vessel.Position, inverse);
+            Vector3 lb = Vector3.Transform(b - vessel.Position, inverse);
+            Vector3 lc = Vector3.Transform(c - vessel.Position, inverse);
+            Vector3 sample = (la + lb + lc) / 3f;
+            // Sample the surrounding exterior pressure shell, not a contrasting
+            // interior recipe. Reuse its exact finish, tint, history and physical UVs.
+            sample -= face.LocalNormal * Vector3.Dot(sample - face.LocalCenter * vessel.Radius, face.LocalNormal);
+            EmitSurfaceTriangle(mesh, structural, vessel, surfaces.VesselHistories[vessel.Index],
+                la, lb, lc, sample, inward);
+        }
     }
 
     private static SurfaceSample Resolve(
@@ -1590,6 +1730,303 @@ public static class BolonSurfaceMeshBuilder
                 hull, opticalCenter, u, v, n, opticalRadius, throat, aperture);
         EmitOpticalSurface(glass, opticalCenter, u, v, n, opticalRadius, visual);
         return 0;
+    }
+
+    private static void EmitReinforcementCollar(
+        StationModuleMesh hull,
+        BolonPentagonalUtilityFixture fixture)
+    {
+        SetMaterial(hull, fixture.MaterialFamily);
+        Vector3 n = fixture.Normal;
+        Vector3[] outer = PentagonRing(
+            fixture.Centre + n * .035f,
+            fixture.TangentU,
+            fixture.TangentV,
+            fixture.OuterRadius);
+        Vector3[] shoulder = PentagonRing(
+            fixture.Centre + n * fixture.ReliefHeight,
+            fixture.TangentU,
+            fixture.TangentV,
+            fixture.OuterRadius * .82f);
+        Vector3[] inner = PentagonRing(
+            fixture.Centre + n * (fixture.ReliefHeight * .38f),
+            fixture.TangentU,
+            fixture.TangentV,
+            fixture.InnerRadius);
+        for (int index = 0; index < 5; index++)
+        {
+            int next = (index + 1) % 5;
+            AddQuadFacing(hull,
+                outer[index], outer[next], shoulder[next], shoulder[index],
+                n, fixture.StructuralColour);
+            AddQuadFacing(hull,
+                shoulder[index], shoulder[next], inner[next], inner[index],
+                n, fixture.SecondaryColour);
+        }
+        AddPolygonFacing(hull, inner, n, fixture.StructuralColour);
+
+        float ribHalfAngle = .055f;
+        for (int index = 0; index < 5; index++)
+        {
+            float angle = index * MathF.Tau / 5f;
+            Vector3[] rib =
+            [
+                Polar(fixture, angle - ribHalfAngle, fixture.InnerRadius * .82f,
+                    fixture.ReliefHeight * .58f),
+                Polar(fixture, angle + ribHalfAngle, fixture.InnerRadius * .82f,
+                    fixture.ReliefHeight * .58f),
+                Polar(fixture, angle + ribHalfAngle * .62f, fixture.OuterRadius * .91f,
+                    fixture.ReliefHeight * .58f),
+                Polar(fixture, angle - ribHalfAngle * .62f, fixture.OuterRadius * .91f,
+                    fixture.ReliefHeight * .58f),
+            ];
+            EmitExtrudedPolygon(
+                hull, rib, n, fixture.ReliefHeight * .28f, fixture.SecondaryColour);
+        }
+    }
+
+    private static void EmitFiveLeafIris(
+        StationModuleMesh hull,
+        BolonPentagonalUtilityFixture fixture)
+    {
+        Vector3 n = fixture.Normal;
+        SetMaterial(hull, fixture.MaterialFamily);
+        Vector3[] outer = PentagonRing(
+            fixture.Centre + n * .035f,
+            fixture.TangentU,
+            fixture.TangentV,
+            fixture.OuterRadius);
+        Vector3[] lip = PentagonRing(
+            fixture.Centre - n * .34f,
+            fixture.TangentU,
+            fixture.TangentV,
+            fixture.OuterRadius * .88f);
+        float doorRadius = fixture.InnerRadius;
+        Vector3 doorCenter = fixture.Centre - n * fixture.RecessDepth;
+        Vector3[] throat = PentagonRing(
+            doorCenter,
+            fixture.TangentU,
+            fixture.TangentV,
+            doorRadius);
+        for (int index = 0; index < 5; index++)
+        {
+            int next = (index + 1) % 5;
+            AddQuadFacing(hull,
+                outer[index], outer[next], lip[next], lip[index],
+                n, fixture.StructuralColour);
+        }
+        SetMaterial(hull, SystemMaterialFamilyId.ErodedMetal);
+        Color throatColour = new(24, 15, 13);
+        for (int index = 0; index < 5; index++)
+        {
+            int next = (index + 1) % 5;
+            Vector3 inward = Vector3.Normalize(fixture.Centre - lip[index]);
+            AddQuadFacing(hull,
+                lip[index], lip[next], throat[next], throat[index],
+                inward, throatColour);
+        }
+        Vector3 cavityCenter = doorCenter - n * .55f;
+        Vector3[] cavity = PentagonRing(
+            cavityCenter,
+            fixture.TangentU,
+            fixture.TangentV,
+            doorRadius * .98f);
+        AddPolygonFacing(hull, cavity, n, new Color(12, 8, 8));
+
+        SetMaterial(hull, fixture.MaterialFamily);
+        float leafThickness = MathF.Max(.32f, fixture.ReliefHeight * .72f);
+        for (int leafIndex = 0; leafIndex < 5; leafIndex++)
+        {
+            float angle = leafIndex * MathF.Tau / 5f;
+            float layer = leafIndex * .045f;
+            Vector3 leafOrigin = doorCenter + n * layer;
+            Vector3[] leaf =
+            [
+                Polar(leafOrigin, fixture, angle - MathF.PI / 5f, doorRadius * .96f),
+                Polar(leafOrigin, fixture, angle + MathF.PI / 5f, doorRadius * .96f),
+                Polar(leafOrigin, fixture, angle + .39f, doorRadius * .53f),
+                Polar(leafOrigin, fixture, angle + .20f, doorRadius * .20f),
+                Polar(leafOrigin, fixture, angle - .20f, doorRadius * .20f),
+                Polar(leafOrigin, fixture, angle - .39f, doorRadius * .53f),
+            ];
+            Color leafColour = leafIndex % 2 == 0
+                ? fixture.StructuralColour
+                : fixture.SecondaryColour;
+            EmitExtrudedPolygon(hull, leaf, n, -leafThickness, leafColour);
+        }
+        Vector3 lockCenter = doorCenter + n * .28f;
+        EmitPentagonalPrism(
+            hull,
+            lockCenter,
+            fixture.TangentU,
+            fixture.TangentV,
+            n,
+            doorRadius * .18f,
+            MathF.Max(.42f, fixture.ReliefHeight * .65f),
+            fixture.SecondaryColour);
+    }
+
+    private static void EmitApparatusRosette(
+        StationModuleMesh hull,
+        BolonPentagonalUtilityFixture fixture)
+    {
+        SetMaterial(hull, fixture.MaterialFamily);
+        Vector3 n = fixture.Normal;
+        float baseHeight = fixture.ReliefHeight * .22f;
+        EmitPentagonalPrism(
+            hull,
+            fixture.Centre + n * .03f,
+            fixture.TangentU,
+            fixture.TangentV,
+            n,
+            fixture.InnerRadius,
+            baseHeight,
+            fixture.StructuralColour);
+        float bladeHalfAngle = .12f;
+        for (int index = 0; index < 5; index++)
+        {
+            float angle = index * MathF.Tau / 5f;
+            Vector3[] blade =
+            [
+                Polar(fixture, angle - bladeHalfAngle, fixture.InnerRadius * .72f,
+                    baseHeight * .55f),
+                Polar(fixture, angle + bladeHalfAngle, fixture.InnerRadius * .72f,
+                    baseHeight * .55f),
+                Polar(fixture, angle + bladeHalfAngle * .42f, fixture.OuterRadius * .90f,
+                    baseHeight * .55f),
+                Polar(fixture, angle - bladeHalfAngle * .42f, fixture.OuterRadius * .90f,
+                    baseHeight * .55f),
+            ];
+            EmitExtrudedPolygon(
+                hull,
+                blade,
+                n,
+                fixture.ReliefHeight * .34f,
+                fixture.SecondaryColour);
+            Vector3 nodeCenter = Polar(
+                fixture,
+                angle,
+                fixture.OuterRadius * .70f,
+                baseHeight + fixture.ReliefHeight * .31f);
+            EmitPentagonalPrism(
+                hull,
+                nodeCenter,
+                fixture.TangentU,
+                fixture.TangentV,
+                n,
+                fixture.OuterRadius * .075f,
+                fixture.ReliefHeight * .22f,
+                fixture.HasOpticalAccent
+                    ? fixture.AccentColour
+                    : fixture.StructuralColour);
+        }
+    }
+
+    private static void SetMaterial(
+        StationModuleMesh mesh,
+        SystemMaterialFamilyId family)
+    {
+        mesh.CurrentMaterialFamily = family;
+        mesh.CurrentUvScaleMeters = SystemMaterialRecipes.Get(family).TileSizeMeters;
+    }
+
+    private static Vector3 Polar(
+        BolonPentagonalUtilityFixture fixture,
+        float angle,
+        float radius,
+        float normalOffset)
+        => fixture.Centre + fixture.Normal * normalOffset
+            + fixture.TangentU * (MathF.Cos(angle) * radius)
+            + fixture.TangentV * (MathF.Sin(angle) * radius);
+
+    private static Vector3 Polar(
+        Vector3 center,
+        BolonPentagonalUtilityFixture fixture,
+        float angle,
+        float radius)
+        => center + fixture.TangentU * (MathF.Cos(angle) * radius)
+            + fixture.TangentV * (MathF.Sin(angle) * radius);
+
+    private static Vector3[] PentagonRing(
+        Vector3 center,
+        Vector3 u,
+        Vector3 v,
+        float radius)
+        => Enumerable.Range(0, 5)
+            .Select(index =>
+            {
+                float angle = index * MathF.Tau / 5f;
+                return center + u * (MathF.Cos(angle) * radius)
+                    + v * (MathF.Sin(angle) * radius);
+            })
+            .ToArray();
+
+    private static void EmitPentagonalPrism(
+        StationModuleMesh mesh,
+        Vector3 baseCenter,
+        Vector3 u,
+        Vector3 v,
+        Vector3 normal,
+        float radius,
+        float height,
+        Color colour)
+        => EmitExtrudedPolygon(
+            mesh,
+            PentagonRing(baseCenter, u, v, radius),
+            normal,
+            height,
+            colour);
+
+    private static void EmitExtrudedPolygon(
+        StationModuleMesh mesh,
+        IReadOnlyList<Vector3> basePolygon,
+        Vector3 normal,
+        float height,
+        Color colour)
+    {
+        Vector3[] top = basePolygon.Select(point => point + normal * height).ToArray();
+        Vector3 topNormal = height >= 0f ? normal : -normal;
+        AddPolygonFacing(mesh, basePolygon, -topNormal, colour);
+        AddPolygonFacing(mesh, top, topNormal, colour);
+        Vector3 centroid = basePolygon.Aggregate(Vector3.Zero, (sum, point) => sum + point)
+            / basePolygon.Count;
+        for (int index = 0; index < basePolygon.Count; index++)
+        {
+            int next = (index + 1) % basePolygon.Count;
+            Vector3 expected = ExtrudedSideNormal(
+                centroid, basePolygon[index], basePolygon[next], normal);
+            AddQuadFacing(mesh,
+                basePolygon[index], basePolygon[next], top[next], top[index],
+                expected, colour);
+        }
+    }
+
+    internal static Vector3 ExtrudedSideNormal(
+        Vector3 polygonCentroid,
+        Vector3 edgeStart,
+        Vector3 edgeEnd,
+        Vector3 extrusionNormal)
+    {
+        Vector3 outward = (edgeStart + edgeEnd) * .5f - polygonCentroid;
+        outward -= extrusionNormal * Vector3.Dot(outward, extrusionNormal);
+        if (outward.LengthSquared() <= 1e-8f)
+            outward = Vector3.Cross(edgeEnd - edgeStart, extrusionNormal);
+        return Vector3.Normalize(outward);
+    }
+
+    private static void AddPolygonFacing(
+        StationModuleMesh mesh,
+        IReadOnlyList<Vector3> polygon,
+        Vector3 expectedNormal,
+        Color colour)
+    {
+        for (int index = 1; index < polygon.Count - 1; index++)
+            AddGradientTriangleFacing(
+                mesh,
+                polygon[0], colour,
+                polygon[index], colour,
+                polygon[index + 1], colour,
+                expectedNormal);
     }
 
     private static int EmitVentInterior(
@@ -1762,6 +2199,27 @@ public static class BolonSurfaceMeshBuilder
             }
         }
         return result.ToArray();
+    }
+
+    private static ApertureCutout[] CreateUtilityCutouts(
+        BolonVesselPlan vessel,
+        IEnumerable<BolonPentagonalUtilityFixture> fixtures)
+    {
+        Quaternion inverse = Quaternion.Inverse(vessel.Orientation);
+        return fixtures.Select(fixture =>
+        {
+            Vector3 localCenter = Vector3.Transform(
+                fixture.Centre - vessel.Position, inverse);
+            Vector3 localNormal = Vector3.Normalize(Vector3.Transform(
+                fixture.Normal, inverse));
+            Vector3 localU = Vector3.Normalize(Vector3.Transform(
+                fixture.TangentU, inverse));
+            Vector3 localV = Vector3.Normalize(Vector3.Transform(
+                fixture.TangentV, inverse));
+            return new ApertureCutout(
+                localNormal,
+                PentagonRing(localCenter, localU, localV, fixture.OuterRadius));
+        }).ToArray();
     }
 
     private static Vector3[] Ring(

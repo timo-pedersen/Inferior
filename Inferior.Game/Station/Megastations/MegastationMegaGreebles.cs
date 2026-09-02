@@ -743,7 +743,9 @@ public static class MegastationMegaGreebleMeshBuilder
         };
         return new(mesh,diagnostics);
     }
-    private static long Bytes(int v,int i)=>(long)v*36L+(long)i*4L;
+    private static long Bytes(int v,int i) =>
+        (long)v * Inferior.Rendering.VertexPositionNormalColorTexture.VertexDeclaration.VertexStride
+        + (long)i * 4L;
 }
 
 internal static class MegastationMegaGreebleDebug

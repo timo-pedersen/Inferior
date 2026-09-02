@@ -412,7 +412,9 @@ public sealed partial class SystemSpaceState
         }
 
         private static long EstimateMesh(StationModuleMesh? mesh)
-            => mesh == null ? 0 : (long)mesh.VertexCount * 36 + (long)mesh.IndexCount * 4;
+            => mesh == null ? 0
+                : (long)mesh.VertexCount * VertexPositionNormalColorTexture.VertexDeclaration.VertexStride
+                    + (long)mesh.IndexCount * 4;
 
         private static void DisposeMeshes(
             Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> meshes)

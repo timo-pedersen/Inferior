@@ -640,7 +640,9 @@ public static class MegastationFabricMeshBuilder
             f.N.X,f.N.Y,f.N.Z,0,centre.X,centre.Y,centre.Z,1),new(width,length,height),colour);
     }
     private static int PositiveMod(int value,int modulus)=>(int)((uint)value%(uint)modulus);
-    private static long Bytes(int v,int i)=>(long)v*36L+(long)i*4L;
+    private static long Bytes(int v,int i) =>
+        (long)v * Inferior.Rendering.VertexPositionNormalColorTexture.VertexDeclaration.VertexStride
+        + (long)i * 4L;
 }
 
 internal static class MegastationFabricDebug

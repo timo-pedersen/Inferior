@@ -707,6 +707,23 @@ public sealed class StationModuleMesh
         }
     }
 
+    // Sets station-local static incident-light RGB independently for each vertex of a
+    // face. This is deliberately separate from vertex RGB (albedo) and alpha
+    // (self-illumination/readability floor).
+    public void SetFaceArtificialLight(int faceIdx, IReadOnlyList<Vector3> incidentRgb)
+    {
+        var (vb, count) = _faces[faceIdx];
+        if (incidentRgb.Count != count)
+            throw new ArgumentException("Artificial-light sample count must match the face vertex count.", nameof(incidentRgb));
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 light = Vector3.Clamp(incidentRgb[i], Vector3.Zero, Vector3.One);
+            var vtx = _verts[vb + i];
+            vtx.ArtificialLight = new Color(light);
+            _verts[vb + i] = vtx;
+        }
+    }
+
     // Writes the self-illumination floor S into vertex alpha for every vertex in the mesh —
     // the bake-time replacement for the old directional multiply (deleted; the sun term is
     // now computed per frame in LitSurface.fx). S = 0 (fully sun-dependent) for every vertex.
@@ -787,7 +804,8 @@ public sealed class StationModuleMesh
         {
             Vector3 pos = Vector3.Transform(v.Position, transform);
             Vector3 nrm = Vector3.Normalize(Vector3.TransformNormal(v.Normal, transform));
-            _verts.Add(new VertexPositionNormalColorTexture(pos, nrm, v.Color, v.TextureCoordinate));
+            _verts.Add(new VertexPositionNormalColorTexture(
+                pos, nrm, v.Color, v.TextureCoordinate, v.ArtificialLight));
         }
 
         for (int i = 0; i < indices.Length; i += 3)

@@ -53,6 +53,17 @@ public sealed partial class SystemSpaceState
 
     private static void PublishBolonMegastationDiagnostics(BolonMegastationDiagnostics d)
     {
+        if (d.AmbassadorBay is { } bay)
+        {
+            string report = $"[BolonAmbassadorBay] station={d.StationIdentity}; vessel={bay.VesselIndex}; face={bay.HostFaceIndex}; axis={bay.CornerAxis}; " +
+                $"mouth={bay.MouthWidth:F1}x{bay.MouthHeight:F1}m; clear={bay.ClearWidth:F1}x{bay.ClearHeight:F1}m; " +
+                $"chamfer={bay.VisibleChamferDepth:F1}m; outerReveal={bay.OuterRevealDepth:F1}m; throat={bay.ThroatLength:F1}m; bay={bay.BayWidth:F1}x{bay.BayHeight:F1}x{bay.BayLength:F1}m; " +
+                $"rearPort={bay.RearPortWidth:F1}x{bay.RearPortHeight:F1}m; rearStub={bay.RearPortCorridorLength:F1}m; H1eBeams=4; " +
+                $"centre={bay.MouthCenter}; outward={bay.Outward}; down={bay.Down}; approachClearance={bay.ApproachClearance:F1}m; " +
+                $"triangles={d.AmbassadorTriangleCount}; collision=deferred; signature={bay.Signature}";
+            System.Diagnostics.Debug.WriteLine(report);
+            DataBus.System.Publish(Topics.System.All, new SystemMessage(report, SystemMessagePriority.NB));
+        }
         DataBus.System.Publish(Topics.System.All, new SystemMessage(
             $"[BolonMegastation] id={d.StationIdentity}; type={d.Archetype}; " +
             $"vessels={d.VesselCount} (anchor:{d.AnchorVesselCount},standard:{d.StandardVesselCount},secondary:{d.SecondaryVesselCount}); " +
@@ -64,10 +75,12 @@ public sealed partial class SystemSpaceState
             $"apertures=groups:{d.ApertureGroupCount},optical:{d.ApertureCount},band:{d.BandGroupCount} (4-9-4:{d.FourNineFourGroupCount}),compact:{d.CompactGroupCount},corner:{d.CornerFanGroupCount},edge:{d.EdgeRunGroupCount},sparse:{d.SparseFieldGroupCount},blankHex:{d.BlankEligibleHexFaceCount}; " +
             $"vents=groups:{d.VentGroupCount},1x:{d.OneXVentCount},2x:{d.TwoXVentCount},3x:{d.ThreeXVentCount},grilleTriangles:{d.VentGrilleTriangleCount}; " +
             $"palettes=ruby:{d.RubyGroupCount},violet:{d.VioletGroupCount},other:{d.RareOtherGroupCount}; " +
+            $"pentagons=bare:{d.BarePentagonCount},collars:{d.ReinforcementCollarCount},iris:{d.IrisHatchCount},rosettes:{d.ApparatusRosetteCount}; " +
+            $"pentagonTriangles=collar:{d.ReinforcementCollarTriangleCount},iris:{d.IrisHatchTriangleCount},rosette:{d.ApparatusRosetteTriangleCount}; " +
             $"apertureState=unlit:{d.UnlitApertureCount},dim:{d.DimApertureCount},luminous:{d.LuminousApertureCount},bright:{d.BrightApertureCount}; " +
             $"apertureGlass={d.ApertureGlassVertexCount}v/{d.ApertureGlassTriangleCount}t/{d.ApertureGlassBytes}B; " +
             $"planningMs={d.PlanningMilliseconds:F1}; meshMs={d.MeshBuildMilliseconds:F1}; " +
-            $"structuralSignature={d.StructuralSignature}; surfaceSignature={d.SurfaceHistorySignature}; apertureSignature={d.ApertureSignature}; apertureVisualSignature={d.ApertureVisualSignature}; vocabularySignature={d.ApertureVocabularySignature}",
+            $"structuralSignature={d.StructuralSignature}; surfaceSignature={d.SurfaceHistorySignature}; apertureSignature={d.ApertureSignature}; apertureVisualSignature={d.ApertureVisualSignature}; vocabularySignature={d.ApertureVocabularySignature}; pentagonalUtilitySignature={d.PentagonalUtilitySignature}",
             SystemMessagePriority.NB));
     }
 
@@ -107,6 +120,10 @@ public sealed partial class SystemSpaceState
             $"beamGeometry={d.ApproachBeamVertexCount}v/{d.ApproachBeamTriangleCount}t; " +
             $"portalUp={d.EntrancePortalUp}; portalRight={d.EntrancePortalRight}; " +
             $"palette={d.EntrancePaletteIdentity}; precinctReservations={d.EntrancePrecinctReservationCount}; " +
+            $"artificial=v{d.ArtificialLightAlgorithmVersion},sources:{d.ArtificialLightSourceCount}," +
+            $"range:{d.ArtificialLightMinimumRange:F1}-{d.ArtificialLightMaximumRange:F1}m," +
+            $"indirect:{d.ArtificialIndirectStrength:P0}@{d.ArtificialIndirectRangeScale:F2}x," +
+            $"signature:{d.ArtificialLightSignature}; " +
             $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
             $"signature={d.Signature}",
             SystemMessagePriority.NB);

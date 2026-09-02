@@ -141,6 +141,7 @@ struct VertexInput
     float4 Position : POSITION0;
     float3 Normal   : NORMAL0;
     float4 Color    : COLOR0;
+    float4 ArtificialLight : COLOR1;
     float2 TexCoord : TEXCOORD0;
 };
 
@@ -156,6 +157,7 @@ struct VertexOutput
     // the surface position in the same space EyePositionWorld is defined in. Interpolated,
     // so the PS re-derives V per-pixel rather than per-vertex (see SpecularHighlight).
     float3 RenderPos   : TEXCOORD4;
+    float3 ArtificialLight : TEXCOORD5;
 };
 
 VertexOutput VS(VertexInput input)
@@ -171,6 +173,7 @@ VertexOutput VS(VertexInput input)
     o.StationPos  = mul(input.Position, ModuleToStationLocal).xyz;
     o.StationNorm = normalize(mul(input.Normal, (float3x3)ModuleToStationLocal));
     o.RenderPos   = worldPos.xyz;
+    o.ArtificialLight = input.ArtificialLight.rgb;
     return o;
 }
 
@@ -424,7 +427,11 @@ float4 PS_DynamicLit(VertexOutput input) : COLOR0
 
     float  nl  = saturate(dot(n, SunDirection));
     float  artificialFloor = input.Color.a * VertexIlluminationScale;
-    float3 lit = max(Ambient + SunColour * nl * EclipseFactor, artificialFloor.xxx);
+    // ArtificialLight is incident illumination, not baked surface colour. It is added
+    // beside ambient/stellar diffuse, then multiplied by albedo below. Established
+    // vertices carry black, so non-H1 rendering remains mathematically unchanged.
+    float3 lit = max(Ambient + SunColour * nl * EclipseFactor + input.ArtificialLight,
+                     artificialFloor.xxx);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
@@ -453,7 +460,8 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
         return float4(shadow, shadow, shadow, 1.0);
 
     float  artificialFloor = input.Color.a * VertexIlluminationScale;
-    float3 lit = max(Ambient + SunColour * nl * shadow * EclipseFactor, artificialFloor.xxx);
+    float3 lit = max(Ambient + SunColour * nl * shadow * EclipseFactor + input.ArtificialLight,
+                     artificialFloor.xxx);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;

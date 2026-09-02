@@ -89,6 +89,7 @@ public sealed record MegastationPrototypeCpuResult(
     StructuralOccupancy Occupancy,
     StructuralOccupancy RegularisedOccupancy,
     MegastationInteriorPlan InteriorPlan,
+    MegastationArtificialLightingPlan ArtificialLightingPlan,
     MegastationInteriorPresentationPlan InteriorPresentationPlan,
     TopologyRegularisationReport TopologyRegularisation,
     BoundaryTopology BoundaryTopology,
@@ -206,6 +207,21 @@ public static class MegastationPrototypeGenerator
         MegastationSystemMaterialAssignment? materialAssignment = systemMaterials is { } materialContext
             ? MegastationSystemMaterialAssignment.Create(materialContext, persistenceId)
             : null;
+        MegastationArtificialLightingPlan artificialLighting =
+            MegastationArtificialLighting.Plan(interiorPlan);
+        interiorPlan = interiorPlan with
+        {
+            Diagnostics = interiorPlan.Diagnostics with
+            {
+                ArtificialLightAlgorithmVersion = artificialLighting.AlgorithmVersion,
+                ArtificialLightSourceCount = artificialLighting.Lights.Count,
+                ArtificialLightMinimumRange = artificialLighting.Lights.Min(light => light.Range),
+                ArtificialLightMaximumRange = artificialLighting.Lights.Max(light => light.Range),
+                ArtificialIndirectStrength = MegastationArtificialLighting.IndirectStrength,
+                ArtificialIndirectRangeScale = MegastationArtificialLighting.IndirectRangeScale,
+                ArtificialLightSignature = artificialLighting.Signature,
+            },
+        };
         MegastationInteriorPresentationPlan interiorPresentation =
             MegastationInteriorPresentationPlanner.Plan(
                 interiorPlan,
@@ -364,7 +380,8 @@ public static class MegastationPrototypeGenerator
             topologyBuildMilliseconds: topologyStopwatch.ElapsedMilliseconds,
             semanticZoning: semanticZoning,
             materialAssignment: materialAssignment,
-            interiorPlan: interiorPlan);
+            interiorPlan: interiorPlan,
+            artificialLighting: artificialLighting);
         cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
 
@@ -449,6 +466,7 @@ public static class MegastationPrototypeGenerator
             occupancy,
             regularised.Occupancy,
             interiorPlan,
+            artificialLighting,
             interiorPresentation,
             regularised.Report,
             topology,

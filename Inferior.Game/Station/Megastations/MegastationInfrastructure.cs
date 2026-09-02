@@ -957,7 +957,8 @@ public static class MegastationInfrastructureMeshBuilder
     }
 
     private static long MeshBytes(int vertices, int indices)
-        => (long)vertices * 36L + (long)indices * 4L;
+        => (long)vertices * Inferior.Rendering.VertexPositionNormalColorTexture.VertexDeclaration.VertexStride
+            + (long)indices * 4L;
 }
 
 internal static class MegastationInfrastructureDebug

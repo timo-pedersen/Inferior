@@ -18,9 +18,9 @@ public sealed class StationGpuByteAccountingTests
     {
         int stride = VertexPositionNormalColorTexture.VertexDeclaration.VertexStride;
 
-        Assert.Equal(36, stride);
+        Assert.Equal(40, stride);
         Assert.Equal(
-            1_701_072,
+            1_890_080,
             StationGpuByteAccounting.VertexBufferBytes(47_252, stride));
     }
 

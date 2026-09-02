@@ -1062,7 +1062,9 @@ public static class MegastationServiceChannelMeshBuilder
             frame.Normal.X, frame.Normal.Y, frame.Normal.Z, 0f,
             centre.X, centre.Y, centre.Z, 1f), new(width, length, thickness), colour);
     }
-    private static long Bytes(int vertices, int indices) => (long)vertices * 36L + (long)indices * 4L;
+    private static long Bytes(int vertices, int indices) =>
+        (long)vertices * Inferior.Rendering.VertexPositionNormalColorTexture.VertexDeclaration.VertexStride
+        + (long)indices * 4L;
 }
 
 internal static class MegastationServiceChannelDebug

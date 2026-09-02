@@ -19,7 +19,8 @@ public sealed class MegastationSemanticZoningTests
             result.RegularisedOccupancy,
             result.BoundaryTopology,
             rebuilt,
-            interiorPlan: result.InteriorPlan);
+            interiorPlan: result.InteriorPlan,
+            artificialLighting: result.ArtificialLightingPlan);
         var (expectedVertices, expectedIndices) = result.Mesh.ToIntArrays();
         var (actualVertices, actualIndices) = rebuilt.ToIntArrays();
 

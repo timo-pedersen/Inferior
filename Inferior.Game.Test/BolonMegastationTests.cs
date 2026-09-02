@@ -344,7 +344,11 @@ public sealed class BolonMegastationTests
             result.Diagnostics.ApertureStructureTriangleCount);
         Assert.Equal(result.Diagnostics.SurfaceTriangleCount
             + connectors * 24
-            + result.Diagnostics.ApertureStructureTriangleCount,
+            + result.Diagnostics.ApertureStructureTriangleCount
+            + result.Diagnostics.ReinforcementCollarTriangleCount
+            + result.Diagnostics.IrisHatchTriangleCount
+            + result.Diagnostics.ApparatusRosetteTriangleCount
+            + result.Diagnostics.AmbassadorTriangleCount,
             indices.Length / 3);
         Assert.Equal(result.Diagnostics.VertexCount, vertices.Length);
         Assert.Equal(result.Diagnostics.TriangleCount, indices.Length / 3);
@@ -360,7 +364,8 @@ public sealed class BolonMegastationTests
             Vector3 a = vertices[indices[i]].Position;
             Vector3 b = vertices[indices[i + 1]].Position;
             Vector3 c = vertices[indices[i + 2]].Position;
-            Assert.True(Vector3.Cross(b - a, c - a).LengthSquared() > .0001f);
+            Assert.True(Vector3.Cross(b - a, c - a).LengthSquared() > .0001f,
+                $"Triangle {i / 3}: {result.AmbassadorBay.Coordinates(a)}, {result.AmbassadorBay.Coordinates(b)}, {result.AmbassadorBay.Coordinates(c)}");
         }
     }
 
@@ -707,6 +712,181 @@ public sealed class BolonMegastationTests
             Assert.Single(group.Apertures.Select(aperture =>
                     ClassifyPalette(aperture.VisualState.InnerColour, group.PaletteFamily))
                 .Distinct()));
+    }
+
+    [Theory]
+    [InlineData(MegastationArchetype.Bolon)]
+    [InlineData(MegastationArchetype.RedBolon)]
+    public void B3aUtilitiesUseOnlyClearPentagonsStaySparseAndRemainInBounds(
+        MegastationArchetype archetype)
+    {
+        BolonMegastationPlan structural = BolonMegastationGenerator.Plan(
+            "B3a Utility:System:Face Ownership", archetype);
+        BolonPentagonalUtilityPlan utility = BolonPentagonalUtilityPlanner.Plan(structural);
+        HashSet<(int Vessel, int Face)> attached = structural.Relationships
+            .SelectMany(relationship => new[]
+            {
+                (relationship.A, relationship.FaceA),
+                (relationship.B, relationship.FaceB),
+            })
+            .ToHashSet();
+
+        Assert.NotEmpty(utility.Fixtures);
+        Assert.True(utility.BarePentagonCount > utility.Fixtures.Count);
+        Assert.Equal(utility.Fixtures.Count,
+            utility.Fixtures.Select(fixture =>
+                (fixture.VesselIndex, fixture.HostFaceIndex)).Distinct().Count());
+        Assert.All(utility.Fixtures, fixture =>
+        {
+            BolonAttachmentFace face = BolonMegastationGenerator.GetAttachmentFace(
+                fixture.HostFaceIndex);
+            Assert.Equal(5, face.SideCount);
+            Assert.DoesNotContain((fixture.VesselIndex, fixture.HostFaceIndex), attached);
+            Assert.True(IsFinite(fixture.Centre));
+            Assert.True(IsFinite(fixture.Normal));
+            Assert.InRange(fixture.RotationRadians, 0f, MathF.Tau / 5f);
+            Assert.True(fixture.OuterRadius > fixture.InnerRadius);
+            Assert.True(fixture.OuterRadius <= fixture.HostSafeRadius);
+            Assert.Equal(5, fixture.RadialElementCount);
+        });
+        Assert.All(BolonSurfacePresentationPlanner.Plan(structural).ApertureGroups,
+            group => Assert.Equal(6, BolonMegastationGenerator.GetAttachmentFace(
+                group.HostFaceIndex).SideCount));
+    }
+
+    [Fact]
+    public void B3aPlanIsDeterministicAndPreservesAllAcceptedSignatures()
+    {
+        const string identity = "B3a Utility:System:Preservation";
+        BolonMegastationPlan structural = BolonMegastationGenerator.Plan(
+            identity, MegastationArchetype.Bolon);
+        BolonSurfacePresentationPlan accepted = BolonSurfacePresentationPlanner.Plan(structural);
+        BolonPentagonalUtilityPlan first = BolonPentagonalUtilityPlanner.Plan(structural);
+        BolonPentagonalUtilityPlan second = BolonPentagonalUtilityPlanner.Plan(structural);
+        BolonMegastationCpuResult generated = BolonMegastationGenerator.GenerateCpu(
+            identity, MegastationArchetype.Bolon);
+
+        Assert.Equal(first.Signature, second.Signature);
+        Assert.Equal(structural.StructuralSignature, generated.Plan.StructuralSignature);
+        Assert.Equal(accepted.SurfaceHistorySignature,
+            generated.SurfacePlan.SurfaceHistorySignature);
+        // B4a only removes the reserved entrance host; B2/B3 still plan independently.
+        Assert.Equal(accepted.ApertureGroups.Where(g => !generated.AmbassadorBay.ReservesFace(
+            g.VesselIndex, g.HostFaceIndex)).Select(g => g.Identity), generated.SurfacePlan.ApertureGroups.Select(g => g.Identity));
+        accepted = BolonSurfacePresentationPlanner.ReserveAmbassadorFace(accepted, generated.AmbassadorBay);
+        Assert.Equal(accepted.ApertureSignature,
+            generated.SurfacePlan.ApertureSignature);
+        Assert.Equal(accepted.ApertureVisualSignature,
+            generated.SurfacePlan.ApertureVisualSignature);
+        Assert.Equal(accepted.ApertureVocabularySignature,
+            generated.SurfacePlan.ApertureVocabularySignature);
+    }
+
+    [Fact]
+    public void B3aIrisHasFiveThickLeavesAndARealRecessedHullOpening()
+    {
+        BolonMegastationCpuResult? result = null;
+        for (int fixture = 0; fixture < 6 && result is null; fixture++)
+        {
+            string identity = $"B3a Iris:System:Fixture {fixture}";
+            BolonMegastationPlan structural = BolonMegastationGenerator.Plan(
+                identity, MegastationArchetype.Bolon);
+            if (BolonPentagonalUtilityPlanner.Plan(structural).Fixtures.Any(
+                    candidate => candidate.Family
+                        == BolonPentagonalUtilityFamily.FiveLeafIris))
+                result = BolonMegastationGenerator.GenerateCpu(
+                    identity, MegastationArchetype.Bolon);
+        }
+        Assert.NotNull(result);
+        BolonPentagonalUtilityFixture[] irises = result.PentagonalUtilityPlan.Fixtures
+            .Where(fixture => fixture.Family == BolonPentagonalUtilityFamily.FiveLeafIris)
+            .ToArray();
+        Assert.NotEmpty(irises);
+        Assert.All(irises, iris =>
+        {
+            Assert.Equal(5, iris.IrisLeafCount);
+            Assert.Equal(5, iris.RadialElementCount);
+            Assert.InRange(iris.RecessDepth, 5.5f, 10.5f);
+            Assert.True(iris.InnerRadius < iris.OuterRadius);
+        });
+        Assert.Equal(irises.Length * 139,
+            result.Diagnostics.IrisHatchTriangleCount);
+
+        var (vertices, indices) = result.Mesh.ToIntArrays();
+        int surfaceIndexCount = result.Diagnostics.SurfaceTriangleCount * 3;
+        foreach (BolonPentagonalUtilityFixture iris in irises)
+        {
+            for (int index = 0; index < surfaceIndexCount; index += 3)
+            {
+                Vector3 a = vertices[indices[index]].Position;
+                if (MathF.Abs(Vector3.Dot(a - iris.Centre, iris.Normal)) > .01f)
+                    continue;
+                Vector3 b = vertices[indices[index + 1]].Position;
+                Vector3 c = vertices[indices[index + 2]].Position;
+                Assert.False(PointInTriangle(iris.Centre, a, b, c, iris.Normal));
+            }
+        }
+    }
+
+    [Fact]
+    public void B3aFamiliesEmitDeterministicFivefoldBatchedGeometry()
+    {
+        BolonMegastationCpuResult result = BolonMegastationGenerator.GenerateCpu(
+            "B3a Utility:System:Geometry Costs", MegastationArchetype.RedBolon);
+        int collars = result.PentagonalUtilityPlan.Fixtures.Count(fixture =>
+            fixture.Family == BolonPentagonalUtilityFamily.ReinforcementCollar);
+        int irises = result.PentagonalUtilityPlan.Fixtures.Count(fixture =>
+            fixture.Family == BolonPentagonalUtilityFamily.FiveLeafIris);
+        int rosettes = result.PentagonalUtilityPlan.Fixtures.Count(fixture =>
+            fixture.Family == BolonPentagonalUtilityFamily.ApparatusRosette);
+
+        Assert.Equal(collars * 83,
+            result.Diagnostics.ReinforcementCollarTriangleCount);
+        Assert.Equal(irises * 139,
+            result.Diagnostics.IrisHatchTriangleCount);
+        Assert.Equal(rosettes * 156,
+            result.Diagnostics.ApparatusRosetteTriangleCount);
+        Assert.All(result.PentagonalUtilityPlan.Fixtures, fixture =>
+            Assert.Equal(5, fixture.RadialElementCount));
+        Assert.Equal(3, StationGenerator.PrepareCpu(
+            TestStation("B3a Utility:System:Residency", MegastationArchetype.Bolon),
+            useMegastationPrototype: true,
+            megastationArchetype: MegastationArchetype.Bolon).UploadPlan.Count);
+    }
+
+    [Fact]
+    public void B3aExtrudedSideNormalsAreOutwardForEitherFootprintWinding()
+    {
+        Vector3[][] footprints =
+        [
+            // Clockwise tapered rib/blade order used by collars and rosettes.
+            [new(-1f, -1f, 0f), new(-1f, 1f, 0f),
+                new(2f, .5f, 0f), new(2f, -.5f, 0f)],
+            // Counter-clockwise order used by regular pentagonal nodes.
+            Enumerable.Range(0, 5).Select(index =>
+            {
+                float angle = index * MathF.Tau / 5f;
+                return new Vector3(MathF.Cos(angle), MathF.Sin(angle), 0f);
+            }).ToArray(),
+        ];
+        foreach (Vector3[] footprint in footprints)
+        {
+            Vector3 centroid = footprint.Aggregate(Vector3.Zero, (sum, point) => sum + point)
+                / footprint.Length;
+            for (int index = 0; index < footprint.Length; index++)
+            {
+                Vector3 midpoint = (footprint[index]
+                    + footprint[(index + 1) % footprint.Length]) * .5f;
+                Vector3 expectedOutward = Vector3.Normalize(midpoint - centroid);
+                Vector3 actual = BolonSurfaceMeshBuilder.ExtrudedSideNormal(
+                    centroid,
+                    footprint[index],
+                    footprint[(index + 1) % footprint.Length],
+                    Vector3.UnitZ);
+                Assert.True(Vector3.Dot(actual, expectedOutward) > .999f);
+                Assert.InRange(MathF.Abs(Vector3.Dot(actual, Vector3.UnitZ)), 0f, 1e-5f);
+            }
+        }
     }
 
     [Theory]

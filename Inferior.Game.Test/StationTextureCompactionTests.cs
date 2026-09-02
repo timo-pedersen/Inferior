@@ -283,7 +283,7 @@ public sealed class StationTextureCompactionTests
         Assert.Equal(diagnostics.SelectedUniqueTextureCount, prepared.Textures.Count);
         Assert.Equal(prepared.Textures.Count, textureUploads.Length);
         Assert.Equal(
-            62_167_440,
+            65_101_992,
             prepared.UploadPlan.Sum(item => item.EstimatedBytes));
         Assert.Equal(prepared.TextureAssignments.Count * 2, diagnostics.ModuleTextureBindingCount);
         Assert.All(prepared.TextureAssignments, assignment =>
