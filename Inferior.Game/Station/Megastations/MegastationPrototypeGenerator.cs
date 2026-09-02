@@ -90,6 +90,7 @@ public sealed record MegastationPrototypeCpuResult(
     StructuralOccupancy RegularisedOccupancy,
     MegastationInteriorPlan InteriorPlan,
     MegastationArtificialLightingPlan ArtificialLightingPlan,
+    MegastationLandingDistrictPlan LandingDistrictPlan,
     MegastationInteriorPresentationPlan InteriorPresentationPlan,
     TopologyRegularisationReport TopologyRegularisation,
     BoundaryTopology BoundaryTopology,
@@ -207,8 +208,12 @@ public static class MegastationPrototypeGenerator
         MegastationSystemMaterialAssignment? materialAssignment = systemMaterials is { } materialContext
             ? MegastationSystemMaterialAssignment.Create(materialContext, persistenceId)
             : null;
+        MegastationLandingDistrictPlan landingDistrict =
+            MegastationLandingDistrictPlanner.Plan(interiorPlan);
         MegastationArtificialLightingPlan artificialLighting =
-            MegastationArtificialLighting.Plan(interiorPlan);
+            MegastationArtificialLighting.WithAdditionalLights(
+                MegastationArtificialLighting.Plan(interiorPlan),
+                landingDistrict.ArtificialLights);
         interiorPlan = interiorPlan with
         {
             Diagnostics = interiorPlan.Diagnostics with
@@ -230,7 +235,11 @@ public static class MegastationPrototypeGenerator
             interiorPlan,
             materialAssignment,
             interiorPresentation,
+            landingDistrict,
+            artificialLighting,
             cancellationToken);
+        if (interiorMesh.LandingDistrictDiagnostics is { } landingDiagnostics)
+            landingDistrict = landingDistrict with { Diagnostics = landingDiagnostics };
         VertexPositionColor[] approachBeamVertices =
             MegastationApproachBeamMeshBuilder.Build(interiorPresentation);
         StationModuleMesh structuralShadowMesh = MegastationInteriorMeshBuilder.BuildStructuralCaster(
@@ -467,6 +476,7 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             interiorPlan,
             artificialLighting,
+            landingDistrict,
             interiorPresentation,
             regularised.Report,
             topology,

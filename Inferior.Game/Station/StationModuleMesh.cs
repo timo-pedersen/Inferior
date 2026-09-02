@@ -675,6 +675,15 @@ public sealed class StationModuleMesh
         return len < 1e-6f ? Vector3.Zero : n / len;
     }
 
+    public Vector3[] GetFaceVertexPositions(int faceIdx)
+    {
+        var (vertexBase, count) = _faces[faceIdx];
+        var result = new Vector3[count];
+        for (int i = 0; i < count; i++)
+            result[i] = _verts[vertexBase + i].Position;
+        return result;
+    }
+
     // Multiplies the RGB of every vertex in a face by `factor` (clamped to [0,255]).
     public void MultiplyFaceColor(int faceIdx, float factor)
     {

@@ -63,10 +63,10 @@ public sealed class MegastationArtificialLightingTests
         MegastationArtificialLightingPlan replanned =
             MegastationArtificialLighting.Plan(first.InteriorPlan);
 
-        Assert.Equal(12, first.ArtificialLightingPlan.Lights.Count);
-        Assert.Equal(first.ArtificialLightingPlan.Signature, replanned.Signature);
-        Assert.Equal(first.ArtificialLightingPlan.Lights, replanned.Lights);
-        Assert.All(first.ArtificialLightingPlan.Lights, light =>
+        Assert.Equal(12, replanned.Lights.Count);
+        Assert.Equal(20, first.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(replanned.Lights, first.ArtificialLightingPlan.Lights.Take(12));
+        Assert.All(replanned.Lights, light =>
         {
             Assert.InRange(light.Range, 180f, 280f);
             Assert.InRange(light.Intensity, .72f, 1.02f);

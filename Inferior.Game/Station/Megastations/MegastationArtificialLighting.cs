@@ -71,6 +71,20 @@ public static class MegastationArtificialLighting
         }
     }
 
+    public static MegastationArtificialLightingPlan WithAdditionalLights(
+        MegastationArtificialLightingPlan baseline,
+        IReadOnlyList<MegastationArtificialLight> additionalLights)
+    {
+        if (additionalLights.Count == 0)
+            return baseline;
+        MegastationArtificialLight[] lights = baseline.Lights.Concat(additionalLights).ToArray();
+        return baseline with
+        {
+            Lights = lights,
+            Signature = Signature(baseline.Seed, lights),
+        };
+    }
+
     public static Vector3 Evaluate(
         Vector3 position,
         Vector3 normal,

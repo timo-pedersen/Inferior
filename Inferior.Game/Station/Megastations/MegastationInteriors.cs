@@ -97,7 +97,17 @@ public sealed record MegastationInteriorDiagnostics(
     float ArtificialLightMaximumRange = 0f,
     float ArtificialIndirectStrength = 0f,
     float ArtificialIndirectRangeScale = 0f,
-    string ArtificialLightSignature = "");
+    string ArtificialLightSignature = "",
+    int LandingDistrictPadCount = 0,
+    int LandingDistrictStandardPadCount = 0,
+    int LandingDistrictLargePadCount = 0,
+    int LandingDistrictServiceBuildingCount = 0,
+    int LandingDistrictLightCount = 0,
+    int LandingDistrictVisibleVertexCount = 0,
+    int LandingDistrictVisibleTriangleCount = 0,
+    int LandingDistrictShadowVertexCount = 0,
+    int LandingDistrictShadowTriangleCount = 0,
+    string LandingDistrictSignature = "");
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -120,7 +130,8 @@ public sealed record MegastationInteriorPlan(
 
 public sealed record MegastationInteriorMeshBuildResult(
     StationModuleMesh Mesh,
-    MegastationInteriorDiagnostics Diagnostics);
+    MegastationInteriorDiagnostics Diagnostics,
+    MegastationLandingDistrictDiagnostics? LandingDistrictDiagnostics = null);
 
 public enum MegastationInteriorGuidanceKind
 {
@@ -1423,6 +1434,8 @@ public static class MegastationInteriorMeshBuilder
         MegastationInteriorPlan plan,
         MegastationSystemMaterialAssignment? materials,
         MegastationInteriorPresentationPlan? presentation = null,
+        MegastationLandingDistrictPlan? landingDistrict = null,
+        MegastationArtificialLightingPlan? artificialLighting = null,
         CancellationToken cancellationToken = default)
     {
         presentation ??= MegastationInteriorPresentationPlanner.Plan(plan);
@@ -1509,18 +1522,29 @@ public static class MegastationInteriorMeshBuilder
             AddBox(mesh, element.Frame, element.Size, element.Colour);
             illuminationRanges.Add((start, mesh.FaceCount - start, element.Illumination));
         }
+        int portalCasterVertexCount = CountCasterVertices(mesh);
+        int portalCasterIndexCount = CountCasterIndices(mesh);
+        MegastationLandingDistrictMeshResult? landingMesh = landingDistrict is null
+            ? null
+            : MegastationLandingDistrictMeshBuilder.Append(
+                mesh, landingDistrict, materials, cancellationToken);
         mesh.ApplyIlluminationFlags();
         foreach ((int start, int count, float illumination) in illuminationRanges)
         for (int face = start; face < start + count; face++)
             mesh.SetFaceIllumination(face, illumination);
+        if (landingMesh is { } districtMesh)
+            MegastationLandingDistrictMeshBuilder.ApplyLighting(
+                mesh,
+                districtMesh,
+                artificialLighting?.Lights ?? landingDistrict!.ArtificialLights);
         stopwatch.Stop();
 
         var diagnostics = plan.Diagnostics with
         {
             PortalVisibleVertexCount = mesh.VertexCount,
             PortalVisibleTriangleCount = mesh.IndexCount / 3,
-            PortalCasterVertexCount = CountCasterVertices(mesh),
-            PortalCasterTriangleCount = CountCasterIndices(mesh) / 3,
+            PortalCasterVertexCount = portalCasterVertexCount,
+            PortalCasterTriangleCount = portalCasterIndexCount / 3,
             MeshBuildMilliseconds = stopwatch.ElapsedMilliseconds,
             PortalGuidanceElementCount = presentation.PortalElementCount,
             ThroatGuidanceElementCount = presentation.ThroatElementCount,
@@ -1551,8 +1575,19 @@ public static class MegastationInteriorMeshBuilder
             EntranceLocalSkylineHeight = presentation.Precinct.LocalSkylineHeight,
             EntranceProjectionHeightFraction = presentation.Precinct.ProjectionHeightFraction,
             EntrancePaletteIdentity = presentation.Palette.Identity,
+            LandingDistrictPadCount = landingMesh?.Diagnostics.PadCount ?? 0,
+            LandingDistrictStandardPadCount = landingMesh?.Diagnostics.StandardPadCount ?? 0,
+            LandingDistrictLargePadCount = landingMesh?.Diagnostics.LargePadCount ?? 0,
+            LandingDistrictServiceBuildingCount =
+                landingMesh?.Diagnostics.ServiceBuildingCount ?? 0,
+            LandingDistrictLightCount = landingMesh?.Diagnostics.ArtificialLightCount ?? 0,
+            LandingDistrictVisibleVertexCount = landingMesh?.Diagnostics.VisibleVertexCount ?? 0,
+            LandingDistrictVisibleTriangleCount = landingMesh?.Diagnostics.VisibleTriangleCount ?? 0,
+            LandingDistrictShadowVertexCount = landingMesh?.Diagnostics.ShadowVertexCount ?? 0,
+            LandingDistrictShadowTriangleCount = landingMesh?.Diagnostics.ShadowTriangleCount ?? 0,
+            LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
         };
-        return new(mesh, diagnostics);
+        return new(mesh, diagnostics, landingMesh?.Diagnostics);
     }
 
     public static StationModuleMesh BuildStructuralCaster(

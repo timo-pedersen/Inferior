@@ -124,6 +124,12 @@ public sealed partial class SystemSpaceState
             $"range:{d.ArtificialLightMinimumRange:F1}-{d.ArtificialLightMaximumRange:F1}m," +
             $"indirect:{d.ArtificialIndirectStrength:P0}@{d.ArtificialIndirectRangeScale:F2}x," +
             $"signature:{d.ArtificialLightSignature}; " +
+            $"landingDistrict=pads:{d.LandingDistrictPadCount}," +
+            $"standard:{d.LandingDistrictStandardPadCount},large:{d.LandingDistrictLargePadCount}," +
+            $"services:{d.LandingDistrictServiceBuildingCount},lights:{d.LandingDistrictLightCount}," +
+            $"mesh:{d.LandingDistrictVisibleVertexCount}v/{d.LandingDistrictVisibleTriangleCount}t," +
+            $"caster:{d.LandingDistrictShadowVertexCount}v/{d.LandingDistrictShadowTriangleCount}t," +
+            $"signature:{d.LandingDistrictSignature}; " +
             $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
             $"signature={d.Signature}",
             SystemMessagePriority.NB);
