@@ -127,6 +127,8 @@ public sealed partial class SystemSpaceState
             $"landingDistrict=pads:{d.LandingDistrictPadCount}," +
             $"standard:{d.LandingDistrictStandardPadCount},large:{d.LandingDistrictLargePadCount}," +
             $"services:{d.LandingDistrictServiceBuildingCount},lights:{d.LandingDistrictLightCount}," +
+            $"loadingAreas:{d.LandingDistrictLoadingAreaCount},containers:{d.LandingDistrictContainerCount}," +
+            $"keepClear:{d.LandingDistrictKeepClearZoneCount}," +
             $"mesh:{d.LandingDistrictVisibleVertexCount}v/{d.LandingDistrictVisibleTriangleCount}t," +
             $"caster:{d.LandingDistrictShadowVertexCount}v/{d.LandingDistrictShadowTriangleCount}t," +
             $"signature:{d.LandingDistrictSignature}; " +

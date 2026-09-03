@@ -131,10 +131,12 @@ public static partial class StationDecorator
             }
             else
             {
-                // Long axis along face.Up
+                // Long axis along face.Up. The cross axis is negated so this remains a
+                // proper basis: cross(local X, local Y) points along local Z/face normal.
+                // Container text therefore never passes through a reflective transform.
                 t = new Matrix(
                     face.LocalUp.X,     face.LocalUp.Y,     face.LocalUp.Z,     0,
-                    face.LocalRight.X,  face.LocalRight.Y,  face.LocalRight.Z,  0,
+                   -face.LocalRight.X, -face.LocalRight.Y, -face.LocalRight.Z,  0,
                     face.LocalNormal.X, face.LocalNormal.Y, face.LocalNormal.Z, 0,
                     centre.X,           centre.Y,           centre.Z,           1);
             }
@@ -144,10 +146,10 @@ public static partial class StationDecorator
             // geometry instead of a separately hand-maintained reimplementation (that
             // reimplementation had drifted from the factory's own conventions, which is
             // why station-placed container text mirrored differently than standalone).
-            // MergeTransformed detects and corrects handedness automatically, so the old
-            // manual axisY-flip check that used to live here is gone — t is passed through
-            // unchanged. No lighting pre-rotation is needed any more either: the sun term
-            // is computed per frame in LitSurface.fx from each vertex's real world normal
+            // Both orientation frames above are proper-handed before reaching
+            // MergeTransformed; asymmetric label geometry is never reflected. No lighting
+            // pre-rotation is needed: the sun term is computed per frame in LitSurface.fx
+            // from each vertex's real world normal
             // (t maps container-local space into module-local space; the module's own
             // rotation and the station's spin are applied once, at draw time, to every
             // vertex uniformly — there is no separate bake-time basis to get wrong).

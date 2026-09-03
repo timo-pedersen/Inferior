@@ -97,9 +97,8 @@ public sealed partial class SystemSpaceState
             Vector3 textOrigin = center + normal * Raise
                                 - uAxis * (textW * 0.5f) - vAxis * (textH * 0.5f);
 
-            Containers.ShippingContainerFactory.AddTextGeometry(
-                mesh, label, textOrigin,
-                textRight: uAxis, textUp: vAxis, textNormal: normal,
+            PlanarTextGeometry.Add(mesh, label, textOrigin,
+                surfaceNormal: normal, readingDirection: uAxis,
                 PixelSize, Color.White);
         }
 

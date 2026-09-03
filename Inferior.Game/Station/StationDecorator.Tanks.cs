@@ -1,4 +1,3 @@
-using Inferior.Game.Containers;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 
@@ -42,29 +41,6 @@ public static partial class StationDecorator
         return names[rng.Next(names.Length)];
     }
 
-    // Pixel-art text rendered as tiny raised quads on a planar surface.
-    private static void AddTextGeometry(StationModuleMesh mesh,
-        string text, Vector3 origin, Vector3 textRight, Vector3 textUp, Vector3 textNormal,
-        float pixelSize, Color textColor)
-    {
-        float cx = 0f;
-        foreach (char ch in text.ToUpperInvariant())
-        {
-            if (!BitmapFonts.HasGlyph(ch)) { cx += (BitmapFonts.CharW + 1) * pixelSize; continue; }
-
-            for (int row = 0; row < BitmapFonts.CharH; row++)
-            for (int col = 0; col < BitmapFonts.CharW; col++)
-            {
-                if (!BitmapFonts.IsLit(ch, col, row)) continue;
-                float px = cx + (col + 0.5f) * pixelSize;
-                float py = (BitmapFonts.CharH - row - 0.5f) * pixelSize;  // row 0 = top in font → flip Y
-                mesh.AddQuad(origin + textRight * px + textUp * py,
-                             textNormal, textUp, pixelSize * 0.88f, pixelSize * 0.88f, textColor);
-            }
-            cx += (BitmapFonts.CharW + 1) * pixelSize;
-        }
-    }
-
     // Metal plate label (substance name + 2-digit ID) on the outward face of a tank.
     private static void AddTankLabel(StationModuleMesh mesh,
         Vector3 tankMidPoint, Vector3 labelNormal, Vector3 labelUp,
@@ -104,14 +80,15 @@ public static partial class StationDecorator
         Vector3 nameOrig = plateCtr + labelNormal * raise
                          + labelRight * (-nameW * 0.5f)
                          + labelUp    * (pixelSize * 1.5f);
-        AddTextGeometry(mesh, substance, nameOrig, labelRight, labelUp, labelNormal, pixelSize, textColor);
+        PlanarTextGeometry.Add(mesh, substance, nameOrig, labelNormal, labelRight,
+            pixelSize, textColor);
 
         // 2-digit ID (lower line, smaller)
         Vector3 idOrig = plateCtr + labelNormal * raise
                        + labelRight * (-idW * 0.5f)
                        - labelUp    * (lineH + pixelSize * 0.8f);
-        AddTextGeometry(mesh, idStr, idOrig, labelRight, labelUp, labelNormal,
-                        idSz, DarkenColor(textColor, 0.70f));
+        PlanarTextGeometry.Add(mesh, idStr, idOrig, labelNormal, labelRight,
+            idSz, DarkenColor(textColor, 0.70f));
     }
 
     // Junction boxes, valve wheels, and pipe stubs on the tank barrel.

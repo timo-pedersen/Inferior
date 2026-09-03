@@ -981,7 +981,13 @@ public sealed class MegastationInteriorTests
                 Vector3 a = vertices[indices[index]].Position;
                 Vector3 b = vertices[indices[index + 1]].Position;
                 Vector3 c = vertices[indices[index + 2]].Position;
-                Assert.True(Vector3.Cross(b - a, c - a).LengthSquared() > 1e-6f);
+                float areaSquared = Vector3.Cross(b - a, c - a).LengthSquared();
+                // The interior now legitimately includes centimetre-scale triangles from
+                // the established container factory; retain a strict non-zero geometry
+                // guard without applying the old megastructure-detail scale as a cutoff.
+                Assert.True(areaSquared > 1e-8f,
+                    $"Near-degenerate interior triangle at index {index / 3}: " +
+                    $"areaSquared={areaSquared:R}; a={a}; b={b}; c={c}");
             }
         }
     }

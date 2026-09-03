@@ -733,6 +733,27 @@ public sealed class StationModuleMesh
         }
     }
 
+    // Merged geometry deliberately has no face records, but interior static lighting still
+    // needs to reach it. This narrow range form lets the landing district light its reused
+    // container meshes without changing MergeTransformed's established ownership model.
+    public void SetVertexRangeArtificialLight(
+        int vertexStart,
+        int vertexCount,
+        Func<Vector3, Vector3, Vector3> evaluate)
+    {
+        ArgumentNullException.ThrowIfNull(evaluate);
+        if (vertexStart < 0 || vertexCount < 0 || vertexStart + vertexCount > _verts.Count)
+            throw new ArgumentOutOfRangeException(nameof(vertexStart));
+        for (int i = vertexStart; i < vertexStart + vertexCount; i++)
+        {
+            var vertex = _verts[i];
+            Vector3 light = Vector3.Clamp(
+                evaluate(vertex.Position, vertex.Normal), Vector3.Zero, Vector3.One);
+            vertex.ArtificialLight = new Color(light);
+            _verts[i] = vertex;
+        }
+    }
+
     // Writes the self-illumination floor S into vertex alpha for every vertex in the mesh —
     // the bake-time replacement for the old directional multiply (deleted; the sun term is
     // now computed per frame in LitSurface.fx). S = 0 (fully sun-dependent) for every vertex.
