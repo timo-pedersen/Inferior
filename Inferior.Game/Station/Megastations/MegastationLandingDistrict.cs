@@ -64,11 +64,56 @@ public sealed record MegastationLandingPadPlan(
     bool IsLarge,
     int PresentationSeed);
 
+public enum MegastationPersonnelAccessKind { Ground, Stair, Ramp }
+public enum MegastationCargoEntranceStyle { Flat, ShallowRecess }
+public enum MegastationFrontageWindowStyle { CompactBand, ObservationStrip }
+
+public sealed record MegastationPersonnelEntrancePlan(
+    string Identity,
+    Vector3 Centre,
+    Vector2 Size,
+    MegastationPersonnelAccessKind AccessKind);
+
+public sealed record MegastationCargoEntrancePlan(
+    string Identity,
+    Vector3 Centre,
+    Vector2 Size,
+    MegastationCargoEntranceStyle Style,
+    float RecessDepth);
+
+public sealed record MegastationFrontageWindowGroupPlan(
+    string Identity,
+    Vector3 Centre,
+    MegastationFrontageWindowStyle Style,
+    int WindowCount,
+    Vector2 WindowSize,
+    float Spacing,
+    Color Colour);
+
+public sealed record MegastationFacilityIdentifierPlan(
+    string Text,
+    Vector3 Origin,
+    Vector3 ReadingDirection,
+    float PixelSize);
+
+public sealed record MegastationOperationalFrontagePlan(
+    string Identity,
+    Vector3 Normal,
+    Vector3 Right,
+    Vector3 Up,
+    IReadOnlyList<string> ServedPadIds,
+    IReadOnlyList<MegastationPersonnelEntrancePlan> PersonnelEntrances,
+    IReadOnlyList<MegastationCargoEntrancePlan> CargoEntrances,
+    IReadOnlyList<MegastationFrontageWindowGroupPlan> WindowGroups,
+    MegastationFacilityIdentifierPlan? FacilityIdentifier,
+    int Seed);
+
 public sealed record MegastationLandingServiceBuilding(
     string Identity,
     Vector3 Centre,
     Vector3 Size,
-    int Seed);
+    int Seed,
+    MegastationOperationalFrontagePlan Frontage);
 
 public sealed record MegastationLandingContainerPlan(
     string Identity,
@@ -137,7 +182,7 @@ public sealed record MegastationLandingDistrictPlan(
 
 public static class MegastationLandingDistrictPlanner
 {
-    public const int AlgorithmVersion = 3;
+    public const int AlgorithmVersion = 4;
     public const float StandardPadSize = 36f;
     public const float LargePadLength = 72f;
     public const float CornerClip = 1f;
@@ -298,14 +343,165 @@ public static class MegastationLandingDistrictPlanner
         {
             int child = MegastationSeed.Derive(seed, $"service:{identity}");
             float adjustedHeight = height + Unit(child, "height") * 5f;
+            string fullIdentity = $"landing-district/service/{identity}";
+            Vector3 centre = Compose(
+                districtRight + rightOffset,
+                upMin + adjustedHeight * .5f,
+                buildingDepth);
+            Vector3 size = new(width, adjustedHeight, depth);
             buildings.Add(new(
-                $"landing-district/service/{identity}",
-                Compose(districtRight + rightOffset, upMin + adjustedHeight * .5f, buildingDepth),
-                new(width, adjustedHeight, depth),
-                child));
+                fullIdentity,
+                centre,
+                size,
+                child,
+                PlanOperationalFrontage(
+                    fullIdentity, identity, centre, size, child, right, up, forward)));
         }
 
         Vector3 Compose(float r, float u, float d) => right * r + up * u + inward * d;
+    }
+
+    private static MegastationOperationalFrontagePlan PlanOperationalFrontage(
+        string buildingIdentity,
+        string role,
+        Vector3 buildingCentre,
+        Vector3 buildingSize,
+        int buildingSeed,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward)
+    {
+        int seed = MegastationSeed.Derive(buildingSeed, "frontage:v1");
+        Vector3 floor = buildingCentre - up * (buildingSize.Y * .5f);
+        Vector3 face = buildingCentre + forward * (buildingSize.Z * .5f);
+        string servedPad = role switch
+        {
+            "west" => "LD-04",
+            "operations" => "LD-05",
+            _ => "LD-06",
+        };
+
+        var cargo = new List<MegastationCargoEntrancePlan>(2);
+        int cargoCount = role == "west" && Unit(seed, "second-cargo") > .38f ? 2 : 1;
+        for (int i = 0; i < cargoCount; i++)
+        {
+            int child = MegastationSeed.Derive(seed, $"cargo:{i}");
+            float width = (role == "operations" ? 10f : 8.5f)
+                + Unit(child, "width") * 1.3f;
+            float height = 5.7f + Unit(child, "height") * .6f;
+            float lateral = i == 0 ? -buildingSize.X * .12f : buildingSize.X * .16f;
+            MegastationCargoEntranceStyle style =
+                role == "operations" || Unit(child, "recess") > .42f
+                    ? MegastationCargoEntranceStyle.ShallowRecess
+                    : MegastationCargoEntranceStyle.Flat;
+            cargo.Add(new(
+                $"{buildingIdentity}/frontage/cargo:{i}",
+                floor + right * lateral + forward * (buildingSize.Z * .5f)
+                    + up * (height * .5f),
+                new(width, height),
+                style,
+                style == MegastationCargoEntranceStyle.ShallowRecess ? .65f : 0f));
+        }
+
+        var personnel = new List<MegastationPersonnelEntrancePlan>(2);
+        MegastationPersonnelAccessKind primaryAccess = role switch
+        {
+            "operations" => MegastationPersonnelAccessKind.Stair,
+            "east" => MegastationPersonnelAccessKind.Ramp,
+            _ => MegastationPersonnelAccessKind.Ground,
+        };
+        float accessFloor = primaryAccess == MegastationPersonnelAccessKind.Ground
+            ? 0f
+            : MegastationLandingDistrictMeshBuilder.AccessPlatformHeight;
+        personnel.Add(new(
+            $"{buildingIdentity}/frontage/personnel:0",
+            floor + forward * (buildingSize.Z * .5f)
+                + right * (buildingSize.X * .34f)
+                + up * (accessFloor + MegastationLandingDistrictMeshBuilder.PersonnelDoorHeight * .5f),
+            new(MegastationLandingDistrictMeshBuilder.PersonnelDoorWidth,
+                MegastationLandingDistrictMeshBuilder.PersonnelDoorHeight),
+            primaryAccess));
+        if (buildingSize.X >= 52f && Unit(seed, "second-personnel") > .48f)
+        {
+            personnel.Add(new(
+                $"{buildingIdentity}/frontage/personnel:1",
+                floor + forward * (buildingSize.Z * .5f)
+                    + right * (buildingSize.X * .08f)
+                    + up * (MegastationLandingDistrictMeshBuilder.PersonnelDoorHeight * .5f),
+                new(MegastationLandingDistrictMeshBuilder.PersonnelDoorWidth,
+                    MegastationLandingDistrictMeshBuilder.PersonnelDoorHeight),
+                MegastationPersonnelAccessKind.Ground));
+        }
+
+        int windowGroupCount = role == "operations"
+            ? 2
+            : 1 + (Unit(seed, "second-window-group") > .72f ? 1 : 0);
+        var windows = new List<MegastationFrontageWindowGroupPlan>(windowGroupCount);
+        for (int i = 0; i < windowGroupCount; i++)
+        {
+            int child = MegastationSeed.Derive(seed, $"windows:{i}");
+            bool observation = role == "operations" && i == 1;
+            int count = observation ? 5 : 3 + (int)(Unit(child, "count") * 3f);
+            float width = observation ? 1.8f : 1.25f + Unit(child, "width") * .35f;
+            float height = observation ? 1.25f : 1.0f + Unit(child, "height") * .25f;
+            float lateral = i == 0 ? buildingSize.X * .15f : -buildingSize.X * .23f;
+            float elevation = observation ? 11.5f : 8.2f;
+            float colourRoll = Unit(child, "colour");
+            Color colour = colourRoll < .48f ? StationWindowVisuals.WarmWhite
+                : colourRoll < .86f ? StationWindowVisuals.NeutralWhite
+                : StationWindowVisuals.CoolBlue;
+            windows.Add(new(
+                $"{buildingIdentity}/frontage/windows:{i}",
+                face + right * lateral + up * elevation,
+                observation
+                    ? MegastationFrontageWindowStyle.ObservationStrip
+                    : MegastationFrontageWindowStyle.CompactBand,
+                count,
+                new(width, height),
+                width + .65f,
+                colour));
+        }
+
+        MegastationFacilityIdentifierPlan? identifier = null;
+        if (role == "operations" || Unit(seed, "identifier") > .35f)
+        {
+            int number = 1 + (int)(Unit(seed, "identifier-number") * 98f);
+            string prefix = role switch
+            {
+                "west" => "WAREHOUSE",
+                "operations" => "SERVICE",
+                _ => "CARGO",
+            };
+            string text = $"{prefix} {number:00}";
+            const float pixel = .18f;
+            float textWidth = text.Length * (BitmapFonts.CharW + 1) * pixel;
+            MegastationCargoEntrancePlan anchor = cargo[0];
+            // The district's placement-right axis points toward visual left when the
+            // frontage is viewed from its operational side. Derive semantic text-right
+            // from the intended Up/Normal frame rather than negating an axis at emission.
+            Vector3 readingDirection = Vector3.Normalize(Vector3.Cross(up, forward));
+            identifier = new(
+                text,
+                anchor.Centre - readingDirection * (textWidth * .5f)
+                    + up * (anchor.Size.Y * .5f
+                        + MegastationLandingDistrictMeshBuilder.CargoDoorFrameThickness
+                        + MegastationLandingDistrictMeshBuilder.FacilityLabelClearance)
+                    + forward * MegastationLandingDistrictMeshBuilder.FrontageMarkingOffset,
+                readingDirection,
+                pixel);
+        }
+
+        return new(
+            $"{buildingIdentity}/frontage",
+            forward,
+            right,
+            up,
+            [servedPad],
+            personnel,
+            cargo,
+            windows,
+            identifier,
+            seed);
     }
 
     private static (
@@ -364,12 +560,13 @@ public static class MegastationLandingDistrictPlanner
         Vector3 rampLow = rampTop
             + service * MegastationLandingPadAssemblyStandards.CargoRampRun
             - up * MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron;
-        Vector3 buildingFloor = building.Centre - up * (building.Size.Y * .5f);
-        float frontOffset = building.Size.Z * .5f + .16f;
-        Vector3 cargoDoor = buildingFloor + forward * frontOffset
-            - right * (building.Size.X * .12f);
-        Vector3 personnelDoor = buildingFloor + forward * frontOffset
-            + right * (building.Size.X * .34f);
+        MegastationCargoEntrancePlan cargoEntrance = building.Frontage.CargoEntrances[0];
+        MegastationPersonnelEntrancePlan personnelEntrance =
+            building.Frontage.PersonnelEntrances[0];
+        Vector3 cargoDoor = cargoEntrance.Centre
+            - up * (cargoEntrance.Size.Y * .5f);
+        Vector3 personnelDoor = personnelEntrance.Centre
+            - up * (personnelEntrance.Size.Y * .5f);
 
         var zones = new List<MegastationKeepClearZonePlan>(4);
         AddZone("LD-05/stair", stairLow + service * 1.5f, new(4f, 3f),
@@ -491,8 +688,26 @@ public static class MegastationLandingDistrictPlanner
                 .Append(',').Append(F(pad.PadSurface.Centre.Y)).Append(',')
                 .Append(F(pad.PadSurface.Centre.Z)).Append(':').Append(pad.NominalSize);
         foreach (MegastationLandingServiceBuilding building in buildings)
+        {
             text.Append('|').Append(building.Identity).Append(':').Append(building.Centre)
                 .Append(':').Append(building.Size);
+            MegastationOperationalFrontagePlan frontage = building.Frontage;
+            text.Append(':').Append(frontage.Identity).Append(':').Append(frontage.Seed);
+            foreach (string pad in frontage.ServedPadIds)
+                text.Append(':').Append(pad);
+            foreach (MegastationCargoEntrancePlan entrance in frontage.CargoEntrances)
+                text.Append(':').Append(entrance.Identity).Append('@').Append(entrance.Centre)
+                    .Append(':').Append(entrance.Size).Append(':').Append(entrance.Style);
+            foreach (MegastationPersonnelEntrancePlan entrance in frontage.PersonnelEntrances)
+                text.Append(':').Append(entrance.Identity).Append('@').Append(entrance.Centre)
+                    .Append(':').Append(entrance.AccessKind);
+            foreach (MegastationFrontageWindowGroupPlan group in frontage.WindowGroups)
+                text.Append(':').Append(group.Identity).Append('@').Append(group.Centre)
+                    .Append(':').Append(group.WindowCount).Append(':').Append(group.WindowSize);
+            if (frontage.FacilityIdentifier is { } identifier)
+                text.Append(':').Append(identifier.Text).Append('@').Append(identifier.Origin)
+                    .Append(':').Append(identifier.ReadingDirection);
+        }
         foreach (MegastationLoadingAreaPlan area in loadingAreas)
         {
             text.Append('|').Append(area.Identity).Append(':').Append(area.Centre)
@@ -526,6 +741,9 @@ public static class MegastationLandingDistrictMeshBuilder
     internal const float CargoDoorHeight = 6f;
     internal const float PersonnelDoorWidth = 1.4f;
     internal const float PersonnelDoorHeight = 2.4f;
+    internal const float CargoDoorFrameThickness = .48f;
+    internal const float FacilityLabelClearance = .45f;
+    internal const float FrontageMarkingOffset = .045f;
     internal const float AccessPlatformHeight = 1.2f;
     internal const float StairRise = .20f;
     internal const float StairTread = .30f;
@@ -575,36 +793,8 @@ public static class MegastationLandingDistrictMeshBuilder
             SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
             AddBox(mesh, Frame(building.Centre, right, up, forward), building.Size,
                 Color.Lerp(dominant, secondary, .35f));
-
-            mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
-            SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
-            float frontOffset = building.Size.Z * .5f + .16f;
-            Vector3 buildingFloor = building.Centre - up * (building.Size.Y * .5f);
-            float cargoWidth = building.Identity.EndsWith("operations", StringComparison.Ordinal)
-                ? 10f : 8.5f;
-            const float cargoHeight = CargoDoorHeight;
-            Vector3 cargoDoor = buildingFloor + forward * frontOffset
-                - right * (building.Size.X * .12f) + up * (cargoHeight * .5f);
-            AddBox(mesh, Frame(cargoDoor, right, up, forward),
-                new(cargoWidth, cargoHeight, .28f), Color.Lerp(secondary, Color.Black, .42f));
-
-            const float personnelWidth = PersonnelDoorWidth;
-            const float personnelHeight = PersonnelDoorHeight;
-            bool raisedAccess = building.Identity.EndsWith("operations", StringComparison.Ordinal)
-                || building.Identity.EndsWith("east", StringComparison.Ordinal);
-            float accessFloor = raisedAccess ? AccessPlatformHeight : 0f;
-            Vector3 personnelDoor = buildingFloor + forward * frontOffset
-                + right * (building.Size.X * .34f)
-                + up * (accessFloor + personnelHeight * .5f);
-            AddBox(mesh, Frame(personnelDoor, right, up, forward),
-                new(personnelWidth, personnelHeight, .25f), Color.Lerp(secondary, Color.Black, .52f));
-
-            if (building.Identity.EndsWith("operations", StringComparison.Ordinal))
-                EmitStairAccess(mesh, buildingFloor, personnelDoor, frontOffset,
-                    right, up, forward, dominant, accent);
-            else if (building.Identity.EndsWith("east", StringComparison.Ordinal))
-                EmitRampAccess(mesh, buildingFloor, personnelDoor, frontOffset,
-                    right, up, forward, dominant, accent);
+            EmitOperationalFrontage(
+                mesh, building, dominant, secondary, accent, illumination);
         }
 
         EmitLoadingContainers(mesh, plan, up, right, forward, dominant, accent,
@@ -628,6 +818,118 @@ public static class MegastationLandingDistrictMeshBuilder
             ShadowVertexCount = casterVertices,
             ShadowTriangleCount = casterTriangles,
         });
+    }
+
+    private static void EmitOperationalFrontage(
+        StationModuleMesh mesh,
+        MegastationLandingServiceBuilding building,
+        Color dominant,
+        Color secondary,
+        Color accent,
+        List<(int Start, int Count, float Illumination)> illumination)
+    {
+        MegastationOperationalFrontagePlan frontage = building.Frontage;
+        Vector3 right = frontage.Right;
+        Vector3 up = frontage.Up;
+        Vector3 forward = frontage.Normal;
+        Vector3 buildingFloor = building.Centre - up * (building.Size.Y * .5f);
+        // Preserve the accepted access landing relationship: the personnel-door skin
+        // sits slightly proud of the authoritative frontage plane.
+        float frontOffset = building.Size.Z * .5f + .16f;
+
+        mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+        foreach (MegastationCargoEntrancePlan entrance in frontage.CargoEntrances)
+            EmitCargoEntrance(mesh, entrance, right, up, forward, secondary, accent);
+
+        foreach (MegastationPersonnelEntrancePlan entrance in frontage.PersonnelEntrances)
+        {
+            SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+            AddBox(mesh, Frame(entrance.Centre + forward * .13f, right, up, forward),
+                new(entrance.Size.X, entrance.Size.Y, .26f),
+                Color.Lerp(secondary, Color.Black, .52f));
+            AddBox(mesh, Frame(
+                    entrance.Centre + up * (entrance.Size.Y * .5f + .18f) + forward * .20f,
+                    right, up, forward),
+                new(entrance.Size.X + .55f, .25f, .40f),
+                Color.Lerp(accent, Color.White, .06f));
+
+            if (entrance.AccessKind == MegastationPersonnelAccessKind.Stair)
+                EmitStairAccess(mesh, buildingFloor, entrance.Centre, frontOffset,
+                    right, up, forward, dominant, accent);
+            else if (entrance.AccessKind == MegastationPersonnelAccessKind.Ramp)
+                EmitRampAccess(mesh, buildingFloor, entrance.Centre, frontOffset,
+                    right, up, forward, dominant, accent);
+        }
+
+        int windowStart = mesh.FaceCount;
+        SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+        foreach (MegastationFrontageWindowGroupPlan group in frontage.WindowGroups)
+        {
+            for (int i = 0; i < group.WindowCount; i++)
+            {
+                float offset = (i - (group.WindowCount - 1) * .5f) * group.Spacing;
+                MegastationWindowMeshBuilder.AppendWindow(
+                    mesh,
+                    group.Centre + right * offset + forward * .035f,
+                    forward,
+                    up,
+                    group.WindowSize.X,
+                    group.WindowSize.Y,
+                    group.Colour);
+            }
+        }
+        if (mesh.FaceCount > windowStart)
+            illumination.Add((windowStart, mesh.FaceCount - windowStart, .92f));
+
+        if (frontage.FacilityIdentifier is { } identifier)
+        {
+            SetMaterial(mesh, SystemMaterialFamilyId.PaintedCoatedMetal);
+            PlanarTextGeometry.Add(
+                mesh,
+                identifier.Text,
+                identifier.Origin,
+                surfaceNormal: forward,
+                readingDirection: identifier.ReadingDirection,
+                identifier.PixelSize,
+                MarkingColour);
+        }
+    }
+
+    private static void EmitCargoEntrance(
+        StationModuleMesh mesh,
+        MegastationCargoEntrancePlan entrance,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Color secondary,
+        Color accent)
+    {
+        SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+        float width = entrance.Size.X;
+        float height = entrance.Size.Y;
+        float frameDepth = entrance.Style == MegastationCargoEntranceStyle.ShallowRecess
+            ? entrance.RecessDepth
+            : .28f;
+        Vector3 frameCentre = entrance.Centre + forward * (frameDepth * .5f);
+        Color frame = Color.Lerp(accent, secondary, .52f);
+        float halfFrame = CargoDoorFrameThickness * .5f;
+        AddBox(mesh, Frame(frameCentre - right * (width * .5f + halfFrame), right, up, forward),
+            new(CargoDoorFrameThickness, height + .55f, frameDepth), frame);
+        AddBox(mesh, Frame(frameCentre + right * (width * .5f + halfFrame), right, up, forward),
+            new(CargoDoorFrameThickness, height + .55f, frameDepth), frame);
+        AddBox(mesh, Frame(frameCentre + up * (height * .5f + halfFrame), right, up, forward),
+            new(width + CargoDoorFrameThickness * 2f, CargoDoorFrameThickness, frameDepth), frame);
+        AddBox(mesh, Frame(entrance.Centre + forward * .055f, right, up, forward),
+            new(width, height, .11f), Color.Lerp(secondary, Color.Black, .55f));
+
+        // Coarse door leaves make the opening read as container-scale machinery without
+        // adding a new door system or dense facade panel pass.
+        for (int leaf = -1; leaf <= 1; leaf += 2)
+            AddBox(mesh, Frame(
+                    entrance.Centre + right * leaf * width * .255f + forward * .12f,
+                    right, up, forward),
+                new(width * .47f, height - .28f, .12f),
+                Color.Lerp(secondary, Color.Black, .43f));
     }
 
     public static void ApplyLighting(

@@ -423,18 +423,8 @@ public static class MegastationWindowMeshBuilder
             if ((i & 255) == 0)
                 cancellationToken.ThrowIfCancellationRequested();
             MegastationWindowInstance window = plan.Windows[i];
-            Vector3 right = Vector3.Normalize(Vector3.Cross(window.Up, window.Normal));
-            Vector3 halfRight = right * (window.Width * 0.5f);
-            Vector3 halfUp = window.Up * (window.Height * 0.5f);
-            Vector3 bottomLeft = window.Centre - halfRight - halfUp;
-            Vector3 bottomRight = window.Centre + halfRight - halfUp;
-            Vector3 topRight = window.Centre + halfRight + halfUp;
-            Vector3 topLeft = window.Centre - halfRight + halfUp;
-            Color bottom = StationWindowVisuals.GlassBottom(window.Colour);
-            Color top = StationWindowVisuals.GlassTop(window.Colour);
-            mesh.AddQuadGradient(
-                bottomLeft, bottom, bottomRight, bottom,
-                topRight, top, topLeft, top);
+            AppendWindow(mesh, window.Centre, window.Normal, window.Up,
+                window.Width, window.Height, window.Colour);
         }
         cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
@@ -448,5 +438,29 @@ public static class MegastationWindowMeshBuilder
             MeshBytes = bytes,
             MeshBuildMilliseconds = stopwatch.ElapsedMilliseconds,
         });
+    }
+
+    // Shared low-level ordinary-species window vocabulary. Planning and ownership remain
+    // with each caller; this helper owns only the established correctly-wound gradient quad.
+    internal static void AppendWindow(
+        StationModuleMesh mesh,
+        Vector3 centre,
+        Vector3 normal,
+        Vector3 up,
+        float width,
+        float height,
+        Color colour)
+    {
+        Vector3 unitUp = Vector3.Normalize(up);
+        Vector3 right = Vector3.Normalize(Vector3.Cross(unitUp, normal));
+        Vector3 halfRight = right * (width * .5f);
+        Vector3 halfUp = unitUp * (height * .5f);
+        Color bottom = StationWindowVisuals.GlassBottom(colour);
+        Color top = StationWindowVisuals.GlassTop(colour);
+        mesh.AddQuadGradient(
+            centre - halfRight - halfUp, bottom,
+            centre + halfRight - halfUp, bottom,
+            centre + halfRight + halfUp, top,
+            centre - halfRight + halfUp, top);
     }
 }
