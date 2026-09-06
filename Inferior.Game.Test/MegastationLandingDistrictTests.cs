@@ -586,6 +586,12 @@ public sealed class MegastationLandingDistrictTests
         Assert.Equal(1.5f, MegastationLandingPadAssemblyStandards.PersonnelStairRun);
         Assert.Equal(6f, MegastationLandingPadAssemblyStandards.CargoRampWidth);
         Assert.Equal(8f, MegastationLandingPadAssemblyStandards.CargoRampRun);
+        Assert.Equal(.14f, MegastationLandingPadAssemblyStandards.CargoRampDeckThickness);
+        Assert.Equal(.10f, MegastationLandingPadAssemblyStandards.CargoRampSupportThickness);
+        Assert.Equal(.08f, MegastationLandingPadAssemblyStandards.StairTreadThickness);
+        Assert.Equal(.10f, MegastationLandingPadAssemblyStandards.StairStringerThickness);
+        Assert.Equal(.06f, MegastationLandingPadAssemblyStandards.RailingMemberThickness);
+        Assert.Equal(.25f, MegastationLandingDistrictMeshBuilder.ApronAdditionalDarkening);
         Assert.Equal(6f, MegastationLandingDistrictMeshBuilder.CargoDoorHeight);
         Assert.Equal(1.4f, MegastationLandingDistrictMeshBuilder.PersonnelDoorWidth);
         Assert.Equal(2.4f, MegastationLandingDistrictMeshBuilder.PersonnelDoorHeight);
@@ -641,6 +647,58 @@ public sealed class MegastationLandingDistrictTests
             Assert.True(MegastationLandingPadAssemblyStandards.CargoRampRun
                 <= pad.OperationalApron.ForwardMaximum - pad.OperationalApron.ForwardMinimum);
         }
+    }
+
+    [Fact]
+    public void CargoRampTopSurfaceMeetsPadAndApronWithoutAnEndLip()
+    {
+        MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
+        foreach (MegastationLandingPadPlan pad in district.Pads)
+        {
+            MegastationCargoRampGeometry ramp =
+                MegastationLandingPadAssemblyStandards.CargoRamp(pad);
+            Vector3 up = pad.PadSurface.Normal;
+            Assert.InRange(MathF.Abs(Vector3.Dot(
+                ramp.High - pad.PadSurface.Centre, up)), 0f, 1e-5f);
+            Assert.Equal(-MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron,
+                Vector3.Dot(ramp.Low - pad.PadSurface.Centre, up), 5);
+            Assert.True(Vector3.Dot(ramp.SurfaceNormal, up) > 0f);
+            Assert.Equal(1f, ramp.Axis.Length(), 5);
+            Assert.Equal(1f, ramp.SurfaceNormal.Length(), 5);
+
+            Vector3 deckCentre = (ramp.High + ramp.Low) * .5f
+                - ramp.SurfaceNormal * (ramp.Thickness * .5f);
+            Vector3 topCentre = deckCentre + ramp.SurfaceNormal * (ramp.Thickness * .5f);
+            AssertVector((ramp.High + ramp.Low) * .5f, topCentre);
+        }
+    }
+
+    [Fact]
+    public void PersonnelStairUsesThinOpenTreadsAndTwoSimpleStringers()
+    {
+        var mesh = new StationModuleMesh();
+        MegastationLandingDistrictMeshBuilder.EmitOpenStairAssembly(
+            mesh,
+            new Vector3(0f, 1f, 0f),
+            Vector3.UnitZ,
+            Vector3.UnitX,
+            Vector3.UnitY,
+            Vector3.UnitZ,
+            5,
+            MegastationLandingPadAssemblyStandards.PersonnelStairWidth,
+            Color.Gray,
+            Color.DarkGray);
+
+        // Five six-faced tread boxes plus two six-faced stringer prisms. The former
+        // five stacked full-height boxes would also have far larger vertical bounds.
+        Assert.Equal(42, mesh.FaceCount);
+        var (vertices, indices) = mesh.ToIntArrays();
+        Assert.Equal(168, vertices.Length);
+        Assert.Equal(84, indices.Length / 3);
+        Assert.All(vertices, vertex => Assert.True(
+            float.IsFinite(vertex.Position.X)
+            && float.IsFinite(vertex.Position.Y)
+            && float.IsFinite(vertex.Position.Z)));
     }
 
     [Fact]

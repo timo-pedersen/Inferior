@@ -88,18 +88,15 @@ public sealed class MegastationArtificialOcclusion
                 new(pad.NominalSize.X, MegastationLandingPadAssemblyStandards.PadSlabThickness,
                     pad.NominalSize.Y), right, up, forward);
 
-            // Only the broad cargo ramp is substantial enough for this first visibility pass.
-            (_, Vector3 rampTop, Vector3 serviceDirection) =
-                MegastationLandingPadAssemblyStandards.AccessAnchors(pad);
-            Vector3 rampLow = rampTop
-                + serviceDirection * MegastationLandingPadAssemblyStandards.CargoRampRun
-                - up * MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron;
-            Vector3 rampAxis = Vector3.Normalize(rampTop - rampLow);
-            Vector3 rampNormal = Vector3.Normalize(Vector3.Cross(rampAxis, right));
+            // The thin deck remains substantial cargo infrastructure. Its visibility
+            // proxy shares the exact authoritative pose used by visible geometry.
+            MegastationCargoRampGeometry ramp =
+                MegastationLandingPadAssemblyStandards.CargoRamp(pad);
             Add(MegastationArtificialOccluderRole.SubstantialAccess,
-                (rampTop + rampLow) * .5f,
-                new(MegastationLandingPadAssemblyStandards.CargoRampWidth, .20f,
-                    Vector3.Distance(rampTop, rampLow)), right, rampNormal, rampAxis);
+                (ramp.High + ramp.Low) * .5f
+                    - ramp.SurfaceNormal * (ramp.Thickness * .5f),
+                new(ramp.Width, ramp.Thickness, Vector3.Distance(ramp.High, ramp.Low)),
+                ramp.Right, ramp.SurfaceNormal, ramp.Axis);
         }
         foreach (MegastationLandingServiceBuilding building in district.ServiceBuildings)
             Add(MegastationArtificialOccluderRole.ServiceBuilding,

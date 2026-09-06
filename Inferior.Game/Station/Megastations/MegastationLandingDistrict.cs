@@ -38,6 +38,11 @@ public static class MegastationLandingPadAssemblyStandards
     public const float PersonnelStairRun = 1.5f;
     public const float CargoRampWidth = 6f;
     public const float CargoRampRun = 8f;
+    public const float CargoRampDeckThickness = .14f;
+    public const float CargoRampSupportThickness = .10f;
+    public const float StairTreadThickness = .08f;
+    public const float StairStringerThickness = .10f;
+    public const float RailingMemberThickness = .06f;
     public const float FixtureLightIntensity = .34f;
     public const float FixtureLightRange = 5.5f;
     public const float FixtureLightAngularCutoffCosine = 0f;
@@ -83,7 +88,31 @@ public static class MegastationLandingPadAssemblyStandards
             rearEdge + pad.PadSurface.Right * (pad.NominalSize.X * .22f),
             serviceDirection);
     }
+
+    public static MegastationCargoRampGeometry CargoRamp(MegastationLandingPadPlan pad)
+    {
+        Vector3 up = pad.PadSurface.Normal;
+        Vector3 right = pad.PadSurface.Right;
+        (_, Vector3 high, Vector3 serviceDirection) = AccessAnchors(pad);
+        Vector3 low = high + serviceDirection * CargoRampRun
+            - up * PadTopHeightAboveApron;
+        Vector3 axis = Vector3.Normalize(high - low);
+        Vector3 surfaceNormal = Vector3.Normalize(Vector3.Cross(axis, right));
+        if (Vector3.Dot(surfaceNormal, up) < 0f)
+            surfaceNormal = -surfaceNormal;
+        return new(high, low, right, axis, surfaceNormal,
+            CargoRampWidth, CargoRampDeckThickness);
+    }
 }
+
+public readonly record struct MegastationCargoRampGeometry(
+    Vector3 High,
+    Vector3 Low,
+    Vector3 Right,
+    Vector3 Axis,
+    Vector3 SurfaceNormal,
+    float Width,
+    float Thickness);
 
 public sealed record MegastationLandingPadFixturePlan(
     string Identity,
@@ -873,6 +902,7 @@ public readonly record struct MegastationLandingDistrictMeshResult(
 public static class MegastationLandingDistrictMeshBuilder
 {
     internal const float ApronReceiverSpacing = 5f;
+    internal const float ApronAdditionalDarkening = .25f;
     internal const float PadTopReceiverSpacing = 2.5f;
     internal const float CargoDoorHeight = 6f;
     internal const float PersonnelDoorWidth = 1.4f;
@@ -917,7 +947,8 @@ public static class MegastationLandingDistrictMeshBuilder
         mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
         SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
         Color apronColour = Color.Lerp(
-            Color.Lerp(dominant, Color.Black, .16f), Color.Black, .25f);
+            Color.Lerp(Color.Lerp(dominant, Color.Black, .16f), Color.Black, .25f),
+            Color.Black, ApronAdditionalDarkening);
         ApronReceiverMesh apron = EmitTessellatedApron(
             mesh, plan, apronColour);
 
@@ -1307,22 +1338,16 @@ public static class MegastationLandingDistrictMeshBuilder
         Vector3 up = pad.PadSurface.Normal;
         Vector3 right = pad.PadSurface.Right;
         Vector3 forward = pad.PadSurface.PreferredHeading;
-        (Vector3 stairTop, Vector3 rampTop, Vector3 serviceDirection) =
+        (Vector3 stairTop, _, Vector3 serviceDirection) =
             MegastationLandingPadAssemblyStandards.AccessAnchors(pad);
         mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
         SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
 
-        const int stepCount = 5;
-        for (int step = 0; step < stepCount; step++)
-        {
-            float height = (step + 1) * StairRise;
-            float distance = (stepCount - step - .5f) * StairTread;
-            Vector3 stepCentre = stairTop + serviceDirection * distance
-                - up * (MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron - height * .5f);
-            AddBox(mesh, Frame(stepCentre, right, up, forward),
-                new(MegastationLandingPadAssemblyStandards.PersonnelStairWidth, height, StairTread),
-                Color.Lerp(dominant, accent, .22f));
-        }
+        EmitOpenStairAssembly(mesh, stairTop, serviceDirection, right, up, forward,
+            stepCount: 5,
+            MegastationLandingPadAssemblyStandards.PersonnelStairWidth,
+            Color.Lerp(dominant, Color.Black, .18f),
+            Color.Lerp(accent, Color.Black, .12f));
 
         // Railing is deliberately confined to the personnel stair. Three posts per
         // side make its human scale unambiguous without fencing the operational pad.
@@ -1336,26 +1361,38 @@ public static class MegastationLandingDistrictMeshBuilder
                 + sideOffset
                 - up * MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron;
             Vector3 high = stairTop + sideOffset;
-            AddBarBetween3D(mesh, low, low + up * RailingHeight, .10f, railColour);
-            AddBarBetween3D(mesh, high, high + up * RailingHeight, .10f, railColour);
+            AddBarBetween3D(mesh, low, low + up * RailingHeight,
+                MegastationLandingPadAssemblyStandards.RailingMemberThickness, railColour);
+            AddBarBetween3D(mesh, high, high + up * RailingHeight,
+                MegastationLandingPadAssemblyStandards.RailingMemberThickness, railColour);
             AddBarBetween3D(mesh,
                 low + up * RailingHeight,
                 high + up * RailingHeight,
-                .10f,
+                MegastationLandingPadAssemblyStandards.RailingMemberThickness,
                 railColour);
         }
 
         // Broad cargo access is a single robust unrailed ramp. The pad-side end is
         // flush with the landing surface; the far end meets the apron surface.
-        Vector3 rampLow = rampTop
-            + serviceDirection * MegastationLandingPadAssemblyStandards.CargoRampRun
-            - up * MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron;
-        Vector3 rampAxis = Vector3.Normalize(rampTop - rampLow);
-        Vector3 rampNormal = Vector3.Normalize(Vector3.Cross(rampAxis, right));
-        AddBox(mesh, Frame((rampTop + rampLow) * .5f, right, rampNormal, rampAxis),
-            new(MegastationLandingPadAssemblyStandards.CargoRampWidth,
-                .20f, Vector3.Distance(rampTop, rampLow)),
+        MegastationCargoRampGeometry ramp =
+            MegastationLandingPadAssemblyStandards.CargoRamp(pad);
+        Vector3 rampCentre = (ramp.High + ramp.Low) * .5f
+            - ramp.SurfaceNormal * (ramp.Thickness * .5f);
+        AddBox(mesh, Frame(rampCentre, ramp.Right, ramp.SurfaceNormal, ramp.Axis),
+            new(ramp.Width, ramp.Thickness, Vector3.Distance(ramp.High, ramp.Low)),
             Color.Lerp(dominant, accent, .18f));
+        Color supportColour = Color.Lerp(dominant, Color.Black, .30f);
+        for (int side = -1; side <= 1; side += 2)
+        {
+            Vector3 lateral = ramp.Right * side * ramp.Width * .34f;
+            Vector3 underside = ramp.SurfaceNormal
+                * -(ramp.Thickness + MegastationLandingPadAssemblyStandards.CargoRampSupportThickness)
+                * .5f;
+            AddBarBetween3D(mesh, ramp.Low + lateral + underside,
+                ramp.High + lateral + underside,
+                MegastationLandingPadAssemblyStandards.CargoRampSupportThickness,
+                supportColour);
+        }
 
         // Keep one successful scale reference beside the central pad-owned stair;
         // this remains a calibration prop rather than a simulated population.
@@ -1363,6 +1400,49 @@ public static class MegastationLandingDistrictMeshBuilder
         {
             Vector3 humanFeet = ScaleHumanFeetPosition(pad);
             EmitScaleHuman(mesh, humanFeet, up, forward);
+        }
+    }
+
+    internal static void EmitOpenStairAssembly(
+        StationModuleMesh mesh,
+        Vector3 topLanding,
+        Vector3 descendingDirection,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        int stepCount,
+        float width,
+        Color treadColour,
+        Color supportColour)
+    {
+        float totalRise = stepCount * StairRise;
+        Vector3 firstTreadCentre = Vector3.Zero;
+        Vector3 lastTreadCentre = Vector3.Zero;
+        for (int step = 0; step < stepCount; step++)
+        {
+            float treadTopHeight = (step + 1) * StairRise;
+            float distance = (stepCount - step - .5f) * StairTread;
+            Vector3 treadCentre = topLanding + descendingDirection * distance
+                - up * (totalRise - treadTopHeight
+                    + MegastationLandingPadAssemblyStandards.StairTreadThickness * .5f);
+            AddBox(mesh, Frame(treadCentre, right, up, forward),
+                new(width, MegastationLandingPadAssemblyStandards.StairTreadThickness, StairTread),
+                treadColour);
+            if (step == 0) firstTreadCentre = treadCentre;
+            if (step == stepCount - 1) lastTreadCentre = treadCentre;
+        }
+
+        Vector3 underTread = -up
+            * ((MegastationLandingPadAssemblyStandards.StairTreadThickness
+                + MegastationLandingPadAssemblyStandards.StairStringerThickness) * .5f);
+        for (int side = -1; side <= 1; side += 2)
+        {
+            Vector3 lateral = right * side * width * .38f;
+            AddBarBetween3D(mesh,
+                firstTreadCentre + lateral + underTread,
+                lastTreadCentre + lateral + underTread,
+                MegastationLandingPadAssemblyStandards.StairStringerThickness,
+                supportColour);
         }
     }
 
@@ -1391,8 +1471,6 @@ public static class MegastationLandingDistrictMeshBuilder
     {
         const float platformHeight = AccessPlatformHeight;
         const float platformDepth = 2.4f;
-        const float stairRise = StairRise;
-        const float stairTread = StairTread;
         const int stepCount = 6;
         Vector3 doorLine = buildingFloor
             + right * Vector3.Dot(personnelDoor - buildingFloor, right)
@@ -1404,17 +1482,14 @@ public static class MegastationLandingDistrictMeshBuilder
             new(3.8f, .24f, platformDepth), Color.Lerp(dominant, accent, .22f));
 
         float platformOuter = frontOffset + platformDepth;
-        for (int step = 0; step < stepCount; step++)
-        {
-            float height = (step + 1) * stairRise;
-            float distance = (stepCount - step - .5f) * stairTread;
-            Vector3 centre = buildingFloor
-                + right * Vector3.Dot(personnelDoor - buildingFloor, right)
-                + forward * (platformOuter + distance)
-                + up * (height * .5f);
-            AddBox(mesh, Frame(centre, right, up, forward),
-                new(2.2f, height, stairTread), Color.Lerp(dominant, accent, .16f));
-        }
+        Vector3 stairTop = buildingFloor
+            + right * Vector3.Dot(personnelDoor - buildingFloor, right)
+            + forward * platformOuter
+            + up * platformHeight;
+        EmitOpenStairAssembly(mesh, stairTop, forward, right, up, forward,
+            stepCount, 2.2f,
+            Color.Lerp(dominant, Color.Black, .18f),
+            Color.Lerp(accent, Color.Black, .12f));
 
         EmitRailing(mesh, doorLine + forward * platformDepth, right, up, forward,
             platformDepth, 3.8f, accent);
@@ -1447,7 +1522,7 @@ public static class MegastationLandingDistrictMeshBuilder
             AddBarBetween3D(mesh,
                 low + lateralOffset + up * RailingHeight,
                 high + lateralOffset + up * RailingHeight,
-                .10f,
+                MegastationLandingPadAssemblyStandards.RailingMemberThickness,
                 accent);
         }
     }
@@ -1463,7 +1538,7 @@ public static class MegastationLandingDistrictMeshBuilder
         Color colour)
     {
         const float height = RailingHeight;
-        const float thickness = .10f;
+        const float thickness = MegastationLandingPadAssemblyStandards.RailingMemberThickness;
         for (int side = -1; side <= 1; side += 2)
         {
             Vector3 sideOffset = right * side * (width * .5f - .08f);
