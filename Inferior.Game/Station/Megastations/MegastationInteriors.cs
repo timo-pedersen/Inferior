@@ -110,7 +110,15 @@ public sealed record MegastationInteriorDiagnostics(
     int LandingDistrictVisibleTriangleCount = 0,
     int LandingDistrictShadowVertexCount = 0,
     int LandingDistrictShadowTriangleCount = 0,
-    string LandingDistrictSignature = "");
+    string LandingDistrictSignature = "",
+    int ArtificialOccluderCount = 0,
+    long ArtificialLightReceiverSampleCount = 0,
+    long ArtificialLightVisibilityTestCount = 0,
+    long ArtificialLightBlockedVisibilityTestCount = 0,
+    double ArtificialLightBakeMilliseconds = 0d,
+    int LandingDistrictApronReceiverVertexCount = 0,
+    int LandingDistrictApronReceiverTriangleCount = 0,
+    float LandingDistrictApronReceiverMaximumSpacing = 0f);
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -1439,6 +1447,7 @@ public static class MegastationInteriorMeshBuilder
         MegastationInteriorPresentationPlan? presentation = null,
         MegastationLandingDistrictPlan? landingDistrict = null,
         MegastationArtificialLightingPlan? artificialLighting = null,
+        MegastationArtificialOcclusion? artificialOcclusion = null,
         CancellationToken cancellationToken = default)
     {
         presentation ??= MegastationInteriorPresentationPlanner.Plan(plan);
@@ -1536,10 +1545,16 @@ public static class MegastationInteriorMeshBuilder
         for (int face = start; face < start + count; face++)
             mesh.SetFaceIllumination(face, illumination);
         if (landingMesh is { } districtMesh)
-            MegastationLandingDistrictMeshBuilder.ApplyLighting(
-                mesh,
-                districtMesh,
-                artificialLighting?.Lights ?? landingDistrict!.ArtificialLights);
+        {
+            void ApplyLandingLighting() => MegastationLandingDistrictMeshBuilder.ApplyLighting(
+                mesh, districtMesh,
+                artificialLighting?.Lights ?? landingDistrict!.ArtificialLights,
+                artificialOcclusion);
+            if (artificialOcclusion is null)
+                ApplyLandingLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyLandingLighting);
+        }
         stopwatch.Stop();
 
         var diagnostics = plan.Diagnostics with
@@ -1591,6 +1606,12 @@ public static class MegastationInteriorMeshBuilder
             LandingDistrictVisibleTriangleCount = landingMesh?.Diagnostics.VisibleTriangleCount ?? 0,
             LandingDistrictShadowVertexCount = landingMesh?.Diagnostics.ShadowVertexCount ?? 0,
             LandingDistrictShadowTriangleCount = landingMesh?.Diagnostics.ShadowTriangleCount ?? 0,
+            LandingDistrictApronReceiverVertexCount =
+                landingMesh?.Diagnostics.ApronReceiverVertexCount ?? 0,
+            LandingDistrictApronReceiverTriangleCount =
+                landingMesh?.Diagnostics.ApronReceiverTriangleCount ?? 0,
+            LandingDistrictApronReceiverMaximumSpacing =
+                landingMesh?.Diagnostics.ApronReceiverMaximumSpacing ?? 0f,
             LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
         };
         return new(mesh, diagnostics, landingMesh?.Diagnostics);

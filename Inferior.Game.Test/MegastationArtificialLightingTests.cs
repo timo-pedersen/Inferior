@@ -57,6 +57,152 @@ public sealed class MegastationArtificialLightingTests
     }
 
     [Fact]
+    public void LocalColourSpillPreservesChromaAgainstSaturatedNeutralBaseline()
+    {
+        MegastationArtificialLight baseline = new(
+            "baseline", new Vector3(0f, 1f, 0f), Color.White, 2f, 100f);
+        MegastationArtificialLight amber = new(
+            "amber", new Vector3(0f, 1f, 0f), new Color(255, 174, 72), .34f, 5.5f);
+        MegastationArtificialLight cyan = new(
+            "cyan", new Vector3(0f, 1f, 0f), new Color(76, 196, 255), .34f, 5.5f);
+
+        Vector3 unchanged = MegastationArtificialLighting.EvaluateLocalColourSpill(
+            Vector3.Zero, Vector3.UnitY, [baseline], []);
+        Vector3 warm = MegastationArtificialLighting.EvaluateLocalColourSpill(
+            Vector3.Zero, Vector3.UnitY, [baseline], [amber]);
+        Vector3 cool = MegastationArtificialLighting.EvaluateLocalColourSpill(
+            Vector3.Zero, Vector3.UnitY, [baseline], [cyan]);
+
+        Assert.Equal(Vector3.One, unchanged);
+        Assert.True(warm.X > warm.Y && warm.Y > warm.Z);
+        Assert.True(cool.Z > cool.Y && cool.Y > cool.X);
+        Assert.All(new[] { unchanged, warm, cool }, value =>
+        {
+            Assert.True(float.IsFinite(value.X) && float.IsFinite(value.Y)
+                && float.IsFinite(value.Z));
+            Assert.InRange(value.X, 0f, 1f);
+            Assert.InRange(value.Y, 0f, 1f);
+            Assert.InRange(value.Z, 0f, 1f);
+        });
+    }
+
+    [Fact]
+    public void DirectionalDirectLightFavoursFrontSuppressesBackAndRetainsBroadIndirect()
+    {
+        MegastationArtificialLight light = new(
+            "directional",
+            Vector3.Zero,
+            Color.White,
+            1f,
+            100f,
+            Vector3.UnitZ,
+            -.30f);
+
+        var front = MegastationArtificialLighting.EvaluateComponents(
+            new Vector3(0f, 0f, 10f), -Vector3.UnitZ, [light]);
+        var back = MegastationArtificialLighting.EvaluateComponents(
+            new Vector3(0f, 0f, -10f), Vector3.UnitZ, [light]);
+        var side = MegastationArtificialLighting.EvaluateComponents(
+            new Vector3(10f, 0f, 0f), -Vector3.UnitX, [light]);
+
+        Assert.True(front.Direct.X > 0f);
+        Assert.Equal(Vector3.Zero, back.Direct);
+        Assert.True(side.Direct.X > 0f);
+        Assert.True(side.Direct.X < front.Direct.X);
+        Assert.True(back.Indirect.X > 0f);
+        Assert.Equal(front.Indirect.X, back.Indirect.X, 5);
+    }
+
+    [Fact]
+    public void SubstantialOccluderSuppressesDirectButPreservesIndirect()
+    {
+        MegastationArtificialLight light = new(
+            "test", new Vector3(0f, 10f, 0f), Color.White, 1f, 100f);
+        MegastationArtificialOcclusion occlusion = MegastationArtificialOcclusion.CreateForTests(
+            Box(MegastationArtificialOccluderRole.ServiceBuilding,
+                new Vector3(0f, 5f, 0f), new Vector3(4f, 2f, 4f)));
+
+        var blocked = MegastationArtificialLighting.EvaluateComponents(
+            Vector3.Zero, Vector3.UnitY, [light], occlusion);
+
+        Assert.Equal(Vector3.Zero, blocked.Direct);
+        Assert.True(blocked.Indirect.X > 0f);
+        Assert.Equal(1, occlusion.Diagnostics(1).BlockedVisibilityTestCount);
+    }
+
+    [Fact]
+    public void OccluderBeyondReceiverDoesNotBlockFiniteSegment()
+    {
+        MegastationArtificialLight light = new(
+            "test", new Vector3(0f, 10f, 0f), Color.White, 1f, 100f);
+        MegastationArtificialOcclusion occlusion = MegastationArtificialOcclusion.CreateForTests(
+            Box(MegastationArtificialOccluderRole.LandingPadSlab,
+                new Vector3(0f, -5f, 0f), new Vector3(4f, 2f, 4f)));
+
+        var result = MegastationArtificialLighting.EvaluateComponents(
+            Vector3.Zero, Vector3.UnitY, [light], occlusion);
+
+        Assert.True(result.Direct.X > 0f);
+        Assert.Equal(0, occlusion.Diagnostics(1).BlockedVisibilityTestCount);
+    }
+
+    [Fact]
+    public void ExplicitMinorDetailDoesNotEnterOccluderSet()
+    {
+        MegastationArtificialLight light = new(
+            "test", new Vector3(0f, 10f, 0f), Color.White, 1f, 100f);
+        MegastationArtificialOcclusion occlusion = MegastationArtificialOcclusion.CreateForTests(
+            Box(MegastationArtificialOccluderRole.MinorDetail,
+                new Vector3(0f, 5f, 0f), new Vector3(4f, 2f, 4f)));
+
+        var result = MegastationArtificialLighting.EvaluateComponents(
+            Vector3.Zero, Vector3.UnitY, [light], occlusion);
+
+        Assert.True(result.Direct.X > 0f);
+        Assert.Equal(0, occlusion.Diagnostics(1).OccluderCount);
+        Assert.False(MegastationArtificialOcclusion.CastsStaticArtificialShadow(
+            MegastationArtificialOccluderRole.MinorDetail));
+    }
+
+    [Fact]
+    public void EveryArtificialOccluderRoleHasExplicitPolicy()
+    {
+        foreach (MegastationArtificialOccluderRole role in
+                 Enum.GetValues<MegastationArtificialOccluderRole>())
+        {
+            bool expected = role != MegastationArtificialOccluderRole.MinorDetail;
+            Assert.Equal(expected,
+                MegastationArtificialOcclusion.CastsStaticArtificialShadow(role));
+        }
+    }
+
+    [Fact]
+    public void AuthoritativeStructuralOccupancyBlocksDirectSegmentDeterministically()
+    {
+        float[] widths = [10f, 10f, 10f];
+        var grid = new SliceGrid(widths, widths, widths, 0..3, 0..3, 0..3);
+        var occupancy = new StructuralOccupancy(grid);
+        occupancy.MarkStructural(1, 1, 1);
+        MegastationArtificialLight light = new(
+            "test", new Vector3(0f, 10f, 0f), Color.White, 1f, 100f);
+
+        static (Vector3 Direct, Vector3 Indirect) Evaluate(
+            StructuralOccupancy occupancy, MegastationArtificialLight light)
+        {
+            MegastationArtificialOcclusion scene =
+                MegastationArtificialOcclusion.CreateForTests(occupancy);
+            return MegastationArtificialLighting.EvaluateComponents(
+                new Vector3(0f, -10f, 0f), Vector3.UnitY, [light], scene);
+        }
+
+        var first = Evaluate(occupancy, light);
+        var second = Evaluate(occupancy, light);
+        Assert.Equal(Vector3.Zero, first.Direct);
+        Assert.True(first.Indirect.X > 0f);
+        Assert.Equal(first, second);
+    }
+
+    [Fact]
     public void KnownStationProducesDeterministicIndependentLightPlan()
     {
         MegastationPrototypeCpuResult first = MegastationPrototypeGenerator.GenerateCpu(Nova);
@@ -64,7 +210,7 @@ public sealed class MegastationArtificialLightingTests
             MegastationArtificialLighting.Plan(first.InteriorPlan);
 
         Assert.Equal(12, replanned.Lights.Count);
-        Assert.Equal(20, first.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(50, first.ArtificialLightingPlan.Lights.Count);
         Assert.Equal(replanned.Lights, first.ArtificialLightingPlan.Lights.Take(12));
         Assert.All(replanned.Lights, light =>
         {
@@ -109,5 +255,15 @@ public sealed class MegastationArtificialLightingTests
         }
 
         Assert.True(litInteriorVertices > 0);
+        Assert.Equal(50, result.InteriorPlan.Diagnostics.ArtificialLightSourceCount);
+        Assert.True(result.InteriorPlan.Diagnostics.ArtificialOccluderCount > 0);
+        Assert.True(result.InteriorPlan.Diagnostics.ArtificialLightReceiverSampleCount > 0);
+        Assert.True(result.InteriorPlan.Diagnostics.ArtificialLightVisibilityTestCount > 0);
+        Assert.True(result.InteriorPlan.Diagnostics.ArtificialLightBlockedVisibilityTestCount > 0);
+        Assert.True(result.InteriorPlan.Diagnostics.ArtificialLightBakeMilliseconds >= 0d);
     }
+
+    private static MegastationArtificialOccluder Box(
+        MegastationArtificialOccluderRole role, Vector3 centre, Vector3 size)
+        => new(role, centre, size * .5f, Vector3.UnitX, Vector3.UnitY, Vector3.UnitZ);
 }

@@ -120,7 +120,8 @@ public static class MegastationPrototypeMeshBuilder
         MegastationSemanticZoningResult? semanticZoning = null,
         MegastationSystemMaterialAssignment? materialAssignment = null,
         MegastationInteriorPlan? interiorPlan = null,
-        MegastationArtificialLightingPlan? artificialLighting = null)
+        MegastationArtificialLightingPlan? artificialLighting = null,
+        MegastationArtificialOcclusion? artificialOcclusion = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
         var stopwatch = new Stopwatch();
@@ -157,7 +158,12 @@ public static class MegastationPrototypeMeshBuilder
         int cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         mesh.ApplyIlluminationFlags();
         ApplyInteriorIllumination(mesh, topology, occupancy.Grid, interiorPlan);
-        ApplyInteriorArtificialLighting(mesh, topology, occupancy.Grid, artificialLighting);
+        void ApplyArtificialLighting() => ApplyInteriorArtificialLighting(
+            mesh, topology, occupancy.Grid, artificialLighting, artificialOcclusion);
+        if (artificialOcclusion is null)
+            ApplyArtificialLighting();
+        else
+            artificialOcclusion.MeasureBake(ApplyArtificialLighting);
         stopwatch.Stop();
 
         var (_, indices) = mesh.ToIntArrays();
@@ -304,7 +310,8 @@ public static class MegastationPrototypeMeshBuilder
         StationModuleMesh mesh,
         BoundaryTopology topology,
         SliceGrid grid,
-        MegastationArtificialLightingPlan? lighting)
+        MegastationArtificialLightingPlan? lighting,
+        MegastationArtificialOcclusion? occlusion)
     {
         if (lighting == null) return;
         for (int faceIndex = 0; faceIndex < topology.Faces.Count; faceIndex++)
@@ -315,7 +322,8 @@ public static class MegastationPrototypeMeshBuilder
             Vector3 normal = BoundaryTopologyBuilder.Normal(face.Direction);
             Vector3[] samples = face.Vertices
                 .Select(vertex => MegastationArtificialLighting.Evaluate(
-                    BoundaryTopologyBuilder.Position(grid, vertex), normal, lighting.Lights))
+                    BoundaryTopologyBuilder.Position(grid, vertex), normal, lighting.Lights,
+                    occlusion))
                 .ToArray();
             mesh.SetFaceArtificialLight(faceIndex, samples);
         }

@@ -92,7 +92,7 @@ public sealed class MegastationLandingDistrictTests
                 replanned.Pads[i].BuildingSetbackClearance);
         }
         Assert.Equal(12, baseline.Lights.Count);
-        Assert.Equal(20, result.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(50, result.ArtificialLightingPlan.Lights.Count);
         Assert.Equal(baseline.Lights, result.ArtificialLightingPlan.Lights.Take(12));
         Assert.Equal(result.LandingDistrictPlan.ArtificialLights,
             result.ArtificialLightingPlan.Lights.Skip(12));
@@ -109,7 +109,7 @@ public sealed class MegastationLandingDistrictTests
         Assert.True(result.InteriorPlan.Diagnostics.LandingDistrictShadowTriangleCount > 0);
         Assert.Equal(3, result.LandingDistrictPlan.ServiceBuildings.Count);
         Console.WriteLine(
-            $"L1e Nova: pads={result.LandingDistrictPlan.Diagnostics.StandardPadCount}+" +
+            $"L1f Nova: pads={result.LandingDistrictPlan.Diagnostics.StandardPadCount}+" +
             $"{result.LandingDistrictPlan.Diagnostics.LargePadCount}; " +
             $"apron={result.LandingDistrictPlan.Diagnostics.ApronSize.X:F0}x" +
             $"{result.LandingDistrictPlan.Diagnostics.ApronSize.Y:F0}m; " +
@@ -118,6 +118,7 @@ public sealed class MegastationLandingDistrictTests
             $"personnelDoors={result.LandingDistrictPlan.ServiceBuildings.Sum(building => building.Frontage.PersonnelEntrances.Count)}; " +
             $"windowGroups={result.LandingDistrictPlan.ServiceBuildings.Sum(building => building.Frontage.WindowGroups.Count)}; " +
             $"facilityIds={result.LandingDistrictPlan.ServiceBuildings.Count(building => building.Frontage.FacilityIdentifier is not null)}; " +
+            $"facadeLights={result.LandingDistrictPlan.ServiceBuildings.Sum(building => building.Frontage.Floodlights.Count)}; " +
             $"lights={result.LandingDistrictPlan.Diagnostics.ArtificialLightCount}; " +
             $"loading={result.LandingDistrictPlan.Diagnostics.LoadingAreaCount}; " +
             $"containers={result.LandingDistrictPlan.Diagnostics.ContainerCount}; " +
@@ -139,6 +140,108 @@ public sealed class MegastationLandingDistrictTests
             Vector3 b = vertices[indices[i + 1]].Position;
             Vector3 c = vertices[indices[i + 2]].Position;
             Assert.True(Vector3.Cross(b - a, c - a).LengthSquared() > 1e-8f);
+        }
+    }
+
+    [Fact]
+    public void ApronReceiverGridCoversExactSurfaceWithContinuousUvsAndPadSamples()
+    {
+        MegastationPrototypeCpuResult generated = Result.Value;
+        MegastationLandingDistrictPlan plan = generated.LandingDistrictPlan;
+        var mesh = new StationModuleMesh();
+        MegastationLandingDistrictMeshResult result =
+            MegastationLandingDistrictMeshBuilder.Append(
+                mesh, plan, generated.MaterialAssignment);
+        var (vertices, _) = mesh.ToIntArrays();
+        var repeatedMesh = new StationModuleMesh();
+        MegastationLandingDistrictMeshBuilder.Append(
+            repeatedMesh, plan, generated.MaterialAssignment);
+        Assert.Equal(mesh.ToIntArrays().verts, repeatedMesh.ToIntArrays().verts);
+        Assert.Equal(mesh.ToIntArrays().indices, repeatedMesh.ToIntArrays().indices);
+        var receiverVertices = vertices
+            .Skip(result.ApronReceiverFirstVertex)
+            .Take(result.ApronReceiverVertexCount)
+            .ToArray();
+        Vector3 right = Vector3.Normalize(plan.DistrictRight);
+        Vector3 up = Vector3.Normalize(plan.FloorNormal);
+        Vector3 depth = Vector3.Normalize(Vector3.Cross(right, up));
+        float halfWidth = plan.ApronSize.X * .5f;
+        float halfDepth = plan.ApronSize.Y * .5f;
+        Vector3 origin = plan.ApronCentre - right * halfWidth
+            + up * (MegastationLandingPadAssemblyStandards.ApronThickness * .5f)
+            + depth * halfDepth;
+        Vector3 arbitrary = MathF.Abs(up.Y) < .85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 textureU = Vector3.Normalize(Vector3.Cross(up, arbitrary));
+        Vector3 textureV = Vector3.Normalize(Vector3.Cross(up, textureU));
+        float tileSize = SystemMaterialRecipes.Get(
+            SystemMaterialFamilyId.HeavyIndustrialPlate).TileSizeMeters;
+
+        int expectedColumns = (int)MathF.Ceiling(
+            plan.ApronSize.X / MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
+        int expectedRows = (int)MathF.Ceiling(
+            plan.ApronSize.Y / MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
+        Assert.Equal(expectedColumns * expectedRows, result.ApronReceiverFaceCount);
+        Assert.Equal(result.ApronReceiverFaceCount * 4, receiverVertices.Length);
+        Assert.Equal(result.ApronReceiverFaceCount * 2,
+            result.Diagnostics.ApronReceiverTriangleCount);
+        Assert.Equal(plan.Pads.Count, result.PadTopReceiverRanges.Count);
+        Assert.All(result.PadTopReceiverRanges, range =>
+        {
+            Assert.True(range.FirstFace >= result.FirstFace);
+            Assert.True(range.FaceCount > 100);
+            Assert.True(range.FirstFace + range.FaceCount
+                <= result.FirstFace + result.FaceCount);
+        });
+        Assert.InRange(result.Diagnostics.ApronReceiverMaximumSpacing, 0f,
+            MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
+
+        foreach (var vertex in receiverVertices)
+        {
+            Vector3 offset = vertex.Position - origin;
+            float localRight = Vector3.Dot(offset, right);
+            float localDepth = -Vector3.Dot(offset, depth);
+            Assert.InRange(localRight, -.001f, plan.ApronSize.X + .001f);
+            Assert.InRange(localDepth, -.001f, plan.ApronSize.Y + .001f);
+            Assert.True(Vector3.Dot(vertex.Normal, up) > .9999f);
+            Assert.True(float.IsFinite(vertex.Position.X)
+                && float.IsFinite(vertex.Position.Y)
+                && float.IsFinite(vertex.Position.Z));
+            Vector2 expectedUv = new(
+                Vector3.Dot(offset, textureU) / tileSize,
+                Vector3.Dot(offset, textureV) / tileSize);
+            Assert.InRange(Vector2.Distance(vertex.TextureCoordinate, expectedUv), 0f, 1e-5f);
+        }
+
+        float minRight = receiverVertices.Min(vertex =>
+            Vector3.Dot(vertex.Position - plan.ApronCentre, right));
+        float maxRight = receiverVertices.Max(vertex =>
+            Vector3.Dot(vertex.Position - plan.ApronCentre, right));
+        float minDepth = receiverVertices.Min(vertex =>
+            Vector3.Dot(vertex.Position - plan.ApronCentre, depth));
+        float maxDepth = receiverVertices.Max(vertex =>
+            Vector3.Dot(vertex.Position - plan.ApronCentre, depth));
+        Assert.Equal(-halfWidth, minRight, 3);
+        Assert.Equal(halfWidth, maxRight, 3);
+        Assert.Equal(-halfDepth, minDepth, 3);
+        Assert.Equal(halfDepth, maxDepth, 3);
+
+        MegastationLandingPadPlan pad = plan.Pads.Single(candidate => candidate.PadId == "LD-05");
+        int beneathPad = receiverVertices.Count(vertex =>
+            MathF.Abs(Vector3.Dot(vertex.Position - pad.PadSurface.Centre, right))
+                <= pad.NominalSize.X * .5f
+            && MathF.Abs(Vector3.Dot(vertex.Position - pad.PadSurface.Centre, depth))
+                <= pad.NominalSize.Y * .5f);
+        Assert.True(beneathPad > 4);
+
+        for (int face = result.ApronReceiverFirstFace;
+             face < result.ApronReceiverFirstFace + result.ApronReceiverFaceCount;
+             face++)
+        {
+            Vector3[] points = mesh.GetFaceVertexPositions(face);
+            Assert.Equal(4, points.Length);
+            Assert.True(Vector3.Dot(mesh.LocalFaceNormal(face), up) > .9999f);
+            Assert.True(Vector3.Cross(points[1] - points[0], points[2] - points[0])
+                .LengthSquared() > 1e-8f);
         }
     }
 
@@ -283,7 +386,7 @@ public sealed class MegastationLandingDistrictTests
     }
 
     [Fact]
-    public void FrontageVariationIsDeterministicAndAddsNoStaticBayLightSources()
+    public void FrontageVariationAndFacadeFloodlightsAreDeterministic()
     {
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
@@ -306,13 +409,172 @@ public sealed class MegastationLandingDistrictTests
                 actual.Frontage.PersonnelEntrances);
             Assert.Equal(expected.Frontage.CargoEntrances, actual.Frontage.CargoEntrances);
             Assert.Equal(expected.Frontage.WindowGroups, actual.Frontage.WindowGroups);
+            Assert.Equal(expected.Frontage.Floodlights, actual.Frontage.Floodlights);
             Assert.Equal(expected.Frontage.FacilityIdentifier,
                 actual.Frontage.FacilityIdentifier);
         }
-        Assert.Equal(8, result.LandingDistrictPlan.ArtificialLights.Count);
-        Assert.Equal(20, result.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(38, result.LandingDistrictPlan.ArtificialLights.Count);
+        Assert.Equal(50, result.ArtificialLightingPlan.Lights.Count);
         Assert.All(result.LandingDistrictPlan.ServiceBuildings, building =>
             Assert.Contains("frontage", building.Frontage.Identity, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void EveryActiveFrontageProducesTwoFiniteWorkingAreaFloodlightsOutsideBuildings()
+    {
+        MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
+        MegastationArtificialLight[] facadeSources = district.ArtificialLights
+            .Where(light => light.Identity.Contains("/floodlight:", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(district.ServiceBuildings.Count * 2, facadeSources.Length);
+        foreach (MegastationLandingServiceBuilding building in district.ServiceBuildings)
+        {
+            Assert.Equal(2, building.Frontage.Floodlights.Count);
+            foreach (MegastationFrontageFloodlightPlan floodlight in building.Frontage.Floodlights)
+            {
+                Assert.Contains(facadeSources, source => source.Identity == floodlight.Identity);
+                Assert.InRange(floodlight.Range, 48f, 60f);
+                Assert.InRange(floodlight.Intensity, .62f, .76f);
+                Assert.InRange(floodlight.AngularCutoffCosine, -.35f, -.25f);
+                AssertFinite(floodlight.FixtureCentre);
+                AssertFinite(floodlight.SourcePosition);
+                AssertFinite(floodlight.Forward);
+                Assert.Equal(1f, floodlight.Forward.Length(), 4);
+                Assert.True(Vector3.Dot(floodlight.Forward, building.Frontage.Normal) > .80f);
+                Assert.True(Vector3.Dot(floodlight.Forward, building.Frontage.Up) < -.45f);
+                Vector3 emitterUp = Vector3.Normalize(Vector3.Cross(
+                    floodlight.Forward, building.Frontage.Right));
+                float nearestEmitterDepth =
+                    MegastationLandingDistrictMeshBuilder.FloodlightEmitterOffset
+                        * Vector3.Dot(floodlight.Forward, building.Frontage.Normal)
+                    - MegastationLandingDistrictMeshBuilder.FloodlightEmitterHeight * .5f
+                        * MathF.Abs(Vector3.Dot(emitterUp, building.Frontage.Normal))
+                    - MegastationLandingDistrictMeshBuilder.FloodlightEmitterDepth * .5f
+                        * MathF.Abs(Vector3.Dot(
+                            floodlight.Forward, building.Frontage.Normal));
+                Assert.True(nearestEmitterDepth
+                    > MegastationLandingDistrictMeshBuilder.FloodlightFixtureHousingDepth * .5f
+                        + .02f);
+                float fixtureDepth = Vector3.Dot(
+                    floodlight.FixtureCentre - building.Centre,
+                    building.Frontage.Normal);
+                Assert.Equal(building.Size.Z * .5f
+                    + MegastationLandingDistrictMeshBuilder.FloodlightFixtureOffset,
+                    fixtureDepth, 3);
+                Assert.True(Vector3.Dot(
+                    floodlight.SourcePosition - floodlight.FixtureCentre,
+                    building.Frontage.Normal) > 2f);
+
+                foreach (MegastationLandingServiceBuilding obstacle in district.ServiceBuildings)
+                    Assert.False(IsInsideBuilding(floodlight.SourcePosition, obstacle, district));
+            }
+        }
+    }
+
+    [Fact]
+    public void EveryPadFixtureFeedsACompactColourMatchedStaticLight()
+    {
+        MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
+        MegastationArtificialLight[] fixtureSources = district.ArtificialLights
+            .Where(light => light.Identity.Contains("/fixture:", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(district.Pads.Count * 4, fixtureSources.Length);
+        foreach (MegastationLandingPadPlan pad in district.Pads)
+        foreach (MegastationLandingPadFixturePlan fixture in
+                 MegastationLandingPadAssemblyStandards.Fixtures(pad))
+        {
+            MegastationArtificialLight source = Assert.Single(fixtureSources,
+                light => light.Identity == fixture.Identity);
+            Assert.Equal(fixture.Colour, source.Colour);
+            Assert.Equal(fixture.SourcePosition, source.Position);
+            Assert.Equal(fixture.SourceForward, source.Forward);
+            Assert.Equal(MegastationLandingPadAssemblyStandards.FixtureLightIntensity,
+                source.Intensity);
+            Assert.Equal(MegastationLandingPadAssemblyStandards.FixtureLightRange,
+                source.Range);
+            Assert.Equal(MegastationLandingPadAssemblyStandards.FixtureLightAngularCutoffCosine,
+                source.AngularCutoffCosine);
+
+            Vector3 up = pad.PadSurface.Normal;
+            Vector3 receiver = fixture.SourcePosition - up * .40f;
+            var near = MegastationArtificialLighting.EvaluateComponents(
+                receiver, up, [source]);
+            Assert.True(near.Direct.LengthSquared() > 0f);
+            if (fixture.Colour == MegastationLandingPadAssemblyStandards.UpperFixtureColour)
+                Assert.True(near.Direct.Z > near.Direct.X);
+            else
+                Assert.True(near.Direct.X > near.Direct.Z);
+
+            // The local source aims into the pad instead of relighting and washing out
+            // its own already-emissive fixture geometry.
+            var fixtureTop = MegastationArtificialLighting.EvaluateComponents(
+                fixture.Centre + up * .14f, up, [source]);
+            Assert.Equal(Vector3.Zero, fixtureTop.Direct);
+
+            Vector3 farReceiver = fixture.SourcePosition
+                + pad.PadSurface.Right * (source.Range
+                    * MegastationArtificialLighting.IndirectRangeScale + .1f);
+            var far = MegastationArtificialLighting.EvaluateComponents(
+                farReceiver, up, [source]);
+            Assert.Equal(Vector3.Zero, far.Direct);
+            Assert.Equal(Vector3.Zero, far.Indirect);
+
+            MegastationArtificialOcclusion blocker =
+                MegastationArtificialOcclusion.CreateForTests(
+                    new MegastationArtificialOccluder(
+                    MegastationArtificialOccluderRole.MajorStructuralMass,
+                    (fixture.SourcePosition + receiver) * .5f,
+                    new Vector3(1f, .05f, 1f),
+                    pad.PadSurface.Right,
+                    up,
+                    pad.PadSurface.PreferredHeading));
+            var blocked = MegastationArtificialLighting.EvaluateComponents(
+                receiver, up, [source], blocker);
+            Assert.Equal(Vector3.Zero, blocked.Direct);
+            Assert.True(blocked.Indirect.LengthSquared() > 0f);
+            AssertFinite(blocked.Direct);
+            AssertFinite(blocked.Indirect);
+        }
+    }
+
+    [Fact]
+    public void PadTopReceiverGridCanResolveCompactFixturePools()
+    {
+        MegastationPrototypeCpuResult result = Result.Value;
+        StationModuleMesh mesh = result.InteriorMesh;
+        foreach (MegastationLandingPadPlan pad in result.LandingDistrictPlan.Pads)
+        {
+            Vector3 centre = pad.PadSurface.Centre;
+            Vector3 up = pad.PadSurface.Normal;
+            Vector3 right = pad.PadSurface.Right;
+            Vector3 forward = pad.PadSurface.PreferredHeading;
+            int receiverFaces = 0;
+            for (int face = 0; face < mesh.FaceCount; face++)
+            {
+                Vector3[] points = mesh.GetFaceVertexPositions(face);
+                if (points.Any(point => MathF.Abs(Vector3.Dot(point - centre, up)) > 1e-4f)
+                    || Vector3.Dot(mesh.LocalFaceNormal(face), up) < .999f
+                    || points.Any(point =>
+                        MathF.Abs(Vector3.Dot(point - centre, right))
+                            > pad.NominalSize.X * .5f + 1e-4f
+                        || MathF.Abs(Vector3.Dot(point - centre, forward))
+                            > pad.NominalSize.Y * .5f + 1e-4f))
+                    continue;
+
+                receiverFaces++;
+                float rightSpan = points.Max(point => Vector3.Dot(point, right))
+                    - points.Min(point => Vector3.Dot(point, right));
+                float forwardSpan = points.Max(point => Vector3.Dot(point, forward))
+                    - points.Min(point => Vector3.Dot(point, forward));
+                Assert.InRange(rightSpan, 0f,
+                    MegastationLandingDistrictMeshBuilder.PadTopReceiverSpacing + 1e-3f);
+                Assert.InRange(forwardSpan, 0f,
+                    MegastationLandingDistrictMeshBuilder.PadTopReceiverSpacing + 1e-3f);
+            }
+            Assert.True(receiverFaces > 100);
+        }
     }
 
     [Fact]
@@ -447,8 +709,8 @@ public sealed class MegastationLandingDistrictTests
             Assert.Equal(expected.Containers, actual.Containers);
         }
         Assert.Equal(result.LandingDistrictPlan.KeepClearZones, replanned.KeepClearZones);
-        Assert.Equal(20, result.ArtificialLightingPlan.Lights.Count);
-        Assert.Equal(8, result.LandingDistrictPlan.ArtificialLights.Count);
+        Assert.Equal(50, result.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(38, result.LandingDistrictPlan.ArtificialLights.Count);
     }
 
     [Fact]
@@ -522,6 +784,22 @@ public sealed class MegastationLandingDistrictTests
 
     private static bool IsFinite(Vector3 value)
         => float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+
+    private static void AssertFinite(Vector3 value)
+    {
+        Assert.True(IsFinite(value));
+    }
+
+    private static bool IsInsideBuilding(
+        Vector3 point,
+        MegastationLandingServiceBuilding building,
+        MegastationLandingDistrictPlan district)
+    {
+        Vector3 offset = point - building.Centre;
+        return MathF.Abs(Vector3.Dot(offset, district.DistrictRight)) < building.Size.X * .5f
+            && MathF.Abs(Vector3.Dot(offset, district.FloorNormal)) < building.Size.Y * .5f
+            && MathF.Abs(Vector3.Dot(offset, district.PreferredHeading)) < building.Size.Z * .5f;
+    }
 
     private static void AssertVector(Vector3 expected, Vector3 actual)
     {

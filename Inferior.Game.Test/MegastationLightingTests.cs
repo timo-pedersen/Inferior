@@ -241,7 +241,11 @@ public sealed class MegastationLightingTests
             result.BoundaryTopology,
             rebuiltStructure,
             interiorPlan: result.InteriorPlan,
-            artificialLighting: result.ArtificialLightingPlan);
+            artificialLighting: result.ArtificialLightingPlan,
+            artificialOcclusion: MegastationArtificialOcclusion.Build(
+                result.RegularisedOccupancy,
+                result.LandingDistrictPlan,
+                result.InteriorPresentationPlan));
         PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(result);
 
         Assert.Equal(result.WindowPlan.Regions.Select(WindowRegionSignature), rebuiltWindows.Regions.Select(WindowRegionSignature));

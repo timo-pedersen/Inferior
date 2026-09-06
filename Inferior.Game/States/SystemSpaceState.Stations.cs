@@ -124,6 +124,11 @@ public sealed partial class SystemSpaceState
             $"range:{d.ArtificialLightMinimumRange:F1}-{d.ArtificialLightMaximumRange:F1}m," +
             $"indirect:{d.ArtificialIndirectStrength:P0}@{d.ArtificialIndirectRangeScale:F2}x," +
             $"signature:{d.ArtificialLightSignature}; " +
+            $"artificialOcclusion=occluders:{d.ArtificialOccluderCount}," +
+            $"receivers:{d.ArtificialLightReceiverSampleCount}," +
+            $"tests:{d.ArtificialLightVisibilityTestCount}," +
+            $"blocked:{d.ArtificialLightBlockedVisibilityTestCount}," +
+            $"bakeMs:{d.ArtificialLightBakeMilliseconds:F1}; " +
             $"landingDistrict=pads:{d.LandingDistrictPadCount}," +
             $"standard:{d.LandingDistrictStandardPadCount},large:{d.LandingDistrictLargePadCount}," +
             $"services:{d.LandingDistrictServiceBuildingCount},lights:{d.LandingDistrictLightCount}," +
@@ -131,6 +136,9 @@ public sealed partial class SystemSpaceState
             $"keepClear:{d.LandingDistrictKeepClearZoneCount}," +
             $"mesh:{d.LandingDistrictVisibleVertexCount}v/{d.LandingDistrictVisibleTriangleCount}t," +
             $"caster:{d.LandingDistrictShadowVertexCount}v/{d.LandingDistrictShadowTriangleCount}t," +
+            $"apronReceivers:{d.LandingDistrictApronReceiverVertexCount}v/" +
+            $"{d.LandingDistrictApronReceiverTriangleCount}t@" +
+            $"{d.LandingDistrictApronReceiverMaximumSpacing:F2}m," +
             $"signature:{d.LandingDistrictSignature}; " +
             $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
             $"signature={d.Signature}",

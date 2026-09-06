@@ -199,6 +199,15 @@ public sealed class StationModuleMesh
         Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
         Vector3 expectedNormal, Vector3 canonicalU, Vector3 canonicalV,
         float tileSizeMeters, Color color)
+        => AddQuadProjected(v0, v1, v2, v3, expectedNormal, canonicalU, canonicalV,
+            Vector3.Zero, tileSizeMeters, color);
+
+    // Explicit projection origin preserves an existing surface's UV phase when that
+    // surface is subdivided into independently emitted quads.
+    public int AddQuadProjected(
+        Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3,
+        Vector3 expectedNormal, Vector3 canonicalU, Vector3 canonicalV,
+        Vector3 projectionOrigin, float tileSizeMeters, Color color)
     {
         if (tileSizeMeters <= 0f || !float.IsFinite(tileSizeMeters))
             throw new ArgumentOutOfRangeException(nameof(tileSizeMeters));
@@ -207,8 +216,8 @@ public sealed class StationModuleMesh
         if (Vector3.Dot(normal, expectedNormal) < 0f)
             normal = -normal;
         Vector2 Uv(Vector3 p) => new(
-            Vector3.Dot(p, canonicalU) / tileSizeMeters,
-            Vector3.Dot(p, canonicalV) / tileSizeMeters);
+            Vector3.Dot(p - projectionOrigin, canonicalU) / tileSizeMeters,
+            Vector3.Dot(p - projectionOrigin, canonicalV) / tileSizeMeters);
         _verts.Add(new(v0, normal, color, Uv(v0)));
         _verts.Add(new(v1, normal, color, Uv(v1)));
         _verts.Add(new(v2, normal, color, Uv(v2)));

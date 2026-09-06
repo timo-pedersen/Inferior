@@ -38,6 +38,39 @@ public static class MegastationLandingPadAssemblyStandards
     public const float PersonnelStairRun = 1.5f;
     public const float CargoRampWidth = 6f;
     public const float CargoRampRun = 8f;
+    public const float FixtureLightIntensity = .34f;
+    public const float FixtureLightRange = 5.5f;
+    public const float FixtureLightAngularCutoffCosine = 0f;
+    public static readonly Color UpperFixtureColour = new(76, 196, 255);
+    public static readonly Color LowerFixtureColour = new(255, 174, 72);
+
+    public static IReadOnlyList<MegastationLandingPadFixturePlan> Fixtures(
+        MegastationLandingPadPlan pad)
+    {
+        Vector3 up = pad.PadSurface.Normal;
+        Vector3 right = pad.PadSurface.Right;
+        Vector3 forward = pad.PadSurface.PreferredHeading;
+        float lampForward = pad.NominalSize.Y * .5f - 2.4f;
+        float lampRight = pad.NominalSize.X * .5f - 2.2f;
+        var fixtures = new List<MegastationLandingPadFixturePlan>(4);
+        foreach (int sx in new[] { -1, 1 })
+        foreach (int sz in new[] { -1, 1 })
+        {
+            Color colour = sz > 0 ? UpperFixtureColour : LowerFixtureColour;
+            Vector3 centre = pad.PadSurface.Centre
+                + right * sx * lampRight + forward * sz * lampForward + up * .18f;
+            Vector3 inward = Vector3.Normalize(-right * sx - forward * sz);
+            Vector3 source = centre + inward * .55f + up * .22f;
+            Vector3 sourceForward = Vector3.Normalize(inward * .65f - up * .76f);
+            fixtures.Add(new(
+                $"interior/landing-district:v1/{pad.PadId}/fixture:{sx}:{sz}",
+                centre,
+                source,
+                sourceForward,
+                colour));
+        }
+        return fixtures;
+    }
 
     public static (Vector3 StairTop, Vector3 RampTop, Vector3 ServiceDirection) AccessAnchors(
         MegastationLandingPadPlan pad)
@@ -51,6 +84,13 @@ public static class MegastationLandingPadAssemblyStandards
             serviceDirection);
     }
 }
+
+public sealed record MegastationLandingPadFixturePlan(
+    string Identity,
+    Vector3 Centre,
+    Vector3 SourcePosition,
+    Vector3 SourceForward,
+    Color Colour);
 
 public sealed record MegastationLandingPadPlan(
     string PadId,
@@ -96,6 +136,16 @@ public sealed record MegastationFacilityIdentifierPlan(
     Vector3 ReadingDirection,
     float PixelSize);
 
+public sealed record MegastationFrontageFloodlightPlan(
+    string Identity,
+    Vector3 FixtureCentre,
+    Vector3 SourcePosition,
+    Color Colour,
+    float Intensity,
+    float Range,
+    Vector3 Forward,
+    float AngularCutoffCosine);
+
 public sealed record MegastationOperationalFrontagePlan(
     string Identity,
     Vector3 Normal,
@@ -105,6 +155,7 @@ public sealed record MegastationOperationalFrontagePlan(
     IReadOnlyList<MegastationPersonnelEntrancePlan> PersonnelEntrances,
     IReadOnlyList<MegastationCargoEntrancePlan> CargoEntrances,
     IReadOnlyList<MegastationFrontageWindowGroupPlan> WindowGroups,
+    IReadOnlyList<MegastationFrontageFloodlightPlan> Floodlights,
     MegastationFacilityIdentifierPlan? FacilityIdentifier,
     int Seed);
 
@@ -163,7 +214,10 @@ public sealed record MegastationLandingDistrictDiagnostics(
     int VisibleTriangleCount,
     int ShadowVertexCount,
     int ShadowTriangleCount,
-    string Signature);
+    string Signature,
+    int ApronReceiverVertexCount = 0,
+    int ApronReceiverTriangleCount = 0,
+    float ApronReceiverMaximumSpacing = 0f);
 
 public sealed record MegastationLandingDistrictPlan(
     int AlgorithmVersion,
@@ -182,7 +236,7 @@ public sealed record MegastationLandingDistrictPlan(
 
 public static class MegastationLandingDistrictPlanner
 {
-    public const int AlgorithmVersion = 4;
+    public const int AlgorithmVersion = 6;
     public const float StandardPadSize = 36f;
     public const float LargePadLength = 72f;
     public const float CornerClip = 1f;
@@ -254,7 +308,7 @@ public static class MegastationLandingDistrictPlanner
             PlanOperationalFloor(pads, buildings, right, up, forward, seed);
 
         int lightingSeed = MegastationSeed.Derive(seed, "lighting");
-        var lights = new List<MegastationArtificialLight>(8);
+        var lights = new List<MegastationArtificialLight>(14);
         foreach (MegastationLandingPadPlan pad in pads)
         {
             int lightSeed = MegastationSeed.Derive(lightingSeed, pad.PadId);
@@ -266,6 +320,18 @@ public static class MegastationLandingDistrictPlanner
                 new Color(220, 235, 255),
                 intensity,
                 range));
+            foreach (MegastationLandingPadFixturePlan fixture in
+                     MegastationLandingPadAssemblyStandards.Fixtures(pad))
+            {
+                lights.Add(new(
+                    fixture.Identity,
+                    fixture.SourcePosition,
+                    fixture.Colour,
+                    MegastationLandingPadAssemblyStandards.FixtureLightIntensity,
+                    MegastationLandingPadAssemblyStandards.FixtureLightRange,
+                    fixture.SourceForward,
+                    MegastationLandingPadAssemblyStandards.FixtureLightAngularCutoffCosine));
+            }
         }
         for (int side = -1; side <= 1; side += 2)
         {
@@ -275,6 +341,18 @@ public static class MegastationLandingDistrictPlanner
                 new Color(205, 228, 255),
                 .82f,
                 118f));
+        }
+        foreach (MegastationLandingServiceBuilding building in buildings)
+        foreach (MegastationFrontageFloodlightPlan floodlight in building.Frontage.Floodlights)
+        {
+            lights.Add(new(
+                floodlight.Identity,
+                floodlight.SourcePosition,
+                floodlight.Colour,
+                floodlight.Intensity,
+                floodlight.Range,
+                floodlight.Forward,
+                floodlight.AngularCutoffCosine));
         }
 
         string signature = Signature(
@@ -462,6 +540,23 @@ public static class MegastationLandingDistrictPlanner
                 colour));
         }
 
+        // L1f: two deliberate working-area sources per active frontage. One is tied
+        // to container movement at the primary cargo entrance, the other to human
+        // access. The point-like H1c carrier sits forward and slightly below the
+        // physical fixture so its pool favours the apron rather than the upper wall.
+        var floodlights = new List<MegastationFrontageFloodlightPlan>(2);
+        MegastationCargoEntrancePlan primaryCargo = cargo[0];
+        MegastationPersonnelEntrancePlan primaryPersonnel = personnel[0];
+        AddFloodlight(
+            "cargo",
+            primaryCargo.Centre
+                - right * (primaryCargo.Size.X * .5f + 1.35f)
+                + up * (primaryCargo.Size.Y * .5f + 1.55f));
+        AddFloodlight(
+            "personnel",
+            primaryPersonnel.Centre - right * 1.75f
+                + up * (primaryPersonnel.Size.Y * .5f + 3.25f));
+
         MegastationFacilityIdentifierPlan? identifier = null;
         if (role == "operations" || Unit(seed, "identifier") > .35f)
         {
@@ -500,8 +595,35 @@ public static class MegastationLandingDistrictPlanner
             personnel,
             cargo,
             windows,
+            floodlights,
             identifier,
             seed);
+
+        void AddFloodlight(string purpose, Vector3 wallAnchor)
+        {
+            int child = MegastationSeed.Derive(seed, $"floodlight:v1/{purpose}");
+            float warmth = Unit(child, "warmth");
+            Color colour = new(
+                (byte)MathHelper.Lerp(234f, 246f, warmth),
+                (byte)MathHelper.Lerp(229f, 239f, warmth),
+                (byte)MathHelper.Lerp(216f, 236f, warmth));
+            Vector3 fixture = wallAnchor
+                + forward * MegastationLandingDistrictMeshBuilder.FloodlightFixtureOffset;
+            float downwardRadians = MathHelper.ToRadians(
+                28f + Unit(child, "downward-cant") * 7f);
+            Vector3 aim = Vector3.Normalize(
+                forward * MathF.Cos(downwardRadians)
+                - up * MathF.Sin(downwardRadians));
+            floodlights.Add(new(
+                $"interior/landing-district:v1/{buildingIdentity}/floodlight:{purpose}",
+                fixture,
+                fixture + forward * 2.15f - up * .65f,
+                colour,
+                .62f + Unit(child, "intensity") * .14f,
+                48f + Unit(child, "range") * 12f,
+                aim,
+                -.35f + Unit(child, "angular-cutoff") * .10f));
+        }
     }
 
     private static (
@@ -704,6 +826,13 @@ public static class MegastationLandingDistrictPlanner
             foreach (MegastationFrontageWindowGroupPlan group in frontage.WindowGroups)
                 text.Append(':').Append(group.Identity).Append('@').Append(group.Centre)
                     .Append(':').Append(group.WindowCount).Append(':').Append(group.WindowSize);
+            foreach (MegastationFrontageFloodlightPlan floodlight in frontage.Floodlights)
+                text.Append(':').Append(floodlight.Identity).Append('@')
+                    .Append(floodlight.FixtureCentre).Append(':')
+                    .Append(floodlight.SourcePosition).Append(':')
+                    .Append(F(floodlight.Intensity)).Append(':').Append(F(floodlight.Range))
+                    .Append(':').Append(floodlight.Forward).Append(':')
+                    .Append(F(floodlight.AngularCutoffCosine));
             if (frontage.FacilityIdentifier is { } identifier)
                 text.Append(':').Append(identifier.Text).Append('@').Append(identifier.Origin)
                     .Append(':').Append(identifier.ReadingDirection);
@@ -734,16 +863,28 @@ public readonly record struct MegastationLandingDistrictMeshResult(
     int FaceCount,
     IReadOnlyList<(int Start, int Count, float Illumination)> IlluminationRanges,
     IReadOnlyList<(int Start, int Count)> UntrackedArtificialLightVertexRanges,
-    MegastationLandingDistrictDiagnostics Diagnostics);
+    MegastationLandingDistrictDiagnostics Diagnostics,
+    int ApronReceiverFirstFace,
+    int ApronReceiverFaceCount,
+    int ApronReceiverFirstVertex,
+    int ApronReceiverVertexCount,
+    IReadOnlyList<(int FirstFace, int FaceCount)> PadTopReceiverRanges);
 
 public static class MegastationLandingDistrictMeshBuilder
 {
+    internal const float ApronReceiverSpacing = 5f;
+    internal const float PadTopReceiverSpacing = 2.5f;
     internal const float CargoDoorHeight = 6f;
     internal const float PersonnelDoorWidth = 1.4f;
     internal const float PersonnelDoorHeight = 2.4f;
     internal const float CargoDoorFrameThickness = .48f;
     internal const float FacilityLabelClearance = .45f;
     internal const float FrontageMarkingOffset = .045f;
+    internal const float FloodlightFixtureOffset = .21f;
+    internal const float FloodlightFixtureHousingDepth = .42f;
+    internal const float FloodlightEmitterOffset = .44f;
+    internal const float FloodlightEmitterHeight = .28f;
+    internal const float FloodlightEmitterDepth = .06f;
     internal const float AccessPlatformHeight = 1.2f;
     internal const float StairRise = .20f;
     internal const float StairTread = .30f;
@@ -765,6 +906,7 @@ public static class MegastationLandingDistrictMeshBuilder
         int firstDecorRange = mesh.DecorClassRanges.Count;
         var illumination = new List<(int Start, int Count, float Illumination)>();
         var untrackedArtificialLightVertices = new List<(int Start, int Count)>();
+        var padTopReceiverRanges = new List<(int FirstFace, int FaceCount)>(plan.Pads.Count);
         Color dominant = materials?.Palette.DominantTint ?? new Color(76, 80, 82);
         Color secondary = materials?.Palette.SecondaryTint ?? new Color(98, 99, 94);
         Color accent = materials?.Palette.AccentTint ?? new Color(132, 126, 94);
@@ -774,16 +916,18 @@ public static class MegastationLandingDistrictMeshBuilder
 
         mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
         SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
-        AddBox(mesh, Frame(plan.ApronCentre, right, up, forward),
-            new(plan.ApronSize.X, MegastationLandingPadAssemblyStandards.ApronThickness, plan.ApronSize.Y),
-            Color.Lerp(dominant, Color.Black, .16f));
+        Color apronColour = Color.Lerp(
+            Color.Lerp(dominant, Color.Black, .16f), Color.Black, .25f);
+        ApronReceiverMesh apron = EmitTessellatedApron(
+            mesh, plan, apronColour);
 
         EmitOperationalFloorMarkings(mesh, plan, up, right, forward);
 
         foreach (MegastationLandingPadPlan pad in plan.Pads)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            EmitPad(mesh, pad, dominant, secondary, accent, illumination);
+            EmitPad(mesh, pad, dominant, secondary, accent, illumination,
+                padTopReceiverRanges);
         }
 
         foreach (MegastationLandingServiceBuilding building in plan.ServiceBuildings)
@@ -817,7 +961,76 @@ public static class MegastationLandingDistrictMeshBuilder
             VisibleTriangleCount = triangles,
             ShadowVertexCount = casterVertices,
             ShadowTriangleCount = casterTriangles,
-        });
+            ApronReceiverVertexCount = apron.VertexCount,
+            ApronReceiverTriangleCount = apron.FaceCount * 2,
+            ApronReceiverMaximumSpacing = apron.MaximumSpacing,
+        }, apron.FirstFace, apron.FaceCount, apron.FirstVertex, apron.VertexCount,
+            padTopReceiverRanges);
+    }
+
+    private readonly record struct ApronReceiverMesh(
+        int FirstFace, int FaceCount, int FirstVertex, int VertexCount,
+        float MaximumSpacing);
+
+    private static ApronReceiverMesh EmitTessellatedApron(
+        StationModuleMesh mesh,
+        MegastationLandingDistrictPlan plan,
+        Color colour)
+    {
+        Vector3 right = Vector3.Normalize(plan.DistrictRight);
+        Vector3 up = Vector3.Normalize(plan.FloorNormal);
+        // Match Frame/AddOrientedBox exactly. PreferredHeading may differ only by sign;
+        // the symmetric apron depth and its established UV phase use this right-handed axis.
+        Vector3 depth = Vector3.Normalize(Vector3.Cross(right, up));
+        float halfWidth = plan.ApronSize.X * .5f;
+        float halfDepth = plan.ApronSize.Y * .5f;
+        float halfHeight = MegastationLandingPadAssemblyStandards.ApronThickness * .5f;
+        Vector3 centre = plan.ApronCentre;
+        Vector3 c0 = centre - right * halfWidth - up * halfHeight - depth * halfDepth;
+        Vector3 c1 = centre + right * halfWidth - up * halfHeight - depth * halfDepth;
+        Vector3 c3 = centre - right * halfWidth + up * halfHeight - depth * halfDepth;
+        Vector3 c4 = centre - right * halfWidth - up * halfHeight + depth * halfDepth;
+        Vector3 c5 = centre + right * halfWidth - up * halfHeight + depth * halfDepth;
+        Vector3 c7 = centre - right * halfWidth + up * halfHeight + depth * halfDepth;
+        Vector3 c2 = centre + right * halfWidth + up * halfHeight - depth * halfDepth;
+        Vector3 c6 = centre + right * halfWidth + up * halfHeight + depth * halfDepth;
+
+        // Preserve the five non-receiver faces and their legacy per-face UV mapping.
+        mesh.AddQuad(c4, c5, c6, c7, colour);
+        mesh.AddQuad(c1, c0, c3, c2, colour);
+        mesh.AddQuad(c0, c4, c7, c3, colour);
+        mesh.AddQuad(c5, c1, c2, c6, colour);
+        mesh.AddQuad(c0, c1, c5, c4, colour);
+
+        int columns = Math.Max(1, (int)MathF.Ceiling(plan.ApronSize.X / ApronReceiverSpacing));
+        int rows = Math.Max(1, (int)MathF.Ceiling(plan.ApronSize.Y / ApronReceiverSpacing));
+        float cellWidth = plan.ApronSize.X / columns;
+        float cellDepth = plan.ApronSize.Y / rows;
+        int firstFace = mesh.FaceCount;
+        int firstVertex = mesh.VertexCount;
+
+        // These are exactly the axes AddQuad derived for the former monolithic top
+        // quad. Keeping c7 as projection origin preserves both texture scale and phase.
+        Vector3 arbitrary = MathF.Abs(up.Y) < .85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 textureU = Vector3.Normalize(Vector3.Cross(up, arbitrary));
+        Vector3 textureV = Vector3.Normalize(Vector3.Cross(up, textureU));
+        for (int row = 0; row < rows; row++)
+        for (int column = 0; column < columns; column++)
+        {
+            float u0 = column * cellWidth;
+            float u1 = (column + 1) * cellWidth;
+            float v0 = row * cellDepth;
+            float v1 = (row + 1) * cellDepth;
+            Vector3 a = c7 + right * u0 - depth * v0;
+            Vector3 b = c7 + right * u1 - depth * v0;
+            Vector3 c = c7 + right * u1 - depth * v1;
+            Vector3 d = c7 + right * u0 - depth * v1;
+            mesh.AddQuadProjected(a, b, c, d, up, textureU, textureV,
+                c7, mesh.CurrentUvScaleMeters, colour);
+        }
+
+        return new(firstFace, rows * columns, firstVertex,
+            mesh.VertexCount - firstVertex, MathF.Max(cellWidth, cellDepth));
     }
 
     private static void EmitOperationalFrontage(
@@ -860,6 +1073,9 @@ public static class MegastationLandingDistrictMeshBuilder
                 EmitRampAccess(mesh, buildingFloor, entrance.Centre, frontOffset,
                     right, up, forward, dominant, accent);
         }
+
+        foreach (MegastationFrontageFloodlightPlan floodlight in frontage.Floodlights)
+            EmitFrontageFloodlight(mesh, floodlight, right, up, forward, secondary, illumination);
 
         int windowStart = mesh.FaceCount;
         SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
@@ -932,20 +1148,54 @@ public static class MegastationLandingDistrictMeshBuilder
                 Color.Lerp(secondary, Color.Black, .43f));
     }
 
+    private static void EmitFrontageFloodlight(
+        StationModuleMesh mesh,
+        MegastationFrontageFloodlightPlan floodlight,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Color structure,
+        List<(int Start, int Count, float Illumination)> illumination)
+    {
+        mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+        SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+        AddBox(mesh, Frame(floodlight.FixtureCentre, right, up, forward),
+            new(1.05f, .48f, FloodlightFixtureHousingDepth),
+            Color.Lerp(structure, Color.Black, .38f));
+        int emitterStart = mesh.FaceCount;
+        Vector3 emitterUp = Vector3.Normalize(Vector3.Cross(floodlight.Forward, right));
+        AddBox(mesh, Frame(
+                floodlight.FixtureCentre + floodlight.Forward * FloodlightEmitterOffset,
+                right,
+                emitterUp,
+                floodlight.Forward),
+            new(.76f, FloodlightEmitterHeight, FloodlightEmitterDepth), floodlight.Colour);
+        illumination.Add((emitterStart, mesh.FaceCount - emitterStart, .90f));
+    }
+
     public static void ApplyLighting(
         StationModuleMesh mesh,
         MegastationLandingDistrictMeshResult result,
-        IReadOnlyList<MegastationArtificialLight> lights)
+        IReadOnlyList<MegastationArtificialLight> lights,
+        MegastationArtificialOcclusion? occlusion = null)
     {
         foreach ((int start, int count, float value) in result.IlluminationRanges)
         for (int face = start; face < start + count; face++)
             mesh.SetFaceIllumination(face, value);
 
+        MegastationArtificialLight[] fixtureLights = lights.Where(light =>
+            light.Identity.Contains("/fixture:", StringComparison.Ordinal)).ToArray();
+        MegastationArtificialLight[] baselineLights = lights.Where(light =>
+            !light.Identity.Contains("/fixture:", StringComparison.Ordinal)).ToArray();
         for (int face = result.FirstFace; face < result.FirstFace + result.FaceCount; face++)
         {
             Vector3 normal = mesh.LocalFaceNormal(face);
             Vector3[] samples = mesh.GetFaceVertexPositions(face)
-                .Select(position => MegastationArtificialLighting.Evaluate(position, normal, lights))
+                .Select(position => IsPadTopReceiver(face)
+                    ? MegastationArtificialLighting.EvaluateLocalColourSpill(
+                        position, normal, baselineLights, fixtureLights, occlusion)
+                    : MegastationArtificialLighting.Evaluate(
+                        position, normal, lights, occlusion))
                 .ToArray();
             mesh.SetFaceArtificialLight(face, samples);
         }
@@ -953,7 +1203,11 @@ public static class MegastationLandingDistrictMeshBuilder
         foreach ((int start, int count) in result.UntrackedArtificialLightVertexRanges)
             mesh.SetVertexRangeArtificialLight(start, count,
                 (position, normal) => MegastationArtificialLighting.Evaluate(
-                    position, normal, lights));
+                    position, normal, lights, occlusion));
+
+        bool IsPadTopReceiver(int face)
+            => result.PadTopReceiverRanges.Any(range =>
+                face >= range.FirstFace && face < range.FirstFace + range.FaceCount);
     }
 
     private static void EmitPad(
@@ -962,7 +1216,8 @@ public static class MegastationLandingDistrictMeshBuilder
         Color dominant,
         Color secondary,
         Color accent,
-        List<(int Start, int Count, float Illumination)> illumination)
+        List<(int Start, int Count, float Illumination)> illumination,
+        List<(int FirstFace, int FaceCount)> padTopReceiverRanges)
     {
         Vector3 up = pad.PadSurface.Normal;
         Vector3 right = pad.PadSurface.Right;
@@ -977,14 +1232,16 @@ public static class MegastationLandingDistrictMeshBuilder
         // station caster so the gap can read through normal bay lighting.
         mesh.CurrentDecorClass = DecorClass.MegastationInteriorMajor;
         SetMaterial(mesh, SystemMaterialFamilyId.PaintedCoatedMetal);
-        EmitOctagonalSlab(
+        padTopReceiverRanges.Add(EmitOctagonalSlab(
             mesh,
             pad.FutureSupportPolygon,
             up,
+            right,
+            forward,
             MegastationLandingPadAssemblyStandards.PadSlabThickness,
             Color.Lerp(dominant, secondary, .38f),
             Color.Lerp(dominant, secondary, .22f),
-            Color.Lerp(dominant, Color.Black, .58f));
+            Color.Lerp(dominant, Color.Black, .58f)));
 
         mesh.CurrentDecorClass = DecorClass.LandingPadMarkings;
 
@@ -1030,16 +1287,11 @@ public static class MegastationLandingDistrictMeshBuilder
         illumination.Add((textStart, mesh.FaceCount - textStart, .78f));
 
         int lampStart = mesh.FaceCount;
-        float lampForward = length * .5f - 2.4f;
-        float lampRight = width * .5f - 2.2f;
-        foreach (int sx in new[] { -1, 1 })
-        foreach (int sz in new[] { -1, 1 })
+        foreach (MegastationLandingPadFixturePlan fixture in
+                 MegastationLandingPadAssemblyStandards.Fixtures(pad))
         {
-            Color colour = sz > 0 ? LampColour : new Color(255, 204, 112);
-            AddBox(mesh, Frame(
-                    centre + right * sx * lampRight + forward * sz * lampForward + up * .18f,
-                    right, up, forward),
-                new(1.2f, .28f, 2.1f), colour);
+            AddBox(mesh, Frame(fixture.Centre, right, up, forward),
+                new(1.2f, .28f, 2.1f), fixture.Colour);
         }
         illumination.Add((lampStart, mesh.FaceCount - lampStart, .95f));
 
@@ -1431,16 +1683,20 @@ public static class MegastationLandingDistrictMeshBuilder
         }
     }
 
-    private static void EmitOctagonalSlab(
+    private static (int FirstFace, int FaceCount) EmitOctagonalSlab(
         StationModuleMesh mesh,
         IReadOnlyList<Vector3> top,
         Vector3 up,
+        Vector3 right,
+        Vector3 forward,
         float thickness,
         Color topColour,
         Color sideColour,
         Color undersideColour)
     {
-        EmitOctagonalSurface(mesh, top, up, topColour);
+        int topFirstFace = mesh.FaceCount;
+        EmitTessellatedOctagonalPadTop(mesh, top, up, right, forward, topColour);
+        int topFaceCount = mesh.FaceCount - topFirstFace;
         Vector3[] bottom = top.Select(point => point - up * thickness).ToArray();
 
         SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
@@ -1460,6 +1716,80 @@ public static class MegastationLandingDistrictMeshBuilder
             AddQuadFacing(mesh,
                 top[i], top[next], bottom[next], bottom[i], outward, sideColour);
         }
+        return (topFirstFace, topFaceCount);
+    }
+
+    private static void EmitTessellatedOctagonalPadTop(
+        StationModuleMesh mesh,
+        IReadOnlyList<Vector3> polygon,
+        Vector3 up,
+        Vector3 right,
+        Vector3 forward,
+        Color colour)
+    {
+        Vector3 centre = polygon.Aggregate(Vector3.Zero, (sum, point) => sum + point)
+            / polygon.Count;
+        float halfWidth = polygon.Max(point => MathF.Abs(Vector3.Dot(point - centre, right)));
+        float halfLength = polygon.Max(point => MathF.Abs(Vector3.Dot(point - centre, forward)));
+        float clip = MegastationLandingDistrictPlanner.CornerClip;
+        Vector3 origin = centre - right * halfWidth - forward * halfLength;
+
+        EmitGrid(-halfWidth + clip, halfWidth - clip, -halfLength, halfLength);
+        EmitGrid(-halfWidth, -halfWidth + clip, -halfLength + clip, halfLength - clip);
+        EmitGrid(halfWidth - clip, halfWidth, -halfLength + clip, halfLength - clip);
+
+        EmitTriangle(-halfWidth + clip, halfLength, -halfWidth + clip, halfLength - clip,
+            -halfWidth, halfLength - clip);
+        EmitTriangle(halfWidth - clip, halfLength - clip, halfWidth - clip, halfLength,
+            halfWidth, halfLength - clip);
+        EmitTriangle(-halfWidth, -halfLength + clip, -halfWidth + clip, -halfLength + clip,
+            -halfWidth + clip, -halfLength);
+        EmitTriangle(halfWidth - clip, -halfLength, halfWidth - clip, -halfLength + clip,
+            halfWidth, -halfLength + clip);
+
+        void EmitGrid(float minimumRight, float maximumRight,
+            float minimumForward, float maximumForward)
+        {
+            int columns = Math.Max(1, (int)MathF.Ceiling(
+                (maximumRight - minimumRight) / PadTopReceiverSpacing));
+            int rows = Math.Max(1, (int)MathF.Ceiling(
+                (maximumForward - minimumForward) / PadTopReceiverSpacing));
+            float width = (maximumRight - minimumRight) / columns;
+            float depth = (maximumForward - minimumForward) / rows;
+            for (int row = 0; row < rows; row++)
+            for (int column = 0; column < columns; column++)
+            {
+                float x0 = minimumRight + column * width;
+                float x1 = minimumRight + (column + 1) * width;
+                float z0 = minimumForward + row * depth;
+                float z1 = minimumForward + (row + 1) * depth;
+                AddProjectedQuadFacing(
+                    Point(x0, z0), Point(x1, z0), Point(x1, z1), Point(x0, z1));
+            }
+        }
+
+        void EmitTriangle(float ax, float az, float bx, float bz, float cx, float cz)
+        {
+            Vector3 a = Point(ax, az);
+            Vector3 b = Point(bx, bz);
+            Vector3 c = Point(cx, cz);
+            if (Vector3.Dot(Vector3.Cross(b - a, c - a), up) < 0f)
+                (b, c) = (c, b);
+            Vector2 Uv(Vector3 point) => new(
+                Vector3.Dot(point - origin, right) / mesh.CurrentUvScaleMeters,
+                Vector3.Dot(point - origin, forward) / mesh.CurrentUvScaleMeters);
+            mesh.AddTriangleWithUv(a, Uv(a), b, Uv(b), c, Uv(c), colour);
+        }
+
+        void AddProjectedQuadFacing(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            if (Vector3.Dot(Vector3.Cross(b - a, c - a), up) < 0f)
+                (b, d) = (d, b);
+            mesh.AddQuadProjected(a, b, c, d, up, right, forward,
+                origin, mesh.CurrentUvScaleMeters, colour);
+        }
+
+        Vector3 Point(float x, float z) => centre + right * x + forward * z;
     }
 
     private static void AddQuadFacing(

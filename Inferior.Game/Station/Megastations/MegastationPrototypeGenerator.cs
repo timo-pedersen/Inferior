@@ -231,12 +231,16 @@ public static class MegastationPrototypeGenerator
             MegastationInteriorPresentationPlanner.Plan(
                 interiorPlan,
                 materialAssignment);
+        MegastationArtificialOcclusion artificialOcclusion =
+            MegastationArtificialOcclusion.Build(
+                regularised.Occupancy, landingDistrict, interiorPresentation);
         MegastationInteriorMeshBuildResult interiorMesh = MegastationInteriorMeshBuilder.Build(
             interiorPlan,
             materialAssignment,
             interiorPresentation,
             landingDistrict,
             artificialLighting,
+            artificialOcclusion,
             cancellationToken);
         if (interiorMesh.LandingDistrictDiagnostics is { } landingDiagnostics)
             landingDistrict = landingDistrict with { Diagnostics = landingDiagnostics };
@@ -390,7 +394,21 @@ public static class MegastationPrototypeGenerator
             semanticZoning: semanticZoning,
             materialAssignment: materialAssignment,
             interiorPlan: interiorPlan,
-            artificialLighting: artificialLighting);
+            artificialLighting: artificialLighting,
+            artificialOcclusion: artificialOcclusion);
+        MegastationArtificialOcclusionDiagnostics artificialOcclusionDiagnostics =
+            artificialOcclusion.Diagnostics(artificialLighting.Lights.Count);
+        interiorPlan = interiorPlan with
+        {
+            Diagnostics = interiorPlan.Diagnostics with
+            {
+                ArtificialOccluderCount = artificialOcclusionDiagnostics.OccluderCount,
+                ArtificialLightReceiverSampleCount = artificialOcclusionDiagnostics.ReceiverSampleCount,
+                ArtificialLightVisibilityTestCount = artificialOcclusionDiagnostics.VisibilityTestCount,
+                ArtificialLightBlockedVisibilityTestCount = artificialOcclusionDiagnostics.BlockedVisibilityTestCount,
+                ArtificialLightBakeMilliseconds = artificialOcclusionDiagnostics.BakeMilliseconds,
+            },
+        };
         cancellationToken.ThrowIfCancellationRequested();
         stopwatch.Stop();
 
