@@ -118,7 +118,14 @@ public sealed record MegastationInteriorDiagnostics(
     double ArtificialLightBakeMilliseconds = 0d,
     int LandingDistrictApronReceiverVertexCount = 0,
     int LandingDistrictApronReceiverTriangleCount = 0,
-    float LandingDistrictApronReceiverMaximumSpacing = 0f);
+    float LandingDistrictApronReceiverMaximumSpacing = 0f,
+    int LandingDistrictSiteCount = 0,
+    int LandingDistrictSmallSiteCount = 0,
+    int LandingDistrictMediumSiteCount = 0,
+    int LandingDistrictLargeSiteCount = 0,
+    int LandingDistrictPadCapacityDeficit = 0,
+    int LandingDistrictLargePadCapacityDeficit = 0,
+    string LandingDistrictSiteSummary = "");
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -1612,6 +1619,15 @@ public static class MegastationInteriorMeshBuilder
                 landingMesh?.Diagnostics.ApronReceiverTriangleCount ?? 0,
             LandingDistrictApronReceiverMaximumSpacing =
                 landingMesh?.Diagnostics.ApronReceiverMaximumSpacing ?? 0f,
+            LandingDistrictSiteCount = landingMesh?.Diagnostics.SiteCount ?? 0,
+            LandingDistrictSmallSiteCount = landingMesh?.Diagnostics.SmallSiteCount ?? 0,
+            LandingDistrictMediumSiteCount = landingMesh?.Diagnostics.MediumSiteCount ?? 0,
+            LandingDistrictLargeSiteCount = landingMesh?.Diagnostics.LargeSiteCount ?? 0,
+            LandingDistrictPadCapacityDeficit =
+                landingMesh?.Diagnostics.PadCapacityDeficit ?? 0,
+            LandingDistrictLargePadCapacityDeficit =
+                landingMesh?.Diagnostics.LargePadCapacityDeficit ?? 0,
+            LandingDistrictSiteSummary = landingMesh?.Diagnostics.SiteSummary ?? string.Empty,
             LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
         };
         return new(mesh, diagnostics, landingMesh?.Diagnostics);

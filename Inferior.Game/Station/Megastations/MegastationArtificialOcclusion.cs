@@ -72,21 +72,21 @@ public sealed class MegastationArtificialOcclusion
         MegastationLandingDistrictPlan district,
         MegastationInteriorPresentationPlan presentation)
     {
-        Vector3 right = district.DistrictRight;
         Vector3 up = district.FloorNormal;
-        Vector3 forward = district.PreferredHeading;
         var occluders = new List<MegastationArtificialOccluder>();
 
-        Add(MegastationArtificialOccluderRole.MajorPlatform, district.ApronCentre,
-            new(district.ApronSize.X, MegastationLandingPadAssemblyStandards.ApronThickness,
-                district.ApronSize.Y), right, up, forward);
+        foreach (MegastationLandingSitePlan site in district.Sites)
+            Add(MegastationArtificialOccluderRole.MajorPlatform, site.ApronCentre,
+                new(site.ApronSize.X, MegastationLandingPadAssemblyStandards.ApronThickness,
+                    site.ApronSize.Y), site.Right, up, site.PreferredHeading);
         foreach (MegastationLandingPadPlan pad in district.Pads)
         {
             Vector3 centre = pad.PadSurface.Centre
                 - up * (MegastationLandingPadAssemblyStandards.PadSlabThickness * .5f);
             Add(MegastationArtificialOccluderRole.LandingPadSlab, centre,
                 new(pad.NominalSize.X, MegastationLandingPadAssemblyStandards.PadSlabThickness,
-                    pad.NominalSize.Y), right, up, forward);
+                    pad.NominalSize.Y), pad.PadSurface.Right, up,
+                pad.PadSurface.PreferredHeading);
 
             // The thin deck remains substantial cargo infrastructure. Its visibility
             // proxy shares the exact authoritative pose used by visible geometry.
@@ -100,11 +100,12 @@ public sealed class MegastationArtificialOcclusion
         }
         foreach (MegastationLandingServiceBuilding building in district.ServiceBuildings)
             Add(MegastationArtificialOccluderRole.ServiceBuilding,
-                building.Centre, building.Size, right, up, forward);
-        foreach (MegastationLandingContainerPlan container in
-                 district.LoadingAreas.SelectMany(area => area.Containers))
+                building.Centre, building.Size, building.Frontage.Right,
+                building.Frontage.Up, building.Frontage.Normal);
+        foreach (MegastationLoadingAreaPlan area in district.LoadingAreas)
+        foreach (MegastationLandingContainerPlan container in area.Containers)
             Add(MegastationArtificialOccluderRole.Container,
-                container.Centre, container.Size, right, up, forward);
+                container.Centre, container.Size, area.Right, up, area.PreferredHeading);
         foreach (MegastationInteriorGuidanceElement element in presentation.Elements)
         {
             // H1c bakes the main cavity only. The hundreds of constructed-throat pieces

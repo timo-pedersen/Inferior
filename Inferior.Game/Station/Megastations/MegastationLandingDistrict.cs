@@ -190,6 +190,7 @@ public sealed record MegastationOperationalFrontagePlan(
 
 public sealed record MegastationLandingServiceBuilding(
     string Identity,
+    string SiteIdentity,
     Vector3 Centre,
     Vector3 Size,
     int Seed,
@@ -204,11 +205,14 @@ public sealed record MegastationLandingContainerPlan(
 
 public sealed record MegastationLoadingAreaPlan(
     string Identity,
+    string SiteIdentity,
     string PadId,
     string ServiceBuildingIdentity,
     Vector3 Centre,
     Vector2 Size,
     MegastationBerthClearance Bounds,
+    Vector3 Right,
+    Vector3 PreferredHeading,
     string Label,
     IReadOnlyList<MegastationLandingContainerPlan> Containers,
     int Seed);
@@ -223,11 +227,33 @@ public enum MegastationKeepClearPurpose
 
 public sealed record MegastationKeepClearZonePlan(
     string Identity,
+    string SiteIdentity,
     Vector3 Centre,
     Vector2 Size,
     MegastationBerthClearance Bounds,
+    Vector3 Right,
+    Vector3 PreferredHeading,
     MegastationKeepClearPurpose Purpose,
     bool ShowLabel);
+
+public enum MegastationLandingSiteSize { Small, Medium, Large }
+public enum MegastationLandingSiteCharacter { CompactService, Mixed, CargoHeavy }
+public enum MegastationLandingSiteOrientation { Degrees0, Degrees90, Degrees180, Degrees270 }
+
+public sealed record MegastationLandingSitePlan(
+    string Identity,
+    MegastationLandingSiteSize SizeClass,
+    MegastationLandingSiteCharacter Character,
+    MegastationLandingSiteOrientation Orientation,
+    Vector3 FloorNormal,
+    Vector3 Right,
+    Vector3 PreferredHeading,
+    Vector3 ApronCentre,
+    Vector2 ApronSize,
+    MegastationBerthClearance InfrastructureEnvelope,
+    IReadOnlyList<string> PadIds,
+    IReadOnlyList<string> ServiceBuildingIds,
+    int Seed);
 
 public sealed record MegastationLandingDistrictDiagnostics(
     int PadCount,
@@ -246,7 +272,17 @@ public sealed record MegastationLandingDistrictDiagnostics(
     string Signature,
     int ApronReceiverVertexCount = 0,
     int ApronReceiverTriangleCount = 0,
-    float ApronReceiverMaximumSpacing = 0f);
+    float ApronReceiverMaximumSpacing = 0f,
+    int SiteCount = 0,
+    int SmallSiteCount = 0,
+    int MediumSiteCount = 0,
+    int LargeSiteCount = 0,
+    int CompactServiceSiteCount = 0,
+    int MixedSiteCount = 0,
+    int CargoHeavySiteCount = 0,
+    int PadCapacityDeficit = 0,
+    int LargePadCapacityDeficit = 0,
+    string SiteSummary = "");
 
 public sealed record MegastationLandingDistrictPlan(
     int AlgorithmVersion,
@@ -256,6 +292,7 @@ public sealed record MegastationLandingDistrictPlan(
     Vector3 PreferredHeading,
     Vector3 ApronCentre,
     Vector2 ApronSize,
+    IReadOnlyList<MegastationLandingSitePlan> Sites,
     IReadOnlyList<MegastationLandingPadPlan> Pads,
     IReadOnlyList<MegastationLandingServiceBuilding> ServiceBuildings,
     IReadOnlyList<MegastationLoadingAreaPlan> LoadingAreas,
@@ -265,7 +302,7 @@ public sealed record MegastationLandingDistrictPlan(
 
 public static class MegastationLandingDistrictPlanner
 {
-    public const int AlgorithmVersion = 6;
+    public const int AlgorithmVersion = 7;
     public const float StandardPadSize = 36f;
     public const float LargePadLength = 72f;
     public const float CornerClip = 1f;
@@ -274,77 +311,95 @@ public static class MegastationLandingDistrictPlanner
     public const float OperationalApronDepth = 14f;
     public const float LoadingAreaOutlineWidth = .10f;
     public static readonly Vector3 StandardContainerSize = new(6f, 2.5f, 2.5f);
+    public const float SiteSeparation = 28f;
+
+    private readonly record struct SiteSpecification(
+        int PadCount, MegastationLandingSiteCharacter Character, int Seed);
+
+    private readonly record struct SitePlacement(
+        SiteSpecification Specification,
+        MegastationLandingSiteOrientation Orientation,
+        Vector3 Right,
+        Vector3 Forward,
+        float CentreRight,
+        float CentreForward,
+        Vector2 ApronSize,
+        MegastationBerthClearance Envelope);
+
+    private readonly record struct SiteMetrics(
+        int Rows, int Columns, float BuildingDepth, float OperationalDepth,
+        Vector2 ApronSize);
 
     public static MegastationLandingDistrictPlan Plan(MegastationInteriorPlan interior)
     {
-        int seed = MegastationSeed.Derive(interior.Seed, "landing-district:v1");
-        Vector3 right = Vector3.Normalize(interior.PortalRight);
+        int seed = MegastationSeed.Derive(interior.Seed, "landing-district:v2");
+        Vector3 canonicalRight = Vector3.Normalize(interior.PortalRight);
         Vector3 up = Vector3.Normalize(interior.PortalUp);
-        Vector3 forward = Vector3.Normalize(interior.OutwardNormal);
-        Vector3 inward = -forward;
-        (float rightMin, float rightMax) = Span(interior.CavityEnvelope, right);
+        Vector3 canonicalForward = Vector3.Normalize(interior.OutwardNormal);
+        (float rightMin, float rightMax) = Span(interior.CavityEnvelope, canonicalRight);
         (float upMin, _) = Span(interior.CavityEnvelope, up);
-        (_, float depthMax) = Span(interior.CavityEnvelope, inward);
+        (float forwardMin, float forwardMax) = Span(interior.CavityEnvelope, canonicalForward);
+        float forwardSpan = forwardMax - forwardMin;
+        var usable = new MegastationBerthClearance(
+            rightMin + 24f, rightMax - 24f,
+            forwardMin + 24f, forwardMin + forwardSpan * .58f);
 
-        // The deep third is deliberately used: H1's optional stepped floor occurs only
-        // in the middle third, while this region is adjacent to the authoritative rear wall.
-        float districtRight = (rightMin + rightMax) * .5f;
-        // L1b moves the pad/apron composition another four metres toward the open bay.
-        // The rear-wall buildings are already at their physical limit, so this is the
-        // smallest change that preserves the ten-metre building setback while leaving
-        // a useful 14 m one-sided loading apron behind every preferred service edge.
-        float rearRowDepth = depthMax - 84f;
-        float frontRowDepth = rearRowDepth - 86f;
-        float[] columns = [-70f, 0f, 70f];
-        var pads = new List<MegastationLandingPadPlan>(6);
-        AddPad(1, columns[0], frontRowDepth, StandardPadSize, false);
-        AddPad(2, columns[1], frontRowDepth, StandardPadSize, false);
-        AddPad(3, columns[2], frontRowDepth, StandardPadSize, false);
-        AddPad(4, columns[0], rearRowDepth, LargePadLength, true);
-        AddPad(5, columns[1], rearRowDepth, StandardPadSize, false);
-        AddPad(6, columns[2], rearRowDepth, LargePadLength, true);
-
-        float apronRightSpan = 206f;
-        float apronDepthSpan = 194f;
-        float apronDepth = (frontRowDepth + rearRowDepth) * .5f + 4f;
-        Vector3 apronCentre = Compose(districtRight, upMin + .08f, apronDepth);
-
-        var buildings = new List<MegastationLandingServiceBuilding>(3);
-        float buildingDepth = depthMax - 18f;
-        AddBuilding("west", -66f, 54f, 28f, 22f);
-        AddBuilding("operations", 0f, 62f, 34f, 28f);
-        AddBuilding("east", 66f, 48f, 25f, 20f);
-        foreach (MegastationLandingPadPlan pad in pads)
-        foreach (MegastationLandingServiceBuilding building in buildings)
+        int countSeed = MegastationSeed.Derive(seed, "site-count");
+        float countRoll = Unit(countSeed, "choice");
+        int desiredSites = countRoll < .14f ? 1 : countRoll < .74f ? 2 : 3;
+        var specifications = new List<SiteSpecification>(3);
+        for (int i = 0; i < desiredSites; i++)
         {
-            MegastationBerthClearance footprint = Envelope(
-                building.Centre,
-                right,
-                forward,
-                building.Size.X,
-                building.Size.Z,
-                0f);
-            if (pad.BuildingSetbackClearance.Intersects(footprint))
-                throw new InvalidOperationException(
-                    $"Landing district building {building.Identity} violates {pad.PadId}'s building setback.");
-            if (pad.OperationalApron.Intersects(footprint))
-                throw new InvalidOperationException(
-                    $"Landing district building {building.Identity} intrudes into {pad.PadId}'s operational apron.");
+            int child = MegastationSeed.Derive(seed, $"site:{i}");
+            int padCount = desiredSites switch
+            {
+                1 => 9,
+                2 => i == 0
+                    ? 4 + (int)(Unit(child, "pad-count") * 3f)
+                    : 4 + (int)(Unit(child, "pad-count") * 2f),
+                _ => 3,
+            };
+            specifications.Add(new(padCount, PickCharacter(child), child));
         }
 
-        (IReadOnlyList<MegastationLoadingAreaPlan> loadingAreas,
-            IReadOnlyList<MegastationKeepClearZonePlan> keepClearZones) =
-            PlanOperationalFloor(pads, buildings, right, up, forward, seed);
+        var placements = new List<SitePlacement>(3);
+        for (int i = 0; i < specifications.Count; i++)
+            TryPlaceBest(specifications[i], i, placements, usable,
+                canonicalRight, canonicalForward, up);
+
+        // Capacity is a target, never permission to overlap or leave the real floor.
+        // Prefer another island when a coherent third site still fits.
+        int attempts = 0;
+        while ((placements.Sum(item => item.Specification.PadCount) < 8
+                || EstimatedLargePads(placements) < 2)
+            && placements.Count < 3 && attempts++ < 2)
+        {
+            int index = placements.Count;
+            int child = MegastationSeed.Derive(seed, $"capacity-site:{index}");
+            var capacity = new SiteSpecification(
+                3 + (int)(Unit(child, "pad-count") * 3f), PickCharacter(child), child);
+            if (!TryPlaceBest(capacity, index, placements, usable,
+                    canonicalRight, canonicalForward, up))
+                break;
+        }
+
+        var sites = new List<MegastationLandingSitePlan>(placements.Count);
+        var pads = new List<MegastationLandingPadPlan>();
+        var buildings = new List<MegastationLandingServiceBuilding>();
+        var loadingAreas = new List<MegastationLoadingAreaPlan>();
+        var keepClearZones = new List<MegastationKeepClearZonePlan>();
+        for (int siteIndex = 0; siteIndex < placements.Count; siteIndex++)
+            BuildSite(siteIndex, placements[siteIndex]);
 
         int lightingSeed = MegastationSeed.Derive(seed, "lighting");
-        var lights = new List<MegastationArtificialLight>(14);
+        var lights = new List<MegastationArtificialLight>();
         foreach (MegastationLandingPadPlan pad in pads)
         {
             int lightSeed = MegastationSeed.Derive(lightingSeed, pad.PadId);
             float intensity = .92f + Unit(lightSeed, "intensity") * .16f;
             float range = pad.IsLarge ? 126f : 108f;
             lights.Add(new(
-                $"interior/landing-district:v1/{pad.PadId}/overhead",
+                $"interior/landing-district:v2/{pad.PadId}/overhead",
                 pad.PadSurface.Centre + up * (pad.IsLarge ? 27f : 24f),
                 new Color(220, 235, 255),
                 intensity,
@@ -362,11 +417,13 @@ public static class MegastationLandingDistrictPlanner
                     MegastationLandingPadAssemblyStandards.FixtureLightAngularCutoffCosine));
             }
         }
+        foreach (MegastationLandingSitePlan site in sites)
         for (int side = -1; side <= 1; side += 2)
         {
             lights.Add(new(
-                $"interior/landing-district:v1/service:{side}",
-                Compose(districtRight + side * 72f, upMin + 15f, depthMax - 35f),
+                $"interior/landing-district:v2/{site.Identity}/service:{side}",
+                site.ApronCentre + site.Right * side * (site.ApronSize.X * .38f)
+                    - site.PreferredHeading * (site.ApronSize.Y * .34f) + up * 15f,
                 new Color(205, 228, 255),
                 .82f,
                 118f));
@@ -384,28 +441,55 @@ public static class MegastationLandingDistrictPlanner
                 floodlight.AngularCutoffCosine));
         }
 
+        MegastationBerthClearance aggregate = Union(sites.Select(site =>
+            OrientedEnvelope(site.ApronCentre, canonicalRight, canonicalForward,
+                site.Right, site.PreferredHeading,
+                site.ApronSize.X, site.ApronSize.Y, 0f)));
+        Vector2 aggregateSize = new(
+            aggregate.RightMaximum - aggregate.RightMinimum,
+            aggregate.ForwardMaximum - aggregate.ForwardMinimum);
+        Vector3 aggregateCentre = canonicalRight
+                * ((aggregate.RightMinimum + aggregate.RightMaximum) * .5f)
+            + canonicalForward
+                * ((aggregate.ForwardMinimum + aggregate.ForwardMaximum) * .5f)
+            + up * (upMin + MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+        int largePadCount = pads.Count(pad => pad.IsLarge);
         string signature = Signature(
-            seed, pads, buildings, loadingAreas, keepClearZones, lights);
+            seed, sites, pads, buildings, loadingAreas, keepClearZones, lights);
         var diagnostics = new MegastationLandingDistrictDiagnostics(
             pads.Count,
             pads.Count(pad => !pad.IsLarge),
             pads.Count(pad => pad.IsLarge),
-            new(apronRightSpan, apronDepthSpan),
+            aggregateSize,
             buildings.Count,
             lights.Count,
             loadingAreas.Count,
             loadingAreas.Sum(area => area.Containers.Count),
             keepClearZones.Count,
             0, 0, 0, 0,
-            signature);
+            signature,
+            SiteCount: sites.Count,
+            SmallSiteCount: sites.Count(site => site.SizeClass == MegastationLandingSiteSize.Small),
+            MediumSiteCount: sites.Count(site => site.SizeClass == MegastationLandingSiteSize.Medium),
+            LargeSiteCount: sites.Count(site => site.SizeClass == MegastationLandingSiteSize.Large),
+            CompactServiceSiteCount: sites.Count(site => site.Character == MegastationLandingSiteCharacter.CompactService),
+            MixedSiteCount: sites.Count(site => site.Character == MegastationLandingSiteCharacter.Mixed),
+            CargoHeavySiteCount: sites.Count(site => site.Character == MegastationLandingSiteCharacter.CargoHeavy),
+            PadCapacityDeficit: Math.Max(0, 8 - pads.Count),
+            LargePadCapacityDeficit: Math.Max(0, 2 - largePadCount),
+            SiteSummary: string.Join('/', sites.Select(site =>
+                $"{site.Identity}:{site.SizeClass}:{site.Character}:" +
+                $"{site.PadIds.Count}p:{pads.Count(pad => site.PadIds.Contains(pad.PadId) && pad.IsLarge)}L:" +
+                $"{site.Orientation}")));
         return new(
             AlgorithmVersion,
             seed,
             up,
-            right,
-            forward,
-            apronCentre,
-            new(apronRightSpan, apronDepthSpan),
+            canonicalRight,
+            canonicalForward,
+            aggregateCentre,
+            aggregateSize,
+            sites,
             pads,
             buildings,
             loadingAreas,
@@ -413,60 +497,237 @@ public static class MegastationLandingDistrictPlanner
             lights,
             diagnostics);
 
-        void AddPad(int number, float rightOffset, float inwardDepth, float length, bool large)
+        void BuildSite(int siteIndex, SitePlacement placement)
         {
-            string id = $"LD-{number:00}";
-            // PadSurface is the future landing authority, so it follows the actual top
-            // of the installed component rather than the bay floor beneath it.
-            Vector3 centre = Compose(
-                districtRight + rightOffset,
-                upMin + MegastationLandingPadAssemblyStandards.ApronThickness
-                    + MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron,
-                inwardDepth);
-            Vector3[] support = SupportPolygon(centre, right, forward, StandardPadSize, length);
-            MegastationBerthClearance hardClearance = Envelope(
-                centre, right, forward, StandardPadSize, length, BerthMargin);
-            float centreForward = Vector3.Dot(centre, forward);
-            float rearEdge = centreForward - length * .5f;
-            float operationalDepth = number == 5 ? 18f : OperationalApronDepth;
-            pads.Add(new(
-                id,
-                new(centre, up, right, forward),
-                new(StandardPadSize, length),
-                support,
-                hardClearance,
-                new(
-                    Vector3.Dot(centre, right) - StandardPadSize * .5f - BerthMargin,
-                    Vector3.Dot(centre, right) + StandardPadSize * .5f + BerthMargin,
-                    rearEdge - operationalDepth,
-                    rearEdge),
-                Envelope(centre, right, forward, StandardPadSize, length, BuildingSetback),
-                hardClearance,
-                large,
-                MegastationSeed.Derive(seed, $"pad:{id}")));
-        }
+            SiteSpecification specification = placement.Specification;
+            SiteMetrics metrics = Metrics(specification.PadCount, specification.Character);
+            string siteIdentity = $"LS-{siteIndex + 1:00}";
+            Vector3 siteCentre = canonicalRight * placement.CentreRight
+                + canonicalForward * placement.CentreForward
+                + up * (upMin + MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+            float rear = -metrics.ApronSize.Y * .5f;
+            float padAreaRear = rear + 8f + metrics.BuildingDepth + 10f
+                + metrics.OperationalDepth;
+            float rowPitch = LargePadLength + 18f;
+            float columnPitch = StandardPadSize + 18f;
+            int largeCount = LargePadCount(specification.PadCount, specification.Character);
+            var sitePads = new List<MegastationLandingPadPlan>(specification.PadCount);
+            int padNumberBase = pads.Count;
+            for (int i = 0; i < specification.PadCount; i++)
+            {
+                int row = i / metrics.Columns;
+                int column = i % metrics.Columns;
+                bool large = ((i + Math.Abs(specification.Seed)) % specification.PadCount) < largeCount;
+                float length = large ? LargePadLength : StandardPadSize;
+                float localRight = (column - (metrics.Columns - 1) * .5f) * columnPitch;
+                float localForward = padAreaRear + LargePadLength * .5f + row * rowPitch;
+                string id = $"LD-{padNumberBase + i + 1:00}";
+                Vector3 centre = siteCentre + placement.Right * localRight
+                    + placement.Forward * localForward
+                    + up * (MegastationLandingPadAssemblyStandards.ApronThickness * .5f
+                        + MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron);
+                MegastationBerthClearance hard = OrientedEnvelope(
+                    centre, canonicalRight, canonicalForward, placement.Right,
+                    placement.Forward, StandardPadSize, length, BerthMargin);
+                Vector3 rearCentre = centre - placement.Forward * (length * .5f);
+                sitePads.Add(new(
+                    id,
+                    new(centre, up, placement.Right, placement.Forward),
+                    new(StandardPadSize, length),
+                    SupportPolygon(centre, placement.Right, placement.Forward,
+                        StandardPadSize, length),
+                    hard,
+                    OrientedEnvelope(rearCentre - placement.Forward
+                            * (metrics.OperationalDepth * .5f),
+                        canonicalRight, canonicalForward, placement.Right, placement.Forward,
+                        StandardPadSize + BerthMargin * 2f, metrics.OperationalDepth, 0f),
+                    OrientedEnvelope(centre, canonicalRight, canonicalForward,
+                        placement.Right, placement.Forward,
+                        StandardPadSize, length, BuildingSetback),
+                    hard,
+                    large,
+                    MegastationSeed.Derive(specification.Seed, $"pad:{i}")));
+            }
+            pads.AddRange(sitePads);
 
-        void AddBuilding(string identity, float rightOffset, float width, float depth, float height)
-        {
-            int child = MegastationSeed.Derive(seed, $"service:{identity}");
-            float adjustedHeight = height + Unit(child, "height") * 5f;
-            string fullIdentity = $"landing-district/service/{identity}";
-            Vector3 centre = Compose(
-                districtRight + rightOffset,
-                upMin + adjustedHeight * .5f,
-                buildingDepth);
-            Vector3 size = new(width, adjustedHeight, depth);
-            buildings.Add(new(
-                fullIdentity,
-                centre,
-                size,
-                child,
-                PlanOperationalFrontage(
-                    fullIdentity, identity, centre, size, child, right, up, forward)));
-        }
+            int buildingCount = specification.PadCount <= 3 ? 1
+                : specification.PadCount <= 8 ? 2 : 3;
+            var siteBuildings = new List<MegastationLandingServiceBuilding>(buildingCount);
+            float buildingWidth = MathF.Min(64f,
+                (metrics.ApronSize.X - 24f - (buildingCount - 1) * 10f) / buildingCount);
+            for (int i = 0; i < buildingCount; i++)
+            {
+                int child = MegastationSeed.Derive(specification.Seed, $"building:{i}");
+                string role = specification.Character switch
+                {
+                    MegastationLandingSiteCharacter.CargoHeavy => i == 0 ? "warehouse" : "cargo",
+                    MegastationLandingSiteCharacter.CompactService => "service",
+                    _ => i == 0 ? "operations" : "service",
+                };
+                string identity = $"landing-site/{siteIdentity}/service/{i:00}";
+                float x = (i - (buildingCount - 1) * .5f) * (buildingWidth + 10f);
+                float height = 20f + Unit(child, "height") * 13f;
+                Vector3 size = new(buildingWidth, height, metrics.BuildingDepth);
+                Vector3 centre = siteCentre + placement.Right * x
+                    + placement.Forward * (rear + 8f + metrics.BuildingDepth * .5f)
+                    + up * (height * .5f - MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+                string[] served = sitePads
+                    .Where((_, padIndex) => padIndex % buildingCount == i)
+                    .Select(pad => pad.PadId).ToArray();
+                siteBuildings.Add(new(
+                    identity, siteIdentity, centre, size, child,
+                    PlanOperationalFrontage(identity, role, centre, size, child,
+                        placement.Right, up, placement.Forward, served)));
+            }
+            buildings.AddRange(siteBuildings);
 
-        Vector3 Compose(float r, float u, float d) => right * r + up * u + inward * d;
+            (IReadOnlyList<MegastationLoadingAreaPlan> siteLoading,
+                IReadOnlyList<MegastationKeepClearZonePlan> siteKeepClear) =
+                PlanOperationalFloor(siteIdentity, specification.Character,
+                    sitePads, siteBuildings, canonicalRight, canonicalForward,
+                    placement.Right, up, placement.Forward, specification.Seed);
+            loadingAreas.AddRange(siteLoading);
+            keepClearZones.AddRange(siteKeepClear);
+
+            foreach (MegastationLandingPadPlan pad in sitePads)
+            foreach (MegastationLandingServiceBuilding building in siteBuildings)
+            {
+                MegastationBerthClearance footprint = OrientedEnvelope(
+                    building.Centre, canonicalRight, canonicalForward,
+                    placement.Right, placement.Forward,
+                    building.Size.X, building.Size.Z, 0f);
+                if (pad.BuildingSetbackClearance.Intersects(footprint)
+                    || pad.OperationalApron.Intersects(footprint))
+                    throw new InvalidOperationException(
+                        $"Landing building {building.Identity} violates {pad.PadId} clearance.");
+            }
+
+            sites.Add(new(
+                siteIdentity,
+                SizeClass(specification.PadCount),
+                specification.Character,
+                placement.Orientation,
+                up,
+                placement.Right,
+                placement.Forward,
+                siteCentre,
+                metrics.ApronSize,
+                placement.Envelope,
+                sitePads.Select(pad => pad.PadId).ToArray(),
+                siteBuildings.Select(building => building.Identity).ToArray(),
+                specification.Seed));
+        }
     }
+
+    private static bool TryPlaceBest(
+        SiteSpecification requested,
+        int siteIndex,
+        List<SitePlacement> accepted,
+        MegastationBerthClearance usable,
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 up)
+    {
+        int minimum = requested.PadCount >= 9 ? 9 : requested.PadCount >= 4 ? 4 : 1;
+        for (int count = requested.PadCount; count >= minimum; count--)
+        {
+            SiteSpecification specification = requested with { PadCount = count };
+            SiteMetrics metrics = Metrics(count, specification.Character);
+            var candidates = new List<(float Separation, uint Score, SitePlacement Placement)>();
+            for (int orientationValue = 0; orientationValue < 4; orientationValue++)
+            {
+                var orientation = (MegastationLandingSiteOrientation)orientationValue;
+                (Vector3 right, Vector3 forward) = CardinalFrame(
+                    canonicalRight, canonicalForward, orientation);
+                float canonicalWidth = orientationValue % 2 == 0
+                    ? metrics.ApronSize.X : metrics.ApronSize.Y;
+                float canonicalDepth = orientationValue % 2 == 0
+                    ? metrics.ApronSize.Y : metrics.ApronSize.X;
+                float minR = usable.RightMinimum + canonicalWidth * .5f;
+                float maxR = usable.RightMaximum - canonicalWidth * .5f;
+                float minF = usable.ForwardMinimum + canonicalDepth * .5f;
+                float maxF = usable.ForwardMaximum - canonicalDepth * .5f;
+                if (minR > maxR || minF > maxF) continue;
+                for (int row = 0; row < 5; row++)
+                for (int column = 0; column < 7; column++)
+                {
+                    float r = MathHelper.Lerp(minR, maxR, column / 6f);
+                    float f = MathHelper.Lerp(minF, maxF, row / 4f);
+                    Vector3 centre = canonicalRight * r + canonicalForward * f;
+                    MegastationBerthClearance envelope = OrientedEnvelope(
+                        centre, canonicalRight, canonicalForward, right, forward,
+                        metrics.ApronSize.X, metrics.ApronSize.Y, SiteSeparation * .5f);
+                    if (accepted.Any(item => item.Envelope.Intersects(envelope))) continue;
+                    uint score = unchecked((uint)MegastationSeed.Derive(
+                        specification.Seed, $"placement:{siteIndex}:{orientationValue}:{row}:{column}"));
+                    float separation = accepted.Count == 0 ? 0f : accepted.Min(item =>
+                        (item.CentreRight - r) * (item.CentreRight - r)
+                        + (item.CentreForward - f) * (item.CentreForward - f));
+                    candidates.Add((separation, score, new(specification, orientation, right, forward,
+                        r, f, metrics.ApronSize, envelope)));
+                }
+            }
+            if (candidates.Count == 0) continue;
+            accepted.Add(candidates.OrderByDescending(item => item.Separation)
+                .ThenBy(item => item.Score).First().Placement);
+            return true;
+        }
+        return false;
+    }
+
+    private static SiteMetrics Metrics(int padCount, MegastationLandingSiteCharacter character)
+    {
+        int rows = padCount <= 3 ? 1 : padCount <= 10 ? 2 : 3;
+        int columns = (int)MathF.Ceiling(padCount / (float)rows);
+        float buildingDepth = character == MegastationLandingSiteCharacter.CargoHeavy ? 26f : 24f;
+        float operational = character switch
+        {
+            MegastationLandingSiteCharacter.CompactService => 16f,
+            MegastationLandingSiteCharacter.Mixed => 22f,
+            _ => 30f,
+        };
+        float width = MathF.Max(88f,
+            columns * StandardPadSize + (columns - 1) * 18f + 24f);
+        float padDepth = rows * LargePadLength + (rows - 1) * 18f;
+        float depth = 16f + buildingDepth + 10f + operational + padDepth;
+        return new(rows, columns, buildingDepth, operational, new(width, depth));
+    }
+
+    private static MegastationLandingSiteCharacter PickCharacter(int seed)
+    {
+        float roll = Unit(seed, "character");
+        return roll < .34f ? MegastationLandingSiteCharacter.CompactService
+            : roll < .68f ? MegastationLandingSiteCharacter.Mixed
+            : MegastationLandingSiteCharacter.CargoHeavy;
+    }
+
+    private static MegastationLandingSiteSize SizeClass(int padCount)
+        => padCount <= 3 ? MegastationLandingSiteSize.Small
+            : padCount <= 8 ? MegastationLandingSiteSize.Medium
+            : MegastationLandingSiteSize.Large;
+
+    private static int LargePadCount(int padCount, MegastationLandingSiteCharacter character)
+        => Math.Min(padCount, Math.Max(padCount >= 9 ? 2 : padCount >= 2 ? 1 : 0,
+            (int)MathF.Round(padCount * (character switch
+            {
+                MegastationLandingSiteCharacter.CargoHeavy => .45f,
+                MegastationLandingSiteCharacter.Mixed => .30f,
+                _ => .20f,
+            }))));
+
+    private static int EstimatedLargePads(IEnumerable<SitePlacement> placements)
+        => placements.Sum(item => LargePadCount(
+            item.Specification.PadCount, item.Specification.Character));
+
+    private static (Vector3 Right, Vector3 Forward) CardinalFrame(
+        Vector3 right, Vector3 forward, MegastationLandingSiteOrientation orientation)
+        => orientation switch
+        {
+            MegastationLandingSiteOrientation.Degrees0 => (right, forward),
+            MegastationLandingSiteOrientation.Degrees90 => (forward, -right),
+            MegastationLandingSiteOrientation.Degrees180 => (-right, -forward),
+            _ => (-forward, right),
+        };
 
     private static MegastationOperationalFrontagePlan PlanOperationalFrontage(
         string buildingIdentity,
@@ -476,17 +737,12 @@ public static class MegastationLandingDistrictPlanner
         int buildingSeed,
         Vector3 right,
         Vector3 up,
-        Vector3 forward)
+        Vector3 forward,
+        IReadOnlyList<string> servedPadIds)
     {
         int seed = MegastationSeed.Derive(buildingSeed, "frontage:v1");
         Vector3 floor = buildingCentre - up * (buildingSize.Y * .5f);
         Vector3 face = buildingCentre + forward * (buildingSize.Z * .5f);
-        string servedPad = role switch
-        {
-            "west" => "LD-04",
-            "operations" => "LD-05",
-            _ => "LD-06",
-        };
 
         var cargo = new List<MegastationCargoEntrancePlan>(2);
         int cargoCount = role == "west" && Unit(seed, "second-cargo") > .38f ? 2 : 1;
@@ -620,7 +876,7 @@ public static class MegastationLandingDistrictPlanner
             forward,
             right,
             up,
-            [servedPad],
+            servedPadIds,
             personnel,
             cargo,
             windows,
@@ -658,47 +914,69 @@ public static class MegastationLandingDistrictPlanner
     private static (
         IReadOnlyList<MegastationLoadingAreaPlan> LoadingAreas,
         IReadOnlyList<MegastationKeepClearZonePlan> KeepClearZones) PlanOperationalFloor(
+            string siteIdentity,
+            MegastationLandingSiteCharacter character,
             IReadOnlyList<MegastationLandingPadPlan> pads,
             IReadOnlyList<MegastationLandingServiceBuilding> buildings,
+            Vector3 canonicalRight,
+            Vector3 canonicalForward,
             Vector3 right,
             Vector3 up,
             Vector3 forward,
-            int districtSeed)
+            int siteSeed)
     {
-        int seed = MegastationSeed.Derive(districtSeed, "operational-floor:v1");
-        MegastationLandingPadPlan pad = pads.Single(candidate => candidate.PadId == "LD-05");
-        MegastationLandingServiceBuilding building = buildings.Single(candidate =>
-            candidate.Identity.EndsWith("operations", StringComparison.Ordinal));
+        int seed = MegastationSeed.Derive(siteSeed, "operational-floor:v2");
+        MegastationLandingPadPlan pad = pads.OrderBy(candidate => MathF.Abs(
+            Vector3.Dot(candidate.PadSurface.Centre, right))).First();
+        MegastationLandingServiceBuilding building = buildings.First(candidate =>
+            candidate.Frontage.ServedPadIds.Contains(pad.PadId));
         Vector3 service = -forward;
         Vector3 rearEdge = pad.PadSurface.Centre + service * (pad.NominalSize.Y * .5f);
         Vector3 apronFloor = rearEdge
             - up * MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron;
 
-        Vector2 loadingSize = new(28f, 12f);
-        Vector3 loadingCentre = apronFloor + service * 19f;
-        MegastationBerthClearance loadingBounds = Envelope(
-            loadingCentre, right, forward, loadingSize.X, loadingSize.Y, 0f);
-        int areaSeed = MegastationSeed.Derive(seed, "loading-area:LD-05");
-        var containers = new List<MegastationLandingContainerPlan>(6);
-        float[] lateral = [-10.5f, -3.5f, 3.5f, 10.5f];
-        for (int i = 0; i < lateral.Length; i++)
+        Vector2 loadingSize = character switch
+        {
+            MegastationLandingSiteCharacter.CompactService => new(24f, 8f),
+            MegastationLandingSiteCharacter.Mixed => new(28f, 14f),
+            _ => new(36f, 18f),
+        };
+        // Leave a real metre-scale lane beyond the pad ramp KEEP CLEAR zone while
+        // keeping the complete loading rectangle ahead of the service frontage.
+        Vector3 loadingCentre = apronFloor + service * (loadingSize.Y * .5f + 12.5f);
+        MegastationBerthClearance loadingBounds = OrientedEnvelope(
+            loadingCentre, canonicalRight, canonicalForward, right, forward,
+            loadingSize.X, loadingSize.Y, 0f);
+        int areaSeed = MegastationSeed.Derive(seed, $"loading-area:{pad.PadId}");
+        int containerCount = character switch
+        {
+            MegastationLandingSiteCharacter.CompactService => 2,
+            MegastationLandingSiteCharacter.Mixed => 5,
+            _ => 8,
+        };
+        var containers = new List<MegastationLandingContainerPlan>(containerCount);
+        int columns = Math.Min(4, containerCount);
+        for (int i = 0; i < containerCount; i++)
         {
             int child = MegastationSeed.Derive(areaSeed, $"container:{i}");
-            AddContainer($"loading-area/LD-05/container:{i}", lateral[i], -2f, 0, child);
+            int row = i / columns;
+            int column = i % columns;
+            float lateral = (column - (columns - 1) * .5f) * 7f;
+            float depth = (row - .5f) * 4.2f;
+            AddContainer($"{siteIdentity}/loading-area/{pad.PadId}/container:{i}",
+                lateral, depth, 0, child);
         }
-        int secondRowSeed = MegastationSeed.Derive(areaSeed, "container:second-row:0");
-        AddContainer("loading-area/LD-05/container:second-row:0",
-            lateral[0], 2f, 0, secondRowSeed);
-        int stackSeed = MegastationSeed.Derive(areaSeed, "container:stack:1");
-        AddContainer("loading-area/LD-05/container:stack:1", lateral[0], 2f, 1, stackSeed);
 
         var loadingArea = new MegastationLoadingAreaPlan(
-            "landing-district/loading-area:LD-05",
+            $"landing-site/{siteIdentity}/loading-area:{pad.PadId}",
+            siteIdentity,
             pad.PadId,
             building.Identity,
             loadingCentre,
             loadingSize,
             loadingBounds,
+            right,
+            forward,
             $"LOADING AREA {pad.PadId[^2..]}",
             containers,
             areaSeed);
@@ -720,13 +998,13 @@ public static class MegastationLandingDistrictPlanner
             - up * (personnelEntrance.Size.Y * .5f);
 
         var zones = new List<MegastationKeepClearZonePlan>(4);
-        AddZone("LD-05/stair", stairLow + service * 1.5f, new(4f, 3f),
+        AddZone($"{pad.PadId}/stair", stairLow + service * 1.5f, new(4f, 3f),
             MegastationKeepClearPurpose.PersonnelStair, false);
-        AddZone("LD-05/ramp", rampLow + service * 2f, new(8f, 4f),
+        AddZone($"{pad.PadId}/ramp", rampLow + service * 2f, new(8f, 4f),
             MegastationKeepClearPurpose.CargoRamp, true);
-        AddZone("service/operations/personnel", personnelDoor + forward * 1.5f,
+        AddZone($"{building.Identity}/personnel", personnelDoor + forward * 1.5f,
             new(4f, 3f), MegastationKeepClearPurpose.PersonnelDoor, false);
-        AddZone("service/operations/cargo", cargoDoor + forward * 2.5f,
+        AddZone($"{building.Identity}/cargo", cargoDoor + forward * 2.5f,
             new(12f, 5f), MegastationKeepClearPurpose.CargoDoor, true);
 
         foreach (MegastationLandingContainerPlan container in containers)
@@ -756,17 +1034,22 @@ public static class MegastationLandingDistrictPlanner
                 identity,
                 centre,
                 size,
-                Envelope(centre, right, forward, size.X, size.Z, 0f),
+                OrientedEnvelope(centre, canonicalRight, canonicalForward,
+                    right, forward, size.X, size.Z, 0f),
                 childSeed));
         }
 
         void AddZone(string identity, Vector3 centre, Vector2 size,
             MegastationKeepClearPurpose purpose, bool showLabel)
             => zones.Add(new(
-                $"landing-district/keep-clear:{identity}",
+                $"landing-site/{siteIdentity}/keep-clear:{identity}",
+                siteIdentity,
                 centre,
                 size,
-                Envelope(centre, right, forward, size.X, size.Y, 0f),
+                OrientedEnvelope(centre, canonicalRight, canonicalForward,
+                    right, forward, size.X, size.Y, 0f),
+                right,
+                forward,
                 purpose,
                 showLabel));
     }
@@ -807,6 +1090,37 @@ public static class MegastationLandingDistrictPlanner
             f + length * .5f + margin);
     }
 
+    internal static MegastationBerthClearance OrientedEnvelope(
+        Vector3 centre,
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 objectRight,
+        Vector3 objectForward,
+        float width,
+        float length,
+        float margin)
+    {
+        float halfRight = MathF.Abs(Vector3.Dot(objectRight, canonicalRight)) * width * .5f
+            + MathF.Abs(Vector3.Dot(objectForward, canonicalRight)) * length * .5f + margin;
+        float halfForward = MathF.Abs(Vector3.Dot(objectRight, canonicalForward)) * width * .5f
+            + MathF.Abs(Vector3.Dot(objectForward, canonicalForward)) * length * .5f + margin;
+        float r = Vector3.Dot(centre, canonicalRight);
+        float f = Vector3.Dot(centre, canonicalForward);
+        return new(r - halfRight, r + halfRight, f - halfForward, f + halfForward);
+    }
+
+    private static MegastationBerthClearance Union(
+        IEnumerable<MegastationBerthClearance> source)
+    {
+        MegastationBerthClearance[] items = source.ToArray();
+        if (items.Length == 0) return new(0f, 0f, 0f, 0f);
+        return new(
+            items.Min(item => item.RightMinimum),
+            items.Max(item => item.RightMaximum),
+            items.Min(item => item.ForwardMinimum),
+            items.Max(item => item.ForwardMaximum));
+    }
+
     private static (float Min, float Max) Span(MegastationInteriorVolume volume, Vector3 axis)
     {
         float min = float.MaxValue;
@@ -827,6 +1141,7 @@ public static class MegastationLandingDistrictPlanner
 
     private static string Signature(
         int seed,
+        IReadOnlyList<MegastationLandingSitePlan> sites,
         IReadOnlyList<MegastationLandingPadPlan> pads,
         IReadOnlyList<MegastationLandingServiceBuilding> buildings,
         IReadOnlyList<MegastationLoadingAreaPlan> loadingAreas,
@@ -834,6 +1149,11 @@ public static class MegastationLandingDistrictPlanner
         IReadOnlyList<MegastationArtificialLight> lights)
     {
         var text = new StringBuilder().Append(AlgorithmVersion).Append('|').Append(seed);
+        foreach (MegastationLandingSitePlan site in sites)
+            text.Append('|').Append(site.Identity).Append(':').Append(site.SizeClass)
+                .Append(':').Append(site.Character).Append(':').Append(site.Orientation)
+                .Append('@').Append(site.ApronCentre).Append(':').Append(site.ApronSize)
+                .Append(':').Append(site.InfrastructureEnvelope);
         foreach (MegastationLandingPadPlan pad in pads)
             text.Append('|').Append(pad.PadId).Append(':').Append(F(pad.PadSurface.Centre.X))
                 .Append(',').Append(F(pad.PadSurface.Centre.Y)).Append(',')
@@ -897,7 +1217,9 @@ public readonly record struct MegastationLandingDistrictMeshResult(
     int ApronReceiverFaceCount,
     int ApronReceiverFirstVertex,
     int ApronReceiverVertexCount,
-    IReadOnlyList<(int FirstFace, int FaceCount)> PadTopReceiverRanges);
+    IReadOnlyList<(int FirstFace, int FaceCount)> PadTopReceiverRanges,
+    IReadOnlyList<(int FirstFace, int FaceCount, int FirstVertex, int VertexCount)>
+        ApronReceiverRanges);
 
 public static class MegastationLandingDistrictMeshBuilder
 {
@@ -941,18 +1263,17 @@ public static class MegastationLandingDistrictMeshBuilder
         Color secondary = materials?.Palette.SecondaryTint ?? new Color(98, 99, 94);
         Color accent = materials?.Palette.AccentTint ?? new Color(132, 126, 94);
         Vector3 up = plan.FloorNormal;
-        Vector3 right = plan.DistrictRight;
-        Vector3 forward = plan.PreferredHeading;
 
         mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
         SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
         Color apronColour = Color.Lerp(
             Color.Lerp(Color.Lerp(dominant, Color.Black, .16f), Color.Black, .25f),
             Color.Black, ApronAdditionalDarkening);
-        ApronReceiverMesh apron = EmitTessellatedApron(
-            mesh, plan, apronColour);
+        var apronMeshes = new List<ApronReceiverMesh>(plan.Sites.Count);
+        foreach (MegastationLandingSitePlan site in plan.Sites)
+            apronMeshes.Add(EmitTessellatedApron(mesh, site, apronColour));
 
-        EmitOperationalFloorMarkings(mesh, plan, up, right, forward);
+        EmitOperationalFloorMarkings(mesh, plan, up);
 
         foreach (MegastationLandingPadPlan pad in plan.Pads)
         {
@@ -966,13 +1287,14 @@ public static class MegastationLandingDistrictMeshBuilder
             cancellationToken.ThrowIfCancellationRequested();
             mesh.CurrentDecorClass = DecorClass.MegastationInteriorMajor;
             SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
-            AddBox(mesh, Frame(building.Centre, right, up, forward), building.Size,
+            AddBox(mesh, Frame(building.Centre, building.Frontage.Right,
+                    building.Frontage.Up, building.Frontage.Normal), building.Size,
                 Color.Lerp(dominant, secondary, .35f));
             EmitOperationalFrontage(
                 mesh, building, dominant, secondary, accent, illumination);
         }
 
-        EmitLoadingContainers(mesh, plan, up, right, forward, dominant, accent,
+        EmitLoadingContainers(mesh, plan, up, dominant, accent,
             untrackedArtificialLightVertices);
 
         int faces = mesh.FaceCount - firstFace;
@@ -992,11 +1314,17 @@ public static class MegastationLandingDistrictMeshBuilder
             VisibleTriangleCount = triangles,
             ShadowVertexCount = casterVertices,
             ShadowTriangleCount = casterTriangles,
-            ApronReceiverVertexCount = apron.VertexCount,
-            ApronReceiverTriangleCount = apron.FaceCount * 2,
-            ApronReceiverMaximumSpacing = apron.MaximumSpacing,
-        }, apron.FirstFace, apron.FaceCount, apron.FirstVertex, apron.VertexCount,
-            padTopReceiverRanges);
+            ApronReceiverVertexCount = apronMeshes.Sum(apron => apron.VertexCount),
+            ApronReceiverTriangleCount = apronMeshes.Sum(apron => apron.FaceCount * 2),
+            ApronReceiverMaximumSpacing = apronMeshes.Count == 0
+                ? 0f : apronMeshes.Max(apron => apron.MaximumSpacing),
+        }, apronMeshes.Count == 0 ? 0 : apronMeshes[0].FirstFace,
+            apronMeshes.Sum(apron => apron.FaceCount),
+            apronMeshes.Count == 0 ? 0 : apronMeshes[0].FirstVertex,
+            apronMeshes.Sum(apron => apron.VertexCount),
+            padTopReceiverRanges,
+            apronMeshes.Select(apron => (apron.FirstFace, apron.FaceCount,
+                apron.FirstVertex, apron.VertexCount)).ToArray());
     }
 
     private readonly record struct ApronReceiverMesh(
@@ -1005,18 +1333,18 @@ public static class MegastationLandingDistrictMeshBuilder
 
     private static ApronReceiverMesh EmitTessellatedApron(
         StationModuleMesh mesh,
-        MegastationLandingDistrictPlan plan,
+        MegastationLandingSitePlan site,
         Color colour)
     {
-        Vector3 right = Vector3.Normalize(plan.DistrictRight);
-        Vector3 up = Vector3.Normalize(plan.FloorNormal);
+        Vector3 right = Vector3.Normalize(site.Right);
+        Vector3 up = Vector3.Normalize(site.FloorNormal);
         // Match Frame/AddOrientedBox exactly. PreferredHeading may differ only by sign;
         // the symmetric apron depth and its established UV phase use this right-handed axis.
         Vector3 depth = Vector3.Normalize(Vector3.Cross(right, up));
-        float halfWidth = plan.ApronSize.X * .5f;
-        float halfDepth = plan.ApronSize.Y * .5f;
+        float halfWidth = site.ApronSize.X * .5f;
+        float halfDepth = site.ApronSize.Y * .5f;
         float halfHeight = MegastationLandingPadAssemblyStandards.ApronThickness * .5f;
-        Vector3 centre = plan.ApronCentre;
+        Vector3 centre = site.ApronCentre;
         Vector3 c0 = centre - right * halfWidth - up * halfHeight - depth * halfDepth;
         Vector3 c1 = centre + right * halfWidth - up * halfHeight - depth * halfDepth;
         Vector3 c3 = centre - right * halfWidth + up * halfHeight - depth * halfDepth;
@@ -1033,10 +1361,10 @@ public static class MegastationLandingDistrictMeshBuilder
         mesh.AddQuad(c5, c1, c2, c6, colour);
         mesh.AddQuad(c0, c1, c5, c4, colour);
 
-        int columns = Math.Max(1, (int)MathF.Ceiling(plan.ApronSize.X / ApronReceiverSpacing));
-        int rows = Math.Max(1, (int)MathF.Ceiling(plan.ApronSize.Y / ApronReceiverSpacing));
-        float cellWidth = plan.ApronSize.X / columns;
-        float cellDepth = plan.ApronSize.Y / rows;
+        int columns = Math.Max(1, (int)MathF.Ceiling(site.ApronSize.X / ApronReceiverSpacing));
+        int rows = Math.Max(1, (int)MathF.Ceiling(site.ApronSize.Y / ApronReceiverSpacing));
+        float cellWidth = site.ApronSize.X / columns;
+        float cellDepth = site.ApronSize.Y / rows;
         int firstFace = mesh.FaceCount;
         int firstVertex = mesh.VertexCount;
 
@@ -1583,14 +1911,14 @@ public static class MegastationLandingDistrictMeshBuilder
     private static void EmitOperationalFloorMarkings(
         StationModuleMesh mesh,
         MegastationLandingDistrictPlan plan,
-        Vector3 up,
-        Vector3 right,
-        Vector3 forward)
+        Vector3 up)
     {
         mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
         SetMaterial(mesh, SystemMaterialFamilyId.PaintedCoatedMetal);
         foreach (MegastationLoadingAreaPlan area in plan.LoadingAreas)
         {
+            Vector3 right = area.Right;
+            Vector3 forward = area.PreferredHeading;
             EmitFloorOutline(mesh, area.Centre, area.Size, right, up, forward,
                 MegastationLandingDistrictPlanner.LoadingAreaOutlineWidth, MarkingColour);
 
@@ -1607,6 +1935,8 @@ public static class MegastationLandingDistrictMeshBuilder
 
         foreach (MegastationKeepClearZonePlan zone in plan.KeepClearZones)
         {
+            Vector3 right = zone.Right;
+            Vector3 forward = zone.PreferredHeading;
             EmitDiagonalStripes(mesh, zone.Centre, zone.Size, right, up, -forward,
                 1.35f, .16f, WarningColour);
             if (!zone.ShowLabel) continue;
@@ -1626,8 +1956,6 @@ public static class MegastationLandingDistrictMeshBuilder
         StationModuleMesh mesh,
         MegastationLandingDistrictPlan plan,
         Vector3 up,
-        Vector3 right,
-        Vector3 forward,
         Color dominant,
         Color accent,
         List<(int Start, int Count)> artificialLightVertexRanges)
@@ -1649,7 +1977,7 @@ public static class MegastationLandingDistrictMeshBuilder
                 lockGrade: LockGrade.Civilian);
             int vertexStart = mesh.VertexCount;
             mesh.MergeTransformed(vertices, indices,
-                Frame(container.Centre, right, up, forward));
+                Frame(container.Centre, area.Right, up, area.PreferredHeading));
             artificialLightVertexRanges.Add((vertexStart, mesh.VertexCount - vertexStart));
         }
     }

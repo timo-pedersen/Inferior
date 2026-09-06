@@ -210,7 +210,8 @@ public sealed class MegastationArtificialLightingTests
             MegastationArtificialLighting.Plan(first.InteriorPlan);
 
         Assert.Equal(12, replanned.Lights.Count);
-        Assert.Equal(50, first.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(12 + first.LandingDistrictPlan.ArtificialLights.Count,
+            first.ArtificialLightingPlan.Lights.Count);
         Assert.Equal(replanned.Lights, first.ArtificialLightingPlan.Lights.Take(12));
         Assert.All(replanned.Lights, light =>
         {
@@ -255,7 +256,8 @@ public sealed class MegastationArtificialLightingTests
         }
 
         Assert.True(litInteriorVertices > 0);
-        Assert.Equal(50, result.InteriorPlan.Diagnostics.ArtificialLightSourceCount);
+        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count,
+            result.InteriorPlan.Diagnostics.ArtificialLightSourceCount);
         Assert.True(result.InteriorPlan.Diagnostics.ArtificialOccluderCount > 0);
         Assert.True(result.InteriorPlan.Diagnostics.ArtificialLightReceiverSampleCount > 0);
         Assert.True(result.InteriorPlan.Diagnostics.ArtificialLightVisibilityTestCount > 0);

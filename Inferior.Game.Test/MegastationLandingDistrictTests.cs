@@ -13,26 +13,97 @@ public sealed class MegastationLandingDistrictTests
         new(() => MegastationPrototypeGenerator.GenerateCpu(Nova));
 
     [Fact]
-    public void DistrictUsesOneCoherentSixPadLayoutAndAuthoritativeEntranceFrame()
+    public void DistrictUsesCoherentCardinalLandingSitesAndAuthoritativeFloorFrame()
     {
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan district = result.LandingDistrictPlan;
 
-        Assert.Equal(6, district.Pads.Count);
-        Assert.Equal(4, district.Pads.Count(pad => !pad.IsLarge));
-        Assert.Equal(2, district.Pads.Count(pad => pad.IsLarge));
+        Assert.InRange(district.Sites.Count, 1, 3);
+        Assert.True(district.Pads.Count >= 8);
+        Assert.True(district.Pads.Count(pad => pad.IsLarge) >= 2);
         Assert.All(district.Pads.Where(pad => !pad.IsLarge), pad =>
             Assert.Equal(new Vector2(36f, 36f), pad.NominalSize));
         Assert.All(district.Pads.Where(pad => pad.IsLarge), pad =>
             Assert.Equal(new Vector2(36f, 72f), pad.NominalSize));
         Assert.True(Vector3.Dot(district.FloorNormal, result.InteriorPlan.PortalUp) > .9999f);
-        Assert.True(Vector3.Dot(district.PreferredHeading, result.InteriorPlan.OutwardNormal) > .9999f);
+        Assert.Equal(district.Sites.Count, district.Diagnostics.SiteCount);
+        foreach (MegastationLandingSitePlan site in district.Sites)
+        {
+            Assert.InRange(site.PadIds.Count, 1, 15);
+            Assert.Equal(site.PadIds.Count <= 3 ? MegastationLandingSiteSize.Small
+                : site.PadIds.Count <= 8 ? MegastationLandingSiteSize.Medium
+                : MegastationLandingSiteSize.Large, site.SizeClass);
+            Assert.Contains(site.Orientation,
+                Enum.GetValues<MegastationLandingSiteOrientation>());
+            Assert.True(Vector3.Dot(site.FloorNormal, district.FloorNormal) > .9999f);
+            Assert.True(MathF.Abs(Vector3.Dot(site.Right, district.DistrictRight)) > .9999f
+                || MathF.Abs(Vector3.Dot(site.Right, district.PreferredHeading)) > .9999f);
+        }
         Assert.All(district.Pads, pad =>
         {
             Assert.Equal(8, pad.FutureSupportPolygon.Count);
-            Assert.True(Vector3.Dot(pad.PadSurface.PreferredHeading,
-                result.InteriorPlan.OutwardNormal) > .9999f);
+            Assert.True(Vector3.Dot(pad.PadSurface.Normal, district.FloorNormal) > .9999f);
+            Assert.Contains(district.Sites, site => site.PadIds.Contains(pad.PadId)
+                && Vector3.Dot(site.PreferredHeading, pad.PadSurface.PreferredHeading) > .9999f);
         });
+    }
+
+    [Fact]
+    public void SiteEnvelopesAreSeparatedAndSeedSampleExercisesL2aVocabulary()
+    {
+        MegastationInteriorPlan baseline = Result.Value.InteriorPlan;
+        var siteCounts = new HashSet<int>();
+        var sizes = new HashSet<MegastationLandingSiteSize>();
+        var characters = new HashSet<MegastationLandingSiteCharacter>();
+        var orientations = new HashSet<MegastationLandingSiteOrientation>();
+        for (int offset = 0; offset < 96; offset++)
+        {
+            int sampledSeed = unchecked(baseline.Seed + offset * 0x45d9f3b);
+            MegastationLandingDistrictPlan plan =
+                MegastationLandingDistrictPlanner.Plan(baseline with { Seed = sampledSeed });
+            siteCounts.Add(plan.Sites.Count);
+            foreach (MegastationLandingSitePlan site in plan.Sites)
+            {
+                sizes.Add(site.SizeClass);
+                characters.Add(site.Character);
+                orientations.Add(site.Orientation);
+            }
+            for (int i = 0; i < plan.Sites.Count; i++)
+            for (int j = i + 1; j < plan.Sites.Count; j++)
+                Assert.False(plan.Sites[i].InfrastructureEnvelope.Intersects(
+                    plan.Sites[j].InfrastructureEnvelope));
+            Assert.All(plan.Pads, pad =>
+                Assert.True(Vector3.Dot(pad.PadSurface.Normal, plan.FloorNormal) > .9999f));
+            if (plan.Diagnostics.PadCapacityDeficit == 0)
+                Assert.True(plan.Pads.Count >= 8);
+            if (plan.Diagnostics.LargePadCapacityDeficit == 0)
+                Assert.True(plan.Pads.Count(pad => pad.IsLarge) >= 2);
+        }
+
+        Assert.Equal([1, 2, 3], siteCounts.Order());
+        Assert.Equal(Enum.GetValues<MegastationLandingSiteSize>().Order(), sizes.Order());
+        Assert.Equal(Enum.GetValues<MegastationLandingSiteCharacter>().Order(), characters.Order());
+        Assert.Equal(Enum.GetValues<MegastationLandingSiteOrientation>().Order(),
+            orientations.Order());
+    }
+
+    [Fact]
+    public void ConstrainedFloorDegradesToObservableCapacityDeficitWithoutInvalidPlacement()
+    {
+        MegastationInteriorPlan baseline = Result.Value.InteriorPlan;
+        Vector3 centre = (baseline.CavityEnvelope.Minimum + baseline.CavityEnvelope.Maximum) * .5f;
+        MegastationInteriorVolume constrained = baseline.CavityEnvelope with
+        {
+            Minimum = centre - new Vector3(45f),
+            Maximum = centre + new Vector3(45f),
+        };
+        MegastationLandingDistrictPlan plan = MegastationLandingDistrictPlanner.Plan(
+            baseline with { CavityEnvelope = constrained });
+
+        Assert.True(plan.Diagnostics.PadCapacityDeficit > 0);
+        Assert.True(plan.Diagnostics.LargePadCapacityDeficit > 0);
+        Assert.Empty(plan.Sites);
+        Assert.Empty(plan.Pads);
     }
 
     [Fact]
@@ -43,16 +114,17 @@ public sealed class MegastationLandingDistrictTests
         {
             MegastationBerthClearance berth = pad.FutureBerthClearance;
             Assert.Equal(pad.HardClearance, berth);
-            Assert.Equal(pad.NominalSize.X + 10f,
-                berth.RightMaximum - berth.RightMinimum, 3);
-            Assert.Equal(pad.NominalSize.Y + 10f,
-                berth.ForwardMaximum - berth.ForwardMinimum, 3);
-            Assert.Equal(pad.NominalSize.X + 20f,
-                pad.BuildingSetbackClearance.RightMaximum
-                    - pad.BuildingSetbackClearance.RightMinimum, 3);
-            Assert.Equal(pad.NominalSize.Y + 20f,
-                pad.BuildingSetbackClearance.ForwardMaximum
-                    - pad.BuildingSetbackClearance.ForwardMinimum, 3);
+            Assert.Equal(MegastationLandingDistrictPlanner.OrientedEnvelope(
+                pad.PadSurface.Centre, district.DistrictRight, district.PreferredHeading,
+                pad.PadSurface.Right, pad.PadSurface.PreferredHeading,
+                pad.NominalSize.X, pad.NominalSize.Y,
+                MegastationLandingDistrictPlanner.BerthMargin), berth);
+            Assert.Equal(MegastationLandingDistrictPlanner.OrientedEnvelope(
+                pad.PadSurface.Centre, district.DistrictRight, district.PreferredHeading,
+                pad.PadSurface.Right, pad.PadSurface.PreferredHeading,
+                pad.NominalSize.X, pad.NominalSize.Y,
+                MegastationLandingDistrictPlanner.BuildingSetback),
+                pad.BuildingSetbackClearance);
             Assert.True(pad.OperationalApron.ForwardMaximum
                 - pad.OperationalApron.ForwardMinimum
                 >= MegastationLandingDistrictPlanner.OperationalApronDepth);
@@ -92,7 +164,8 @@ public sealed class MegastationLandingDistrictTests
                 replanned.Pads[i].BuildingSetbackClearance);
         }
         Assert.Equal(12, baseline.Lights.Count);
-        Assert.Equal(50, result.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(baseline.Lights.Count + result.LandingDistrictPlan.ArtificialLights.Count,
+            result.ArtificialLightingPlan.Lights.Count);
         Assert.Equal(baseline.Lights, result.ArtificialLightingPlan.Lights.Take(12));
         Assert.Equal(result.LandingDistrictPlan.ArtificialLights,
             result.ArtificialLightingPlan.Lights.Skip(12));
@@ -107,9 +180,10 @@ public sealed class MegastationLandingDistrictTests
         Assert.True(result.InteriorPlan.Diagnostics.LandingDistrictVisibleVertexCount > 0);
         Assert.True(result.InteriorPlan.Diagnostics.LandingDistrictVisibleTriangleCount > 0);
         Assert.True(result.InteriorPlan.Diagnostics.LandingDistrictShadowTriangleCount > 0);
-        Assert.Equal(3, result.LandingDistrictPlan.ServiceBuildings.Count);
+        Assert.NotEmpty(result.LandingDistrictPlan.ServiceBuildings);
         Console.WriteLine(
-            $"L1f Nova: pads={result.LandingDistrictPlan.Diagnostics.StandardPadCount}+" +
+            $"L2a Nova: sites={result.LandingDistrictPlan.Diagnostics.SiteSummary}; " +
+            $"pads={result.LandingDistrictPlan.Diagnostics.StandardPadCount}+" +
             $"{result.LandingDistrictPlan.Diagnostics.LargePadCount}; " +
             $"apron={result.LandingDistrictPlan.Diagnostics.ApronSize.X:F0}x" +
             $"{result.LandingDistrictPlan.Diagnostics.ApronSize.Y:F0}m; " +
@@ -158,30 +232,65 @@ public sealed class MegastationLandingDistrictTests
             repeatedMesh, plan, generated.MaterialAssignment);
         Assert.Equal(mesh.ToIntArrays().verts, repeatedMesh.ToIntArrays().verts);
         Assert.Equal(mesh.ToIntArrays().indices, repeatedMesh.ToIntArrays().indices);
-        var receiverVertices = vertices
-            .Skip(result.ApronReceiverFirstVertex)
-            .Take(result.ApronReceiverVertexCount)
-            .ToArray();
-        Vector3 right = Vector3.Normalize(plan.DistrictRight);
         Vector3 up = Vector3.Normalize(plan.FloorNormal);
-        Vector3 depth = Vector3.Normalize(Vector3.Cross(right, up));
-        float halfWidth = plan.ApronSize.X * .5f;
-        float halfDepth = plan.ApronSize.Y * .5f;
-        Vector3 origin = plan.ApronCentre - right * halfWidth
-            + up * (MegastationLandingPadAssemblyStandards.ApronThickness * .5f)
-            + depth * halfDepth;
         Vector3 arbitrary = MathF.Abs(up.Y) < .85f ? Vector3.UnitY : Vector3.UnitX;
         Vector3 textureU = Vector3.Normalize(Vector3.Cross(up, arbitrary));
         Vector3 textureV = Vector3.Normalize(Vector3.Cross(up, textureU));
         float tileSize = SystemMaterialRecipes.Get(
             SystemMaterialFamilyId.HeavyIndustrialPlate).TileSizeMeters;
 
-        int expectedColumns = (int)MathF.Ceiling(
-            plan.ApronSize.X / MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
-        int expectedRows = (int)MathF.Ceiling(
-            plan.ApronSize.Y / MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
-        Assert.Equal(expectedColumns * expectedRows, result.ApronReceiverFaceCount);
-        Assert.Equal(result.ApronReceiverFaceCount * 4, receiverVertices.Length);
+        Assert.Equal(plan.Sites.Count, result.ApronReceiverRanges.Count);
+        Assert.Equal(result.ApronReceiverFaceCount * 2,
+            result.Diagnostics.ApronReceiverTriangleCount);
+        int totalFaces = 0;
+        int totalVertices = 0;
+        for (int i = 0; i < plan.Sites.Count; i++)
+        {
+            MegastationLandingSitePlan site = plan.Sites[i];
+            var range = result.ApronReceiverRanges[i];
+            Vector3 right = Vector3.Normalize(site.Right);
+            Vector3 depth = Vector3.Normalize(Vector3.Cross(right, up));
+            float halfWidth = site.ApronSize.X * .5f;
+            float halfDepth = site.ApronSize.Y * .5f;
+            Vector3 origin = site.ApronCentre - right * halfWidth
+                + up * (MegastationLandingPadAssemblyStandards.ApronThickness * .5f)
+                + depth * halfDepth;
+            var receiverVertices = vertices.Skip(range.FirstVertex)
+                .Take(range.VertexCount).ToArray();
+            int expectedColumns = (int)MathF.Ceiling(
+                site.ApronSize.X / MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
+            int expectedRows = (int)MathF.Ceiling(
+                site.ApronSize.Y / MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
+            Assert.Equal(expectedColumns * expectedRows, range.FaceCount);
+            Assert.Equal(range.FaceCount * 4, receiverVertices.Length);
+            totalFaces += range.FaceCount;
+            totalVertices += range.VertexCount;
+
+            foreach (var vertex in receiverVertices)
+            {
+                Vector3 offset = vertex.Position - origin;
+                float localRight = Vector3.Dot(offset, right);
+                float localDepth = -Vector3.Dot(offset, depth);
+                Assert.InRange(localRight, -.001f, site.ApronSize.X + .001f);
+                Assert.InRange(localDepth, -.001f, site.ApronSize.Y + .001f);
+                Assert.True(Vector3.Dot(vertex.Normal, up) > .9999f);
+                Vector2 expectedUv = new(
+                    Vector3.Dot(offset, textureU) / tileSize,
+                    Vector3.Dot(offset, textureV) / tileSize);
+                Assert.InRange(Vector2.Distance(vertex.TextureCoordinate, expectedUv), 0f, 1e-5f);
+            }
+
+            for (int face = range.FirstFace; face < range.FirstFace + range.FaceCount; face++)
+            {
+                Vector3[] points = mesh.GetFaceVertexPositions(face);
+                Assert.Equal(4, points.Length);
+                Assert.True(Vector3.Dot(mesh.LocalFaceNormal(face), up) > .9999f);
+                Assert.True(Vector3.Cross(points[1] - points[0], points[2] - points[0])
+                    .LengthSquared() > 1e-8f);
+            }
+        }
+        Assert.Equal(totalFaces, result.ApronReceiverFaceCount);
+        Assert.Equal(totalVertices, result.ApronReceiverVertexCount);
         Assert.Equal(result.ApronReceiverFaceCount * 2,
             result.Diagnostics.ApronReceiverTriangleCount);
         Assert.Equal(plan.Pads.Count, result.PadTopReceiverRanges.Count);
@@ -195,54 +304,6 @@ public sealed class MegastationLandingDistrictTests
         Assert.InRange(result.Diagnostics.ApronReceiverMaximumSpacing, 0f,
             MegastationLandingDistrictMeshBuilder.ApronReceiverSpacing);
 
-        foreach (var vertex in receiverVertices)
-        {
-            Vector3 offset = vertex.Position - origin;
-            float localRight = Vector3.Dot(offset, right);
-            float localDepth = -Vector3.Dot(offset, depth);
-            Assert.InRange(localRight, -.001f, plan.ApronSize.X + .001f);
-            Assert.InRange(localDepth, -.001f, plan.ApronSize.Y + .001f);
-            Assert.True(Vector3.Dot(vertex.Normal, up) > .9999f);
-            Assert.True(float.IsFinite(vertex.Position.X)
-                && float.IsFinite(vertex.Position.Y)
-                && float.IsFinite(vertex.Position.Z));
-            Vector2 expectedUv = new(
-                Vector3.Dot(offset, textureU) / tileSize,
-                Vector3.Dot(offset, textureV) / tileSize);
-            Assert.InRange(Vector2.Distance(vertex.TextureCoordinate, expectedUv), 0f, 1e-5f);
-        }
-
-        float minRight = receiverVertices.Min(vertex =>
-            Vector3.Dot(vertex.Position - plan.ApronCentre, right));
-        float maxRight = receiverVertices.Max(vertex =>
-            Vector3.Dot(vertex.Position - plan.ApronCentre, right));
-        float minDepth = receiverVertices.Min(vertex =>
-            Vector3.Dot(vertex.Position - plan.ApronCentre, depth));
-        float maxDepth = receiverVertices.Max(vertex =>
-            Vector3.Dot(vertex.Position - plan.ApronCentre, depth));
-        Assert.Equal(-halfWidth, minRight, 3);
-        Assert.Equal(halfWidth, maxRight, 3);
-        Assert.Equal(-halfDepth, minDepth, 3);
-        Assert.Equal(halfDepth, maxDepth, 3);
-
-        MegastationLandingPadPlan pad = plan.Pads.Single(candidate => candidate.PadId == "LD-05");
-        int beneathPad = receiverVertices.Count(vertex =>
-            MathF.Abs(Vector3.Dot(vertex.Position - pad.PadSurface.Centre, right))
-                <= pad.NominalSize.X * .5f
-            && MathF.Abs(Vector3.Dot(vertex.Position - pad.PadSurface.Centre, depth))
-                <= pad.NominalSize.Y * .5f);
-        Assert.True(beneathPad > 4);
-
-        for (int face = result.ApronReceiverFirstFace;
-             face < result.ApronReceiverFirstFace + result.ApronReceiverFaceCount;
-             face++)
-        {
-            Vector3[] points = mesh.GetFaceVertexPositions(face);
-            Assert.Equal(4, points.Length);
-            Assert.True(Vector3.Dot(mesh.LocalFaceNormal(face), up) > .9999f);
-            Assert.True(Vector3.Cross(points[1] - points[0], points[2] - points[0])
-                .LengthSquared() > 1e-8f);
-        }
     }
 
     [Fact]
@@ -288,13 +349,11 @@ public sealed class MegastationLandingDistrictTests
             foreach (MegastationLandingPadPlan pad in district.Pads)
             foreach (MegastationLandingServiceBuilding building in district.ServiceBuildings)
             {
-                MegastationBerthClearance footprint = MegastationLandingDistrictPlanner.Envelope(
-                    building.Centre,
-                    district.DistrictRight,
-                    district.PreferredHeading,
-                    building.Size.X,
-                    building.Size.Z,
-                    0f);
+                MegastationBerthClearance footprint =
+                    MegastationLandingDistrictPlanner.OrientedEnvelope(
+                        building.Centre, district.DistrictRight, district.PreferredHeading,
+                        building.Frontage.Right, building.Frontage.Normal,
+                        building.Size.X, building.Size.Z, 0f);
                 Assert.False(pad.BuildingSetbackClearance.Intersects(footprint));
                 Assert.False(pad.OperationalApron.Intersects(footprint));
             }
@@ -305,16 +364,19 @@ public sealed class MegastationLandingDistrictTests
     public void ServiceBuildingsExposeSparseLandingFacingOperationalFrontages()
     {
         MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
-        Assert.Equal(3, district.ServiceBuildings.Count);
+        Assert.NotEmpty(district.ServiceBuildings);
 
         foreach (MegastationLandingServiceBuilding building in district.ServiceBuildings)
         {
             MegastationOperationalFrontagePlan frontage = building.Frontage;
-            Assert.True(Vector3.Dot(frontage.Normal, district.PreferredHeading) > .9999f);
-            Assert.True(Vector3.Dot(frontage.Right, district.DistrictRight) > .9999f);
+            MegastationLandingSitePlan site = district.Sites.Single(candidate =>
+                candidate.Identity == building.SiteIdentity);
+            Assert.True(Vector3.Dot(frontage.Normal, site.PreferredHeading) > .9999f);
+            Assert.True(Vector3.Dot(frontage.Right, site.Right) > .9999f);
             Assert.True(Vector3.Dot(frontage.Up, district.FloorNormal) > .9999f);
-            Assert.Single(frontage.ServedPadIds);
-            Assert.Contains(district.Pads, pad => pad.PadId == frontage.ServedPadIds[0]);
+            Assert.NotEmpty(frontage.ServedPadIds);
+            Assert.All(frontage.ServedPadIds, id =>
+                Assert.Contains(district.Pads, pad => pad.PadId == id));
             Assert.InRange(frontage.PersonnelEntrances.Count, 1, 3);
             Assert.InRange(frontage.CargoEntrances.Count, 1, 2);
             Assert.InRange(frontage.WindowGroups.Count, 1, 3);
@@ -364,25 +426,29 @@ public sealed class MegastationLandingDistrictTests
     public void OperationsLoadingAreaAndKeepClearZonesConsumePlannedFrontageEntrances()
     {
         MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
-        MegastationLoadingAreaPlan area = Assert.Single(district.LoadingAreas);
-        MegastationLandingServiceBuilding building = district.ServiceBuildings.Single(candidate =>
-            candidate.Identity == area.ServiceBuildingIdentity);
-        Assert.Equal(["LD-05"], building.Frontage.ServedPadIds);
+        Assert.Equal(district.Sites.Count, district.LoadingAreas.Count);
+        foreach (MegastationLoadingAreaPlan area in district.LoadingAreas)
+        {
+            MegastationLandingServiceBuilding building = district.ServiceBuildings.Single(candidate =>
+                candidate.Identity == area.ServiceBuildingIdentity);
+            Assert.Contains(area.PadId, building.Frontage.ServedPadIds);
+            MegastationCargoEntrancePlan cargo = building.Frontage.CargoEntrances[0];
+            MegastationPersonnelEntrancePlan personnel = building.Frontage.PersonnelEntrances[0];
+            MegastationKeepClearZonePlan cargoZone = district.KeepClearZones.Single(zone =>
+                zone.SiteIdentity == area.SiteIdentity
+                && zone.Purpose == MegastationKeepClearPurpose.CargoDoor);
+            MegastationKeepClearZonePlan personnelZone = district.KeepClearZones.Single(zone =>
+                zone.SiteIdentity == area.SiteIdentity
+                && zone.Purpose == MegastationKeepClearPurpose.PersonnelDoor);
+            Vector3 cargoFloor = cargo.Centre - district.FloorNormal * (cargo.Size.Y * .5f);
+            Vector3 personnelFloor = personnel.Centre
+                - district.FloorNormal * (personnel.Size.Y * .5f);
 
-        MegastationCargoEntrancePlan cargo = building.Frontage.CargoEntrances[0];
-        MegastationPersonnelEntrancePlan personnel = building.Frontage.PersonnelEntrances[0];
-        MegastationKeepClearZonePlan cargoZone = district.KeepClearZones.Single(zone =>
-            zone.Purpose == MegastationKeepClearPurpose.CargoDoor);
-        MegastationKeepClearZonePlan personnelZone = district.KeepClearZones.Single(zone =>
-            zone.Purpose == MegastationKeepClearPurpose.PersonnelDoor);
-        Vector3 cargoFloor = cargo.Centre - district.FloorNormal * (cargo.Size.Y * .5f);
-        Vector3 personnelFloor = personnel.Centre
-            - district.FloorNormal * (personnel.Size.Y * .5f);
-
-        AssertVector(cargoFloor + district.PreferredHeading * 2.5f, cargoZone.Centre);
-        AssertVector(personnelFloor + district.PreferredHeading * 1.5f, personnelZone.Centre);
-        Assert.False(area.Bounds.Intersects(cargoZone.Bounds));
-        Assert.False(area.Bounds.Intersects(personnelZone.Bounds));
+            AssertVector(cargoFloor + area.PreferredHeading * 2.5f, cargoZone.Centre);
+            AssertVector(personnelFloor + area.PreferredHeading * 1.5f, personnelZone.Centre);
+            Assert.False(area.Bounds.Intersects(cargoZone.Bounds));
+            Assert.False(area.Bounds.Intersects(personnelZone.Bounds));
+        }
     }
 
     [Fact]
@@ -413,8 +479,12 @@ public sealed class MegastationLandingDistrictTests
             Assert.Equal(expected.Frontage.FacilityIdentifier,
                 actual.Frontage.FacilityIdentifier);
         }
-        Assert.Equal(38, result.LandingDistrictPlan.ArtificialLights.Count);
-        Assert.Equal(50, result.ArtificialLightingPlan.Lights.Count);
+        Assert.Equal(result.LandingDistrictPlan.Pads.Count * 5
+                + result.LandingDistrictPlan.Sites.Count * 2
+                + result.LandingDistrictPlan.ServiceBuildings.Count * 2,
+            result.LandingDistrictPlan.ArtificialLights.Count);
+        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count,
+            result.ArtificialLightingPlan.Lights.Count);
         Assert.All(result.LandingDistrictPlan.ServiceBuildings, building =>
             Assert.Contains("frontage", building.Frontage.Identity, StringComparison.Ordinal));
     }
@@ -467,7 +537,7 @@ public sealed class MegastationLandingDistrictTests
                     building.Frontage.Normal) > 2f);
 
                 foreach (MegastationLandingServiceBuilding obstacle in district.ServiceBuildings)
-                    Assert.False(IsInsideBuilding(floodlight.SourcePosition, obstacle, district));
+                    Assert.False(IsInsideBuilding(floodlight.SourcePosition, obstacle));
             }
         }
     }
@@ -607,10 +677,12 @@ public sealed class MegastationLandingDistrictTests
     public void InstalledPadSurfaceAndOpenGapUseTheRequestedVerticalStack()
     {
         MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
-        float apronTop = Vector3.Dot(district.ApronCentre, district.FloorNormal)
-            + MegastationLandingPadAssemblyStandards.ApronThickness * .5f;
         foreach (MegastationLandingPadPlan pad in district.Pads)
         {
+            MegastationLandingSitePlan site = district.Sites.Single(candidate =>
+                candidate.PadIds.Contains(pad.PadId));
+            float apronTop = Vector3.Dot(site.ApronCentre, district.FloorNormal)
+                + MegastationLandingPadAssemblyStandards.ApronThickness * .5f;
             float padTop = Vector3.Dot(pad.PadSurface.Centre, district.FloorNormal);
             Assert.Equal(MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron,
                 padTop - apronTop, 3);
@@ -705,47 +777,51 @@ public sealed class MegastationLandingDistrictTests
     public void LoadingAreaContainsOrganizedStandardContainersAndStaysOutsideBerth()
     {
         MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
-        MegastationLoadingAreaPlan area = Assert.Single(district.LoadingAreas);
-        Assert.Equal("LD-05", area.PadId);
-        Assert.EndsWith("operations", area.ServiceBuildingIdentity, StringComparison.Ordinal);
-        Assert.Equal("LOADING AREA 05", area.Label);
-        Assert.Equal(new Vector2(28f, 12f), area.Size);
+        Assert.Equal(district.Sites.Count, district.LoadingAreas.Count);
         Assert.Equal(.10f, MegastationLandingDistrictPlanner.LoadingAreaOutlineWidth);
-        Assert.Equal(6, area.Containers.Count);
-
+        foreach (MegastationLoadingAreaPlan area in district.LoadingAreas)
+        {
+        Assert.Contains(district.Sites, site => site.Identity == area.SiteIdentity);
+        Assert.Contains(district.Pads, pad => pad.PadId == area.PadId);
+        Assert.StartsWith("LOADING AREA ", area.Label, StringComparison.Ordinal);
+        Assert.InRange(area.Containers.Count, 2, 8);
         foreach (MegastationLandingContainerPlan container in area.Containers)
         {
             Assert.Equal(MegastationLandingDistrictPlanner.StandardContainerSize, container.Size);
             Assert.True(area.Bounds.Contains(container.Footprint));
         }
 
-        Assert.Equal(2, area.Containers.GroupBy(container => container.Footprint)
-            .Single(group => group.Count() == 2).Count());
         float occupiedFraction = area.Containers.Select(container => container.Footprint)
             .Distinct().Sum(footprint =>
                 (footprint.RightMaximum - footprint.RightMinimum)
                 * (footprint.ForwardMaximum - footprint.ForwardMinimum))
             / (area.Size.X * area.Size.Y);
-        Assert.InRange(occupiedFraction, .20f, .60f);
+        Assert.InRange(occupiedFraction, .10f, .75f);
         MegastationLandingPadPlan pad = district.Pads.Single(candidate => candidate.PadId == area.PadId);
         Assert.False(area.Bounds.Intersects(pad.FutureBerthClearance));
+        }
     }
 
     [Fact]
     public void KeepClearGrammarIsSparsePurposefulAndSeparateFromStoredCargo()
     {
         MegastationLandingDistrictPlan district = Result.Value.LandingDistrictPlan;
-        MegastationLoadingAreaPlan area = Assert.Single(district.LoadingAreas);
-        Assert.Equal(4, district.KeepClearZones.Count);
-        Assert.Equal(Enum.GetValues<MegastationKeepClearPurpose>().Order(),
-            district.KeepClearZones.Select(zone => zone.Purpose).Order());
-        Assert.Equal(2, district.KeepClearZones.Count(zone => zone.ShowLabel));
-
-        foreach (MegastationKeepClearZonePlan zone in district.KeepClearZones)
+        Assert.Equal(district.Sites.Count * 4, district.KeepClearZones.Count);
+        foreach (MegastationLandingSitePlan site in district.Sites)
         {
-            Assert.False(area.Bounds.Intersects(zone.Bounds));
-            Assert.All(area.Containers, container =>
-                Assert.False(zone.Bounds.Intersects(container.Footprint)));
+            MegastationLoadingAreaPlan area = district.LoadingAreas.Single(candidate =>
+                candidate.SiteIdentity == site.Identity);
+            MegastationKeepClearZonePlan[] zones = district.KeepClearZones.Where(zone =>
+                zone.SiteIdentity == site.Identity).ToArray();
+            Assert.Equal(Enum.GetValues<MegastationKeepClearPurpose>().Order(),
+                zones.Select(zone => zone.Purpose).Order());
+            Assert.Equal(2, zones.Count(zone => zone.ShowLabel));
+            foreach (MegastationKeepClearZonePlan zone in zones)
+            {
+                Assert.False(area.Bounds.Intersects(zone.Bounds));
+                Assert.All(area.Containers, container =>
+                    Assert.False(zone.Bounds.Intersects(container.Footprint)));
+            }
         }
     }
 
@@ -767,8 +843,8 @@ public sealed class MegastationLandingDistrictTests
             Assert.Equal(expected.Containers, actual.Containers);
         }
         Assert.Equal(result.LandingDistrictPlan.KeepClearZones, replanned.KeepClearZones);
-        Assert.Equal(50, result.ArtificialLightingPlan.Lights.Count);
-        Assert.Equal(38, result.LandingDistrictPlan.ArtificialLights.Count);
+        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count,
+            result.ArtificialLightingPlan.Lights.Count);
     }
 
     [Fact]
@@ -794,8 +870,7 @@ public sealed class MegastationLandingDistrictTests
     [Fact]
     public void ScaleHumanUsesRaisedPadSurfaceAsFeetContactPlane()
     {
-        MegastationLandingPadPlan pad = Result.Value.LandingDistrictPlan.Pads
-            .Single(candidate => candidate.PadId == "LD-05");
+        MegastationLandingPadPlan pad = Result.Value.LandingDistrictPlan.Pads[0];
 
         Vector3 feet = MegastationLandingDistrictMeshBuilder.ScaleHumanFeetPosition(pad);
 
@@ -807,8 +882,7 @@ public sealed class MegastationLandingDistrictTests
     [Fact]
     public void ScaleHumanFeetContactFloorPadAndStairSupportSurfaces()
     {
-        MegastationLandingPadPlan pad = Result.Value.LandingDistrictPlan.Pads
-            .Single(candidate => candidate.PadId == "LD-05");
+        MegastationLandingPadPlan pad = Result.Value.LandingDistrictPlan.Pads[0];
         Vector3 normal = pad.PadSurface.Normal;
         Vector3 bayFloor = pad.PadSurface.Centre - normal
             * (MegastationLandingPadAssemblyStandards.PadTopHeightAboveApron
@@ -850,13 +924,12 @@ public sealed class MegastationLandingDistrictTests
 
     private static bool IsInsideBuilding(
         Vector3 point,
-        MegastationLandingServiceBuilding building,
-        MegastationLandingDistrictPlan district)
+        MegastationLandingServiceBuilding building)
     {
         Vector3 offset = point - building.Centre;
-        return MathF.Abs(Vector3.Dot(offset, district.DistrictRight)) < building.Size.X * .5f
-            && MathF.Abs(Vector3.Dot(offset, district.FloorNormal)) < building.Size.Y * .5f
-            && MathF.Abs(Vector3.Dot(offset, district.PreferredHeading)) < building.Size.Z * .5f;
+        return MathF.Abs(Vector3.Dot(offset, building.Frontage.Right)) < building.Size.X * .5f
+            && MathF.Abs(Vector3.Dot(offset, building.Frontage.Up)) < building.Size.Y * .5f
+            && MathF.Abs(Vector3.Dot(offset, building.Frontage.Normal)) < building.Size.Z * .5f;
     }
 
     private static void AssertVector(Vector3 expected, Vector3 actual)

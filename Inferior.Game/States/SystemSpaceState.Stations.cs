@@ -129,8 +129,12 @@ public sealed partial class SystemSpaceState
             $"tests:{d.ArtificialLightVisibilityTestCount}," +
             $"blocked:{d.ArtificialLightBlockedVisibilityTestCount}," +
             $"bakeMs:{d.ArtificialLightBakeMilliseconds:F1}; " +
-            $"landingDistrict=pads:{d.LandingDistrictPadCount}," +
+            $"landingDistrict=sites:{d.LandingDistrictSiteCount}" +
+            $"({d.LandingDistrictSmallSiteCount}S/{d.LandingDistrictMediumSiteCount}M/" +
+            $"{d.LandingDistrictLargeSiteCount}L),pads:{d.LandingDistrictPadCount}," +
             $"standard:{d.LandingDistrictStandardPadCount},large:{d.LandingDistrictLargePadCount}," +
+            $"capacityDeficit:{d.LandingDistrictPadCapacityDeficit}/" +
+            $"{d.LandingDistrictLargePadCapacityDeficit}L," +
             $"services:{d.LandingDistrictServiceBuildingCount},lights:{d.LandingDistrictLightCount}," +
             $"loadingAreas:{d.LandingDistrictLoadingAreaCount},containers:{d.LandingDistrictContainerCount}," +
             $"keepClear:{d.LandingDistrictKeepClearZoneCount}," +
@@ -139,6 +143,7 @@ public sealed partial class SystemSpaceState
             $"apronReceivers:{d.LandingDistrictApronReceiverVertexCount}v/" +
             $"{d.LandingDistrictApronReceiverTriangleCount}t@" +
             $"{d.LandingDistrictApronReceiverMaximumSpacing:F2}m," +
+            $"sitePlans:{d.LandingDistrictSiteSummary}," +
             $"signature:{d.LandingDistrictSignature}; " +
             $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
             $"signature={d.Signature}",
