@@ -17,6 +17,7 @@ namespace Inferior.Game.Test;
 public sealed class NovaAnchorageVariantFloorTests(ITestOutputHelper output)
 {
     [Fact]
+    [Trait("Category", "Slow")]
     public void NovaAnchorageDockingBay_VariantBaseColourAndTexture_StayAboveFloor()
     {
         Star star = StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;

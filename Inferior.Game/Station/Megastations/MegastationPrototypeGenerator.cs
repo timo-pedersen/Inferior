@@ -91,6 +91,8 @@ public sealed record MegastationPrototypeCpuResult(
     MegastationInteriorPlan InteriorPlan,
     MegastationArtificialLightingPlan ArtificialLightingPlan,
     MegastationLandingDistrictPlan LandingDistrictPlan,
+    MegastationBayHabitationPlan BayHabitationPlan,
+    MegastationBayFacilityPlan BayFacilityPlan,
     MegastationInteriorPresentationPlan InteriorPresentationPlan,
     TopologyRegularisationReport TopologyRegularisation,
     BoundaryTopology BoundaryTopology,
@@ -209,7 +211,12 @@ public static class MegastationPrototypeGenerator
             ? MegastationSystemMaterialAssignment.Create(materialContext, persistenceId)
             : null;
         MegastationLandingDistrictPlan landingDistrict =
-            MegastationLandingDistrictPlanner.Plan(interiorPlan);
+            MegastationLandingDistrictPlanner.Plan(interiorPlan, regularised.Occupancy);
+        MegastationBayHabitationPlan bayHabitation =
+            MegastationBayHabitationPlanner.Plan(interiorPlan, landingDistrict);
+        MegastationBayFacilityPlan bayFacilities =
+            MegastationBayFacilityPlanner.Plan(
+                interiorPlan, bayHabitation, regularised.Occupancy, topology);
         MegastationArtificialLightingPlan artificialLighting =
             MegastationArtificialLighting.WithAdditionalLights(
                 MegastationArtificialLighting.Plan(interiorPlan),
@@ -233,17 +240,23 @@ public static class MegastationPrototypeGenerator
                 materialAssignment);
         MegastationArtificialOcclusion artificialOcclusion =
             MegastationArtificialOcclusion.Build(
-                regularised.Occupancy, landingDistrict, interiorPresentation);
+                regularised.Occupancy, landingDistrict, interiorPresentation, bayFacilities);
         MegastationInteriorMeshBuildResult interiorMesh = MegastationInteriorMeshBuilder.Build(
             interiorPlan,
             materialAssignment,
             interiorPresentation,
             landingDistrict,
+            bayHabitation,
+            bayFacilities,
             artificialLighting,
             artificialOcclusion,
             cancellationToken);
         if (interiorMesh.LandingDistrictDiagnostics is { } landingDiagnostics)
             landingDistrict = landingDistrict with { Diagnostics = landingDiagnostics };
+        if (interiorMesh.BayHabitationDiagnostics is { } habitationDiagnostics)
+            bayHabitation = bayHabitation with { Diagnostics = habitationDiagnostics };
+        if (interiorMesh.BayFacilityDiagnostics is { } facilityDiagnostics)
+            bayFacilities = bayFacilities with { Diagnostics = facilityDiagnostics };
         VertexPositionColor[] approachBeamVertices =
             MegastationApproachBeamMeshBuilder.Build(interiorPresentation);
         StationModuleMesh structuralShadowMesh = MegastationInteriorMeshBuilder.BuildStructuralCaster(
@@ -253,14 +266,17 @@ public static class MegastationPrototypeGenerator
             face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary);
         int interiorBoundaryFaces = topology.Faces.Count(face =>
             face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary);
+        int cutoutFaceExpansion = bayFacilities.Diagnostics.CutoutCount * 8;
         interiorPlan = interiorPlan with
         {
             Diagnostics = interiorMesh.Diagnostics with
             {
                 ThroatBoundaryFaceCount = throatBoundaryFaces,
                 InteriorBoundaryFaceCount = interiorBoundaryFaces,
-                InteriorStructuralVertexCount = (throatBoundaryFaces + interiorBoundaryFaces) * 4,
-                InteriorStructuralTriangleCount = (throatBoundaryFaces + interiorBoundaryFaces) * 2,
+                InteriorStructuralVertexCount =
+                    (throatBoundaryFaces + interiorBoundaryFaces + cutoutFaceExpansion) * 4,
+                InteriorStructuralTriangleCount =
+                    (throatBoundaryFaces + interiorBoundaryFaces + cutoutFaceExpansion) * 2,
             },
         };
         MegastationPlanarRegion[] planarRegions = MegastationPlanarRegionExtractor.Extract(
@@ -395,7 +411,8 @@ public static class MegastationPrototypeGenerator
             materialAssignment: materialAssignment,
             interiorPlan: interiorPlan,
             artificialLighting: artificialLighting,
-            artificialOcclusion: artificialOcclusion);
+            artificialOcclusion: artificialOcclusion,
+            bayFacilities: bayFacilities);
         MegastationArtificialOcclusionDiagnostics artificialOcclusionDiagnostics =
             artificialOcclusion.Diagnostics(artificialLighting.Lights.Count);
         interiorPlan = interiorPlan with
@@ -495,6 +512,8 @@ public static class MegastationPrototypeGenerator
             interiorPlan,
             artificialLighting,
             landingDistrict,
+            bayHabitation,
+            bayFacilities,
             interiorPresentation,
             regularised.Report,
             topology,

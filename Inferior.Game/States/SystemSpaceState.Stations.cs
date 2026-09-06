@@ -143,8 +143,31 @@ public sealed partial class SystemSpaceState
             $"apronReceivers:{d.LandingDistrictApronReceiverVertexCount}v/" +
             $"{d.LandingDistrictApronReceiverTriangleCount}t@" +
             $"{d.LandingDistrictApronReceiverMaximumSpacing:F2}m," +
+            $"structuralRejects:{d.LandingDistrictStructuralEnvelopeRejectCount} envelope/" +
+            $"{d.LandingDistrictStructuralComponentRejectCount} component," +
+            $"structuralRejections:{d.LandingDistrictStructuralRejectionSummary}," +
             $"sitePlans:{d.LandingDistrictSiteSummary}," +
             $"signature:{d.LandingDistrictSignature}; " +
+            $"bayHabitation=v{d.BayHabitationAlgorithmVersion}," +
+            $"walls:{d.BayHabitationActiveWallCount}active/{d.BayHabitationBlankWallCount}blank," +
+            $"regions:{d.BayHabitationRegionCount},groups:{d.BayHabitationWindowGroupCount}," +
+            $"windows:{d.BayHabitationWindowCount}" +
+            $"({d.BayHabitationLitWindowCount}lit/{d.BayHabitationDimWindowCount}dim/" +
+            $"{d.BayHabitationDarkWindowCount}dark)," +
+            $"mesh:{d.BayHabitationMeshVertexCount}v/{d.BayHabitationMeshTriangleCount}t," +
+            $"walls:{d.BayHabitationWallSummary},signature:{d.BayHabitationSignature}; " +
+            $"bayFacilities=v{d.BayFacilityAlgorithmVersion}," +
+            $"regions:{d.BayFacilityEnhancedRegionCount}enhanced/{d.BayFacilityPlainRegionCount}plain," +
+            $"archetypes:{d.BayFacilityRecessedCount}recessed/{d.BayFacilityGalleryCount}gallery/" +
+            $"{d.BayFacilityEmbeddedCount}embedded/{d.BayFacilityServiceApertureCount}aperture," +
+            $"secondary:{d.BayFacilitySecondaryFormCount},parts:{d.BayFacilityStructuralPartCount}," +
+            $"railings:{d.BayFacilityRailingPartCount},occluders:{d.BayFacilityOccluderPartCount}," +
+            $"cutouts:{d.BayFacilityCutoutCount},facilityWindows:{d.BayFacilityWindowCount}," +
+            $"balconies:{d.BayFacilityBalconyCount}," +
+            $"projection:{d.BayFacilityMaximumProjection:F1}m," +
+            $"mesh:{d.BayFacilityMeshVertexCount}v/{d.BayFacilityMeshTriangleCount}t," +
+            $"shadow:{d.BayFacilityShadowVertexCount}v/{d.BayFacilityShadowTriangleCount}t," +
+            $"signature:{d.BayFacilitySignature}; " +
             $"planningMs={d.PlanningMilliseconds}; meshMs={d.MeshBuildMilliseconds}; " +
             $"signature={d.Signature}",
             SystemMessagePriority.NB);

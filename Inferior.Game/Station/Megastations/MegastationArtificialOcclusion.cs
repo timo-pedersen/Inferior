@@ -12,6 +12,7 @@ public enum MegastationArtificialOccluderRole
     Container,
     SubstantialAccess,
     MajorStructuralMass,
+    WallFacility,
     MinorDetail,
 }
 
@@ -41,6 +42,7 @@ public sealed class MegastationArtificialOcclusion
     private const float EndpointTolerance = .02f;
     private readonly StructuralOccupancy? _occupancy;
     private readonly MegastationArtificialOccluder[] _occluders;
+    private readonly MegastationArtificialOccluder[] _occupancyVoids;
     private readonly Dictionary<(Vector3 Source, Vector3 Receiver), bool> _visibilityCache = [];
     private long _receiverSamples;
     private long _visibilityTests;
@@ -49,10 +51,12 @@ public sealed class MegastationArtificialOcclusion
 
     private MegastationArtificialOcclusion(
         StructuralOccupancy? occupancy,
-        IEnumerable<MegastationArtificialOccluder> occluders)
+        IEnumerable<MegastationArtificialOccluder> occluders,
+        IEnumerable<MegastationArtificialOccluder>? occupancyVoids = null)
     {
         _occupancy = occupancy;
         _occluders = occluders.Where(item => CastsStaticArtificialShadow(item.Role)).ToArray();
+        _occupancyVoids = occupancyVoids?.ToArray() ?? [];
     }
 
     public static bool CastsStaticArtificialShadow(MegastationArtificialOccluderRole role)
@@ -70,7 +74,8 @@ public sealed class MegastationArtificialOcclusion
     public static MegastationArtificialOcclusion Build(
         StructuralOccupancy occupancy,
         MegastationLandingDistrictPlan district,
-        MegastationInteriorPresentationPlan presentation)
+        MegastationInteriorPresentationPlan presentation,
+        MegastationBayFacilityPlan? bayFacilities = null)
     {
         Vector3 up = district.FloorNormal;
         var occluders = new List<MegastationArtificialOccluder>();
@@ -118,7 +123,23 @@ public sealed class MegastationArtificialOcclusion
                 element.Centre, element.Size,
                 Axis(element.Frame, 0), Axis(element.Frame, 1), Axis(element.Frame, 2));
         }
-        return new(occupancy, occluders);
+        if (bayFacilities is not null)
+        foreach (MegastationBayFacility facility in bayFacilities.Facilities)
+        foreach (MegastationBayFacilityPart part in facility.Parts.Where(part =>
+                     part.CastsArtificialShadow))
+            Add(MegastationArtificialOccluderRole.WallFacility,
+                part.Centre, part.Size, facility.Right, facility.Up, facility.Normal);
+        MegastationArtificialOccluder[] occupancyVoids = bayFacilities?.Facilities
+            .Where(facility => facility.Cutout is not null)
+            .Select(facility => facility.Cutout!)
+            .Select(cutout => new MegastationArtificialOccluder(
+                MegastationArtificialOccluderRole.MinorDetail,
+                cutout.Centre - cutout.Normal * (cutout.Depth * .5f),
+                new(cutout.Size.X * .5f, cutout.Size.Y * .5f,
+                    cutout.Depth * .5f + EndpointTolerance),
+                cutout.Right, cutout.Up, cutout.Normal))
+            .ToArray() ?? [];
+        return new(occupancy, occluders, occupancyVoids);
 
         void Add(MegastationArtificialOccluderRole role, Vector3 centre, Vector3 size,
             Vector3 localRight, Vector3 localUp, Vector3 localForward)
@@ -186,12 +207,15 @@ public sealed class MegastationArtificialOcclusion
         float travelled = 0f;
         while (travelled < length && grid.Contains(x, y, z))
         {
-            if (_occupancy.IsOccupied(x, y, z))
-                return true;
             float tx = DistanceToBoundary(grid, GridAxis.X, x, start.X, direction.X);
             float ty = DistanceToBoundary(grid, GridAxis.Y, y, start.Y, direction.Y);
             float tz = DistanceToBoundary(grid, GridAxis.Z, z, start.Z, direction.Z);
             float next = MathF.Min(tx, MathF.Min(ty, tz));
+            float intervalEnd = MathF.Min(next, length);
+            if (_occupancy.IsOccupied(x, y, z)
+                && !OccupancyIntervalIsCarved(
+                    start, direction, travelled, intervalEnd))
+                return true;
             if (!float.IsFinite(next) || next >= length)
                 break;
             const float crossingTolerance = 1e-4f;
@@ -204,6 +228,30 @@ public sealed class MegastationArtificialOcclusion
             travelled = next;
         }
         return false;
+    }
+
+    private bool OccupancyIntervalIsCarved(
+        Vector3 start,
+        Vector3 direction,
+        float intervalStart,
+        float intervalEnd)
+    {
+        if (_occupancyVoids.Length == 0)
+            return false;
+        float inset = MathF.Min(EndpointTolerance,
+            MathF.Max(0f, (intervalEnd - intervalStart) * .25f));
+        Vector3 a = start + direction * (intervalStart + inset);
+        Vector3 b = start + direction * (intervalEnd - inset);
+        return _occupancyVoids.Any(volume => Contains(volume, a) && Contains(volume, b));
+    }
+
+    private static bool Contains(MegastationArtificialOccluder volume, Vector3 point)
+    {
+        Vector3 offset = point - volume.Centre;
+        const float tolerance = .025f;
+        return MathF.Abs(Vector3.Dot(offset, volume.Right)) <= volume.HalfSize.X + tolerance
+            && MathF.Abs(Vector3.Dot(offset, volume.Up)) <= volume.HalfSize.Y + tolerance
+            && MathF.Abs(Vector3.Dot(offset, volume.Forward)) <= volume.HalfSize.Z + tolerance;
     }
 
     private static float DistanceToBoundary(

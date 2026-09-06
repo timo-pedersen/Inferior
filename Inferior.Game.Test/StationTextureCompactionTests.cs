@@ -118,6 +118,7 @@ public sealed class StationTextureCompactionTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void MegastationPreparationBorrowsStructuralFallbacksAndCompactsSecondaryTextures()
     {
         Star star = StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;
@@ -255,6 +256,7 @@ public sealed class StationTextureCompactionTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void RealOrdinaryStationUploadsOnlyItsCompactedSelectedTextures()
     {
         Star star = StarterSystemSelector.SelectStar(GalaxyGenerator.Generate()).Star;

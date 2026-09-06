@@ -121,7 +121,8 @@ public static class MegastationPrototypeMeshBuilder
         MegastationSystemMaterialAssignment? materialAssignment = null,
         MegastationInteriorPlan? interiorPlan = null,
         MegastationArtificialLightingPlan? artificialLighting = null,
-        MegastationArtificialOcclusion? artificialOcclusion = null)
+        MegastationArtificialOcclusion? artificialOcclusion = null,
+        MegastationBayFacilityPlan? bayFacilities = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
         var stopwatch = new Stopwatch();
@@ -147,7 +148,7 @@ public static class MegastationPrototypeMeshBuilder
         stopwatch.Restart();
         ChamferPlan chamferPlan = BuildChamferPlan(topology, occupancy.Grid, settings);
         int faceQuads = AddStructuralFaces(topology, occupancy, mesh, debugColorMode, chamferPlan,
-            semanticZoning, materialAssignment);
+            semanticZoning, materialAssignment, bayFacilities, out var structuralFaceRanges);
         if (materialAssignment is { } assignment)
         {
             SystemMaterialBinding fallback = assignment.DefaultStructuralBinding;
@@ -157,9 +158,11 @@ public static class MegastationPrototypeMeshBuilder
         int bevelQuads = AddBevels(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         int cornerCaps = AddCornerCaps(topology, occupancy.Grid, mesh, debugColorMode, chamferPlan);
         mesh.ApplyIlluminationFlags();
-        ApplyInteriorIllumination(mesh, topology, occupancy.Grid, interiorPlan);
+        ApplyInteriorIllumination(
+            mesh, topology, occupancy.Grid, interiorPlan, structuralFaceRanges);
         void ApplyArtificialLighting() => ApplyInteriorArtificialLighting(
-            mesh, topology, occupancy.Grid, artificialLighting, artificialOcclusion);
+            mesh, topology, occupancy.Grid, artificialLighting, artificialOcclusion,
+            structuralFaceRanges);
         if (artificialOcclusion is null)
             ApplyArtificialLighting();
         else
@@ -232,10 +235,19 @@ public static class MegastationPrototypeMeshBuilder
         MegastationDebugColorMode debugColorMode,
         ChamferPlan chamferPlan,
         MegastationSemanticZoningResult? semanticZoning,
-        MegastationSystemMaterialAssignment? materialAssignment)
+        MegastationSystemMaterialAssignment? materialAssignment,
+        MegastationBayFacilityPlan? bayFacilities,
+        out IReadOnlyList<(int Start, int Count)> faceRanges)
     {
+        Dictionary<BoundaryFaceKey, MegastationBayWallCutout> cutouts = bayFacilities?.Facilities
+            .Where(facility => facility.Cutout is not null)
+            .Select(facility => facility.Cutout!)
+            .ToDictionary(cutout => cutout.SupportingFace) ?? [];
+        var ranges = new List<(int Start, int Count)>(topology.Faces.Count);
+        int quadCount = 0;
         foreach (var face in topology.Faces)
         {
+            int firstFace = mesh.FaceCount;
             var p = new Vector3[4];
             for (int i = 0; i < 4; i++)
                 p[i] = RetractedFaceVertex(topology, occupancy.Grid, face, face.Vertices[i], chamferPlan);
@@ -252,23 +264,111 @@ public static class MegastationPrototypeMeshBuilder
                 mesh.CurrentMaterialFamily = binding.FamilyId;
                 float tileSize = SystemMaterialRecipes.Get(binding.FamilyId).TileSizeMeters;
                 (Vector3 u, Vector3 v) = CanonicalUvAxes(face.Direction);
-                AddProjectedQuad(mesh, p[0], p[1], p[2], p[3], normal, u, v,
-                    tileSize, binding.Tint);
+                if (cutouts.TryGetValue(face.Key, out MegastationBayWallCutout? cutout))
+                    AddCutStructuralFace(mesh, p, normal, u, v, tileSize,
+                        binding.Tint, cutout, assignment);
+                else
+                    AddProjectedQuad(mesh, p[0], p[1], p[2], p[3], normal, u, v,
+                        tileSize, binding.Tint);
             }
             else
             {
                 Color color = ColorFor(topology, occupancy, face, debugColorMode);
-                AddQuad(mesh, p[0], p[1], p[2], p[3], normal, color);
+                if (cutouts.TryGetValue(face.Key, out MegastationBayWallCutout? cutout))
+                    AddCutStructuralFace(mesh, p, normal,
+                        CanonicalUvAxes(face.Direction).U,
+                        CanonicalUvAxes(face.Direction).V,
+                        8f, color, cutout, null);
+                else
+                    AddQuad(mesh, p[0], p[1], p[2], p[3], normal, color);
             }
+            int emitted = mesh.FaceCount - firstFace;
+            ranges.Add((firstFace, emitted));
+            quadCount += emitted;
         }
-        return topology.Faces.Count;
+        faceRanges = ranges;
+        return quadCount;
+    }
+
+    private static void AddCutStructuralFace(
+        StationModuleMesh mesh,
+        IReadOnlyList<Vector3> facePoints,
+        Vector3 normal,
+        Vector3 textureU,
+        Vector3 textureV,
+        float tileSize,
+        Color wallColour,
+        MegastationBayWallCutout cutout,
+        MegastationSystemMaterialAssignment? materials)
+    {
+        SystemMaterialFamilyId? wallMaterial = mesh.CurrentMaterialFamily;
+        float minX = facePoints.Min(point => Vector3.Dot(point - cutout.Centre, cutout.Right));
+        float maxX = facePoints.Max(point => Vector3.Dot(point - cutout.Centre, cutout.Right));
+        float minY = facePoints.Min(point => Vector3.Dot(point - cutout.Centre, cutout.Up));
+        float maxY = facePoints.Max(point => Vector3.Dot(point - cutout.Centre, cutout.Up));
+        float cutMinX = -cutout.Size.X * .5f;
+        float cutMaxX = cutout.Size.X * .5f;
+        float cutMinY = -cutout.Size.Y * .5f;
+        float cutMaxY = cutout.Size.Y * .5f;
+        if (cutMinX <= minX || cutMaxX >= maxX || cutMinY <= minY || cutMaxY >= maxY)
+            throw new InvalidOperationException(
+                $"Bay-wall cutout {cutout.Identity} is not contained by {cutout.SupportingFace}.");
+
+        Vector3 P(float x, float y, float depth = 0f)
+            => cutout.Centre + cutout.Right * x + cutout.Up * y
+                - cutout.Normal * depth;
+        Vector3 obl = P(minX, minY), obr = P(maxX, minY);
+        Vector3 otr = P(maxX, maxY), otl = P(minX, maxY);
+        Vector3 ibl = P(cutMinX, cutMinY), ibr = P(cutMaxX, cutMinY);
+        Vector3 itr = P(cutMaxX, cutMaxY), itl = P(cutMinX, cutMaxY);
+        AddProjectedQuad(mesh, obl, obr, ibr, ibl, normal,
+            textureU, textureV, tileSize, wallColour);
+        AddProjectedQuad(mesh, obr, otr, itr, ibr, normal,
+            textureU, textureV, tileSize, wallColour);
+        AddProjectedQuad(mesh, otr, otl, itl, itr, normal,
+            textureU, textureV, tileSize, wallColour);
+        AddProjectedQuad(mesh, otl, obl, ibl, itl, normal,
+            textureU, textureV, tileSize, wallColour);
+
+        Color dominant = materials?.Palette.DominantTint ?? new Color(74, 78, 82);
+        Color secondary = materials?.Palette.SecondaryTint ?? new Color(96, 101, 106);
+        if (materials is not null)
+            mesh.CurrentMaterialFamily = SystemMaterialFamilyId.HeavyIndustrialPlate;
+        float shellTile = SystemMaterialRecipes.Get(
+            SystemMaterialFamilyId.HeavyIndustrialPlate).TileSizeMeters;
+        Vector3 rbl = P(cutMinX, cutMinY, cutout.Depth);
+        Vector3 rbr = P(cutMaxX, cutMinY, cutout.Depth);
+        Vector3 rtr = P(cutMaxX, cutMaxY, cutout.Depth);
+        Vector3 rtl = P(cutMinX, cutMaxY, cutout.Depth);
+        Color shell = Color.Lerp(dominant, secondary, .28f);
+        shell.A = wallColour.A;
+        AddProjectedQuad(mesh, ibl, rbl, rtl, itl, cutout.Right,
+            cutout.Normal, cutout.Up, shellTile, shell);
+        AddProjectedQuad(mesh, ibr, itr, rtr, rbr, -cutout.Right,
+            cutout.Normal, cutout.Up, shellTile, shell);
+        AddProjectedQuad(mesh, ibl, ibr, rbr, rbl, cutout.Up,
+            cutout.Right, cutout.Normal, shellTile, shell);
+        AddProjectedQuad(mesh, itl, rtl, rtr, itr, -cutout.Up,
+            cutout.Right, cutout.Normal, shellTile, shell);
+
+        if (materials is not null)
+            mesh.CurrentMaterialFamily = SystemMaterialFamilyId.CleanTechnicalAlloy;
+        float facadeTile = SystemMaterialRecipes.Get(
+            SystemMaterialFamilyId.CleanTechnicalAlloy).TileSizeMeters;
+        Color facade = Color.Lerp(secondary, dominant, .22f);
+        facade.A = wallColour.A;
+        AddProjectedQuad(mesh, rbl, rbr, rtr, rtl, cutout.Normal,
+            cutout.Right, cutout.Up, facadeTile,
+            facade);
+        mesh.CurrentMaterialFamily = wallMaterial;
     }
 
     private static void ApplyInteriorIllumination(
         StationModuleMesh mesh,
         BoundaryTopology topology,
         SliceGrid grid,
-        MegastationInteriorPlan? plan)
+        MegastationInteriorPlan? plan,
+        IReadOnlyList<(int Start, int Count)> faceRanges)
     {
         if (plan == null) return;
         float maximumDepth = MathF.Max(1f, MathF.Max(
@@ -302,7 +402,9 @@ public static class MegastationPrototypeMeshBuilder
                 // transition treatment; deep bay structure can now become genuinely dark.
                 floor = 0f;
             }
-            mesh.SetFaceIllumination(faceIndex, floor);
+            (int start, int count) = faceRanges[faceIndex];
+            for (int emittedFace = start; emittedFace < start + count; emittedFace++)
+                mesh.SetFaceIllumination(emittedFace, floor);
         }
     }
 
@@ -311,7 +413,8 @@ public static class MegastationPrototypeMeshBuilder
         BoundaryTopology topology,
         SliceGrid grid,
         MegastationArtificialLightingPlan? lighting,
-        MegastationArtificialOcclusion? occlusion)
+        MegastationArtificialOcclusion? occlusion,
+        IReadOnlyList<(int Start, int Count)> faceRanges)
     {
         if (lighting == null) return;
         for (int faceIndex = 0; faceIndex < topology.Faces.Count; faceIndex++)
@@ -319,13 +422,16 @@ public static class MegastationPrototypeMeshBuilder
             BoundaryFace face = topology.Faces[faceIndex];
             if (face.SpaceKind != MegastationBoundarySpaceKind.InteriorBoundary)
                 continue;
-            Vector3 normal = BoundaryTopologyBuilder.Normal(face.Direction);
-            Vector3[] samples = face.Vertices
-                .Select(vertex => MegastationArtificialLighting.Evaluate(
-                    BoundaryTopologyBuilder.Position(grid, vertex), normal, lighting.Lights,
-                    occlusion))
-                .ToArray();
-            mesh.SetFaceArtificialLight(faceIndex, samples);
+            (int start, int count) = faceRanges[faceIndex];
+            for (int emittedFace = start; emittedFace < start + count; emittedFace++)
+            {
+                Vector3 normal = mesh.LocalFaceNormal(emittedFace);
+                Vector3[] samples = mesh.GetFaceVertexPositions(emittedFace)
+                    .Select(position => MegastationArtificialLighting.Evaluate(
+                        position, normal, lighting.Lights, occlusion))
+                    .ToArray();
+                mesh.SetFaceArtificialLight(emittedFace, samples);
+            }
         }
     }
 

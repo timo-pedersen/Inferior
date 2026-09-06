@@ -236,10 +236,29 @@ baseline. Visible geometry and artificial-light occluders share authoritative si
 per-site apron and pad receiver ranges preserve the accepted tessellated static-light behavior.
 Landing mechanics, wall/ceiling sites and collision remain deferred.
 
-Verification: Debug and Release builds clean. The complete solution passes 967/967 tests
-(837 Game, 41 UI, 6 Gameplay and 83 ObjectDesigner); the final landing-site/lighting focused suite passes
-29/29 tests. `git diff --check` is clean. Earlier historical checkpoint measurements remain
-in `bolon-b4a-review.md`.
+L3a/L3b are implemented in the current uncommitted worktree and await Timo's in-engine visual
+review. L3a adds sparse deterministic human-scale emissive window regions on authoritative
+vertical bay-wall frames while leaving the entrance wall, most wall area and all artificial-light
+source counts unchanged. L3b derives sparse shallow recessed frames, projecting galleries,
+embedded blocks and rare service apertures from selected L3a regions; substantial parts join the
+existing stellar-shadow and H1c-C artificial-occlusion paths, while railings/doors remain minor.
+The known follow-up is deliberately deferred as **L3a.1**: increase window-region visual weight
+with more clusters, longer rows and more double/triple rows without producing office-tower wall
+coverage. Debug/Release builds are clean and the uncommitted L3a/L3b state passes 975/975 tests.
+
+Verification: Debug and Release builds were clean at the latest implementation checkpoint. The
+last complete pre-profile solution run passed 980/980 tests (850 Game, 41 UI, 6 Gameplay and
+83 ObjectDesigner). Earlier historical checkpoint measurements remain in `bolon-b4a-review.md`.
+
+Test execution is now split into fast-default and opt-in Slow profiles. `dotnet test Inferior.slnx`
+uses `TestProfiles/Fast.runsettings` and excludes `[Trait("Category", "Slow")]`; production-scale
+generation, seed sweeps and broad preparation/integration run with
+`dotnet test Inferior.slnx -p:RunSlowTests=true`. The initial audited split keeps 650 Game tests
+fast and classifies 208 production-scale/rendered-output tests Slow, for 772 fast solution tests
+against the last known 980-test complete baseline. See `testing-ai.md`; agents must report the tier actually run and
+must not invoke the complete slow tier merely because a commit was requested. On the initial
+verification machine, the fast Game project completed in about 6 seconds and the complete fast
+solution command in about 12 seconds, down from roughly 11 minutes for the prior all-tests run.
 
 No new interior or Bolon stage is authorized by this checkpoint. Further foreground greeble,
 docking, collision and true radiosity require explicit briefs.

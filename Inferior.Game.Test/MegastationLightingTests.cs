@@ -14,6 +14,7 @@ public sealed class MegastationLightingTests
     [Theory]
     [InlineData("Gaanis:Gaanis II:Omega Beacon")]
     [InlineData("Enloax:Enloax Vd:Deep Haven")]
+    [Trait("Category", "Slow")]
     public void RepresentativeMegastationsRetainSmallMostlySteadyClusters(string stationIdentity)
     {
         MegastationLightPlan plan = MegastationPrototypeGenerator.GenerateCpu(stationIdentity).LightPlan;
@@ -48,6 +49,7 @@ public sealed class MegastationLightingTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void NovaLightingIsDeterministicAndTraversalIndependent()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -209,6 +211,7 @@ public sealed class MegastationLightingTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void StrategicAnimationIsSparseAndOtherRolesAreMostlySteady()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -229,6 +232,7 @@ public sealed class MegastationLightingTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Z2bChangesOnlyPureLightMetadata()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -240,12 +244,16 @@ public sealed class MegastationLightingTests
             result.RegularisedOccupancy,
             result.BoundaryTopology,
             rebuiltStructure,
+            semanticZoning: result.SemanticZoning,
+            materialAssignment: result.MaterialAssignment,
             interiorPlan: result.InteriorPlan,
             artificialLighting: result.ArtificialLightingPlan,
             artificialOcclusion: MegastationArtificialOcclusion.Build(
                 result.RegularisedOccupancy,
                 result.LandingDistrictPlan,
-                result.InteriorPresentationPlan));
+                result.InteriorPresentationPlan,
+                result.BayFacilityPlan),
+            bayFacilities: result.BayFacilityPlan);
         PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(result);
 
         Assert.Equal(result.WindowPlan.Regions.Select(WindowRegionSignature), rebuiltWindows.Regions.Select(WindowRegionSignature));
@@ -272,6 +280,7 @@ public sealed class MegastationLightingTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void SurfaceNormalsSurviveHandoffForDepthPresentation()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);

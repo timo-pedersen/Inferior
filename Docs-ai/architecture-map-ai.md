@@ -447,6 +447,11 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 ## Inferior.Game.Test
 
+- Test execution is repository-wide and tiered by `Directory.Build.props`: `dotnet test Inferior.slnx`
+  uses `TestProfiles/Fast.runsettings` and excludes `[Trait("Category", "Slow")]`; passing
+  `-p:RunSlowTests=true` selects `TestProfiles/All.runsettings`. Slow tests cover production-scale
+  generation, seed sweeps and broad preparation/integration. See `testing-ai.md` for commands and
+  classification/verification policy.
 - `MegastationPrototypeTests.cs` — xUnit coverage for the occupancy-generated megastation prototype: slice grid, exterior flood fill, face/edge/corner ownership, connectivity, massing signatures, version/seed compatibility, and mesh sanity.
 - `StationVisualResidencyTests.cs` — GraphicsDevice-free boundary/hysteresis, deterministic selection/tie, explicit supersession, system reset, stale-result rejection, visual-class override, zero-or-one package, lightweight-data independence, and repeated-disposal coverage.
 - `ShipRecordContainmentTests.cs` — xUnit test enforcing that `ShipRecord` only appears in `ShipBuilder`/`ShipExtensions`/`ShipPersistenceService`.

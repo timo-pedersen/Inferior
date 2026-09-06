@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Inferior.Game.Test;
 
+[Trait("Category", "Slow")]
 public sealed class BolonMegastationTests
 {
     [Fact]

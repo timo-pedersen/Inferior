@@ -311,6 +311,7 @@ public sealed class StationVisualUploadSchedulerTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void CpuPreparationBuildsDeterministicOrderedUploadPlan()
     {
         var station = new Station

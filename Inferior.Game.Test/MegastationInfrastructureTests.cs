@@ -13,6 +13,7 @@ public sealed class MegastationInfrastructureTests
     private const string NovaAnchorageId = "Oranae:Oranae I:Nova Anchorage";
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void SharedPlanarRegionsPreserveG1ProjectionAndExposeUnfilteredSubstrate()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -45,6 +46,7 @@ public sealed class MegastationInfrastructureTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void NovaInfrastructureIsDeterministicBatchedTextureFreeAndInSanityRange()
     {
         MegastationPrototypeCpuResult a = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);

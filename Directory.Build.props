@@ -3,5 +3,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Heavy procedural/integration tests are opt-in. See Docs-ai/testing-ai.md. -->
+    <RunSettingsFilePath Condition="'$(RunSlowTests)' != 'true'">$(MSBuildThisFileDirectory)TestProfiles\Fast.runsettings</RunSettingsFilePath>
+    <RunSettingsFilePath Condition="'$(RunSlowTests)' == 'true'">$(MSBuildThisFileDirectory)TestProfiles\All.runsettings</RunSettingsFilePath>
   </PropertyGroup>
 </Project>

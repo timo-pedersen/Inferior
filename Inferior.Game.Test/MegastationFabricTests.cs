@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Inferior.Game.Test;
 
+[Trait("Category", "Slow")]
 public sealed class MegastationFabricTests
 {
     private const string Nova = "Oranae:Oranae I:Nova Anchorage";

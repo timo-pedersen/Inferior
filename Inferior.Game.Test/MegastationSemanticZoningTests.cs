@@ -10,6 +10,7 @@ public sealed class MegastationSemanticZoningTests
     private const string NovaAnchorageId = "Oranae:Oranae I:Nova Anchorage";
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void SharedBoundaryTopologyProducesIdenticalMeshArrays()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -19,12 +20,16 @@ public sealed class MegastationSemanticZoningTests
             result.RegularisedOccupancy,
             result.BoundaryTopology,
             rebuilt,
+            semanticZoning: result.SemanticZoning,
+            materialAssignment: result.MaterialAssignment,
             interiorPlan: result.InteriorPlan,
             artificialLighting: result.ArtificialLightingPlan,
             artificialOcclusion: MegastationArtificialOcclusion.Build(
                 result.RegularisedOccupancy,
                 result.LandingDistrictPlan,
-                result.InteriorPresentationPlan));
+                result.InteriorPresentationPlan,
+                result.BayFacilityPlan),
+            bayFacilities: result.BayFacilityPlan);
         var (expectedVertices, expectedIndices) = result.Mesh.ToIntArrays();
         var (actualVertices, actualIndices) = rebuilt.ToIntArrays();
 
@@ -34,6 +39,7 @@ public sealed class MegastationSemanticZoningTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void ZoningIsDeterministicForSameFinalTopology()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -104,6 +110,7 @@ public sealed class MegastationSemanticZoningTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void OneStructuralAnchorHasExactlyOneZoneAndRole()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu("semantic-coherence-fixture");
@@ -177,6 +184,7 @@ public sealed class MegastationSemanticZoningTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void DebugIndexGroupsCoverEverySemanticBoundaryFaceExactlyOnce()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu("semantic-debug-range-fixture");

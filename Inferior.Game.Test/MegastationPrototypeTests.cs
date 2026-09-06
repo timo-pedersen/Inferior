@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Inferior.Game.Test;
 
+[Trait("Category", "Slow")]
 public sealed class MegastationPrototypeTests
 {
     private const string StationId = "Test Star:Test Parent:Prototype Station";
@@ -171,6 +172,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void MassingSignatures_FreezeAcceptedPrototypeBFixtures()
     {
         var fixtures = new[]
@@ -259,6 +261,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void PrototypeH1Version5_UsesSeedCompatibilityVersion1ForAcceptedRawMassing()
     {
         var current = GenerateRawCpu(StationId);
@@ -278,6 +281,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void SubsystemVersionChanges_AreIsolatedUntilExplicitlyUsedByGeneration()
     {
         var baseline = GenerateRawCpu(StationId);
@@ -327,6 +331,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void TowerSeedChange_DoesNotAlterSliceGrid()
     {
         var settingsA = RawMassingSettings with { BaseUrbanDepth = new IntRange(2, 4) };
@@ -367,6 +372,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void WholeVolume_IsConnectedAndHasNoSealedCavities()
     {
         var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
@@ -382,6 +388,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void BoundaryTopology_ClassifiesRegularisedFixtureAsValidManifoldInput()
     {
         var result = MegastationPrototypeGenerator.GenerateCpu(StationId);
@@ -392,7 +399,9 @@ public sealed class MegastationPrototypeTests
         Assert.Equal(0, result.Diagnostics.NonManifoldVertexCount);
         Assert.True(result.Diagnostics.SharpBoundaryValidation.IsValid);
         Assert.True(result.Diagnostics.ChamferedBoundaryValidation.IsValid);
-        Assert.Equal(result.Diagnostics.BoundaryFaceCount, result.Diagnostics.ExposedQuadCount);
+        Assert.Equal(result.Diagnostics.BoundaryFaceCount
+                + result.BayFacilityPlan.Diagnostics.CutoutCount * 8,
+            result.Diagnostics.ExposedQuadCount);
         Assert.Equal(MegastationMeshPath.Chamfered, result.Diagnostics.MeshPath);
         Assert.True(result.Diagnostics.BevelQuadCount > 0);
         Assert.True(result.Diagnostics.CornerCapCount > 0);
@@ -400,6 +409,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void BoundaryTopologySignature_IsDeterministicAndIndependentOfRawMassingSignature()
     {
         var a = MegastationPrototypeGenerator.GenerateCpu(StationId);
@@ -663,6 +673,7 @@ public sealed class MegastationPrototypeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void StressConfiguration_ExceedsSixteenBitMeshSafelyByUsingStationModuleMeshBuildPath()
     {
         var settings = MegastationPrototypeSettings.Default with

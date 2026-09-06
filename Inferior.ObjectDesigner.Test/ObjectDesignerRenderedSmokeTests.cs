@@ -61,6 +61,7 @@ public sealed class ObjectDesignerRenderedSmokeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void ObjectDesigner_preview_ship_renderer_uses_preview_eye_for_specular()
     {
         Vector3 previewEye = new(0f, 4f, 26f);
@@ -75,6 +76,7 @@ public sealed class ObjectDesignerRenderedSmokeTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Metric_grid_render_smoke_shows_zoom_levels_and_stays_under_editor_marks()
     {
         Rectangle viewport = new(20, 20, 160, 160);

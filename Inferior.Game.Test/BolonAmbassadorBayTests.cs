@@ -11,6 +11,7 @@ using Xunit.Abstractions;
 
 namespace Inferior.Game.Test;
 
+[Trait("Category", "Slow")]
 public sealed class BolonAmbassadorBayTests(ITestOutputHelper output)
 {
     [Theory]

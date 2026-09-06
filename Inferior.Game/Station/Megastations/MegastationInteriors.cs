@@ -125,7 +125,43 @@ public sealed record MegastationInteriorDiagnostics(
     int LandingDistrictLargeSiteCount = 0,
     int LandingDistrictPadCapacityDeficit = 0,
     int LandingDistrictLargePadCapacityDeficit = 0,
-    string LandingDistrictSiteSummary = "");
+    string LandingDistrictSiteSummary = "",
+    int LandingDistrictStructuralEnvelopeRejectCount = 0,
+    int LandingDistrictStructuralComponentRejectCount = 0,
+    string LandingDistrictStructuralRejectionSummary = "",
+    int BayHabitationAlgorithmVersion = 0,
+    int BayHabitationActiveWallCount = 0,
+    int BayHabitationBlankWallCount = 0,
+    int BayHabitationRegionCount = 0,
+    int BayHabitationWindowGroupCount = 0,
+    int BayHabitationWindowCount = 0,
+    int BayHabitationLitWindowCount = 0,
+    int BayHabitationDimWindowCount = 0,
+    int BayHabitationDarkWindowCount = 0,
+    int BayHabitationMeshVertexCount = 0,
+    int BayHabitationMeshTriangleCount = 0,
+    string BayHabitationWallSummary = "",
+    string BayHabitationSignature = "",
+    int BayFacilityAlgorithmVersion = 0,
+    int BayFacilityEnhancedRegionCount = 0,
+    int BayFacilityPlainRegionCount = 0,
+    int BayFacilityRecessedCount = 0,
+    int BayFacilityGalleryCount = 0,
+    int BayFacilityEmbeddedCount = 0,
+    int BayFacilityServiceApertureCount = 0,
+    int BayFacilitySecondaryFormCount = 0,
+    int BayFacilityStructuralPartCount = 0,
+    int BayFacilityRailingPartCount = 0,
+    int BayFacilityOccluderPartCount = 0,
+    int BayFacilityCutoutCount = 0,
+    int BayFacilityWindowCount = 0,
+    int BayFacilityBalconyCount = 0,
+    float BayFacilityMaximumProjection = 0f,
+    int BayFacilityMeshVertexCount = 0,
+    int BayFacilityMeshTriangleCount = 0,
+    int BayFacilityShadowVertexCount = 0,
+    int BayFacilityShadowTriangleCount = 0,
+    string BayFacilitySignature = "");
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -149,7 +185,9 @@ public sealed record MegastationInteriorPlan(
 public sealed record MegastationInteriorMeshBuildResult(
     StationModuleMesh Mesh,
     MegastationInteriorDiagnostics Diagnostics,
-    MegastationLandingDistrictDiagnostics? LandingDistrictDiagnostics = null);
+    MegastationLandingDistrictDiagnostics? LandingDistrictDiagnostics = null,
+    MegastationBayHabitationDiagnostics? BayHabitationDiagnostics = null,
+    MegastationBayFacilityDiagnostics? BayFacilityDiagnostics = null);
 
 public enum MegastationInteriorGuidanceKind
 {
@@ -1453,6 +1491,8 @@ public static class MegastationInteriorMeshBuilder
         MegastationSystemMaterialAssignment? materials,
         MegastationInteriorPresentationPlan? presentation = null,
         MegastationLandingDistrictPlan? landingDistrict = null,
+        MegastationBayHabitationPlan? bayHabitation = null,
+        MegastationBayFacilityPlan? bayFacilities = null,
         MegastationArtificialLightingPlan? artificialLighting = null,
         MegastationArtificialOcclusion? artificialOcclusion = null,
         CancellationToken cancellationToken = default)
@@ -1547,9 +1587,23 @@ public static class MegastationInteriorMeshBuilder
             ? null
             : MegastationLandingDistrictMeshBuilder.Append(
                 mesh, landingDistrict, materials, cancellationToken);
+        MegastationBayFacilityMeshResult? facilityMesh = bayFacilities is null
+            ? null
+            : MegastationBayFacilityMeshBuilder.Append(
+                mesh, bayFacilities, materials, cancellationToken);
+        MegastationBayHabitationMeshResult? habitationMesh = bayHabitation is null
+            ? null
+            : MegastationBayHabitationMeshBuilder.Append(
+                mesh, bayHabitation, bayFacilities, cancellationToken);
         mesh.ApplyIlluminationFlags();
         foreach ((int start, int count, float illumination) in illuminationRanges)
         for (int face = start; face < start + count; face++)
+            mesh.SetFaceIllumination(face, illumination);
+        if (habitationMesh is { } wallMesh)
+        foreach ((int face, float illumination) in wallMesh.IlluminationFaces)
+            mesh.SetFaceIllumination(face, illumination);
+        if (facilityMesh is { } facilityWindows)
+        foreach ((int face, float illumination) in facilityWindows.IlluminationFaces)
             mesh.SetFaceIllumination(face, illumination);
         if (landingMesh is { } districtMesh)
         {
@@ -1561,6 +1615,17 @@ public static class MegastationInteriorMeshBuilder
                 ApplyLandingLighting();
             else
                 artificialOcclusion.MeasureBake(ApplyLandingLighting);
+        }
+        if (facilityMesh is { } wallFacilityMesh)
+        {
+            void ApplyFacilityLighting() => MegastationBayFacilityMeshBuilder.ApplyLighting(
+                mesh, wallFacilityMesh,
+                artificialLighting?.Lights ?? landingDistrict?.ArtificialLights ?? [],
+                artificialOcclusion);
+            if (artificialOcclusion is null)
+                ApplyFacilityLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyFacilityLighting);
         }
         stopwatch.Stop();
 
@@ -1628,9 +1693,63 @@ public static class MegastationInteriorMeshBuilder
             LandingDistrictLargePadCapacityDeficit =
                 landingMesh?.Diagnostics.LargePadCapacityDeficit ?? 0,
             LandingDistrictSiteSummary = landingMesh?.Diagnostics.SiteSummary ?? string.Empty,
+            LandingDistrictStructuralEnvelopeRejectCount =
+                landingMesh?.Diagnostics.StructuralEnvelopeRejectCount ?? 0,
+            LandingDistrictStructuralComponentRejectCount =
+                landingMesh?.Diagnostics.StructuralComponentRejectCount ?? 0,
+            LandingDistrictStructuralRejectionSummary =
+                landingMesh?.Diagnostics.StructuralRejectionSummary ?? string.Empty,
             LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
+            BayHabitationAlgorithmVersion =
+                habitationMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BayHabitationActiveWallCount =
+                habitationMesh?.Diagnostics.ActiveWallCount ?? 0,
+            BayHabitationBlankWallCount =
+                habitationMesh?.Diagnostics.BlankWallCount ?? 0,
+            BayHabitationRegionCount = habitationMesh?.Diagnostics.RegionCount ?? 0,
+            BayHabitationWindowGroupCount =
+                habitationMesh?.Diagnostics.WindowGroupCount ?? 0,
+            BayHabitationWindowCount = habitationMesh?.Diagnostics.WindowCount ?? 0,
+            BayHabitationLitWindowCount =
+                habitationMesh?.Diagnostics.LitWindowCount ?? 0,
+            BayHabitationDimWindowCount =
+                habitationMesh?.Diagnostics.DimWindowCount ?? 0,
+            BayHabitationDarkWindowCount =
+                habitationMesh?.Diagnostics.DarkWindowCount ?? 0,
+            BayHabitationMeshVertexCount =
+                habitationMesh?.Diagnostics.MeshVertexCount ?? 0,
+            BayHabitationMeshTriangleCount =
+                habitationMesh?.Diagnostics.MeshTriangleCount ?? 0,
+            BayHabitationWallSummary =
+                habitationMesh?.Diagnostics.WallSummary ?? string.Empty,
+            BayHabitationSignature =
+                habitationMesh?.Diagnostics.Signature ?? string.Empty,
+            BayFacilityAlgorithmVersion = facilityMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BayFacilityEnhancedRegionCount =
+                facilityMesh?.Diagnostics.EnhancedRegionCount ?? 0,
+            BayFacilityPlainRegionCount = facilityMesh?.Diagnostics.PlainRegionCount ?? 0,
+            BayFacilityRecessedCount = facilityMesh?.Diagnostics.RecessedFacilityCount ?? 0,
+            BayFacilityGalleryCount = facilityMesh?.Diagnostics.ProjectingGalleryCount ?? 0,
+            BayFacilityEmbeddedCount = facilityMesh?.Diagnostics.EmbeddedBlockCount ?? 0,
+            BayFacilityServiceApertureCount =
+                facilityMesh?.Diagnostics.ServiceApertureCount ?? 0,
+            BayFacilitySecondaryFormCount = facilityMesh?.Diagnostics.SecondaryFormCount ?? 0,
+            BayFacilityStructuralPartCount = facilityMesh?.Diagnostics.StructuralPartCount ?? 0,
+            BayFacilityRailingPartCount = facilityMesh?.Diagnostics.RailingPartCount ?? 0,
+            BayFacilityOccluderPartCount =
+                facilityMesh?.Diagnostics.ArtificialShadowPartCount ?? 0,
+            BayFacilityCutoutCount = facilityMesh?.Diagnostics.CutoutCount ?? 0,
+            BayFacilityWindowCount = facilityMesh?.Diagnostics.FacilityWindowCount ?? 0,
+            BayFacilityBalconyCount = facilityMesh?.Diagnostics.BalconyCount ?? 0,
+            BayFacilityMaximumProjection = facilityMesh?.Diagnostics.MaximumProjection ?? 0f,
+            BayFacilityMeshVertexCount = facilityMesh?.Diagnostics.MeshVertexCount ?? 0,
+            BayFacilityMeshTriangleCount = facilityMesh?.Diagnostics.MeshTriangleCount ?? 0,
+            BayFacilityShadowVertexCount = facilityMesh?.Diagnostics.ShadowVertexCount ?? 0,
+            BayFacilityShadowTriangleCount = facilityMesh?.Diagnostics.ShadowTriangleCount ?? 0,
+            BayFacilitySignature = facilityMesh?.Diagnostics.Signature ?? string.Empty,
         };
-        return new(mesh, diagnostics, landingMesh?.Diagnostics);
+        return new(mesh, diagnostics, landingMesh?.Diagnostics, habitationMesh?.Diagnostics,
+            facilityMesh?.Diagnostics);
     }
 
     public static StationModuleMesh BuildStructuralCaster(

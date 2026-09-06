@@ -73,6 +73,7 @@ public sealed class MegastationWindowTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void NovaPlanIsDeterministicAndTraversalIndependent()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -89,6 +90,7 @@ public sealed class MegastationWindowTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void WindowScaleRemainsHumanSizedOnNonUniformGrid()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -169,6 +171,7 @@ public sealed class MegastationWindowTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Z2aLeavesStructuralAndZoningOutputsUnchanged()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -179,12 +182,16 @@ public sealed class MegastationWindowTests
             result.RegularisedOccupancy,
             result.BoundaryTopology,
             rebuilt,
+            semanticZoning: result.SemanticZoning,
+            materialAssignment: result.MaterialAssignment,
             interiorPlan: result.InteriorPlan,
             artificialLighting: result.ArtificialLightingPlan,
             artificialOcclusion: MegastationArtificialOcclusion.Build(
                 result.RegularisedOccupancy,
                 result.LandingDistrictPlan,
-                result.InteriorPresentationPlan));
+                result.InteriorPresentationPlan,
+                result.BayFacilityPlan),
+            bayFacilities: result.BayFacilityPlan);
         MegastationSemanticZoningResult rebuiltZoning = MegastationSemanticZoningBuilder.Build(
             result.Diagnostics.RootSeed, result.RegularisedOccupancy, result.BoundaryTopology, result.Faces);
 

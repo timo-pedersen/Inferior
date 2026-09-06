@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Inferior.Game.Test;
 
+[Trait("Category", "Slow")]
 public sealed class MegastationLandingDistrictTests
 {
     private const string Nova = "Oranae:Oranae I:Nova Anchorage";
@@ -140,7 +141,8 @@ public sealed class MegastationLandingDistrictTests
     {
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
-            MegastationLandingDistrictPlanner.Plan(result.InteriorPlan);
+            MegastationLandingDistrictPlanner.Plan(
+                result.InteriorPlan, result.RegularisedOccupancy);
         MegastationArtificialLightingPlan baseline =
             MegastationArtificialLighting.Plan(result.InteriorPlan);
 
@@ -169,6 +171,90 @@ public sealed class MegastationLandingDistrictTests
         Assert.Equal(baseline.Lights, result.ArtificialLightingPlan.Lights.Take(12));
         Assert.Equal(result.LandingDistrictPlan.ArtificialLights,
             result.ArtificialLightingPlan.Lights.Skip(12));
+    }
+
+    [Fact]
+    public void ProductionSitesClearAuthoritativeThreeDimensionalStructure()
+    {
+        MegastationPrototypeCpuResult result = Result.Value;
+        MegastationLandingDistrictPlan district = result.LandingDistrictPlan;
+        MegastationLandingSiteStructuralClearance clearance =
+            MegastationLandingSiteStructuralClearance.Create(
+                result.RegularisedOccupancy, result.InteriorPlan);
+
+        foreach (MegastationLandingServiceBuilding building in district.ServiceBuildings)
+            Assert.True(clearance.IsOrientedBoxClear(
+                building.Centre,
+                building.Frontage.Right,
+                building.Frontage.Up,
+                building.Frontage.Normal,
+                building.Size,
+                out string blocker),
+                $"{building.Identity} intersects {blocker}");
+
+        Assert.True(district.Diagnostics.StructuralEnvelopeRejectCount > 0);
+        Assert.Equal(0, district.Diagnostics.StructuralComponentRejectCount);
+    }
+
+    [Fact]
+    public void StructuralMassOverClearPadPlanRejectsWholeSiteAndReplansDeterministically()
+    {
+        MegastationPrototypeCpuResult result = Result.Value;
+        MegastationInteriorPlan interior = result.InteriorPlan;
+        MegastationLandingDistrictPlan unvalidated =
+            MegastationLandingDistrictPlanner.Plan(interior);
+        MegastationLandingServiceBuilding obstructed = unvalidated.ServiceBuildings[0];
+        SliceGrid grid = result.RegularisedOccupancy.Grid;
+        (int x, int y, int z) = CellContaining(grid, obstructed.Centre);
+        var obstacle = new StructuralOccupancy(grid);
+        obstacle.MarkStructural(x, y, z);
+
+        MegastationLandingSiteStructuralClearance clearance =
+            MegastationLandingSiteStructuralClearance.Create(obstacle, interior);
+        Assert.False(clearance.IsOrientedBoxClear(
+            obstructed.Centre,
+            obstructed.Frontage.Right,
+            obstructed.Frontage.Up,
+            obstructed.Frontage.Normal,
+            obstructed.Size,
+            out _));
+        Assert.Contains(unvalidated.Pads, pad =>
+        {
+            float floor = FloorHeight(interior);
+            MegastationBerthClearance footprint =
+                MegastationLandingDistrictPlanner.OrientedEnvelope(
+                    pad.PadSurface.Centre,
+                    unvalidated.DistrictRight,
+                    unvalidated.PreferredHeading,
+                    pad.PadSurface.Right,
+                    pad.PadSurface.PreferredHeading,
+                    pad.NominalSize.X,
+                    pad.NominalSize.Y,
+                    0f);
+            return clearance.IsPrismClear(
+                footprint, floor, floor + 2f,
+                unvalidated.DistrictRight,
+                unvalidated.PreferredHeading,
+                unvalidated.FloorNormal,
+                out _);
+        });
+
+        MegastationLandingDistrictPlan replanned =
+            MegastationLandingDistrictPlanner.Plan(interior, obstacle);
+        MegastationLandingDistrictPlan repeated =
+            MegastationLandingDistrictPlanner.Plan(interior, obstacle);
+
+        Assert.NotEqual(unvalidated.Diagnostics.Signature, replanned.Diagnostics.Signature);
+        Assert.Equal(replanned.Diagnostics.Signature, repeated.Diagnostics.Signature);
+        Assert.True(replanned.Diagnostics.StructuralEnvelopeRejectCount > 0);
+        Assert.All(replanned.ServiceBuildings, building =>
+            Assert.True(clearance.IsOrientedBoxClear(
+                building.Centre,
+                building.Frontage.Right,
+                building.Frontage.Up,
+                building.Frontage.Normal,
+                building.Size,
+                out _)));
     }
 
     [Fact]
@@ -456,7 +542,8 @@ public sealed class MegastationLandingDistrictTests
     {
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
-            MegastationLandingDistrictPlanner.Plan(result.InteriorPlan);
+            MegastationLandingDistrictPlanner.Plan(
+                result.InteriorPlan, result.RegularisedOccupancy);
 
         Assert.Equal(result.LandingDistrictPlan.ServiceBuildings.Count,
             replanned.ServiceBuildings.Count);
@@ -830,7 +917,8 @@ public sealed class MegastationLandingDistrictTests
     {
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
-            MegastationLandingDistrictPlanner.Plan(result.InteriorPlan);
+            MegastationLandingDistrictPlanner.Plan(
+                result.InteriorPlan, result.RegularisedOccupancy);
 
         Assert.Equal(result.LandingDistrictPlan.Diagnostics.Signature,
             replanned.Diagnostics.Signature);
@@ -937,5 +1025,30 @@ public sealed class MegastationLandingDistrictTests
         Assert.Equal(expected.X, actual.X, 3);
         Assert.Equal(expected.Y, actual.Y, 3);
         Assert.Equal(expected.Z, actual.Z, 3);
+    }
+
+    private static (int X, int Y, int Z) CellContaining(SliceGrid grid, Vector3 point)
+        => (CellContaining(grid, GridAxis.X, point.X),
+            CellContaining(grid, GridAxis.Y, point.Y),
+            CellContaining(grid, GridAxis.Z, point.Z));
+
+    private static int CellContaining(SliceGrid grid, GridAxis axis, float coordinate)
+    {
+        for (int i = 0; i < grid.Count(axis); i++)
+            if (coordinate >= grid.GetCellMinimum(axis, i)
+                && coordinate <= grid.GetCellMaximum(axis, i))
+                return i;
+        throw new InvalidOperationException($"No {axis} cell contains {coordinate}.");
+    }
+
+    private static float FloorHeight(MegastationInteriorPlan interior)
+    {
+        Vector3 up = Vector3.Normalize(interior.PortalUp);
+        float minimum = float.MaxValue;
+        foreach (float x in new[] { interior.CavityEnvelope.Minimum.X, interior.CavityEnvelope.Maximum.X })
+        foreach (float y in new[] { interior.CavityEnvelope.Minimum.Y, interior.CavityEnvelope.Maximum.Y })
+        foreach (float z in new[] { interior.CavityEnvelope.Minimum.Z, interior.CavityEnvelope.Maximum.Z })
+            minimum = MathF.Min(minimum, Vector3.Dot(new Vector3(x, y, z), up));
+        return minimum;
     }
 }

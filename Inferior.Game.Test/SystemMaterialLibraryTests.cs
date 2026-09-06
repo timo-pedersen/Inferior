@@ -234,6 +234,7 @@ public sealed class SystemMaterialLibraryTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void MegastationStructuralAndFabricLayersUseAtMostOneRangePerFamily()
     {
         MegastationPrototypeCpuResult cpu = MaterialNova.Value;

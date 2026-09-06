@@ -47,9 +47,24 @@ design/code mismatch.
 
 ```powershell
 dotnet build Inferior.slnx
+dotnet test Inferior.slnx
+dotnet test Inferior.slnx -p:RunSlowTests=true
+dotnet test Inferior.slnx -p:RunSlowTests=true --filter "Category=Slow"
 dotnet run --project Inferior.Game
 dotnet build Inferior.slnx -c Release
 ```
+
+`dotnet test Inferior.slnx` is intentionally the fast default suite. Tests marked
+`[Trait("Category", "Slow")]` perform full procedural generation, seed sweeps, or
+broad integration and are filtered out by `TestProfiles/Fast.runsettings`. Pass
+`-p:RunSlowTests=true` to select `TestProfiles/All.runsettings`; combine it with the
+filter above to run only the slow tier. See `Docs-ai/testing-ai.md`.
+
+Verification should be proportional. Routine/local changes and commits run the fast
+suite plus directly relevant focused tests. Run the complete slow tier for changes to
+shared procedural generation, topology, station preparation/residency, or other broad
+pipelines, and for milestone/full-suite verification. Do not run the complete slow tier
+merely because the user asked for a commit.
 
 MonoGame content builds automatically from `Inferior.Game/Content/Content.mgcb`.
 Tests are in `Inferior.Game.Test` (xUnit).

@@ -9,6 +9,7 @@ using Xunit;
 
 namespace Inferior.Game.Test;
 
+[Trait("Category", "Slow")]
 public sealed class MegastationInteriorTests
 {
     private const string Nova = "Oranae:Oranae I:Nova Anchorage";
@@ -362,17 +363,12 @@ public sealed class MegastationInteriorTests
         Assert.InRange(result.InteriorPlan.PortalClearSize.Y, 125.6f, 125.8f);
 
         var (vertices, _) = result.Mesh.ToIntArrays();
-        for (int faceIndex = 0; faceIndex < result.BoundaryTopology.Faces.Count; faceIndex++)
-        {
-            BoundaryFace face = result.BoundaryTopology.Faces[faceIndex];
-            byte[] alpha = vertices.Skip(faceIndex * 4).Take(4).Select(vertex => vertex.Color.A).ToArray();
-            if (face.SpaceKind == MegastationBoundarySpaceKind.ExteriorBoundary)
-                Assert.All(alpha, value => Assert.Equal(0, value));
-            else if (face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary)
-                Assert.All(alpha, value => Assert.InRange(value, (byte)25, (byte)62));
-            else
-                Assert.All(alpha, value => Assert.Equal(0, value));
-        }
+        int expectedThroatVertices = result.BoundaryTopology.Faces.Count(face =>
+            face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary) * 4;
+        Assert.Equal(expectedThroatVertices, vertices.Count(vertex =>
+            vertex.Color.A is >= 25 and <= 62));
+        Assert.All(vertices.Where(vertex => vertex.Color.A is < 25 or > 62),
+            vertex => Assert.Equal(0, vertex.Color.A));
     }
 
     [Fact]

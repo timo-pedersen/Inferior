@@ -282,7 +282,10 @@ public sealed record MegastationLandingDistrictDiagnostics(
     int CargoHeavySiteCount = 0,
     int PadCapacityDeficit = 0,
     int LargePadCapacityDeficit = 0,
-    string SiteSummary = "");
+    string SiteSummary = "",
+    int StructuralEnvelopeRejectCount = 0,
+    int StructuralComponentRejectCount = 0,
+    string StructuralRejectionSummary = "");
 
 public sealed record MegastationLandingDistrictPlan(
     int AlgorithmVersion,
@@ -300,9 +303,157 @@ public sealed record MegastationLandingDistrictPlan(
     IReadOnlyList<MegastationArtificialLight> ArtificialLights,
     MegastationLandingDistrictDiagnostics Diagnostics);
 
+internal sealed class MegastationLandingSiteStructuralClearance
+{
+    private const float ContactTolerance = .001f;
+    private readonly StructuralOccupancy _occupancy;
+    private readonly Vector3 _entranceMinimum;
+    private readonly Vector3 _entranceMaximum;
+
+    private MegastationLandingSiteStructuralClearance(
+        StructuralOccupancy occupancy,
+        Vector3 entranceMinimum,
+        Vector3 entranceMaximum)
+    {
+        _occupancy = occupancy;
+        _entranceMinimum = entranceMinimum;
+        _entranceMaximum = entranceMaximum;
+    }
+
+    public static MegastationLandingSiteStructuralClearance Create(
+        StructuralOccupancy occupancy,
+        MegastationInteriorPlan interior)
+    {
+        // The constructed entrance is presentation geometry fitted to an authoritative
+        // protected void. Keep its substantial assembly volume out of floor-site planning
+        // even though its cells were deliberately removed from StructuralOccupancy.
+        return new(
+            occupancy,
+            interior.EntrancePrecinct.AssemblyMinimum,
+            interior.EntrancePrecinct.AssemblyMaximum);
+    }
+
+    public bool IsPrismClear(
+        MegastationBerthClearance footprint,
+        float minimumHeight,
+        float maximumHeight,
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 up,
+        out string blocker)
+    {
+        (Vector3 minimum, Vector3 maximum) = Bounds(
+            footprint, minimumHeight, maximumHeight,
+            canonicalRight, canonicalForward, up);
+        return IsClear(minimum, maximum, out blocker);
+    }
+
+    public bool IsOrientedBoxClear(
+        Vector3 centre,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Vector3 size,
+        out string blocker)
+    {
+        Vector3 halfRight = right * (size.X * .5f);
+        Vector3 halfUp = up * (size.Y * .5f);
+        Vector3 halfForward = forward * (size.Z * .5f);
+        Vector3 minimum = new(float.MaxValue);
+        Vector3 maximum = new(float.MinValue);
+        foreach (int sr in new[] { -1, 1 })
+        foreach (int su in new[] { -1, 1 })
+        foreach (int sf in new[] { -1, 1 })
+        {
+            Vector3 point = centre + halfRight * sr + halfUp * su + halfForward * sf;
+            minimum = Vector3.Min(minimum, point);
+            maximum = Vector3.Max(maximum, point);
+        }
+        return IsClear(minimum, maximum, out blocker);
+    }
+
+    private bool IsClear(Vector3 minimum, Vector3 maximum, out string blocker)
+    {
+        if (Intersects(minimum, maximum, _entranceMinimum, _entranceMaximum,
+                ContactTolerance))
+        {
+            blocker = "EntranceThroat/assembly";
+            return false;
+        }
+
+        SliceGrid grid = _occupancy.Grid;
+        (int xStart, int xEnd) = CellRange(grid, GridAxis.X, minimum.X, maximum.X);
+        (int yStart, int yEnd) = CellRange(grid, GridAxis.Y, minimum.Y, maximum.Y);
+        (int zStart, int zEnd) = CellRange(grid, GridAxis.Z, minimum.Z, maximum.Z);
+        for (int x = xStart; x < xEnd; x++)
+        for (int y = yStart; y < yEnd; y++)
+        for (int z = zStart; z < zEnd; z++)
+        {
+            if (!_occupancy.IsOccupied(x, y, z))
+                continue;
+            string owner = _occupancy.Owner(x, y, z).ToString();
+            string region = _occupancy.RegionId(x, y, z) ?? "unassigned";
+            blocker = $"{owner}/{region}/cell:{x},{y},{z}";
+            return false;
+        }
+        blocker = string.Empty;
+        return true;
+    }
+
+    private static (int Start, int End) CellRange(
+        SliceGrid grid,
+        GridAxis axis,
+        float minimum,
+        float maximum)
+    {
+        int start = grid.Count(axis);
+        int end = 0;
+        for (int i = 0; i < grid.Count(axis); i++)
+        {
+            if (grid.GetCellMinimum(axis, i) >= maximum - ContactTolerance
+                || grid.GetCellMaximum(axis, i) <= minimum + ContactTolerance)
+                continue;
+            start = Math.Min(start, i);
+            end = Math.Max(end, i + 1);
+        }
+        return start == grid.Count(axis) ? (0, 0) : (start, end);
+    }
+
+    private static (Vector3 Minimum, Vector3 Maximum) Bounds(
+        MegastationBerthClearance footprint,
+        float minimumHeight,
+        float maximumHeight,
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 up)
+    {
+        Vector3 minimum = new(float.MaxValue);
+        Vector3 maximum = new(float.MinValue);
+        foreach (float r in new[] { footprint.RightMinimum, footprint.RightMaximum })
+        foreach (float f in new[] { footprint.ForwardMinimum, footprint.ForwardMaximum })
+        foreach (float h in new[] { minimumHeight, maximumHeight })
+        {
+            Vector3 point = canonicalRight * r + canonicalForward * f + up * h;
+            minimum = Vector3.Min(minimum, point);
+            maximum = Vector3.Max(maximum, point);
+        }
+        return (minimum, maximum);
+    }
+
+    private static bool Intersects(
+        Vector3 aMinimum,
+        Vector3 aMaximum,
+        Vector3 bMinimum,
+        Vector3 bMaximum,
+        float tolerance = 0f)
+        => aMinimum.X < bMaximum.X - tolerance && aMaximum.X > bMinimum.X + tolerance
+            && aMinimum.Y < bMaximum.Y - tolerance && aMaximum.Y > bMinimum.Y + tolerance
+            && aMinimum.Z < bMaximum.Z - tolerance && aMaximum.Z > bMinimum.Z + tolerance;
+}
+
 public static class MegastationLandingDistrictPlanner
 {
-    public const int AlgorithmVersion = 7;
+    public const int AlgorithmVersion = 8;
     public const float StandardPadSize = 36f;
     public const float LargePadLength = 72f;
     public const float CornerClip = 1f;
@@ -312,6 +463,7 @@ public static class MegastationLandingDistrictPlanner
     public const float LoadingAreaOutlineWidth = .10f;
     public static readonly Vector3 StandardContainerSize = new(6f, 2.5f, 2.5f);
     public const float SiteSeparation = 28f;
+    internal const float SiteArchitectureClearHeight = 36f;
 
     private readonly record struct SiteSpecification(
         int PadCount, MegastationLandingSiteCharacter Character, int Seed);
@@ -331,6 +483,11 @@ public static class MegastationLandingDistrictPlanner
         Vector2 ApronSize);
 
     public static MegastationLandingDistrictPlan Plan(MegastationInteriorPlan interior)
+        => Plan(interior, structuralOccupancy: null);
+
+    public static MegastationLandingDistrictPlan Plan(
+        MegastationInteriorPlan interior,
+        StructuralOccupancy? structuralOccupancy)
     {
         int seed = MegastationSeed.Derive(interior.Seed, "landing-district:v2");
         Vector3 canonicalRight = Vector3.Normalize(interior.PortalRight);
@@ -343,6 +500,14 @@ public static class MegastationLandingDistrictPlanner
         var usable = new MegastationBerthClearance(
             rightMin + 24f, rightMax - 24f,
             forwardMin + 24f, forwardMin + forwardSpan * .58f);
+        MegastationLandingSiteStructuralClearance? structuralClearance =
+            structuralOccupancy is null
+                ? null
+                : MegastationLandingSiteStructuralClearance.Create(
+                    structuralOccupancy, interior);
+        var structuralRejections = new List<string>();
+        int structuralEnvelopeRejects = 0;
+        int structuralComponentRejects = 0;
 
         int countSeed = MegastationSeed.Derive(seed, "site-count");
         float countRoll = Unit(countSeed, "choice");
@@ -365,7 +530,9 @@ public static class MegastationLandingDistrictPlanner
         var placements = new List<SitePlacement>(3);
         for (int i = 0; i < specifications.Count; i++)
             TryPlaceBest(specifications[i], i, placements, usable,
-                canonicalRight, canonicalForward, up);
+                canonicalRight, canonicalForward, up, upMin,
+                structuralClearance, structuralRejections,
+                ref structuralEnvelopeRejects, ref structuralComponentRejects);
 
         // Capacity is a target, never permission to overlap or leave the real floor.
         // Prefer another island when a coherent third site still fits.
@@ -379,7 +546,9 @@ public static class MegastationLandingDistrictPlanner
             var capacity = new SiteSpecification(
                 3 + (int)(Unit(child, "pad-count") * 3f), PickCharacter(child), child);
             if (!TryPlaceBest(capacity, index, placements, usable,
-                    canonicalRight, canonicalForward, up))
+                    canonicalRight, canonicalForward, up, upMin,
+                    structuralClearance, structuralRejections,
+                    ref structuralEnvelopeRejects, ref structuralComponentRejects))
                 break;
         }
 
@@ -390,6 +559,8 @@ public static class MegastationLandingDistrictPlanner
         var keepClearZones = new List<MegastationKeepClearZonePlan>();
         for (int siteIndex = 0; siteIndex < placements.Count; siteIndex++)
             BuildSite(siteIndex, placements[siteIndex]);
+        if (structuralClearance is not null)
+            ValidatePlannedComponents();
 
         int lightingSeed = MegastationSeed.Derive(seed, "lighting");
         var lights = new List<MegastationArtificialLight>();
@@ -480,7 +651,10 @@ public static class MegastationLandingDistrictPlanner
             SiteSummary: string.Join('/', sites.Select(site =>
                 $"{site.Identity}:{site.SizeClass}:{site.Character}:" +
                 $"{site.PadIds.Count}p:{pads.Count(pad => site.PadIds.Contains(pad.PadId) && pad.IsLarge)}L:" +
-                $"{site.Orientation}")));
+                $"{site.Orientation}")),
+            StructuralEnvelopeRejectCount: structuralEnvelopeRejects,
+            StructuralComponentRejectCount: structuralComponentRejects,
+            StructuralRejectionSummary: string.Join(" | ", structuralRejections.Take(12)));
         return new(
             AlgorithmVersion,
             seed,
@@ -617,6 +791,61 @@ public static class MegastationLandingDistrictPlanner
                 siteBuildings.Select(building => building.Identity).ToArray(),
                 specification.Seed));
         }
+
+        void ValidatePlannedComponents()
+        {
+            foreach (MegastationLandingSitePlan site in sites)
+            {
+                if (!structuralClearance!.IsPrismClear(
+                        OrientedEnvelope(site.ApronCentre, canonicalRight, canonicalForward,
+                            site.Right, site.PreferredHeading,
+                            site.ApronSize.X, site.ApronSize.Y, 0f),
+                        upMin,
+                        upMin + MegastationLandingPadAssemblyStandards.ApronThickness,
+                        canonicalRight, canonicalForward, up,
+                        out string apronBlocker))
+                    throw new InvalidOperationException(
+                        $"Landing site {site.Identity} apron intersects {apronBlocker} after planning.");
+
+                foreach (MegastationLandingPadPlan pad in pads.Where(candidate =>
+                             site.PadIds.Contains(candidate.PadId)))
+                {
+                    MegastationBerthClearance footprint = OrientedEnvelope(
+                        pad.PadSurface.Centre, canonicalRight, canonicalForward,
+                        pad.PadSurface.Right, pad.PadSurface.PreferredHeading,
+                        pad.NominalSize.X, pad.NominalSize.Y, 0f);
+                    if (!structuralClearance.IsPrismClear(
+                            footprint, upMin, upMin + 2f,
+                            canonicalRight, canonicalForward, up, out string padBlocker))
+                        throw new InvalidOperationException(
+                            $"Landing pad {pad.PadId} intersects {padBlocker} after planning.");
+                }
+
+                foreach (MegastationLandingServiceBuilding building in buildings.Where(candidate =>
+                             candidate.SiteIdentity == site.Identity))
+                    if (!structuralClearance.IsOrientedBoxClear(
+                            building.Centre, building.Frontage.Right, building.Frontage.Up,
+                            building.Frontage.Normal, building.Size, out string buildingBlocker))
+                        throw new InvalidOperationException(
+                            $"Landing building {building.Identity} intersects {buildingBlocker} after planning.");
+
+                foreach (MegastationLoadingAreaPlan area in loadingAreas.Where(candidate =>
+                             candidate.SiteIdentity == site.Identity))
+                {
+                    if (!structuralClearance.IsPrismClear(
+                            area.Bounds, upMin, upMin + .25f,
+                            canonicalRight, canonicalForward, up, out string loadingBlocker))
+                        throw new InvalidOperationException(
+                            $"Landing loading area {area.Identity} intersects {loadingBlocker} after planning.");
+                    foreach (MegastationLandingContainerPlan container in area.Containers)
+                        if (!structuralClearance.IsOrientedBoxClear(
+                                container.Centre, area.Right, up, area.PreferredHeading,
+                                container.Size, out string containerBlocker))
+                            throw new InvalidOperationException(
+                                $"Landing container {container.Identity} intersects {containerBlocker} after planning.");
+                }
+            }
+        }
     }
 
     private static bool TryPlaceBest(
@@ -626,9 +855,17 @@ public static class MegastationLandingDistrictPlanner
         MegastationBerthClearance usable,
         Vector3 canonicalRight,
         Vector3 canonicalForward,
-        Vector3 up)
+        Vector3 up,
+        float floorHeight,
+        MegastationLandingSiteStructuralClearance? structuralClearance,
+        List<string> structuralRejections,
+        ref int structuralEnvelopeRejects,
+        ref int structuralComponentRejects)
     {
-        int minimum = requested.PadCount >= 9 ? 9 : requested.PadCount >= 4 ? 4 : 1;
+        // Geometry validity wins over the requested class. A coherent smaller site is
+        // preferable to either forcing a large layout through structure or abandoning
+        // otherwise usable main-floor capacity.
+        const int minimum = 1;
         for (int count = requested.PadCount; count >= minimum; count--)
         {
             SiteSpecification specification = requested with { PadCount = count };
@@ -658,13 +895,39 @@ public static class MegastationLandingDistrictPlanner
                         centre, canonicalRight, canonicalForward, right, forward,
                         metrics.ApronSize.X, metrics.ApronSize.Y, SiteSeparation * .5f);
                     if (accepted.Any(item => item.Envelope.Intersects(envelope))) continue;
+                    var placement = new SitePlacement(specification, orientation, right, forward,
+                        r, f, metrics.ApronSize, envelope);
+                    if (structuralClearance is not null)
+                    {
+                        MegastationBerthClearance footprint = OrientedEnvelope(
+                            centre, canonicalRight, canonicalForward, right, forward,
+                            metrics.ApronSize.X, metrics.ApronSize.Y, 0f);
+                        if (!structuralClearance.IsPrismClear(
+                                footprint, floorHeight,
+                                floorHeight + SiteArchitectureClearHeight,
+                                canonicalRight, canonicalForward, up, out string blocker))
+                        {
+                            structuralEnvelopeRejects++;
+                            AddStructuralRejection(structuralRejections,
+                                $"site:{siteIndex}/{orientation}/{row},{column}:envelope:{blocker}");
+                            continue;
+                        }
+                        if (!CandidateComponentsAreClear(
+                                placement, floorHeight, canonicalRight, canonicalForward, up,
+                                structuralClearance, out blocker))
+                        {
+                            structuralComponentRejects++;
+                            AddStructuralRejection(structuralRejections,
+                                $"site:{siteIndex}/{orientation}/{row},{column}:component:{blocker}");
+                            continue;
+                        }
+                    }
                     uint score = unchecked((uint)MegastationSeed.Derive(
                         specification.Seed, $"placement:{siteIndex}:{orientationValue}:{row}:{column}"));
                     float separation = accepted.Count == 0 ? 0f : accepted.Min(item =>
                         (item.CentreRight - r) * (item.CentreRight - r)
                         + (item.CentreForward - f) * (item.CentreForward - f));
-                    candidates.Add((separation, score, new(specification, orientation, right, forward,
-                        r, f, metrics.ApronSize, envelope)));
+                    candidates.Add((separation, score, placement));
                 }
             }
             if (candidates.Count == 0) continue;
@@ -673,6 +936,50 @@ public static class MegastationLandingDistrictPlanner
             return true;
         }
         return false;
+    }
+
+    private static bool CandidateComponentsAreClear(
+        SitePlacement placement,
+        float floorHeight,
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 up,
+        MegastationLandingSiteStructuralClearance clearance,
+        out string blocker)
+    {
+        SiteMetrics metrics = Metrics(
+            placement.Specification.PadCount, placement.Specification.Character);
+        Vector3 siteCentre = canonicalRight * placement.CentreRight
+            + canonicalForward * placement.CentreForward
+            + up * (floorHeight + MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+        float rear = -metrics.ApronSize.Y * .5f;
+        int buildingCount = placement.Specification.PadCount <= 3 ? 1
+            : placement.Specification.PadCount <= 8 ? 2 : 3;
+        float buildingWidth = MathF.Min(64f,
+            (metrics.ApronSize.X - 24f - (buildingCount - 1) * 10f) / buildingCount);
+        for (int i = 0; i < buildingCount; i++)
+        {
+            int child = MegastationSeed.Derive(placement.Specification.Seed, $"building:{i}");
+            float height = 20f + Unit(child, "height") * 13f;
+            Vector3 size = new(buildingWidth, height, metrics.BuildingDepth);
+            float x = (i - (buildingCount - 1) * .5f) * (buildingWidth + 10f);
+            Vector3 centre = siteCentre + placement.Right * x
+                + placement.Forward * (rear + 8f + metrics.BuildingDepth * .5f)
+                + up * (height * .5f
+                    - MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+            if (!clearance.IsOrientedBoxClear(
+                    centre, placement.Right, up, placement.Forward, size, out blocker))
+                return false;
+        }
+
+        blocker = string.Empty;
+        return true;
+    }
+
+    private static void AddStructuralRejection(List<string> rejections, string message)
+    {
+        if (rejections.Count < 12)
+            rejections.Add(message);
     }
 
     private static SiteMetrics Metrics(int padCount, MegastationLandingSiteCharacter character)

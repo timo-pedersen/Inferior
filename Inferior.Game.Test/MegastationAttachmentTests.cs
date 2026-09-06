@@ -154,6 +154,7 @@ public sealed class MegastationAttachmentTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void NovaPlanIsDeterministicTraversalIndependentAndNonRecursive()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
@@ -196,6 +197,7 @@ public sealed class MegastationAttachmentTests
     [Theory]
     [InlineData("Gaanis:Gaanis II:Omega Beacon")]
     [InlineData("Araris:Araris I:Swift Depot")]
+    [Trait("Category", "Slow")]
     public void OtherMegastationsRemainBoundedAndReportable(string stationIdentity)
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator
@@ -228,6 +230,7 @@ public sealed class MegastationAttachmentTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void PlanningAndSuppressionLeaveStructuralSolidAndSurvivingIdentitiesUnchanged()
     {
         MegastationPrototypeCpuResult result = MegastationPrototypeGenerator.GenerateCpu(NovaAnchorageId);
