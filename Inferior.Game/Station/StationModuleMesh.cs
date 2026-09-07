@@ -30,6 +30,9 @@ public enum DecorClass
     MegastationMegaGreebleMajor, MegastationMegaGreebleMinor,
     MegastationFabricMajor, MegastationFabricMinor,
     MegastationServiceChannelMajor, MegastationServiceChannelMinor,
+    // All substantial presentation architecture inside the hollow station uses Major.
+    // This is the capability seam for future structural platforms such as Mega Shelves;
+    // fixtures, markings, windows, rails, and other fine detail remain Minor.
     MegastationInteriorMajor, MegastationInteriorMinor,
 
     // C1 — structural

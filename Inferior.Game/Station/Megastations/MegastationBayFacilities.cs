@@ -32,6 +32,25 @@ public enum MegastationBayFacilityColourRole
     Dark,
 }
 
+public enum MegastationBayHabitationReservationKind
+{
+    Cutout,
+    Gallery,
+    EmbeddedFacility,
+    ServiceAperture,
+    PlainWindowBand,
+}
+
+public sealed record MegastationBayHabitationReservation(
+    string Identity,
+    string WallIdentity,
+    string RegionIdentity,
+    MegastationBayHabitationReservationKind Kind,
+    Vector2 Centre,
+    Vector2 Size,
+    float MinimumProjection,
+    float MaximumProjection);
+
 public sealed record MegastationBayFacilityPart(
     string Identity,
     MegastationBayFacilityPartRole Role,
@@ -91,93 +110,148 @@ public sealed record MegastationBayFacilityDiagnostics(
     int ShadowVertexCount,
     int ShadowTriangleCount,
     long MeshBytes,
-    string Signature);
+    string Signature,
+    int ReservationRejectCount = 0,
+    int CutoutValidationRejectCount = 0,
+    int ArtificialLightCount = 0);
 
 public sealed record MegastationBayFacilityPlan(
     IReadOnlyList<MegastationBayFacility> Facilities,
+    IReadOnlySet<string> RetainedRegionIdentities,
+    IReadOnlyList<MegastationBayHabitationReservation> Reservations,
+    IReadOnlyList<MegastationArtificialLight> ArtificialLights,
     MegastationBayFacilityDiagnostics Diagnostics);
+
+public sealed record MegastationBayWallCompositionPlan(
+    MegastationBayHabitationPlan Habitation,
+    MegastationBayFacilityPlan Facilities);
+
+public static class MegastationBayWallCompositionPlanner
+{
+    public static MegastationBayWallCompositionPlan Plan(
+        MegastationInteriorPlan interior,
+        MegastationLandingDistrictPlan landingDistrict,
+        StructuralOccupancy occupancy,
+        BoundaryTopology topology)
+    {
+        MegastationBayHabitationPlan candidates = MegastationBayHabitationPlanner.Plan(
+            interior, landingDistrict, occupancy, topology);
+        MegastationBayFacilityPlan facilities = MegastationBayFacilityPlanner.Plan(
+            interior, candidates, occupancy, topology, landingDistrict);
+        MegastationBayHabitationPlan habitation = MegastationBayHabitationPlanner.RetainRegions(
+            candidates, facilities.RetainedRegionIdentities,
+            facilities.Facilities.Select(facility => facility.RegionIdentity)
+                .ToHashSet(StringComparer.Ordinal));
+        return new(habitation, facilities);
+    }
+}
 
 public static class MegastationBayFacilityPlanner
 {
-    public const int AlgorithmVersion = 1;
+    public const int AlgorithmVersion = 2;
+    private const float ReservationMargin = 2f;
 
     public static MegastationBayFacilityPlan Plan(
         MegastationInteriorPlan interior,
         MegastationBayHabitationPlan habitation,
         StructuralOccupancy? occupancy = null,
-        BoundaryTopology? topology = null)
+        BoundaryTopology? topology = null,
+        MegastationLandingDistrictPlan? landingDistrict = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var facilities = new List<MegastationBayFacility>();
-        int rootSeed = MegastationSeed.Derive(interior.Seed, "bay-wall-facilities:v1");
-        foreach (MegastationBayHabitationRegion region in habitation.Regions)
+        var reservations = new List<MegastationBayHabitationReservation>();
+        var retained = new HashSet<string>(StringComparer.Ordinal);
+        var lights = new List<MegastationArtificialLight>();
+        var supportingFaces = new HashSet<BoundaryFaceKey>();
+        int reservationRejects = 0;
+        int cutoutValidationRejects = 0;
+        int rootSeed = MegastationSeed.Derive(interior.Seed, "bay-wall-facilities:v2");
+
+        // Allocate the strongest architecture first. This is a semantic priority,
+        // not an emission-order accident: every later occupant sees its reservation.
+        if (occupancy is not null && topology is not null)
+        foreach (MegastationBayHabitationRegion region in habitation.Regions
+                     .OrderBy(item => Unit(MegastationSeed.Derive(rootSeed, item.Identity),
+                         "cutout-priority")))
         {
-            int seed = MegastationSeed.Derive(rootSeed, region.Identity);
-            if (Unit(seed, "presence") >= .60f)
+            int regionSeed = MegastationSeed.Derive(rootSeed, region.Identity);
+            MegastationBayFacility candidate = Build(region, regionSeed, forceRecess: true);
+            if (candidate.Cutout is null)
+            {
+                cutoutValidationRejects++;
                 continue;
-            facilities.Add(Build(region, seed, forceRecess: facilities.Count == 0));
-        }
-        if (facilities.Count == 0 && habitation.Regions.Count > 0)
-        {
-            MegastationBayHabitationRegion selected = habitation.Regions
-                .OrderBy(region => Unit(MegastationSeed.Derive(rootSeed, region.Identity),
-                    "presence"))
-                .First();
-            facilities.Add(Build(selected, MegastationSeed.Derive(rootSeed, selected.Identity),
-                forceRecess: true));
-        }
-        if (topology is not null && occupancy is not null
-            && facilities.All(facility => facility.Cutout is null))
-        {
-            foreach (MegastationBayHabitationRegion region in habitation.Regions
-                         .OrderBy(item => Unit(MegastationSeed.Derive(rootSeed, item.Identity),
-                             "cutout-priority")))
-            {
-                int regionSeed = MegastationSeed.Derive(rootSeed, region.Identity);
-                MegastationBayFacility candidate = Build(region, regionSeed,
-                    forceRecess: true);
-                if (candidate.Cutout is null)
-                    continue;
-                int existing = facilities.FindIndex(facility =>
-                    facility.RegionIdentity == region.Identity);
-                if (existing >= 0)
-                    facilities[existing] = candidate;
-                else
-                    facilities.Add(candidate);
-                break;
             }
-        }
-        if (topology is not null && occupancy is not null)
-        {
-            var supportingFaces = new HashSet<BoundaryFaceKey>();
-            for (int index = 0; index < facilities.Count; index++)
+            if (supportingFaces.Contains(candidate.Cutout.SupportingFace)
+                || !TryAcceptFacility(candidate))
             {
-                MegastationBayWallCutout? cutout = facilities[index].Cutout;
-                if (cutout is null || supportingFaces.Add(cutout.SupportingFace))
-                    continue;
-                MegastationBayHabitationRegion region = habitation.Regions.Single(item =>
-                    item.Identity == facilities[index].RegionIdentity);
-                MegastationBayWallSurface wall = habitation.Walls.Single(item =>
-                    item.Identity == region.WallIdentity);
-                int regionSeed = MegastationSeed.Derive(rootSeed, region.Identity);
-                facilities[index] = BuildFacility(wall, region,
-                    MegastationBayFacilityArchetype.ProjectingGallery,
-                    secondary: false, regionSeed, occupancy, topology);
+                reservationRejects++;
+                continue;
             }
+            supportingFaces.Add(candidate.Cutout.SupportingFace);
+            AddFacility(candidate, regionSeed);
+            break;
         }
-        if (facilities.Count == habitation.Regions.Count && facilities.Count > 1)
+
+        foreach (MegastationBayHabitationRegion region in habitation.Regions
+                     .OrderBy(item => item.Identity, StringComparer.Ordinal))
         {
-            int removable = facilities.FindLastIndex(facility => facility.Cutout is null);
-            facilities.RemoveAt(removable >= 0 ? removable : facilities.Count - 1);
+            if (retained.Contains(region.Identity))
+                continue;
+            int seed = MegastationSeed.Derive(rootSeed, region.Identity);
+            if (Unit(seed, "presence") >= .58f)
+                continue;
+            MegastationBayFacilityArchetype intendedArchetype = PickArchetype(seed);
+            MegastationBayFacility candidate = Build(region, seed, forceRecess: false);
+            if (intendedArchetype == MegastationBayFacilityArchetype.RecessedFacility
+                && occupancy is not null && topology is not null
+                && candidate.Cutout is null)
+            {
+                cutoutValidationRejects++;
+                continue;
+            }
+            if (candidate.Cutout is { } opening
+                && supportingFaces.Contains(opening.SupportingFace))
+            {
+                reservationRejects++;
+                continue;
+            }
+            if (!TryAcceptFacility(candidate))
+            {
+                reservationRejects++;
+                continue;
+            }
+            if (candidate.Cutout is { } acceptedOpening)
+                supportingFaces.Add(acceptedOpening.SupportingFace);
+            AddFacility(candidate, seed);
+        }
+
+        // Plain bands fill only the authoritative wall space left by substantial
+        // architecture. Conflicting lightweight regions are intentionally discarded.
+        foreach (MegastationBayHabitationRegion region in habitation.Regions
+                     .Where(region => !retained.Contains(region.Identity))
+                     .OrderBy(region => region.Identity, StringComparer.Ordinal))
+        {
+            var reservation = new MegastationBayHabitationReservation(
+                $"{region.Identity}/reservation:plain", region.WallIdentity,
+                region.Identity, MegastationBayHabitationReservationKind.PlainWindowBand,
+                region.Centre, region.Size + new Vector2(ReservationMargin * 2f), 0f, .1f);
+            if (reservations.Any(existing => ReservationsOverlap(existing, reservation)))
+            {
+                reservationRejects++;
+                continue;
+            }
+            reservations.Add(reservation);
+            retained.Add(region.Identity);
         }
 
         stopwatch.Stop();
-        string signature = Signature(facilities);
+        string signature = Signature(facilities, reservations, lights);
         var diagnostics = new MegastationBayFacilityDiagnostics(
             AlgorithmVersion,
             habitation.Regions.Count,
             facilities.Count,
-            habitation.Regions.Count - facilities.Count,
+            retained.Count - facilities.Count,
             facilities.Count(item => item.Archetype ==
                 MegastationBayFacilityArchetype.RecessedFacility),
             facilities.Count(item => item.Archetype ==
@@ -199,8 +273,11 @@ public static class MegastationBayFacilityPlanner
             facilities.Count == 0 ? 0f : facilities.Max(item => item.MaximumProjection),
             stopwatch.ElapsedMilliseconds,
             0, 0, 0, 0, 0,
-            signature);
-        return new(facilities, diagnostics);
+            signature,
+            reservationRejects,
+            cutoutValidationRejects,
+            lights.Count);
+        return new(facilities, retained, reservations, lights, diagnostics);
 
         MegastationBayFacility Build(
             MegastationBayHabitationRegion region,
@@ -218,6 +295,158 @@ public static class MegastationBayFacilityPlanner
             return BuildFacility(wall, region, archetype, secondary, seed,
                 occupancy, topology);
         }
+
+        bool TryAcceptFacility(MegastationBayFacility facility)
+        {
+            MegastationBayWallSurface wall = habitation.Walls.Single(candidate =>
+                candidate.Identity == facility.WallIdentity);
+            MegastationBayHabitationReservation reservation = Reservation(facility, wall);
+            if (!FitsAuthoritativeWallAndBay(facility, wall, reservation))
+                return false;
+            if (reservations.Any(existing => ReservationsOverlap(existing, reservation)))
+                return false;
+            if (landingBuildingsOverlap(facility, wall))
+                return false;
+            return true;
+        }
+
+        bool FitsAuthoritativeWallAndBay(
+            MegastationBayFacility facility,
+            MegastationBayWallSurface wall,
+            MegastationBayHabitationReservation reservation)
+        {
+            if (occupancy is null || topology is null)
+                return true;
+            if (!MegastationBayHabitationPlanner.TryFindSupportingFace(
+                    wall, reservation.Centre, reservation.Size, 0f,
+                    occupancy.Grid, topology, out BoundaryFace? face)
+                || face is null
+                || facility.Cutout is { } cutout && cutout.SupportingFace != face.Key)
+                return false;
+            (int dx, int dy, int dz) = Direction.Offset(face.Direction);
+            int voidX = face.Key.X + dx;
+            int voidY = face.Key.Y + dy;
+            int voidZ = face.Key.Z + dz;
+            if (occupancy.VoidKind(voidX, voidY, voidZ)
+                != MegacellVoidKind.InteriorFlightVolume)
+                return false;
+            GridAxis axis = Direction.PrimaryAxis(face.Direction);
+            int voidIndex = axis switch
+            {
+                GridAxis.X => voidX,
+                GridAxis.Y => voidY,
+                _ => voidZ,
+            };
+            return reservation.MaximumProjection
+                <= occupancy.Grid.GetCellSize(axis, voidIndex) - .1f;
+        }
+
+        void AddFacility(MegastationBayFacility facility, int seed)
+        {
+            MegastationBayWallSurface wall = habitation.Walls.Single(candidate =>
+                candidate.Identity == facility.WallIdentity);
+            facilities.Add(facility);
+            retained.Add(facility.RegionIdentity);
+            reservations.Add(Reservation(facility, wall));
+            if (facility.Cutout is { } cutout
+                && Unit(seed, "recess-light-presence") < .92f)
+                lights.Add(BuildRecessLight(cutout, seed));
+        }
+
+        bool landingBuildingsOverlap(
+            MegastationBayFacility facility,
+            MegastationBayWallSurface wall)
+        {
+            Vector2 centre = new(
+                Vector3.Dot(facility.EnvelopeCentre - wall.Centre, wall.Right),
+                Vector3.Dot(facility.EnvelopeCentre - wall.Centre, wall.Up));
+            Vector2 size = new(facility.EnvelopeSize.X + ReservationMargin * 2f,
+                facility.EnvelopeSize.Y + ReservationMargin * 2f);
+            return (landingDistrict?.ServiceBuildings ?? []).Any(building => BuildingOverlaps(
+                wall, centre, size, building));
+        }
+    }
+
+    internal static bool ReservationsOverlap(
+        MegastationBayHabitationReservation a,
+        MegastationBayHabitationReservation b)
+        => a.WallIdentity == b.WallIdentity
+            && RectangleOverlaps(a.Centre, a.Size, b.Centre, b.Size);
+
+    private static bool RectangleOverlaps(
+        Vector2 centreA,
+        Vector2 sizeA,
+        Vector2 centreB,
+        Vector2 sizeB)
+        => MathF.Abs(centreA.X - centreB.X) * 2f < sizeA.X + sizeB.X
+            && MathF.Abs(centreA.Y - centreB.Y) * 2f < sizeA.Y + sizeB.Y;
+
+    private static MegastationBayHabitationReservation Reservation(
+        MegastationBayFacility facility,
+        MegastationBayWallSurface wall)
+    {
+        Vector3 offset = facility.EnvelopeCentre - wall.Centre;
+        Vector2 centre = new(Vector3.Dot(offset, wall.Right),
+            Vector3.Dot(offset, wall.Up));
+        float projection = Vector3.Dot(offset, wall.Normal);
+        MegastationBayHabitationReservationKind kind = facility.Cutout is not null
+            ? MegastationBayHabitationReservationKind.Cutout
+            : facility.Archetype switch
+            {
+                MegastationBayFacilityArchetype.ProjectingGallery =>
+                    MegastationBayHabitationReservationKind.Gallery,
+                MegastationBayFacilityArchetype.EmbeddedBlock =>
+                    MegastationBayHabitationReservationKind.EmbeddedFacility,
+                _ => MegastationBayHabitationReservationKind.ServiceAperture,
+            };
+        return new($"{facility.Identity}/reservation", facility.WallIdentity,
+            facility.RegionIdentity, kind, centre,
+            new(facility.EnvelopeSize.X + ReservationMargin * 2f,
+                facility.EnvelopeSize.Y + ReservationMargin * 2f),
+            projection - facility.EnvelopeSize.Z * .5f,
+            projection + facility.EnvelopeSize.Z * .5f);
+    }
+
+    private static bool BuildingOverlaps(
+        MegastationBayWallSurface wall,
+        Vector2 centre,
+        Vector2 size,
+        MegastationLandingServiceBuilding building)
+    {
+        Vector3 buildingRight = Vector3.Normalize(building.Frontage.Right);
+        Vector3 buildingUp = Vector3.Normalize(building.Frontage.Up);
+        Vector3 buildingForward = Vector3.Normalize(building.Frontage.Normal);
+        float Radius(Vector3 axis) =>
+            MathF.Abs(Vector3.Dot(buildingRight, axis)) * building.Size.X * .5f
+            + MathF.Abs(Vector3.Dot(buildingUp, axis)) * building.Size.Y * .5f
+            + MathF.Abs(Vector3.Dot(buildingForward, axis)) * building.Size.Z * .5f;
+        if (MathF.Abs(Vector3.Dot(building.Centre - wall.Centre, wall.Normal))
+            > Radius(wall.Normal) + 2f)
+            return false;
+        Vector2 buildingCentre = new(
+            Vector3.Dot(building.Centre - wall.Centre, wall.Right),
+            Vector3.Dot(building.Centre - wall.Centre, wall.Up));
+        Vector2 buildingSize = new(Radius(wall.Right) * 2f, Radius(wall.Up) * 2f);
+        return RectangleOverlaps(centre, size, buildingCentre,
+            buildingSize + new Vector2(ReservationMargin * 2f));
+    }
+
+    private static MegastationArtificialLight BuildRecessLight(
+        MegastationBayWallCutout cutout,
+        int seed)
+    {
+        float colourRoll = Unit(seed, "recess-light-colour");
+        Color colour = colourRoll < .72f ? new Color(255, 226, 185)
+            : colourRoll < .94f ? new Color(235, 238, 232)
+            : new Color(204, 225, 242);
+        float intensity = .52f + Unit(seed, "recess-light-intensity") * .28f;
+        float range = MathHelper.Clamp(
+            MathF.Max(cutout.Size.X, cutout.Size.Y) * .72f, 14f, 42f);
+        Vector3 position = cutout.Centre
+            - cutout.Normal * MathF.Min(cutout.Depth * .35f, 1.4f)
+            + cutout.Up * cutout.Size.Y * .22f;
+        return new($"{cutout.Identity}/architectural-light:v1", position,
+            colour, intensity, range, -cutout.Normal, -.2f);
     }
 
     private static MegastationBayFacilityArchetype PickArchetype(int seed)
@@ -255,7 +484,7 @@ public static class MegastationBayFacilityPlanner
         if (archetype == MegastationBayFacilityArchetype.RecessedFacility
             && occupancy is not null && topology is not null)
         {
-            cutout = BuildCutout(wall, region, seed, occupancy.Grid, topology);
+            cutout = BuildCutout(wall, region, seed, occupancy, topology);
             if (cutout is not null && Unit(seed, "cut-edge-frame") < .42f)
                 AddPerimeter(MegastationBayFacilityPartRole.ApertureFrame,
                     new(Vector3.Dot(cutout.Centre - wall.Centre, wall.Right),
@@ -295,7 +524,7 @@ public static class MegastationBayFacilityPlanner
         }
 
         bool gallery = archetype == MegastationBayFacilityArchetype.ProjectingGallery
-            || secondary;
+            || secondary && cutout is null;
         if (cutout is not null)
             AddRecessArchitecture(cutout);
         if (gallery)
@@ -365,7 +594,7 @@ public static class MegastationBayFacilityPlanner
             (minX + maxX) * .5f, (minY + maxY) * .5f, (minZ + maxZ) * .5f);
         Vector3 envelopeSize = new(maxX - minX, maxY - minY, maxZ - minZ);
         return new(
-            $"{region.Identity}/facility:v1", wall.Identity, region.Identity,
+            $"{region.Identity}/facility:v2", wall.Identity, region.Identity,
             archetype, wall.Right, wall.Up, wall.Normal,
             envelopeCentre, envelopeSize, maximumProjection, secondary, parts,
             cutout, windows);
@@ -593,7 +822,7 @@ public static class MegastationBayFacilityPlanner
             MegastationBayFacilityColourRole colour,
             bool casts)
             => parts.Add(new(
-                $"{region.Identity}/facility:v1/{suffix}", role,
+                $"{region.Identity}/facility:v2/{suffix}", role,
                 SurfacePoint(localCentre.X, localCentre.Y, localCentre.Z),
                 size, material, colour, casts));
 
@@ -605,57 +834,50 @@ public static class MegastationBayFacilityPlanner
         MegastationBayWallSurface wall,
         MegastationBayHabitationRegion region,
         int seed,
-        SliceGrid grid,
+        StructuralOccupancy occupancy,
         BoundaryTopology topology)
     {
-        var candidates = topology.Faces
-            .Where(face => face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary
-                && Vector3.Dot(BoundaryTopologyBuilder.Normal(face.Direction), wall.Normal) > .9999f)
-            .Select(face =>
-            {
-                Vector3[] points = face.Vertices
-                    .Select(vertex => BoundaryTopologyBuilder.Position(grid, vertex)).ToArray();
-                float plane = MathF.Abs(Vector3.Dot(points[0] - wall.Centre, wall.Normal));
-                float minX = points.Min(point => Vector3.Dot(point - wall.Centre, wall.Right));
-                float maxX = points.Max(point => Vector3.Dot(point - wall.Centre, wall.Right));
-                float minY = points.Min(point => Vector3.Dot(point - wall.Centre, wall.Up));
-                float maxY = points.Max(point => Vector3.Dot(point - wall.Centre, wall.Up));
-                bool contains = region.Centre.X >= minX && region.Centre.X <= maxX
-                    && region.Centre.Y >= minY && region.Centre.Y <= maxY;
-                return (Face: face, Plane: plane, MinX: minX, MaxX: maxX,
-                    MinY: minY, MaxY: maxY, Contains: contains);
-            })
-            .Where(item => item.Plane < .01f && item.Contains)
-            .OrderByDescending(item =>
-                (item.MaxX - item.MinX) * (item.MaxY - item.MinY))
-            .ToArray();
-        if (candidates.Length == 0)
+        SliceGrid grid = occupancy.Grid;
+        Vector2 desiredSize = new(region.Size.X, MathF.Max(region.Size.Y, 10f));
+        if (!MegastationBayHabitationPlanner.TryFindSupportingFace(
+                wall, region.Centre, desiredSize, 2f, grid, topology,
+                out BoundaryFace? selectedFace)
+            || selectedFace is null)
+            return null;
+        BoundaryFaceKey key = selectedFace.Key;
+        if (!occupancy.IsOccupied(key.X, key.Y, key.Z))
+            return null;
+        (int dx, int dy, int dz) = Direction.Offset(selectedFace.Direction);
+        if (occupancy.VoidKind(key.X + dx, key.Y + dy, key.Z + dz)
+            != MegacellVoidKind.InteriorFlightVolume)
             return null;
 
-        var selected = candidates[0];
-        float availableWidth = selected.MaxX - selected.MinX - 4f;
-        float availableHeight = selected.MaxY - selected.MinY - 4f;
-        if (availableWidth < 10f || availableHeight < 8f)
+        GridAxis depthAxis = Direction.PrimaryAxis(selectedFace.Direction);
+        int depthIndex = depthAxis switch
+        {
+            GridAxis.X => key.X,
+            GridAxis.Y => key.Y,
+            _ => key.Z,
+        };
+        float maximumDepth = grid.GetCellSize(depthAxis, depthIndex) - .5f;
+        if (maximumDepth < 1f)
             return null;
-        float width = MathF.Min(region.Size.X, availableWidth);
-        float height = MathF.Min(MathF.Max(region.Size.Y, 10f), availableHeight);
-        float x = MathHelper.Clamp(region.Centre.X,
-            selected.MinX + 2f + width * .5f,
-            selected.MaxX - 2f - width * .5f);
-        float y = MathHelper.Clamp(region.Centre.Y,
-            selected.MinY + 2f + height * .5f,
-            selected.MaxY - 2f - height * .5f);
-        float depth = 1f + Unit(seed, "recess-depth") * 4f;
-        Vector3 centre = wall.Centre + wall.Right * x + wall.Up * y;
+        float depth = MathF.Min(1f + Unit(seed, "recess-depth") * 4f,
+            maximumDepth);
+        Vector3 centre = wall.Centre + wall.Right * region.Centre.X
+            + wall.Up * region.Centre.Y;
         return new(
-            $"{region.Identity}/cutout:v1", selected.Face.Key, wall.Identity,
-            centre, wall.Right, wall.Up, wall.Normal, new(width, height), depth);
+            $"{region.Identity}/cutout:v2", key, wall.Identity,
+            centre, wall.Right, wall.Up, wall.Normal, desiredSize, depth);
     }
 
     private static float Unit(int seed, string domain)
         => (unchecked((uint)MegastationSeed.Derive(seed, domain)) & 0x00ffffff) / 16777215f;
 
-    private static string Signature(IReadOnlyList<MegastationBayFacility> facilities)
+    private static string Signature(
+        IReadOnlyList<MegastationBayFacility> facilities,
+        IReadOnlyList<MegastationBayHabitationReservation> reservations,
+        IReadOnlyList<MegastationArtificialLight> lights)
     {
         var text = new StringBuilder().Append(AlgorithmVersion);
         foreach (MegastationBayFacility facility in facilities)
@@ -675,6 +897,18 @@ public static class MegastationBayFacilityPlanner
                     .Append(window.Centre).Append(':').Append(window.Width)
                     .Append(':').Append(window.Height).Append(':').Append(window.State);
         }
+        foreach (MegastationBayHabitationReservation reservation in reservations)
+            text.Append("|reservation:").Append(reservation.Identity).Append(':')
+                .Append(reservation.Kind).Append(':').Append(reservation.Centre)
+                .Append(':').Append(reservation.Size).Append(':')
+                .Append(reservation.MinimumProjection.ToString("R", CultureInfo.InvariantCulture))
+                .Append(':')
+                .Append(reservation.MaximumProjection.ToString("R", CultureInfo.InvariantCulture));
+        foreach (MegastationArtificialLight light in lights)
+            text.Append("|light:").Append(light.Identity).Append(':')
+                .Append(light.Position).Append(':').Append(light.Colour.PackedValue)
+                .Append(':').Append(light.Intensity.ToString("R", CultureInfo.InvariantCulture))
+                .Append(':').Append(light.Range.ToString("R", CultureInfo.InvariantCulture));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
     }
 }

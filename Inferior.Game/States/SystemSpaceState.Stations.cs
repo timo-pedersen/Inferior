@@ -164,6 +164,10 @@ public sealed partial class SystemSpaceState
             $"railings:{d.BayFacilityRailingPartCount},occluders:{d.BayFacilityOccluderPartCount}," +
             $"cutouts:{d.BayFacilityCutoutCount},facilityWindows:{d.BayFacilityWindowCount}," +
             $"balconies:{d.BayFacilityBalconyCount}," +
+            $"reservations:{d.BayFacilityReservationCount}," +
+            $"rejects:{d.BayFacilityReservationRejectCount}reservation/" +
+            $"{d.BayFacilityCutoutValidationRejectCount}cutout," +
+            $"recessLights:{d.BayFacilityArtificialLightCount}," +
             $"projection:{d.BayFacilityMaximumProjection:F1}m," +
             $"mesh:{d.BayFacilityMeshVertexCount}v/{d.BayFacilityMeshTriangleCount}t," +
             $"shadow:{d.BayFacilityShadowVertexCount}v/{d.BayFacilityShadowTriangleCount}t," +

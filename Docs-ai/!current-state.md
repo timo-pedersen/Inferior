@@ -15,6 +15,10 @@
 > B4a/B4a.1 ambassador bay with H1e approach beams and rear visitor port. Collision remains
 > deferred. The megastation shadow map remains 8192². Timo visually accepted
 > the complete Fabric + M1 baseline, including close-range material appearance, on 2026-08-26.
+> Major authoritative bay/interior structure now shares the exact finalized structural mesh with
+> the existing stellar-shadow caster path; H1g was accepted on 2026-09-07 from direct proxy evidence
+> that landing-site interior buildings cast central-star shadows, while the rare exact wall-corner
+> alignment remains unreplicated rather than directly visually confirmed.
 > Mega-greeble parabolic antennas, flat SurfaceArrays, RadialSolarWings, and native
 > G2/mega-greeble shadow participation remain accepted and locked. The abandoned
 > `E:\Git\GitInferior-megastation-prototype-c`
@@ -236,19 +240,38 @@ baseline. Visible geometry and artificial-light occluders share authoritative si
 per-site apron and pad receiver ranges preserve the accepted tessellated static-light behavior.
 Landing mechanics, wall/ceiling sites and collision remain deferred.
 
-L3a/L3b are implemented in the current uncommitted worktree and await Timo's in-engine visual
-review. L3a adds sparse deterministic human-scale emissive window regions on authoritative
-vertical bay-wall frames while leaving the entrance wall, most wall area and all artificial-light
-source counts unchanged. L3b derives sparse shallow recessed frames, projecting galleries,
-embedded blocks and rare service apertures from selected L3a regions; substantial parts join the
-existing stellar-shadow and H1c-C artificial-occlusion paths, while railings/doors remain minor.
-The known follow-up is deliberately deferred as **L3a.1**: increase window-region visual weight
-with more clusters, longer rows and more double/triple rows without producing office-tower wall
-coverage. Debug/Release builds are clean and the uncommitted L3a/L3b state passes 975/975 tests.
+L3a/L3b.2 are implemented and await Timo's in-engine visual review. L3a adds sparse deterministic
+human-scale emissive window regions on authoritative vertical bay-wall frames while leaving the
+entrance wall, most wall area and all artificial-light source counts unchanged. L3b.2 coordinates
+habitation and facility selection through one final wall-composition plan: area-driven regions use
+exact `InteriorBoundary` support, facility reservations remove superseded L3a windows before
+emission, and cutouts/galleries/embedded facilities respect full envelopes, structural thickness,
+the adjacent flight volume and existing service architecture. Valid real cutouts are prioritized;
+invalid requested recesses reject rather than silently changing type. Substantial parts join the
+existing stellar-shadow and H1c-C artificial-occlusion paths, while railings/doors remain minor;
+restrained deterministic recess lights reuse the H1c path. Nova's checkpoint produced 8 final
+habitation regions, 43 plain windows, 4 facility regions, 1 real cutout, 24 facility windows and
+1 recess light. The known density follow-up remains deliberately deferred as **L3a.1**.
+
+H1g major-interior stellar-shadow participation is implemented and accepted as a correctness
+checkpoint. The finalized structural `StationModuleMesh` is now also the authoritative hull caster,
+so bay shell walls/floor/ceiling, major internal walls, structural steps/ledges and future major
+structural platforms automatically enter the existing 8192² stellar-shadow map through capability,
+without another map, draw path, shader or GPU resource. Minor windows, lights, markings, rails and
+furniture remain excluded. On Nova the structural caster grew from 22,422 to 25,758 triangles
+(+3,336, about 15%) with zero additional GPU resources. Timo could not reproduce the rare exact
+wall-corner/star alignment, but did directly confirm that internal buildings around landing sites
+cast shadows from the central star; H1g is therefore accepted on that proxy evidence unless a later
+reproduction proves a remaining case. The dramatic stellar strip entering through the mouth remains
+intentional and preserved.
 
 Verification: Debug and Release builds were clean at the latest implementation checkpoint. The
 last complete pre-profile solution run passed 980/980 tests (850 Game, 41 UI, 6 Gameplay and
 83 ObjectDesigner). Earlier historical checkpoint measurements remain in `bolon-b4a-review.md`.
+The L3b.2/H1g checkpoint additionally passed the 775-test Fast solution profile, focused 6-test
+stellar-caster policy suite, focused 3-test fast habitation-planner suite, the relevant Slow H1
+portal/caster integration test, and 11 focused Slow habitation tests. The full Slow profile was not
+run. Tests were not rerun solely for the 2026-09-07 acceptance commit because the game was running.
 
 Test execution is now split into fast-default and opt-in Slow profiles. `dotnet test Inferior.slnx`
 uses `TestProfiles/Fast.runsettings` and excludes `[Trait("Category", "Slow")]`; production-scale

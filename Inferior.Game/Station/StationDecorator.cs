@@ -260,8 +260,8 @@ public static partial class StationDecorator
             [DecorClass.MegastationFabricMajor] = true,  // substantial background building masses
             [DecorClass.MegastationServiceChannelMinor] = false, // floor and internal conduit runs
             [DecorClass.MegastationServiceChannelMajor] = true,  // lips, terminals and bridges
-            [DecorClass.MegastationInteriorMinor] = false, // illuminated gate markers and small guidance detail
-            [DecorClass.MegastationInteriorMajor] = true,  // portal frame and major buttresses
+            [DecorClass.MegastationInteriorMinor] = false, // lights, markings, windows, rails and small guidance detail
+            [DecorClass.MegastationInteriorMajor] = true,  // substantial interior architecture, including future structural platforms
 
             // C1 — structural. Landed: gated via F8 overlay + Timo's in-engine screenshots.
             [DecorClass.Pipes]        = true,

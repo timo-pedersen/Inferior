@@ -74,9 +74,13 @@ public class StationShadowCasterMeshTests
         Assert.Contains(DecorClass.MegastationInfrastructureMajor, enabled);
         Assert.Contains(DecorClass.MegastationMegaGreebleMajor, enabled);
         Assert.Contains(DecorClass.MegastationFabricMajor, enabled);
+        Assert.Contains(DecorClass.MegastationServiceChannelMajor, enabled);
+        Assert.Contains(DecorClass.MegastationInteriorMajor, enabled);
         Assert.DoesNotContain(DecorClass.MegastationInfrastructureMinor, enabled);
         Assert.DoesNotContain(DecorClass.MegastationMegaGreebleMinor, enabled);
         Assert.DoesNotContain(DecorClass.MegastationFabricMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationServiceChannelMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationInteriorMinor, enabled);
     }
 
     [Fact]

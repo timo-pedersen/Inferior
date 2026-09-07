@@ -338,15 +338,31 @@ public sealed class MegastationInteriorTests
             range.decorClass == DecorClass.MegastationInteriorMinor && range.indexCount > 0);
         Assert.True(StationDecorator.DecorCastingPolicy[DecorClass.MegastationInteriorMajor]);
         Assert.False(StationDecorator.DecorCastingPolicy[DecorClass.MegastationInteriorMinor]);
-        int expectedStructuralCasterFaces = result.BoundaryTopology.Faces.Count(face =>
-            face.SpaceKind != MegastationBoundarySpaceKind.InteriorBoundary);
-        Assert.Equal(expectedStructuralCasterFaces, structure.HullShadowMesh!.FaceCount);
+        Assert.Same(result.Mesh, result.StructuralShadowMesh);
+        Assert.Same(structure.HullMesh, structure.HullShadowMesh);
+        Assert.Equal(result.Mesh.FaceCount, structure.HullShadowMesh!.FaceCount);
+        Assert.True(structure.HullShadowMesh.FaceCount >=
+            result.BoundaryTopology.Stats.BoundaryFaceCount);
+        int expectedInteriorFaces = result.BoundaryTopology.Faces.Count(face =>
+            face.SpaceKind != MegastationBoundarySpaceKind.ExteriorBoundary)
+            + result.BayFacilityPlan.Diagnostics.CutoutCount * 8;
+        Assert.Equal(expectedInteriorFaces * 2,
+            result.InteriorPlan.Diagnostics.InteriorStructuralTriangleCount);
         Assert.Equal(
             192 + result.InteriorPresentationPlan.ThroatCasterCount * 24,
             result.InteriorPlan.Diagnostics.PortalCasterVertexCount);
         Assert.Equal(
             96 + result.InteriorPresentationPlan.ThroatCasterCount * 12,
             result.InteriorPlan.Diagnostics.PortalCasterTriangleCount);
+
+        int previousCasterFaces = result.BoundaryTopology.Faces.Count(face =>
+            face.SpaceKind != MegastationBoundarySpaceKind.InteriorBoundary);
+        Console.WriteLine(
+            $"H1g {Nova}: structuralCaster={previousCasterFaces * 2}t -> " +
+            $"{structure.HullShadowMesh.FaceCount * 2}t; " +
+            $"added={(structure.HullShadowMesh.FaceCount - previousCasterFaces) * 2}t; " +
+            $"interiorBoundary={result.InteriorPlan.Diagnostics.InteriorBoundaryFaceCount}; " +
+            $"cutoutExpansion={result.BayFacilityPlan.Diagnostics.CutoutCount * 8}q");
     }
 
     [Fact]

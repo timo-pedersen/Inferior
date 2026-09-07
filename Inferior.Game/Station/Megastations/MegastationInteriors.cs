@@ -161,6 +161,10 @@ public sealed record MegastationInteriorDiagnostics(
     int BayFacilityMeshTriangleCount = 0,
     int BayFacilityShadowVertexCount = 0,
     int BayFacilityShadowTriangleCount = 0,
+    int BayFacilityReservationCount = 0,
+    int BayFacilityReservationRejectCount = 0,
+    int BayFacilityCutoutValidationRejectCount = 0,
+    int BayFacilityArtificialLightCount = 0,
     string BayFacilitySignature = "");
 
 public sealed record MegastationInteriorPlan(
@@ -1746,27 +1750,17 @@ public static class MegastationInteriorMeshBuilder
             BayFacilityMeshTriangleCount = facilityMesh?.Diagnostics.MeshTriangleCount ?? 0,
             BayFacilityShadowVertexCount = facilityMesh?.Diagnostics.ShadowVertexCount ?? 0,
             BayFacilityShadowTriangleCount = facilityMesh?.Diagnostics.ShadowTriangleCount ?? 0,
+            BayFacilityReservationCount = bayFacilities?.Reservations.Count ?? 0,
+            BayFacilityReservationRejectCount =
+                facilityMesh?.Diagnostics.ReservationRejectCount ?? 0,
+            BayFacilityCutoutValidationRejectCount =
+                facilityMesh?.Diagnostics.CutoutValidationRejectCount ?? 0,
+            BayFacilityArtificialLightCount =
+                facilityMesh?.Diagnostics.ArtificialLightCount ?? 0,
             BayFacilitySignature = facilityMesh?.Diagnostics.Signature ?? string.Empty,
         };
         return new(mesh, diagnostics, landingMesh?.Diagnostics, habitationMesh?.Diagnostics,
             facilityMesh?.Diagnostics);
-    }
-
-    public static StationModuleMesh BuildStructuralCaster(
-        StructuralOccupancy occupancy,
-        BoundaryTopology topology)
-    {
-        var mesh = new StationModuleMesh();
-        foreach (BoundaryFace face in topology.Faces.Where(face =>
-                     face.SpaceKind != MegastationBoundarySpaceKind.InteriorBoundary))
-        {
-            Vector3[] p = face.Vertices
-                .Select(vertex => BoundaryTopologyBuilder.Position(occupancy.Grid, vertex))
-                .ToArray();
-            mesh.AddQuad(p[0], p[1], p[2], p[3], Color.White);
-        }
-        mesh.ApplyIlluminationFlags();
-        return mesh;
     }
 
     private static void SetMaterial(StationModuleMesh mesh, SystemMaterialFamilyId family)

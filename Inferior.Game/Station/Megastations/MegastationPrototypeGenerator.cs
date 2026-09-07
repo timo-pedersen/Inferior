@@ -212,15 +212,17 @@ public static class MegastationPrototypeGenerator
             : null;
         MegastationLandingDistrictPlan landingDistrict =
             MegastationLandingDistrictPlanner.Plan(interiorPlan, regularised.Occupancy);
-        MegastationBayHabitationPlan bayHabitation =
-            MegastationBayHabitationPlanner.Plan(interiorPlan, landingDistrict);
-        MegastationBayFacilityPlan bayFacilities =
-            MegastationBayFacilityPlanner.Plan(
-                interiorPlan, bayHabitation, regularised.Occupancy, topology);
+        MegastationBayWallCompositionPlan bayWallComposition =
+            MegastationBayWallCompositionPlanner.Plan(
+                interiorPlan, landingDistrict, regularised.Occupancy, topology);
+        MegastationBayHabitationPlan bayHabitation = bayWallComposition.Habitation;
+        MegastationBayFacilityPlan bayFacilities = bayWallComposition.Facilities;
         MegastationArtificialLightingPlan artificialLighting =
             MegastationArtificialLighting.WithAdditionalLights(
-                MegastationArtificialLighting.Plan(interiorPlan),
-                landingDistrict.ArtificialLights);
+                MegastationArtificialLighting.WithAdditionalLights(
+                    MegastationArtificialLighting.Plan(interiorPlan),
+                    landingDistrict.ArtificialLights),
+                bayFacilities.ArtificialLights);
         interiorPlan = interiorPlan with
         {
             Diagnostics = interiorPlan.Diagnostics with
@@ -259,9 +261,6 @@ public static class MegastationPrototypeGenerator
             bayFacilities = bayFacilities with { Diagnostics = facilityDiagnostics };
         VertexPositionColor[] approachBeamVertices =
             MegastationApproachBeamMeshBuilder.Build(interiorPresentation);
-        StationModuleMesh structuralShadowMesh = MegastationInteriorMeshBuilder.BuildStructuralCaster(
-            regularised.Occupancy,
-            topology);
         int throatBoundaryFaces = topology.Faces.Count(face =>
             face.SpaceKind == MegastationBoundarySpaceKind.EntranceThroatBoundary);
         int interiorBoundaryFaces = topology.Faces.Count(face =>
@@ -413,6 +412,11 @@ public static class MegastationPrototypeGenerator
             artificialLighting: artificialLighting,
             artificialOcclusion: artificialOcclusion,
             bayFacilities: bayFacilities);
+        // Every face in this mesh is authoritative structural mass. Reuse the exact
+        // emitted geometry so exterior, throat, bay shell, structural steps, and real
+        // cutout replacements agree between visible and stellar-caster transforms.
+        // Upload preparation still creates the existing single hull-caster GPU buffer.
+        StationModuleMesh structuralShadowMesh = mesh;
         MegastationArtificialOcclusionDiagnostics artificialOcclusionDiagnostics =
             artificialOcclusion.Diagnostics(artificialLighting.Lights.Count);
         interiorPlan = interiorPlan with

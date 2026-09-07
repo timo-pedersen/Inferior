@@ -81,7 +81,7 @@ public sealed record MegastationBayHabitationPlan(
 
 public static class MegastationBayHabitationPlanner
 {
-    public const int AlgorithmVersion = 1;
+    public const int AlgorithmVersion = 2;
     private const float MinimumFloorClearance = 32f;
     private const float CeilingClearance = 18f;
     private const float HorizontalMargin = 14f;
@@ -89,30 +89,32 @@ public static class MegastationBayHabitationPlanner
 
     public static MegastationBayHabitationPlan Plan(
         MegastationInteriorPlan interior,
-        MegastationLandingDistrictPlan landingDistrict)
+        MegastationLandingDistrictPlan landingDistrict,
+        StructuralOccupancy? occupancy = null,
+        BoundaryTopology? topology = null)
     {
         var stopwatch = Stopwatch.StartNew();
-        int seed = MegastationSeed.Derive(interior.Seed, "bay-wall-habitation:v1");
+        int seed = MegastationSeed.Derive(interior.Seed, "bay-wall-habitation:v2");
         MegastationBayWallSurface[] walls = CreateWalls(interior);
         var regions = new List<MegastationBayHabitationRegion>();
         var windows = new List<MegastationBayHabitationWindow>();
+        Dictionary<string, int> targets = walls.Where(wall => wall.IsEligible)
+            .ToDictionary(wall => wall.Identity, wall => TargetRegionCount(wall, seed),
+                StringComparer.Ordinal);
 
         foreach (MegastationBayWallSurface wall in walls)
         {
             if (!wall.IsEligible)
                 continue;
             int wallSeed = MegastationSeed.Derive(seed, wall.Identity);
-            if (Unit(wallSeed, "presence") >= .68f)
-                continue;
-
-            float countRoll = Unit(wallSeed, "region-count");
-            int targetCount = countRoll < .48f ? 1 : countRoll < .93f ? 2 : 3;
+            int targetCount = targets[wall.Identity];
             for (int index = 0; index < targetCount; index++)
             {
                 int regionSeed = MegastationSeed.Derive(wallSeed, $"region:{index}");
                 if (!TryPlanRegion(wall, regionSeed, index,
                         regions.Where(region => region.WallIdentity == wall.Identity).ToArray(),
                         landingDistrict.ServiceBuildings,
+                        occupancy, topology,
                         out MegastationBayHabitationRegion? region)
                     || region is null)
                     continue;
@@ -121,19 +123,24 @@ public static class MegastationBayHabitationPlanner
             }
         }
 
-        // A valid flyable bay must retain at least one inhabited wall composition.
-        // This is a deterministic fallback, not a global density increase: normal
-        // presence rolls and intentionally blank walls remain unchanged.
-        if (regions.Count == 0)
+        float usableArea = walls.Where(wall => wall.IsEligible).Sum(UsableArea);
+        int minimumRegions = MinimumRegionBudget(usableArea);
+        if (regions.Count < minimumRegions)
         {
-            foreach (MegastationBayWallSurface wall in walls.Where(item => item.IsEligible)
-                         .OrderBy(item => Unit(MegastationSeed.Derive(seed, item.Identity),
-                             "fallback-priority")))
+            MegastationBayWallSurface[] orderedWalls = walls.Where(item => item.IsEligible)
+                .OrderBy(item => Unit(MegastationSeed.Derive(seed, item.Identity),
+                    "minimum-priority"))
+                .ToArray();
+            for (int round = 0; round < 8 && regions.Count < minimumRegions; round++)
+            foreach (MegastationBayWallSurface wall in orderedWalls)
             {
                 int wallSeed = MegastationSeed.Derive(seed, wall.Identity);
-                int regionSeed = MegastationSeed.Derive(wallSeed, "fallback-region:0");
-                if (!TryPlanRegion(wall, regionSeed, 0, [],
+                int index = targets[wall.Identity] + round;
+                int regionSeed = MegastationSeed.Derive(wallSeed, $"region:{index}");
+                if (!TryPlanRegion(wall, regionSeed, index,
+                        regions.Where(region => region.WallIdentity == wall.Identity).ToArray(),
                         landingDistrict.ServiceBuildings,
+                        occupancy, topology,
                         out MegastationBayHabitationRegion? planned)
                     || planned is null)
                     continue;
@@ -143,11 +150,35 @@ public static class MegastationBayHabitationPlanner
                 };
                 regions.Add(region);
                 PlanWindows(wall, region, regionSeed, windows);
-                break;
             }
         }
 
         stopwatch.Stop();
+        return CreatePlan(walls, regions, windows, stopwatch.ElapsedMilliseconds);
+    }
+
+    public static MegastationBayHabitationPlan RetainRegions(
+        MegastationBayHabitationPlan source,
+        IReadOnlySet<string> retainedRegionIdentities,
+        IReadOnlySet<string>? architecturallyOccupiedRegionIdentities = null)
+    {
+        MegastationBayHabitationRegion[] regions = source.Regions
+            .Where(region => retainedRegionIdentities.Contains(region.Identity)).ToArray();
+        MegastationBayHabitationWindow[] windows = source.Windows
+            .Where(window => retainedRegionIdentities.Contains(window.RegionIdentity)
+                && !(architecturallyOccupiedRegionIdentities?.Contains(window.RegionIdentity)
+                    ?? false))
+            .ToArray();
+        return CreatePlan(source.Walls, regions, windows,
+            source.Diagnostics.PlanningMilliseconds);
+    }
+
+    private static MegastationBayHabitationPlan CreatePlan(
+        IReadOnlyList<MegastationBayWallSurface> walls,
+        IReadOnlyList<MegastationBayHabitationRegion> regions,
+        IReadOnlyList<MegastationBayHabitationWindow> windows,
+        long planningMilliseconds)
+    {
         string wallSummary = string.Join(",", walls.Select(wall =>
         {
             int regionCount = regions.Count(region => region.WallIdentity == wall.Identity);
@@ -158,9 +189,9 @@ public static class MegastationBayHabitationPlanner
         string signature = Signature(walls, regions, windows);
         var diagnostics = new MegastationBayHabitationDiagnostics(
             AlgorithmVersion,
-            walls.Length,
+            walls.Count,
             regions.Select(region => region.WallIdentity).Distinct(StringComparer.Ordinal).Count(),
-            walls.Length - regions.Select(region => region.WallIdentity)
+            walls.Count - regions.Select(region => region.WallIdentity)
                 .Distinct(StringComparer.Ordinal).Count(),
             regions.Count,
             regions.Sum(region => region.GroupCount),
@@ -168,12 +199,31 @@ public static class MegastationBayHabitationPlanner
             windows.Count(window => window.State == MegastationWindowState.Lit),
             windows.Count(window => window.State == MegastationWindowState.Dim),
             windows.Count(window => window.State == MegastationWindowState.Dark),
-            stopwatch.ElapsedMilliseconds,
+            planningMilliseconds,
             0, 0, 0,
             wallSummary,
             signature);
         return new(walls, regions, windows, diagnostics);
     }
+
+    private static int TargetRegionCount(MegastationBayWallSurface wall, int rootSeed)
+    {
+        int wallSeed = MegastationSeed.Derive(rootSeed, wall.Identity);
+        if (Unit(wallSeed, "presence") >= .88f)
+            return 0;
+        int areaCount = (int)(UsableArea(wall) / 35_000f);
+        int variation = Unit(wallSeed, "region-count") >= .5f ? 1 : 0;
+        return Math.Clamp(2 + areaCount + variation, 2, 6);
+    }
+
+    private static float UsableArea(MegastationBayWallSurface wall)
+        => MathF.Max(0f, wall.Width - HorizontalMargin * 2f)
+            * MathF.Max(0f, wall.Height - MinimumFloorClearance - CeilingClearance);
+
+    internal static int MinimumRegionBudget(float usableArea)
+        => usableArea <= 0f
+            ? 0
+            : Math.Clamp((int)MathF.Ceiling(usableArea / 30_000f), 6, 12);
 
     private static MegastationBayWallSurface[] CreateWalls(MegastationInteriorPlan interior)
     {
@@ -220,6 +270,8 @@ public static class MegastationBayHabitationPlanner
         int index,
         IReadOnlyList<MegastationBayHabitationRegion> accepted,
         IReadOnlyList<MegastationLandingServiceBuilding> buildings,
+        StructuralOccupancy? occupancy,
+        BoundaryTopology? topology,
         out MegastationBayHabitationRegion? region)
     {
         float minX = -wall.Width * .5f + HorizontalMargin;
@@ -234,7 +286,7 @@ public static class MegastationBayHabitationPlanner
             return false;
         }
 
-        for (int attempt = 0; attempt < 10; attempt++)
+        for (int attempt = 0; attempt < 24; attempt++)
         {
             int candidateSeed = MegastationSeed.Derive(seed, $"candidate:{attempt}");
             float width = MathF.Min(availableWidth,
@@ -252,6 +304,10 @@ public static class MegastationBayHabitationPlanner
             if (buildings.Any(building => OverlapsBuilding(
                     wall, new(x, y), new(width, height), building)))
                 continue;
+            if (occupancy is not null && topology is not null
+                && !TryFindSupportingFace(wall, new(x, y), new(width, height),
+                    1.5f, occupancy.Grid, topology, out _))
+                continue;
 
             int groups = 1 + (Unit(candidateSeed, "groups") > .42f ? 1 : 0)
                 + (Unit(candidateSeed, "third-group") > .86f ? 1 : 0);
@@ -267,6 +323,38 @@ public static class MegastationBayHabitationPlanner
 
         region = null;
         return false;
+    }
+
+    internal static bool TryFindSupportingFace(
+        MegastationBayWallSurface wall,
+        Vector2 centre,
+        Vector2 size,
+        float margin,
+        SliceGrid grid,
+        BoundaryTopology topology,
+        out BoundaryFace? supportingFace)
+    {
+        supportingFace = topology.Faces
+            .Where(face => face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary
+                && Vector3.Dot(BoundaryTopologyBuilder.Normal(face.Direction), wall.Normal) > .9999f)
+            .Where(face =>
+            {
+                Vector3[] points = face.Vertices
+                    .Select(vertex => BoundaryTopologyBuilder.Position(grid, vertex)).ToArray();
+                if (MathF.Abs(Vector3.Dot(points[0] - wall.Centre, wall.Normal)) >= .01f)
+                    return false;
+                float minX = points.Min(point => Vector3.Dot(point - wall.Centre, wall.Right));
+                float maxX = points.Max(point => Vector3.Dot(point - wall.Centre, wall.Right));
+                float minY = points.Min(point => Vector3.Dot(point - wall.Centre, wall.Up));
+                float maxY = points.Max(point => Vector3.Dot(point - wall.Centre, wall.Up));
+                return centre.X - size.X * .5f - margin >= minX
+                    && centre.X + size.X * .5f + margin <= maxX
+                    && centre.Y - size.Y * .5f - margin >= minY
+                    && centre.Y + size.Y * .5f + margin <= maxY;
+            })
+            .OrderBy(face => face.Key)
+            .FirstOrDefault();
+        return supportingFace is not null;
     }
 
     private static void PlanWindows(
