@@ -222,6 +222,12 @@ public sealed record MegastationInteriorDiagnostics(
     int LandingDistrictLandingSurfaceCount = 1,
     int LandingDistrictShelfSiteCount = 0,
     string LandingDistrictLandingSurfaceSummary = "",
+    int LandingDistrictLandingCapableShelfCount = 0,
+    int LandingDistrictOccupiedShelfCount = 0,
+    int LandingDistrictFreestandingShelfSiteCount = 0,
+    int LandingDistrictWallIntegratedShelfSiteCount = 0,
+    int LandingDistrictDeliberatelyEmptyShelfCount = 0,
+    string LandingDistrictShelfUtilizationSummary = "",
     int MegaShelfObstacleBeaconCount = 0,
     int MegaShelfFloodFixtureCount = 0,
     int MegaShelfStaticWorkLightCount = 0,
@@ -2017,6 +2023,18 @@ public static class MegastationInteriorMeshBuilder
                 landingMesh?.Diagnostics.ShelfLandingSiteCount ?? 0,
             LandingDistrictLandingSurfaceSummary =
                 landingMesh?.Diagnostics.LandingSurfaceSummary ?? string.Empty,
+            LandingDistrictLandingCapableShelfCount =
+                landingMesh?.Diagnostics.LandingCapableShelfCount ?? 0,
+            LandingDistrictOccupiedShelfCount =
+                landingMesh?.Diagnostics.OccupiedShelfCount ?? 0,
+            LandingDistrictFreestandingShelfSiteCount =
+                landingMesh?.Diagnostics.FreestandingShelfSiteCount ?? 0,
+            LandingDistrictWallIntegratedShelfSiteCount =
+                landingMesh?.Diagnostics.WallIntegratedShelfSiteCount ?? 0,
+            LandingDistrictDeliberatelyEmptyShelfCount =
+                landingMesh?.Diagnostics.DeliberatelyEmptyShelfCount ?? 0,
+            LandingDistrictShelfUtilizationSummary =
+                landingMesh?.Diagnostics.ShelfUtilizationSummary ?? string.Empty,
             LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
             BayHabitationAlgorithmVersion =
                 habitationMesh?.Diagnostics.AlgorithmVersion ?? 0,

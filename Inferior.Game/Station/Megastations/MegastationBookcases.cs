@@ -4,7 +4,8 @@ namespace Inferior.Game.StationGen.Megastations;
 
 public static partial class MegastationMegaShelfPlanner
 {
-    private const float BookcaseMinimumClearVolume = 80f;
+    private const float BookcaseMinimumClearVolume =
+        MegastationLandingDistrictPlanner.IntegratedSiteArchitectureClearHeight + 4f;
     private const float BookcaseFloorClearance = 28f;
     // Keep the upper rack well below the irregular structural roof cells, not
     // merely below the nominal cavity envelope. This also leaves the strong
@@ -14,12 +15,14 @@ public static partial class MegastationMegaShelfPlanner
     // reserve through perpendicular boundary walls at either end.
     private const float BookcaseWallMargin = 20f;
     private const float BookcaseRunStep = 8f;
-    // A one-pad CompactService site needs 116 x 166 m of usable surface after
-    // its own separation allowance.  Shelf landing surfaces lose 12 m at each
-    // edge, so macro runs/projections must never shrink below these physical
-    // dimensions while searching around structural interruptions.
-    private const float MinimumLandingWidth = 140f;
-    private const float MinimumLandingDepth = 190f;
+    // Bookcase levels are wall-attached and may use the compact integrated-site
+    // envelope. Keep these dimensions derived from the landing planner rather
+    // than duplicating its pad, margin, and frontage assumptions here.
+    private static readonly Vector2 MinimumIntegratedLandingBody =
+        MegastationLandingDistrictPlanner.MinimumShelfBodySize(
+            MegastationLandingSiteLayout.WallIntegrated);
+    private static float MinimumLandingWidth => MinimumIntegratedLandingBody.X;
+    private static float MinimumLandingDepth => MinimumIntegratedLandingBody.Y;
 
     internal static float[] BookcaseElevations(
         float minimum,

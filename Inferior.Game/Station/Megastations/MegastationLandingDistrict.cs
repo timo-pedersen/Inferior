@@ -239,6 +239,36 @@ public sealed record MegastationKeepClearZonePlan(
 public enum MegastationLandingSiteSize { Small, Medium, Large }
 public enum MegastationLandingSiteCharacter { CompactService, Mixed, CargoHeavy }
 public enum MegastationLandingSiteOrientation { Degrees0, Degrees90, Degrees180, Degrees270 }
+public enum MegastationLandingSiteLayout { Freestanding, WallIntegrated }
+
+public sealed record MegastationLandingSiteReservation(
+    string Identity,
+    string SiteIdentity,
+    string HostWallIdentity,
+    Vector3 Centre,
+    Vector3 Size,
+    Vector3 Right,
+    Vector3 Up,
+    Vector3 Forward,
+    Vector2 WallCentre,
+    Vector2 WallSize)
+{
+    public bool IntersectsOrientedBox(
+        Vector3 centre,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Vector3 size)
+    {
+        (Vector3 aMinimum, Vector3 aMaximum) = MegastationMegaShelfPlanner.Bounds(
+            Centre, Right, Up, Forward, Size);
+        (Vector3 bMinimum, Vector3 bMaximum) = MegastationMegaShelfPlanner.Bounds(
+            centre, right, up, forward, size);
+        return aMinimum.X < bMaximum.X && aMaximum.X > bMinimum.X
+            && aMinimum.Y < bMaximum.Y && aMaximum.Y > bMinimum.Y
+            && aMinimum.Z < bMaximum.Z && aMaximum.Z > bMinimum.Z;
+    }
+}
 
 public sealed record MegastationLandingSitePlan(
     string Identity,
@@ -254,7 +284,10 @@ public sealed record MegastationLandingSitePlan(
     IReadOnlyList<string> PadIds,
     IReadOnlyList<string> ServiceBuildingIds,
     int Seed,
-    string LandingSurfaceIdentity = "main-floor");
+    string LandingSurfaceIdentity = "main-floor",
+    MegastationLandingSiteLayout Layout = MegastationLandingSiteLayout.Freestanding,
+    string? HostWallIdentity = null,
+    MegastationLandingSiteReservation? OperationalReservation = null);
 
 public sealed record MegastationLandingDistrictDiagnostics(
     int PadCount,
@@ -289,7 +322,13 @@ public sealed record MegastationLandingDistrictDiagnostics(
     string StructuralRejectionSummary = "",
     int LandingSurfaceCount = 1,
     int ShelfLandingSiteCount = 0,
-    string LandingSurfaceSummary = "");
+    string LandingSurfaceSummary = "",
+    int LandingCapableShelfCount = 0,
+    int OccupiedShelfCount = 0,
+    int FreestandingShelfSiteCount = 0,
+    int WallIntegratedShelfSiteCount = 0,
+    int DeliberatelyEmptyShelfCount = 0,
+    string ShelfUtilizationSummary = "");
 
 public sealed record MegastationLandingDistrictPlan(
     int AlgorithmVersion,
@@ -304,6 +343,7 @@ public sealed record MegastationLandingDistrictPlan(
     IReadOnlyList<MegastationLandingServiceBuilding> ServiceBuildings,
     IReadOnlyList<MegastationLoadingAreaPlan> LoadingAreas,
     IReadOnlyList<MegastationKeepClearZonePlan> KeepClearZones,
+    IReadOnlyList<MegastationLandingSiteReservation> SiteReservations,
     IReadOnlyList<MegastationArtificialLight> ArtificialLights,
     MegastationLandingDistrictDiagnostics Diagnostics);
 
@@ -483,7 +523,7 @@ internal sealed class MegastationLandingSiteStructuralClearance
 
 public static class MegastationLandingDistrictPlanner
 {
-    public const int AlgorithmVersion = 9;
+    public const int AlgorithmVersion = 10;
     public const float StandardPadSize = 36f;
     public const float LargePadLength = 72f;
     public const float CornerClip = 1f;
@@ -494,6 +534,8 @@ public static class MegastationLandingDistrictPlanner
     public static readonly Vector3 StandardContainerSize = new(6f, 2.5f, 2.5f);
     public const float SiteSeparation = 28f;
     internal const float SiteArchitectureClearHeight = 36f;
+    internal const float IntegratedSiteArchitectureClearHeight = 44f;
+    internal const float FreestandingShelfSiteArchitectureClearHeight = 64f;
 
     private readonly record struct SiteSpecification(
         int PadCount, MegastationLandingSiteCharacter Character, int Seed);
@@ -501,18 +543,24 @@ public static class MegastationLandingDistrictPlanner
     private readonly record struct SitePlacement(
         SiteSpecification Specification,
         MegastationLandingSurface Surface,
+        MegastationLandingSiteLayout Layout,
+        MegastationBayWallSurface? HostWall,
         MegastationLandingSiteOrientation Orientation,
         Vector3 Right,
         Vector3 Forward,
         float CentreRight,
         float CentreForward,
         Vector2 ApronSize,
-        MegastationBerthClearance Envelope);
+        MegastationBerthClearance Envelope,
+        float AvailableClearHeight,
+        float RequiredClearHeight);
 
     private readonly record struct SurfaceCandidate(
         MegastationLandingSurface Surface,
         MegastationBerthClearance Usable,
-        float Height);
+        float Height,
+        MegastationBayWallSurface? HostWall,
+        float AvailableClearHeight);
 
     private readonly record struct SiteMetrics(
         int Rows, int Columns, float BuildingDepth, float OperationalDepth,
@@ -563,11 +611,17 @@ public static class MegastationLandingDistrictPlanner
             IsMainFloor: true);
         var surfaces = new List<SurfaceCandidate>
         {
-            new(mainFloor, usable, upMin),
+            new(mainFloor, usable, upMin, null, float.PositiveInfinity),
         };
+        MegastationBayWallSurface[] bayWalls = MegastationBayHabitationPlanner
+            .CreateWalls(interior);
         foreach (MegastationLandingSurface surface in
                  megaShelves?.LandingSurfaces ?? interior.AdditionalLandingSurfaces ?? [])
         {
+            MegastationMegaShelf? shelf = megaShelves?.Shelves.FirstOrDefault(candidate =>
+                candidate.LandingSurface?.Identity == surface.Identity);
+            MegastationBayWallSurface? hostWall = shelf is null
+                ? null : IntegratedHostWall(shelf, bayWalls);
             float centreRight = Vector3.Dot(surface.Centre, canonicalRight);
             float centreForward = Vector3.Dot(surface.Centre, canonicalForward);
             surfaces.Add(new(
@@ -577,7 +631,10 @@ public static class MegastationLandingDistrictPlanner
                     centreRight + surface.UsableSize.X * .5f,
                     centreForward - surface.UsableSize.Y * .5f,
                     centreForward + surface.UsableSize.Y * .5f),
-                Vector3.Dot(surface.Centre, up)));
+                Vector3.Dot(surface.Centre, up),
+                hostWall,
+                AvailableClearHeight(surface, megaShelves, interior, canonicalRight,
+                    canonicalForward, up)));
         }
         MegastationLandingSiteStructuralClearance? structuralClearance =
             structuralOccupancy is null
@@ -607,23 +664,12 @@ public static class MegastationLandingDistrictPlanner
             specifications.Add(new(padCount, PickCharacter(child), child));
         }
 
-        var placements = new List<SitePlacement>(3);
+        var placements = new List<SitePlacement>();
+        SurfaceCandidate[] floorSurfaces = surfaces
+            .Where(surface => surface.Surface.IsMainFloor).ToArray();
         for (int i = 0; i < specifications.Count; i++)
         {
-            bool placed = false;
-            if (forceLandingSiteOnShelf && i == 0)
-            {
-                SurfaceCandidate[] shelfSurfaces = surfaces
-                    .Where(surface => !surface.Surface.IsMainFloor).ToArray();
-                if (shelfSurfaces.Length > 0)
-                    placed = TryPlaceBest(specifications[i], i, placements, shelfSurfaces,
-                        canonicalRight, canonicalForward, up,
-                        structuralClearance, structuralRejections,
-                        ref structuralEnvelopeRejects, ref structuralComponentRejects,
-                        forceShelf: false);
-            }
-            if (!placed)
-                TryPlaceBest(specifications[i], i, placements, surfaces,
+            TryPlaceBest(specifications[i], i, placements, floorSurfaces,
                     canonicalRight, canonicalForward, up,
                     structuralClearance, structuralRejections,
                     ref structuralEnvelopeRejects, ref structuralComponentRejects,
@@ -641,7 +687,7 @@ public static class MegastationLandingDistrictPlanner
             int child = MegastationSeed.Derive(seed, $"capacity-site:{index}");
             var capacity = new SiteSpecification(
                 3 + (int)(Unit(child, "pad-count") * 3f), PickCharacter(child), child);
-            if (!TryPlaceBest(capacity, index, placements, surfaces,
+            if (!TryPlaceBest(capacity, index, placements, floorSurfaces,
                     canonicalRight, canonicalForward, up,
                     structuralClearance, structuralRejections,
                     ref structuralEnvelopeRejects, ref structuralComponentRejects,
@@ -649,11 +695,66 @@ public static class MegastationLandingDistrictPlanner
                 break;
         }
 
+        SurfaceCandidate[] shelfSurfaces = surfaces
+            .Where(surface => !surface.Surface.IsMainFloor)
+            .OrderBy(surface => unchecked((uint)MegastationSeed.Derive(seed,
+                $"shelf-utilization-priority:{surface.Surface.Identity}")))
+            .ToArray();
+        int desiredOccupiedShelves = DesiredOccupiedShelfCount(seed, shelfSurfaces.Length);
+        foreach (SurfaceCandidate surface in shelfSurfaces)
+        {
+            if (placements.Count(item => !item.Surface.IsMainFloor) >= desiredOccupiedShelves)
+                break;
+            int siteIndex = placements.Count;
+            int child = MegastationSeed.Derive(seed,
+                $"shelf-site:{surface.Surface.Identity}");
+            int padCount = 1 + PositiveMod(
+                MegastationSeed.Derive(child, "pad-count"), 3);
+            var specification = new SiteSpecification(
+                padCount, PickCharacter(child), child);
+            bool preferIntegrated = surface.HostWall is not null
+                && (surface.AvailableClearHeight < 58f
+                    || MathF.Min(surface.Surface.UsableSize.X,
+                        surface.Surface.UsableSize.Y) < 170f
+                    || Unit(child, "layout-preference") < .68f);
+            MegastationLandingSiteLayout first = preferIntegrated
+                ? MegastationLandingSiteLayout.WallIntegrated
+                : MegastationLandingSiteLayout.Freestanding;
+            MegastationLandingSiteLayout second = first ==
+                    MegastationLandingSiteLayout.WallIntegrated
+                ? MegastationLandingSiteLayout.Freestanding
+                : MegastationLandingSiteLayout.WallIntegrated;
+            bool placed = TryPlaceBest(specification, siteIndex, placements, [surface],
+                canonicalRight, canonicalForward, up,
+                structuralClearance, structuralRejections,
+                ref structuralEnvelopeRejects, ref structuralComponentRejects,
+                forceShelf: true, requiredLayout: first);
+            if (!placed)
+                placed = TryPlaceBest(specification, siteIndex, placements, [surface],
+                    canonicalRight, canonicalForward, up,
+                    structuralClearance, structuralRejections,
+                    ref structuralEnvelopeRejects, ref structuralComponentRejects,
+                    forceShelf: true, requiredLayout: second);
+        }
+
+        if (forceLandingSiteOnShelf && shelfSurfaces.Length > 0
+            && placements.All(item => item.Surface.IsMainFloor))
+        {
+            SurfaceCandidate surface = shelfSurfaces[0];
+            int child = MegastationSeed.Derive(seed, "forced-shelf-site");
+            _ = TryPlaceBest(new(1, MegastationLandingSiteCharacter.CompactService, child),
+                placements.Count, placements, [surface], canonicalRight, canonicalForward, up,
+                structuralClearance, structuralRejections,
+                ref structuralEnvelopeRejects, ref structuralComponentRejects,
+                forceShelf: true);
+        }
+
         var sites = new List<MegastationLandingSitePlan>(placements.Count);
         var pads = new List<MegastationLandingPadPlan>();
         var buildings = new List<MegastationLandingServiceBuilding>();
         var loadingAreas = new List<MegastationLoadingAreaPlan>();
         var keepClearZones = new List<MegastationKeepClearZonePlan>();
+        var siteReservations = new List<MegastationLandingSiteReservation>();
         for (int siteIndex = 0; siteIndex < placements.Count; siteIndex++)
             BuildSite(siteIndex, placements[siteIndex]);
         if (structuralClearance is not null)
@@ -725,7 +826,8 @@ public static class MegastationLandingDistrictPlanner
                 : sites.Average(site => Vector3.Dot(site.ApronCentre, up)));
         int largePadCount = pads.Count(pad => pad.IsLarge);
         string signature = Signature(
-            seed, sites, pads, buildings, loadingAreas, keepClearZones, lights);
+            seed, sites, pads, buildings, loadingAreas, keepClearZones,
+            siteReservations, lights);
         var diagnostics = new MegastationLandingDistrictDiagnostics(
             pads.Count,
             pads.Count(pad => !pad.IsLarge),
@@ -750,7 +852,7 @@ public static class MegastationLandingDistrictPlanner
             SiteSummary: string.Join('/', sites.Select(site =>
                 $"{site.Identity}:{site.SizeClass}:{site.Character}:" +
                 $"{site.PadIds.Count}p:{pads.Count(pad => site.PadIds.Contains(pad.PadId) && pad.IsLarge)}L:" +
-                $"{site.Orientation}:{site.LandingSurfaceIdentity}")),
+                $"{site.Orientation}:{site.LandingSurfaceIdentity}:{site.Layout}")),
             StructuralEnvelopeRejectCount: structuralEnvelopeRejects,
             StructuralComponentRejectCount: structuralComponentRejects,
             StructuralRejectionSummary: string.Join(" | ", structuralRejections.Take(12)),
@@ -760,7 +862,27 @@ public static class MegastationLandingDistrictPlanner
                     StringComparison.Ordinal)),
             LandingSurfaceSummary: string.Join('/', surfaces.Select(surface =>
                 $"{surface.Surface.Identity}:{surface.Surface.UsableSize.X:F0}x" +
-                $"{surface.Surface.UsableSize.Y:F0}@{surface.Height:F0}")));
+                $"{surface.Surface.UsableSize.Y:F0}@{surface.Height:F0}")),
+            LandingCapableShelfCount: shelfSurfaces.Length,
+            OccupiedShelfCount: sites.Where(site =>
+                    !string.Equals(site.LandingSurfaceIdentity, mainFloor.Identity,
+                        StringComparison.Ordinal))
+                .Select(site => site.LandingSurfaceIdentity).Distinct(StringComparer.Ordinal)
+                .Count(),
+            FreestandingShelfSiteCount: sites.Count(site =>
+                !string.Equals(site.LandingSurfaceIdentity, mainFloor.Identity,
+                    StringComparison.Ordinal)
+                && site.Layout == MegastationLandingSiteLayout.Freestanding),
+            WallIntegratedShelfSiteCount: sites.Count(site =>
+                !string.Equals(site.LandingSurfaceIdentity, mainFloor.Identity,
+                    StringComparison.Ordinal)
+                && site.Layout == MegastationLandingSiteLayout.WallIntegrated),
+            DeliberatelyEmptyShelfCount: Math.Max(0,
+                shelfSurfaces.Length - desiredOccupiedShelves),
+            ShelfUtilizationSummary:
+                $"target={desiredOccupiedShelves}/{shelfSurfaces.Length};" +
+                $"occupied={sites.Where(site => !string.Equals(site.LandingSurfaceIdentity, mainFloor.Identity, StringComparison.Ordinal)).Select(site => site.LandingSurfaceIdentity).Distinct(StringComparer.Ordinal).Count()};" +
+                $"integrated={sites.Count(site => site.Layout == MegastationLandingSiteLayout.WallIntegrated)}");
         return new(
             AlgorithmVersion,
             seed,
@@ -774,21 +896,24 @@ public static class MegastationLandingDistrictPlanner
             buildings,
             loadingAreas,
             keepClearZones,
+            siteReservations,
             lights,
             diagnostics);
 
         void BuildSite(int siteIndex, SitePlacement placement)
         {
             SiteSpecification specification = placement.Specification;
-            SiteMetrics metrics = Metrics(specification.PadCount, specification.Character);
+            SiteMetrics metrics = Metrics(
+                specification.PadCount, specification.Character, placement.Layout);
             string siteIdentity = $"LS-{siteIndex + 1:00}";
             float siteFloorHeight = Vector3.Dot(placement.Surface.Centre, up);
             Vector3 siteCentre = canonicalRight * placement.CentreRight
                 + canonicalForward * placement.CentreForward
                 + up * (siteFloorHeight + MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
             float rear = -metrics.ApronSize.Y * .5f;
-            float padAreaRear = rear + 8f + metrics.BuildingDepth + 10f
-                + metrics.OperationalDepth;
+            float padAreaRear = placement.Layout == MegastationLandingSiteLayout.WallIntegrated
+                ? rear + 8f + metrics.OperationalDepth
+                : rear + 8f + metrics.BuildingDepth + 10f + metrics.OperationalDepth;
             float rowPitch = LargePadLength + 18f;
             float columnPitch = StandardPadSize + 18f;
             int largeCount = LargePadCount(specification.PadCount, specification.Character);
@@ -831,11 +956,15 @@ public static class MegastationLandingDistrictPlanner
             }
             pads.AddRange(sitePads);
 
-            int buildingCount = specification.PadCount <= 3 ? 1
+            int buildingCount = placement.Layout == MegastationLandingSiteLayout.WallIntegrated
+                ? 1
+                : specification.PadCount <= 3 ? 1
                 : specification.PadCount <= 8 ? 2 : 3;
             var siteBuildings = new List<MegastationLandingServiceBuilding>(buildingCount);
-            float buildingWidth = MathF.Min(64f,
-                (metrics.ApronSize.X - 24f - (buildingCount - 1) * 10f) / buildingCount);
+            float buildingWidth = placement.Layout == MegastationLandingSiteLayout.WallIntegrated
+                ? MathF.Max(28f, metrics.ApronSize.X - 16f)
+                : MathF.Min(64f,
+                    (metrics.ApronSize.X - 24f - (buildingCount - 1) * 10f) / buildingCount);
             for (int i = 0; i < buildingCount; i++)
             {
                 int child = MegastationSeed.Derive(specification.Seed, $"building:{i}");
@@ -847,11 +976,33 @@ public static class MegastationLandingDistrictPlanner
                 };
                 string identity = $"landing-site/{siteIdentity}/service/{i:00}";
                 float x = (i - (buildingCount - 1) * .5f) * (buildingWidth + 10f);
-                float height = 20f + Unit(child, "height") * 13f;
-                Vector3 size = new(buildingWidth, height, metrics.BuildingDepth);
-                Vector3 centre = siteCentre + placement.Right * x
-                    + placement.Forward * (rear + 8f + metrics.BuildingDepth * .5f)
-                    + up * (height * .5f - MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+                bool integrated = placement.Layout ==
+                    MegastationLandingSiteLayout.WallIntegrated;
+                float height = integrated
+                    ? 12f + Unit(child, "height") * 5f
+                    : 20f + Unit(child, "height") * 13f;
+                float depth = integrated ? 1.8f : metrics.BuildingDepth;
+                Vector3 size = new(buildingWidth, height, depth);
+                Vector3 centre;
+                if (integrated)
+                {
+                    MegastationBayWallSurface wall = placement.HostWall
+                        ?? throw new InvalidOperationException(
+                            "Wall-integrated site has no authoritative host wall.");
+                    float wallLateral = Vector3.Dot(siteCentre - wall.Centre, wall.Right);
+                    float wallVertical = siteFloorHeight - Vector3.Dot(wall.Centre, up);
+                    Vector3 wallFloor = wall.Centre + wall.Right * wallLateral
+                        + up * wallVertical;
+                    centre = wallFloor + placement.Forward * (depth * .5f + .04f)
+                        + up * (height * .5f);
+                }
+                else
+                {
+                    centre = siteCentre + placement.Right * x
+                        + placement.Forward * (rear + 8f + depth * .5f)
+                        + up * (height * .5f
+                            - MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+                }
                 string[] served = sitePads
                     .Where((_, padIndex) => padIndex % buildingCount == i)
                     .Select(pad => pad.PadId).ToArray();
@@ -861,6 +1012,43 @@ public static class MegastationLandingDistrictPlanner
                         placement.Right, up, placement.Forward, served)));
             }
             buildings.AddRange(siteBuildings);
+
+            MegastationLandingSiteReservation? reservation = null;
+            if (placement.Layout == MegastationLandingSiteLayout.WallIntegrated)
+            {
+                MegastationBayWallSurface wall = placement.HostWall!;
+                float wallLateral = Vector3.Dot(siteCentre - wall.Centre, wall.Right);
+                float wallVertical = siteFloorHeight - Vector3.Dot(wall.Centre, up);
+                Vector3 wallFloor = wall.Centre + wall.Right * wallLateral + up * wallVertical;
+                float surfaceRadius = MathF.Abs(Vector3.Dot(
+                        placement.Surface.Right, placement.Forward))
+                        * placement.Surface.UsableSize.X * .5f
+                    + MathF.Abs(Vector3.Dot(
+                        placement.Surface.Forward, placement.Forward))
+                        * placement.Surface.UsableSize.Y * .5f;
+                float surfaceCentreDepth = Vector3.Dot(
+                    placement.Surface.Centre - wall.Centre, placement.Forward);
+                float corridorDepth = MathF.Max(metrics.ApronSize.Y,
+                    surfaceCentreDepth + surfaceRadius + placement.Surface.EdgeMargin);
+                float reservationHeight = MathF.Min(
+                    IntegratedSiteArchitectureClearHeight,
+                    placement.Surface.IsMainFloor
+                        ? IntegratedSiteArchitectureClearHeight
+                        : placement.AvailableClearHeight);
+                reservation = new(
+                    $"landing-site/{siteIdentity}/wall-to-edge-reservation",
+                    siteIdentity,
+                    wall.Identity,
+                    wallFloor + placement.Forward * (corridorDepth * .5f)
+                        + up * (reservationHeight * .5f),
+                    new(metrics.ApronSize.X, reservationHeight, corridorDepth),
+                    placement.Right,
+                    up,
+                    placement.Forward,
+                    new(wallLateral, wallVertical + reservationHeight * .5f),
+                    new(metrics.ApronSize.X, reservationHeight));
+                siteReservations.Add(reservation);
+            }
 
             (IReadOnlyList<MegastationLoadingAreaPlan> siteLoading,
                 IReadOnlyList<MegastationKeepClearZonePlan> siteKeepClear) =
@@ -897,7 +1085,10 @@ public static class MegastationLandingDistrictPlanner
                 sitePads.Select(pad => pad.PadId).ToArray(),
                 siteBuildings.Select(building => building.Identity).ToArray(),
                 specification.Seed,
-                placement.Surface.Identity));
+                placement.Surface.Identity,
+                placement.Layout,
+                placement.HostWall?.Identity,
+                reservation));
         }
 
         void ValidatePlannedComponents()
@@ -964,7 +1155,95 @@ public static class MegastationLandingDistrictPlanner
                                 $"Landing container {container.Identity} intersects {containerBlocker} after planning.");
                 }
             }
+
+            foreach (MegastationLandingSiteReservation reservation in siteReservations)
+            foreach (MegastationLandingServiceBuilding building in buildings.Where(building =>
+                         !string.Equals(building.SiteIdentity, reservation.SiteIdentity,
+                             StringComparison.Ordinal)))
+                if (reservation.IntersectsOrientedBox(
+                        building.Centre, building.Frontage.Right, building.Frontage.Up,
+                        building.Frontage.Normal, building.Size))
+                    throw new InvalidOperationException(
+                        $"Landing building {building.Identity} intrudes into " +
+                        $"{reservation.Identity}.");
         }
+    }
+
+    internal static int DesiredOccupiedShelfCount(int seed, int shelfCount)
+    {
+        if (shelfCount <= 0)
+            return 0;
+        if (shelfCount == 1)
+            return PositiveMod(MegastationSeed.Derive(
+                seed, "single-shelf-occupancy"), 100) < 15 ? 0 : 1;
+
+        float fraction = MathHelper.Lerp(.70f, .85f,
+            Unit(seed, "shelf-occupancy-fraction"));
+        int desired = (int)MathF.Round(shelfCount * fraction,
+            MidpointRounding.AwayFromZero);
+        int majority = shelfCount / 2 + 1;
+        return Math.Clamp(desired, majority, shelfCount);
+    }
+
+    private static MegastationBayWallSurface? IntegratedHostWall(
+        MegastationMegaShelf shelf,
+        IReadOnlyList<MegastationBayWallSurface> walls)
+    {
+        // Integration is a surface capability: a landing surface needs one
+        // authoritative, eligible host wall and an open projection away from it.
+        // Shelf family names never enter this decision.
+        MegastationBayWallSurface? host = walls.FirstOrDefault(wall =>
+            wall.IsEligible
+            && string.Equals(wall.Identity, shelf.HostWallIdentity,
+                StringComparison.Ordinal));
+        if (host is null || shelf.LandingSurface is null)
+            return null;
+        Vector3 surfaceUp = Vector3.Normalize(shelf.LandingSurface.Up);
+        if (MathF.Abs(Vector3.Dot(host.Normal, surfaceUp)) > .01f)
+            return null;
+        bool hasOpposingSupport = shelf.HostWallIdentities.Any(identity =>
+        {
+            MegastationBayWallSurface? other = walls.FirstOrDefault(wall =>
+                string.Equals(wall.Identity, identity, StringComparison.Ordinal));
+            return other is not null && Vector3.Dot(other.Normal, host.Normal) < -.999f;
+        });
+        if (hasOpposingSupport)
+            return null;
+        return host;
+    }
+
+    private static float AvailableClearHeight(
+        MegastationLandingSurface surface,
+        MegastationMegaShelfPlan? megaShelves,
+        MegastationInteriorPlan interior,
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 up)
+    {
+        (_, float cavityTop) = Span(interior.CavityEnvelope, up);
+        float surfaceHeight = Vector3.Dot(surface.Centre, up);
+        float nearest = cavityTop;
+        MegastationBerthClearance footprint = OrientedEnvelope(
+            surface.Centre, canonicalRight, canonicalForward,
+            surface.Right, surface.Forward,
+            surface.UsableSize.X, surface.UsableSize.Y, 0f);
+        foreach (MegastationMegaShelf shelf in megaShelves?.Shelves ?? [])
+        {
+            if (string.Equals(shelf.LandingSurface?.Identity, surface.Identity,
+                    StringComparison.Ordinal))
+                continue;
+            float underside = Vector3.Dot(shelf.Body.Centre, up)
+                - shelf.Body.Size.Y * .5f;
+            if (underside <= surfaceHeight + .001f)
+                continue;
+            MegastationBerthClearance other = OrientedEnvelope(
+                shelf.Body.Centre, canonicalRight, canonicalForward,
+                shelf.Body.Right, shelf.Body.Forward,
+                shelf.Body.Size.X, shelf.Body.Size.Z, 0f);
+            if (footprint.Intersects(other))
+                nearest = MathF.Min(nearest, underside);
+        }
+        return MathF.Max(0f, nearest - surfaceHeight);
     }
 
     private static bool TryPlaceBest(
@@ -979,8 +1258,11 @@ public static class MegastationLandingDistrictPlanner
         List<string> structuralRejections,
         ref int structuralEnvelopeRejects,
         ref int structuralComponentRejects,
-        bool forceShelf)
+        bool forceShelf,
+        MegastationLandingSiteLayout? requiredLayout = null)
     {
+        int localEnvelopeRejects = 0;
+        int localComponentRejects = 0;
         // Geometry validity wins over the requested class. A coherent smaller site is
         // preferable to either forcing a large layout through structure or abandoning
         // otherwise usable main-floor capacity.
@@ -988,96 +1270,175 @@ public static class MegastationLandingDistrictPlanner
         for (int count = requested.PadCount; count >= minimum; count--)
         {
             SiteSpecification specification = requested with { PadCount = count };
-            SiteMetrics metrics = Metrics(count, specification.Character);
             var candidates = new List<(int SurfacePriority, float Separation, uint Score,
                 SitePlacement Placement)>();
             IEnumerable<SurfaceCandidate> orderedSurfaces = forceShelf
                 ? surfaces.OrderBy(surface => surface.Surface.IsMainFloor)
                 : surfaces;
             foreach (SurfaceCandidate surface in orderedSurfaces)
-            for (int orientationValue = 0; orientationValue < 4; orientationValue++)
             {
-                var orientation = (MegastationLandingSiteOrientation)orientationValue;
-                (Vector3 right, Vector3 forward) = CardinalFrame(
-                    canonicalRight, canonicalForward, orientation);
-                float canonicalWidth = orientationValue % 2 == 0
-                    ? metrics.ApronSize.X : metrics.ApronSize.Y;
-                float canonicalDepth = orientationValue % 2 == 0
-                    ? metrics.ApronSize.Y : metrics.ApronSize.X;
-                float edgeClearance = surface.Surface.IsMainFloor ? 0f : SiteSeparation * .5f;
-                float minR = surface.Usable.RightMinimum + canonicalWidth * .5f + edgeClearance;
-                float maxR = surface.Usable.RightMaximum - canonicalWidth * .5f - edgeClearance;
-                float minF = surface.Usable.ForwardMinimum + canonicalDepth * .5f + edgeClearance;
-                float maxF = surface.Usable.ForwardMaximum - canonicalDepth * .5f - edgeClearance;
-                if (minR > maxR || minF > maxF) continue;
-                for (int row = 0; row < 5; row++)
-                for (int column = 0; column < 7; column++)
+                MegastationLandingSiteLayout[] layouts = requiredLayout is { } only
+                    ? [only]
+                    : [MegastationLandingSiteLayout.Freestanding];
+                foreach (MegastationLandingSiteLayout layout in layouts)
                 {
-                    float r = MathHelper.Lerp(minR, maxR, column / 6f);
-                    float f = MathHelper.Lerp(minF, maxF, row / 4f);
-                    Vector3 centre = canonicalRight * r + canonicalForward * f;
-                    MegastationBerthClearance envelope = OrientedEnvelope(
-                        centre, canonicalRight, canonicalForward, right, forward,
-                        metrics.ApronSize.X, metrics.ApronSize.Y, SiteSeparation * .5f);
-                    if (accepted.Any(item =>
-                            MathF.Abs(Vector3.Dot(item.Surface.Centre, up) - surface.Height)
-                                < SiteArchitectureClearHeight
-                            && item.Envelope.Intersects(envelope)))
+                    if (layout == MegastationLandingSiteLayout.WallIntegrated
+                        && surface.HostWall is null)
                         continue;
-                    var placement = new SitePlacement(specification, surface.Surface,
-                        orientation, right, forward, r, f, metrics.ApronSize, envelope);
-                    if (structuralClearance is not null)
+                    SiteMetrics metrics = Metrics(count, specification.Character, layout);
+                    float requiredHeight = surface.Surface.IsMainFloor
+                        ? SiteArchitectureClearHeight
+                        : layout == MegastationLandingSiteLayout.WallIntegrated
+                            ? IntegratedSiteArchitectureClearHeight
+                            : FreestandingShelfSiteArchitectureClearHeight;
+                    if (surface.AvailableClearHeight + .001f < requiredHeight)
+                        continue;
+
+                    if (layout == MegastationLandingSiteLayout.WallIntegrated)
                     {
-                        MegastationBerthClearance footprint = OrientedEnvelope(
-                            centre, canonicalRight, canonicalForward, right, forward,
-                            metrics.ApronSize.X, metrics.ApronSize.Y, 0f);
-                        if (!structuralClearance.IsPrismClear(
-                                footprint, surface.Height,
-                                surface.Height + SiteArchitectureClearHeight,
-                                canonicalRight, canonicalForward, up, out string blocker,
-                                surface.Surface.StructuralOwnerIdentity))
-                        {
-                            structuralEnvelopeRejects++;
-                            AddStructuralRejection(structuralRejections,
-                                $"site:{siteIndex}/{surface.Surface.Identity}/{orientation}/" +
-                                $"{row},{column}:envelope:{blocker}");
+                        MegastationBayWallSurface wall = surface.HostWall!;
+                        Vector3 right = wall.Right;
+                        Vector3 forward = wall.Normal;
+                        MegastationLandingSiteOrientation orientation = CardinalOrientation(
+                            canonicalRight, canonicalForward, right, forward);
+                        float lateralRadius = MathF.Abs(Vector3.Dot(
+                                surface.Surface.Right, right))
+                                * surface.Surface.UsableSize.X * .5f
+                            + MathF.Abs(Vector3.Dot(
+                                surface.Surface.Forward, right))
+                                * surface.Surface.UsableSize.Y * .5f;
+                        float lateralCentre = Vector3.Dot(
+                            surface.Surface.Centre - wall.Centre, right);
+                        float minLateral = lateralCentre - lateralRadius
+                            + metrics.ApronSize.X * .5f + SiteSeparation * .5f;
+                        float maxLateral = lateralCentre + lateralRadius
+                            - metrics.ApronSize.X * .5f - SiteSeparation * .5f;
+                        if (minLateral > maxLateral)
                             continue;
-                        }
-                        if (!CandidateComponentsAreClear(
-                                placement, surface.Height, canonicalRight, canonicalForward, up,
-                                structuralClearance, out blocker))
+                        for (int column = 0; column < 7; column++)
                         {
-                            structuralComponentRejects++;
-                            AddStructuralRejection(structuralRejections,
-                                $"site:{siteIndex}/{surface.Surface.Identity}/{orientation}/" +
-                                $"{row},{column}:component:{blocker}");
-                            continue;
+                            float lateral = MathHelper.Lerp(
+                                minLateral, maxLateral, column / 6f);
+                            float vertical = Vector3.Dot(
+                                surface.Surface.Centre - wall.Centre, up);
+                            Vector3 centre = wall.Centre + right * lateral + up * vertical
+                                + forward * (surface.Surface.EdgeMargin
+                                    + metrics.ApronSize.Y * .5f);
+                            TryAddCandidate(surface, layout, metrics, orientation,
+                                right, forward, centre, row: 0, column, requiredHeight);
                         }
                     }
-                    uint score = unchecked((uint)MegastationSeed.Derive(
-                        specification.Seed,
-                        $"placement:{siteIndex}:{surface.Surface.Identity}:" +
-                        $"{orientationValue}:{row}:{column}"));
-                    if (surface.Surface.IsMainFloor && surfaces.Count == 1)
-                        score = unchecked((uint)MegastationSeed.Derive(
-                            specification.Seed,
-                            $"placement:{siteIndex}:{orientationValue}:{row}:{column}"));
-                    float separation = accepted.Count == 0 ? 0f : accepted.Min(item =>
-                        (item.CentreRight - r) * (item.CentreRight - r)
-                        + (item.CentreForward - f) * (item.CentreForward - f));
-                    int surfacePriority = forceShelf
-                        ? surface.Surface.IsMainFloor ? 1 : 0
-                        : PreferredSurfacePriority(surface.Surface, siteIndex, surfaces.Count,
-                            specification.Seed);
-                    candidates.Add((surfacePriority, separation, score, placement));
+                    else
+                    for (int orientationValue = 0; orientationValue < 4; orientationValue++)
+                    {
+                        var orientation = (MegastationLandingSiteOrientation)orientationValue;
+                        (Vector3 right, Vector3 forward) = CardinalFrame(
+                            canonicalRight, canonicalForward, orientation);
+                        float canonicalWidth = orientationValue % 2 == 0
+                            ? metrics.ApronSize.X : metrics.ApronSize.Y;
+                        float canonicalDepth = orientationValue % 2 == 0
+                            ? metrics.ApronSize.Y : metrics.ApronSize.X;
+                        float edgeClearance = surface.Surface.IsMainFloor
+                            ? 0f : SiteSeparation * .5f;
+                        float minR = surface.Usable.RightMinimum
+                            + canonicalWidth * .5f + edgeClearance;
+                        float maxR = surface.Usable.RightMaximum
+                            - canonicalWidth * .5f - edgeClearance;
+                        float minF = surface.Usable.ForwardMinimum
+                            + canonicalDepth * .5f + edgeClearance;
+                        float maxF = surface.Usable.ForwardMaximum
+                            - canonicalDepth * .5f - edgeClearance;
+                        if (minR > maxR || minF > maxF) continue;
+                        for (int row = 0; row < 5; row++)
+                        for (int column = 0; column < 7; column++)
+                        {
+                            float r = MathHelper.Lerp(minR, maxR, column / 6f);
+                            float f = MathHelper.Lerp(minF, maxF, row / 4f);
+                            Vector3 centre = canonicalRight * r + canonicalForward * f;
+                            TryAddCandidate(surface, layout, metrics, orientation,
+                                right, forward, centre, row, column, requiredHeight);
+                        }
+                    }
                 }
             }
             if (candidates.Count == 0) continue;
+            structuralEnvelopeRejects += localEnvelopeRejects;
+            structuralComponentRejects += localComponentRejects;
             accepted.Add(candidates.OrderBy(item => item.SurfacePriority)
                 .ThenByDescending(item => item.Separation)
                 .ThenBy(item => item.Score).First().Placement);
             return true;
+
+            void TryAddCandidate(
+                SurfaceCandidate surface,
+                MegastationLandingSiteLayout layout,
+                SiteMetrics metrics,
+                MegastationLandingSiteOrientation orientation,
+                Vector3 right,
+                Vector3 forward,
+                Vector3 centre,
+                int row,
+                int column,
+                float requiredHeight)
+            {
+                float r = Vector3.Dot(centre, canonicalRight);
+                float f = Vector3.Dot(centre, canonicalForward);
+                MegastationBerthClearance footprint = OrientedEnvelope(
+                    centre, canonicalRight, canonicalForward, right, forward,
+                    metrics.ApronSize.X, metrics.ApronSize.Y, 0f);
+                if (!surface.Usable.Contains(footprint)) return;
+                MegastationBerthClearance envelope = OrientedEnvelope(
+                    centre, canonicalRight, canonicalForward, right, forward,
+                    metrics.ApronSize.X, metrics.ApronSize.Y, SiteSeparation * .5f);
+                if (accepted.Any(item =>
+                        MathF.Abs(Vector3.Dot(item.Surface.Centre, up) - surface.Height)
+                            < MathF.Max(item.RequiredClearHeight, requiredHeight)
+                        && item.Envelope.Intersects(envelope)))
+                    return;
+                var placement = new SitePlacement(
+                    specification, surface.Surface, layout, surface.HostWall,
+                    orientation, right, forward, r, f, metrics.ApronSize, envelope,
+                    surface.AvailableClearHeight, requiredHeight);
+                if (structuralClearance is not null)
+                {
+                    if (!structuralClearance.IsPrismClear(
+                            footprint, surface.Height, surface.Height + requiredHeight,
+                            canonicalRight, canonicalForward, up, out string blocker,
+                            surface.Surface.StructuralOwnerIdentity))
+                    {
+                        localEnvelopeRejects++;
+                        AddStructuralRejection(structuralRejections,
+                            $"site:{siteIndex}/{surface.Surface.Identity}/{layout}/" +
+                            $"{row},{column}:envelope:{blocker}");
+                        return;
+                    }
+                    if (!CandidateComponentsAreClear(
+                            placement, surface.Height, canonicalRight, canonicalForward, up,
+                            structuralClearance, out blocker))
+                    {
+                        localComponentRejects++;
+                        AddStructuralRejection(structuralRejections,
+                            $"site:{siteIndex}/{surface.Surface.Identity}/{layout}/" +
+                            $"{row},{column}:component:{blocker}");
+                        return;
+                    }
+                }
+                uint score = unchecked((uint)MegastationSeed.Derive(
+                    specification.Seed,
+                    $"placement:{siteIndex}:{surface.Surface.Identity}:{layout}:" +
+                    $"{orientation}:{row}:{column}"));
+                float separation = accepted.Count == 0 ? 0f : accepted.Min(item =>
+                    (item.CentreRight - r) * (item.CentreRight - r)
+                    + (item.CentreForward - f) * (item.CentreForward - f));
+                int surfacePriority = forceShelf
+                    ? surface.Surface.IsMainFloor ? 1 : 0
+                    : PreferredSurfacePriority(surface.Surface, siteIndex, surfaces.Count,
+                        specification.Seed);
+                candidates.Add((surfacePriority, separation, score, placement));
+            }
         }
+        structuralEnvelopeRejects += localEnvelopeRejects;
+        structuralComponentRejects += localComponentRejects;
         return false;
     }
 
@@ -1111,25 +1472,47 @@ public static class MegastationLandingDistrictPlanner
         out string blocker)
     {
         SiteMetrics metrics = Metrics(
-            placement.Specification.PadCount, placement.Specification.Character);
+            placement.Specification.PadCount, placement.Specification.Character,
+            placement.Layout);
         Vector3 siteCentre = canonicalRight * placement.CentreRight
             + canonicalForward * placement.CentreForward
             + up * (floorHeight + MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
         float rear = -metrics.ApronSize.Y * .5f;
-        int buildingCount = placement.Specification.PadCount <= 3 ? 1
+        int buildingCount = placement.Layout == MegastationLandingSiteLayout.WallIntegrated
+            ? 1
+            : placement.Specification.PadCount <= 3 ? 1
             : placement.Specification.PadCount <= 8 ? 2 : 3;
-        float buildingWidth = MathF.Min(64f,
-            (metrics.ApronSize.X - 24f - (buildingCount - 1) * 10f) / buildingCount);
+        float buildingWidth = placement.Layout == MegastationLandingSiteLayout.WallIntegrated
+            ? MathF.Max(28f, metrics.ApronSize.X - 16f)
+            : MathF.Min(64f,
+                (metrics.ApronSize.X - 24f - (buildingCount - 1) * 10f) / buildingCount);
         for (int i = 0; i < buildingCount; i++)
         {
             int child = MegastationSeed.Derive(placement.Specification.Seed, $"building:{i}");
-            float height = 20f + Unit(child, "height") * 13f;
-            Vector3 size = new(buildingWidth, height, metrics.BuildingDepth);
+            bool integrated = placement.Layout == MegastationLandingSiteLayout.WallIntegrated;
+            float height = integrated
+                ? 12f + Unit(child, "height") * 5f
+                : 20f + Unit(child, "height") * 13f;
+            float depth = integrated ? 1.8f : metrics.BuildingDepth;
+            Vector3 size = new(buildingWidth, height, depth);
             float x = (i - (buildingCount - 1) * .5f) * (buildingWidth + 10f);
-            Vector3 centre = siteCentre + placement.Right * x
-                + placement.Forward * (rear + 8f + metrics.BuildingDepth * .5f)
-                + up * (height * .5f
-                    - MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+            Vector3 centre;
+            if (integrated)
+            {
+                MegastationBayWallSurface wall = placement.HostWall!;
+                float lateral = Vector3.Dot(siteCentre - wall.Centre, wall.Right);
+                float vertical = floorHeight - Vector3.Dot(wall.Centre, up);
+                Vector3 wallFloor = wall.Centre + wall.Right * lateral + up * vertical;
+                centre = wallFloor + placement.Forward * (depth * .5f + .04f)
+                    + up * (height * .5f);
+            }
+            else
+            {
+                centre = siteCentre + placement.Right * x
+                    + placement.Forward * (rear + 8f + depth * .5f)
+                    + up * (height * .5f
+                        - MegastationLandingPadAssemblyStandards.ApronThickness * .5f);
+            }
             if (!clearance.IsOrientedBoxClear(
                     centre, placement.Right, up, placement.Forward, size, out blocker,
                     placement.Surface.StructuralOwnerIdentity))
@@ -1146,7 +1529,10 @@ public static class MegastationLandingDistrictPlanner
             rejections.Add(message);
     }
 
-    private static SiteMetrics Metrics(int padCount, MegastationLandingSiteCharacter character)
+    private static SiteMetrics Metrics(
+        int padCount,
+        MegastationLandingSiteCharacter character,
+        MegastationLandingSiteLayout layout = MegastationLandingSiteLayout.Freestanding)
     {
         int rows = padCount <= 3 ? 1 : padCount <= 10 ? 2 : 3;
         int columns = (int)MathF.Ceiling(padCount / (float)rows);
@@ -1160,17 +1546,38 @@ public static class MegastationLandingDistrictPlanner
         float width = MathF.Max(88f,
             columns * StandardPadSize + (columns - 1) * 18f + 24f);
         float padDepth = rows * LargePadLength + (rows - 1) * 18f;
-        float depth = 16f + buildingDepth + 10f + operational + padDepth;
+        float depth = layout == MegastationLandingSiteLayout.WallIntegrated
+            ? 16f + operational + padDepth
+            : 16f + buildingDepth + 10f + operational + padDepth;
         return new(rows, columns, buildingDepth, operational, new(width, depth));
     }
 
     internal static bool CanHostMinimumSite(Vector2 usableSize)
     {
-        SiteMetrics minimum = Metrics(1, MegastationLandingSiteCharacter.CompactService);
+        return CanHostMinimumSite(usableSize, MegastationLandingSiteLayout.Freestanding)
+            || CanHostMinimumSite(usableSize,
+                MegastationLandingSiteLayout.WallIntegrated);
+    }
+
+    internal static bool CanHostMinimumSite(
+        Vector2 usableSize,
+        MegastationLandingSiteLayout layout)
+    {
+        SiteMetrics minimum = Metrics(
+            1, MegastationLandingSiteCharacter.CompactService, layout);
         float requiredWidth = minimum.ApronSize.X + SiteSeparation;
         float requiredDepth = minimum.ApronSize.Y + SiteSeparation;
         return usableSize.X >= requiredWidth && usableSize.Y >= requiredDepth
             || usableSize.X >= requiredDepth && usableSize.Y >= requiredWidth;
+    }
+
+    internal static Vector2 MinimumShelfBodySize(MegastationLandingSiteLayout layout)
+    {
+        SiteMetrics minimum = Metrics(
+            1, MegastationLandingSiteCharacter.CompactService, layout);
+        float expansion = SiteSeparation + MegastationMegaShelfPlanner.LandingEdgeMargin * 2f;
+        return new(minimum.ApronSize.X + expansion,
+            minimum.ApronSize.Y + expansion);
     }
 
     private static MegastationLandingSiteCharacter PickCharacter(int seed)
@@ -1208,6 +1615,30 @@ public static class MegastationLandingDistrictPlanner
             MegastationLandingSiteOrientation.Degrees180 => (-right, -forward),
             _ => (-forward, right),
         };
+
+    private static MegastationLandingSiteOrientation CardinalOrientation(
+        Vector3 canonicalRight,
+        Vector3 canonicalForward,
+        Vector3 right,
+        Vector3 forward)
+    {
+        MegastationLandingSiteOrientation best = MegastationLandingSiteOrientation.Degrees0;
+        float bestAlignment = float.MinValue;
+        foreach (MegastationLandingSiteOrientation candidate in
+                 Enum.GetValues<MegastationLandingSiteOrientation>())
+        {
+            (Vector3 candidateRight, Vector3 candidateForward) = CardinalFrame(
+                canonicalRight, canonicalForward, candidate);
+            float alignment = Vector3.Dot(candidateRight, right)
+                + Vector3.Dot(candidateForward, forward);
+            if (alignment > bestAlignment)
+            {
+                bestAlignment = alignment;
+                best = candidate;
+            }
+        }
+        return best;
+    }
 
     private static MegastationOperationalFrontagePlan PlanOperationalFrontage(
         string buildingIdentity,
@@ -1629,6 +2060,7 @@ public static class MegastationLandingDistrictPlanner
         IReadOnlyList<MegastationLandingServiceBuilding> buildings,
         IReadOnlyList<MegastationLoadingAreaPlan> loadingAreas,
         IReadOnlyList<MegastationKeepClearZonePlan> keepClearZones,
+        IReadOnlyList<MegastationLandingSiteReservation> siteReservations,
         IReadOnlyList<MegastationArtificialLight> lights)
     {
         var text = new StringBuilder().Append(AlgorithmVersion).Append('|').Append(seed);
@@ -1637,7 +2069,9 @@ public static class MegastationLandingDistrictPlanner
                 .Append(':').Append(site.Character).Append(':').Append(site.Orientation)
                 .Append('@').Append(site.ApronCentre).Append(':').Append(site.ApronSize)
                 .Append(':').Append(site.InfrastructureEnvelope)
-                .Append(':').Append(site.LandingSurfaceIdentity);
+                .Append(':').Append(site.LandingSurfaceIdentity)
+                .Append(':').Append(site.Layout)
+                .Append(':').Append(site.HostWallIdentity);
         foreach (MegastationLandingPadPlan pad in pads)
             text.Append('|').Append(pad.PadId).Append(':').Append(F(pad.PadSurface.Centre.X))
                 .Append(',').Append(F(pad.PadSurface.Centre.Y)).Append(',')
@@ -1682,6 +2116,12 @@ public static class MegastationLandingDistrictPlanner
         foreach (MegastationKeepClearZonePlan zone in keepClearZones)
             text.Append('|').Append(zone.Identity).Append(':').Append(zone.Centre)
                 .Append(':').Append(zone.Size).Append(':').Append(zone.Purpose);
+        foreach (MegastationLandingSiteReservation reservation in siteReservations)
+            text.Append('|').Append(reservation.Identity).Append(':')
+                .Append(reservation.HostWallIdentity).Append('@')
+                .Append(reservation.Centre).Append(':').Append(reservation.Size)
+                .Append(':').Append(reservation.WallCentre).Append(':')
+                .Append(reservation.WallSize);
         foreach (MegastationArtificialLight light in lights)
             text.Append('|').Append(light.Identity).Append(':').Append(light.Position)
                 .Append(':').Append(F(light.Intensity)).Append(':').Append(F(light.Range));

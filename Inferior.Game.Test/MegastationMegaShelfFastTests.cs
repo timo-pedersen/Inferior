@@ -29,7 +29,7 @@ public sealed class MegastationMegaShelfFastTests
     }
 
     [Fact]
-    public void OperatingVolumesStartAtShelfTopAndLandingGetsGreaterClearance()
+    public void OperatingVolumesStartAtShelfTopAndIntegratedLandingKeepsShipClearance()
     {
         var wall = new MegastationBayWallSurface(
             "wall", MegastationBayWallKind.Rear, Vector3.Zero,
@@ -46,7 +46,8 @@ public sealed class MegastationMegaShelfFastTests
             Vector3.Dot(landing.Centre, wall.Up) - landing.Size.Y * .5f, 3);
         Assert.Equal(Vector3.Dot(top, wall.Normal) - 180f * .5f,
             Vector3.Dot(landing.Centre, wall.Normal) - landing.Size.Z * .5f, 3);
-        Assert.Equal(80f, landing.Size.Y);
+        Assert.Equal(MegastationLandingDistrictPlanner.IntegratedSiteArchitectureClearHeight,
+            landing.Size.Y);
         Assert.Equal(44f, structural.Size.Y);
         Assert.True(landing.Size.X > structural.Size.X);
         Assert.True(landing.Size.Z > structural.Size.Z);
@@ -458,7 +459,7 @@ public sealed class MegastationMegaShelfFastTests
             clear[index - 1] = tops[index] - thickness - tops[index - 1];
         Assert.All(clear, value => Assert.Equal(clear[0], value, 3));
         Assert.True(tops[0] - thickness - minimum >= 25f);
-        Assert.True(maximum - tops[^1] >= 80f);
+        Assert.True(maximum - tops[^1] >= 120f);
     }
 
     [Fact]
@@ -467,7 +468,7 @@ public sealed class MegastationMegaShelfFastTests
         Assert.Empty(MegastationMegaShelfPlanner.BookcaseElevations(
             0f, 500f, 2, 3f));
         Assert.Empty(MegastationMegaShelfPlanner.BookcaseElevations(
-            0f, 250f, 3, 3f));
+            0f, 130f, 3, 3f));
         MegastationInteriorStructuralSolid body = Shelf(new(500f, 3f, 110f));
         IReadOnlyList<MegastationMegaShelfTruss> trusses =
             MegastationMegaShelfPlanner.BuildTrusses(

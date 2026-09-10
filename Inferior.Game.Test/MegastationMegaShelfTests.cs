@@ -90,7 +90,25 @@ public sealed class MegastationMegaShelfTests(ITestOutputHelper output)
                 + $"{levels[second].Identity} {levels[second].Body.Centre}/"
                 + $"{levels[second].Body.Size}/{levels[second].Body.Right}/"
                 + $"{levels[second].Body.Forward}");
-        output.WriteLine(arrangement.Summary);
+        MegastationLandingDistrictPlan landing = result.LandingDistrictPlan;
+        HashSet<string> levelIdentities = levels
+            .Select(level => level.LandingSurface!.Identity)
+            .ToHashSet(StringComparer.Ordinal);
+        MegastationLandingSitePlan[] shelfSites = landing.Sites
+            .Where(site => levelIdentities.Contains(site.LandingSurfaceIdentity)).ToArray();
+        Assert.True(shelfSites.Select(site => site.LandingSurfaceIdentity)
+                .Distinct(StringComparer.Ordinal).Count() > levels.Length / 2,
+            landing.Diagnostics.ShelfUtilizationSummary + "; "
+            + landing.Diagnostics.StructuralRejectionSummary);
+        Assert.Contains(shelfSites,
+            site => site.Layout == MegastationLandingSiteLayout.WallIntegrated);
+        Assert.All(shelfSites.Where(site =>
+                site.Layout == MegastationLandingSiteLayout.WallIntegrated), site =>
+            Assert.NotNull(site.OperationalReservation));
+        output.WriteLine(arrangement.Summary + "; landing="
+            + landing.Diagnostics.ShelfUtilizationSummary + "; layouts="
+            + landing.Diagnostics.FreestandingShelfSiteCount + "free/"
+            + landing.Diagnostics.WallIntegratedShelfSiteCount + "integrated");
     }
 
     [Theory]

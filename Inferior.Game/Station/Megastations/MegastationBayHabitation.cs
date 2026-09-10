@@ -114,6 +114,7 @@ public static class MegastationBayHabitationPlanner
                 if (!TryPlanRegion(wall, regionSeed, index,
                         regions.Where(region => region.WallIdentity == wall.Identity).ToArray(),
                         landingDistrict.ServiceBuildings,
+                        landingDistrict.SiteReservations,
                         interior.AddedStructuralSolids ?? [],
                         occupancy, topology,
                         out MegastationBayHabitationRegion? region)
@@ -141,6 +142,7 @@ public static class MegastationBayHabitationPlanner
                 if (!TryPlanRegion(wall, regionSeed, index,
                         regions.Where(region => region.WallIdentity == wall.Identity).ToArray(),
                         landingDistrict.ServiceBuildings,
+                        landingDistrict.SiteReservations,
                         interior.AddedStructuralSolids ?? [],
                         occupancy, topology,
                         out MegastationBayHabitationRegion? planned)
@@ -272,6 +274,7 @@ public static class MegastationBayHabitationPlanner
         int index,
         IReadOnlyList<MegastationBayHabitationRegion> accepted,
         IReadOnlyList<MegastationLandingServiceBuilding> buildings,
+        IReadOnlyList<MegastationLandingSiteReservation> landingReservations,
         IReadOnlyList<MegastationInteriorStructuralSolid> structuralSolids,
         StructuralOccupancy? occupancy,
         BoundaryTopology? topology,
@@ -307,6 +310,9 @@ public static class MegastationBayHabitationPlanner
             if (buildings.Any(building => OverlapsBuilding(
                     wall, new(x, y), new(width, height), building)))
                 continue;
+            if (landingReservations.Any(reservation => ReservationOverlapsRegion(
+                    wall.Identity, new(x, y), new(width, height), reservation)))
+                continue;
             if (structuralSolids.Any(solid => OverlapsStructuralRoot(
                     wall, new(x, y), new(width, height), solid)))
                 continue;
@@ -330,6 +336,15 @@ public static class MegastationBayHabitationPlanner
         region = null;
         return false;
     }
+
+    internal static bool ReservationOverlapsRegion(
+        string wallIdentity,
+        Vector2 centre,
+        Vector2 size,
+        MegastationLandingSiteReservation reservation)
+        => string.Equals(reservation.HostWallIdentity, wallIdentity,
+                StringComparison.Ordinal)
+            && Overlaps(centre, size, reservation.WallCentre, reservation.WallSize, 4f);
 
     internal static bool TryFindSupportingFace(
         MegastationBayWallSurface wall,

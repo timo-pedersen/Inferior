@@ -193,6 +193,12 @@ public sealed partial class SystemSpaceState
             $"structuralRejections:{d.LandingDistrictStructuralRejectionSummary}," +
             $"landingSurfaces:{d.LandingDistrictLandingSurfaceCount}," +
             $"shelfSites:{d.LandingDistrictShelfSiteCount}," +
+            $"shelfUtilization:{d.LandingDistrictOccupiedShelfCount}/" +
+            $"{d.LandingDistrictLandingCapableShelfCount}," +
+            $"shelfLayouts:{d.LandingDistrictFreestandingShelfSiteCount}free/" +
+            $"{d.LandingDistrictWallIntegratedShelfSiteCount}integrated," +
+            $"deliberatelyEmpty:{d.LandingDistrictDeliberatelyEmptyShelfCount}," +
+            $"shelfPlan:{d.LandingDistrictShelfUtilizationSummary}," +
             $"surfacePlans:{d.LandingDistrictLandingSurfaceSummary}," +
             $"sitePlans:{d.LandingDistrictSiteSummary}," +
             $"signature:{d.LandingDistrictSignature}; " +

@@ -388,28 +388,28 @@ public static partial class MegastationMegaShelfPlanner
                     LandingEdgeMargin,
                     solid.Identity,
                     IsMainFloor: false);
-                bool landingCapable = MegastationLandingDistrictPlanner.CanHostMinimumSite(
-                    proposedLandingSurface.UsableSize);
                 MegastationBayWallSurface[] hostWalls = [wall];
-                if (landingCapable && !OperatingVolumeIsClear(
-                        clearance, solid, hostWalls, landing: true))
+                float? landingClearHeight = LandingClearHeight(
+                    proposedLandingSurface.UsableSize, hostWalls);
+                if (landingClearHeight is not null && !OperatingVolumeIsClear(
+                        clearance, solid, hostWalls, landingClearHeight))
                 {
-                    landingCapable = false;
+                    landingClearHeight = null;
                     landingDowngrades++;
                 }
-                if (!landingCapable && !OperatingVolumeIsClear(
-                        clearance, solid, hostWalls, landing: false))
+                if (landingClearHeight is null && !OperatingVolumeIsClear(
+                        clearance, solid, hostWalls, landingClearHeight: null))
                 {
                     operatingClearanceRejects++;
                     continue;
                 }
                 MegastationMegaShelfClearanceVolume clearanceVolume = CreateClearanceVolume(
-                    solid, hostWalls, landingCapable);
+                    solid, hostWalls, landingClearHeight);
                 bool active = Unit(candidateSeed, "composition-presence") < activeDensity;
                 pool.Add(new(
                     identity, MegastationMegaShelfFamily.Cantilever,
                     wall, hostWalls, supportingFaces, solid,
-                    landingCapable ? proposedLandingSurface : null,
+                    landingClearHeight is not null ? proposedLandingSurface : null,
                     clearanceVolume, verticalBand, candidateSeed,
                     Unit(candidateSeed, "composition-priority"), active));
             }
@@ -821,26 +821,26 @@ public static partial class MegastationMegaShelfPlanner
 
         MegastationLandingSurface proposedLandingSurface = CreateLandingSurface(
             interior, identity, body);
-        bool landingCapable = MegastationLandingDistrictPlanner.CanHostMinimumSite(
-            proposedLandingSurface.UsableSize);
+        float? landingClearHeight = LandingClearHeight(
+            proposedLandingSurface.UsableSize, hostWalls);
         bool downgraded = false;
-        if (landingCapable && !OperatingVolumeIsClear(
-                clearance, body, hostWalls, landing: true))
+        if (landingClearHeight is not null && !OperatingVolumeIsClear(
+                clearance, body, hostWalls, landingClearHeight))
         {
-            landingCapable = false;
+            landingClearHeight = null;
             downgraded = true;
         }
-        if (!landingCapable && !OperatingVolumeIsClear(
-                clearance, body, hostWalls, landing: false))
+        if (landingClearHeight is null && !OperatingVolumeIsClear(
+                clearance, body, hostWalls, landingClearHeight: null))
             return new(null, CandidateReject.Operating, downgraded);
 
         MegastationMegaShelfClearanceVolume clearanceVolume = CreateClearanceVolume(
-            body, hostWalls, landingCapable);
+            body, hostWalls, landingClearHeight);
         bool active = Unit(candidateSeed, "composition-presence")
             < MathHelper.Clamp(activeProbability, 0f, 1f);
         return new(new ShelfCandidate(
             identity, family, hostWalls[0], hostWalls, supportingFaces, body,
-            landingCapable ? proposedLandingSurface : null,
+            landingClearHeight is not null ? proposedLandingSurface : null,
             clearanceVolume, band, candidateSeed,
             Unit(candidateSeed, "composition-priority"), active),
             CandidateReject.None, downgraded);
@@ -1443,12 +1443,30 @@ public static partial class MegastationMegaShelfPlanner
         MegastationLandingSiteStructuralClearance clearance,
         MegastationInteriorStructuralSolid body,
         IReadOnlyList<MegastationBayWallSurface> hostWalls,
-        bool landing)
+        float? landingClearHeight)
     {
         MegastationMegaShelfClearanceVolume volume = CreateOperatingVolume(
-            body, hostWalls, landing);
+            body, hostWalls, landingClearHeight);
         return clearance.IsOrientedBoxClear(
             volume.Centre, volume.Right, volume.Up, volume.Forward, volume.Size, out _);
+    }
+
+    private static float? LandingClearHeight(
+        Vector2 usableSize,
+        IReadOnlyList<MegastationBayWallSurface> hostWalls)
+    {
+        bool hasOpenWallProjection = hostWalls.Count > 0
+            && !hostWalls.Any(first => hostWalls.Any(second =>
+                !ReferenceEquals(first, second)
+                && Vector3.Dot(first.Normal, second.Normal) < -.999f));
+        if (hasOpenWallProjection
+            && MegastationLandingDistrictPlanner.CanHostMinimumSite(
+                usableSize, MegastationLandingSiteLayout.WallIntegrated))
+            return MegastationLandingDistrictPlanner.IntegratedSiteArchitectureClearHeight;
+        if (MegastationLandingDistrictPlanner.CanHostMinimumSite(
+                usableSize, MegastationLandingSiteLayout.Freestanding))
+            return MegastationLandingDistrictPlanner.FreestandingShelfSiteArchitectureClearHeight;
+        return null;
     }
 
     internal static MegastationMegaShelfClearanceVolume CreateOperatingVolume(
@@ -1462,16 +1480,26 @@ public static partial class MegastationMegaShelfPlanner
             "operating-volume/source", MegastationInteriorStructuralRole.MegaShelf,
             topCentre, new(width, 0f, projection), wall.Right, wall.Up, wall.Normal,
             true, true);
-        return CreateOperatingVolume(body, [wall], landing);
+        return CreateOperatingVolume(body, [wall], landing
+            ? MegastationLandingDistrictPlanner.IntegratedSiteArchitectureClearHeight
+            : null);
     }
 
     internal static MegastationMegaShelfClearanceVolume CreateOperatingVolume(
         MegastationInteriorStructuralSolid body,
         IReadOnlyList<MegastationBayWallSurface> hostWalls,
         bool landing)
+        => CreateOperatingVolume(body, hostWalls, landing
+            ? MegastationLandingDistrictPlanner.IntegratedSiteArchitectureClearHeight
+            : null);
+
+    private static MegastationMegaShelfClearanceVolume CreateOperatingVolume(
+        MegastationInteriorStructuralSolid body,
+        IReadOnlyList<MegastationBayWallSurface> hostWalls,
+        float? landingClearHeight)
     {
-        float height = landing ? 80f : 44f;
-        float margin = landing ? 16f : 10f;
+        float height = landingClearHeight ?? 44f;
+        float margin = landingClearHeight is not null ? 16f : 10f;
         HorizontalMargins margins = HorizontalMarginsFor(body, hostWalls, margin);
         Vector3 topCentre = body.Centre + body.Up * (body.Size.Y * .5f);
         return new(
@@ -1481,17 +1509,17 @@ public static partial class MegastationMegaShelfPlanner
             new(body.Size.X + margins.NegativeRight + margins.PositiveRight,
                 height,
                 body.Size.Z + margins.NegativeForward + margins.PositiveForward),
-            body.Right, body.Up, body.Forward, landing);
+            body.Right, body.Up, body.Forward, landingClearHeight is not null);
     }
 
     private static MegastationMegaShelfClearanceVolume CreateClearanceVolume(
         MegastationInteriorStructuralSolid body,
         IReadOnlyList<MegastationBayWallSurface> hostWalls,
-        bool landing)
+        float? landingClearHeight)
     {
-        float above = landing ? 80f : 44f;
-        float below = landing ? 44f : 30f;
-        float margin = landing ? 16f : 10f;
+        float above = landingClearHeight ?? 44f;
+        float below = landingClearHeight is not null ? 44f : 30f;
+        float margin = landingClearHeight is not null ? 16f : 10f;
         HorizontalMargins margins = HorizontalMarginsFor(body, hostWalls, margin);
         return new(
             body.Centre + body.Up * ((above - below) * .5f)
@@ -1500,7 +1528,7 @@ public static partial class MegastationMegaShelfPlanner
             new(body.Size.X + margins.NegativeRight + margins.PositiveRight,
                 body.Size.Y + above + below,
                 body.Size.Z + margins.NegativeForward + margins.PositiveForward),
-            body.Right, body.Up, body.Forward, landing);
+            body.Right, body.Up, body.Forward, landingClearHeight is not null);
     }
 
     private static HorizontalMargins HorizontalMarginsFor(
