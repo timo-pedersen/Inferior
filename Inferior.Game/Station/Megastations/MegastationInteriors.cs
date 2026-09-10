@@ -165,7 +165,67 @@ public sealed record MegastationInteriorDiagnostics(
     int BayFacilityReservationRejectCount = 0,
     int BayFacilityCutoutValidationRejectCount = 0,
     int BayFacilityArtificialLightCount = 0,
-    string BayFacilitySignature = "");
+    string BayFacilitySignature = "",
+    int MegaShelfAlgorithmVersion = 0,
+    int MegaShelfCandidateCount = 0,
+    int MegaShelfCount = 0,
+    int MegaShelfSupportRejectCount = 0,
+    int MegaShelfStructuralRejectCount = 0,
+    int MegaShelfArrivalExclusionRejectCount = 0,
+    int MegaShelfOverlapRejectCount = 0,
+    int MegaShelfVerticalSeparationRejectCount = 0,
+    int MegaShelfOperatingClearanceRejectCount = 0,
+    int MegaShelfLandingDowngradeCount = 0,
+    int MegaShelfFullSpanFlightClearanceRejectCount = 0,
+    int MegaShelfCompositionRejectCount = 0,
+    int MegaShelfCantileverCandidateCount = 0,
+    int MegaShelfCornerCandidateCount = 0,
+    int MegaShelfFullSpanCandidateCount = 0,
+    int MegaShelfCornerViableCandidateCount = 0,
+    int MegaShelfFullSpanViableCandidateCount = 0,
+    int MegaShelfCantileverAcceptedCount = 0,
+    int MegaShelfCornerAcceptedCount = 0,
+    int MegaShelfFullSpanAcceptedCount = 0,
+    int MegaShelfLowCandidateCount = 0,
+    int MegaShelfMidCandidateCount = 0,
+    int MegaShelfHighCandidateCount = 0,
+    int MegaShelfLowAcceptedCount = 0,
+    int MegaShelfMidAcceptedCount = 0,
+    int MegaShelfHighAcceptedCount = 0,
+    float MegaShelfMinimumWidth = 0f,
+    float MegaShelfMaximumWidth = 0f,
+    float MegaShelfMinimumProjection = 0f,
+    float MegaShelfMaximumProjection = 0f,
+    float MegaShelfMinimumThickness = 0f,
+    float MegaShelfMaximumThickness = 0f,
+    int MegaShelfVisibleTriangleCount = 0,
+    int MegaShelfCasterTriangleCount = 0,
+    int MegaShelfMarkerCount = 0,
+    int MegaShelfCornerMarkerCount = 0,
+    int MegaShelfLowerEdgeMarkerCount = 0,
+    int MegaShelfTrussCount = 0,
+    int MegaShelfBoxTrussCount = 0,
+    int MegaShelfTriangularTrussCount = 0,
+    int MegaShelfTrussVisibleTriangleCount = 0,
+    int MegaShelfTrussCasterTriangleCount = 0,
+    MegastationShelfMacroLayout MegaShelfMacroLayout = MegastationShelfMacroLayout.None,
+    int MegaShelfBookcaseCount = 0,
+    int MegaShelfBookcaseShelfCount = 0,
+    int MegaShelfBookcaseInsufficientHeightRejectCount = 0,
+    int MegaShelfBookcaseArrivalRejectCount = 0,
+    int MegaShelfBookcaseWallContinuityRejectCount = 0,
+    int MegaShelfBookcaseStructuralRejectCount = 0,
+    int MegaShelfBookcaseSymmetryRejectCount = 0,
+    string MegaShelfMacroSummary = "",
+    string MegaShelfSummary = "",
+    string MegaShelfSignature = "",
+    int LandingDistrictLandingSurfaceCount = 1,
+    int LandingDistrictShelfSiteCount = 0,
+    string LandingDistrictLandingSurfaceSummary = "",
+    int MegaShelfObstacleBeaconCount = 0,
+    int MegaShelfFloodFixtureCount = 0,
+    int MegaShelfStaticWorkLightCount = 0,
+    string MegaShelfLightingSignature = "");
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -184,7 +244,121 @@ public sealed record MegastationInteriorPlan(
     MegastationInteriorVolume CavityEnvelope,
     MegastationEntrancePrecinct EntrancePrecinct,
     IReadOnlyList<MegastationProtectedVoidCell> ProtectedCells,
-    MegastationInteriorDiagnostics Diagnostics);
+    MegastationInteriorDiagnostics Diagnostics,
+    IReadOnlyList<MegastationInteriorStructuralSolid>? AddedStructuralSolids = null,
+    IReadOnlyList<MegastationLandingSurface>? AdditionalLandingSurfaces = null,
+    IReadOnlyList<MegastationMegaShelfMarker>? AddedStructuralMarkers = null,
+    IReadOnlyList<MegastationMegaShelfTruss>? AddedStructuralTrusses = null,
+    MegastationShelfLightingPlan? ShelfLighting = null)
+{
+    public MegastationInteriorMacroExclusionVolume ArrivalManeuverExclusion
+        => MegastationInteriorMacroExclusionVolume.CreateArrival(this);
+}
+
+public enum MegastationInteriorMacroExclusionRole
+{
+    EntranceArrivalManeuver,
+}
+
+public sealed record MegastationInteriorMacroExclusionVolume(
+    string Identity,
+    MegastationInteriorMacroExclusionRole Role,
+    Vector3 Centre,
+    Vector3 Size,
+    Vector3 Right,
+    Vector3 Up,
+    Vector3 Forward,
+    Vector3 SupportedShipEnvelope)
+{
+    private const float LateralManeuverMargin = 54f;
+    private const float VerticalManeuverMargin = 42f;
+    private const float CrownMargin = 24f;
+
+    public static MegastationInteriorMacroExclusionVolume CreateArrival(
+        MegastationInteriorPlan interior)
+    {
+        Vector3 outward = Vector3.Normalize(interior.OutwardNormal);
+        Vector3 right = Vector3.Normalize(interior.PortalRight);
+        Vector3 up = Vector3.Normalize(interior.PortalUp);
+        Vector3 supported = new(
+            SupportedShipEnvelopeStandards.LargeWidth,
+            SupportedShipEnvelopeStandards.LargeHeight,
+            SupportedShipEnvelopeStandards.LargeLength);
+        Vector3 flightSize = interior.MainFlightVolume.Size;
+        float cavityDepth = MathF.Abs(outward.X) * flightSize.X
+            + MathF.Abs(outward.Y) * flightSize.Y
+            + MathF.Abs(outward.Z) * flightSize.Z;
+        float inwardBayDistance = MathF.Max(
+            supported.Z * 4f,
+            cavityDepth * .62f);
+        float length = interior.EntrancePrecinct.ProjectionLength
+            + interior.Diagnostics.ThroatLength
+            + inwardBayDistance;
+        float width = MathF.Max(
+            interior.EntrancePrecinct.CrownOuterWidth + CrownMargin,
+            supported.X + LateralManeuverMargin * 2f);
+        float height = MathF.Max(
+            interior.EntrancePrecinct.CrownOuterHeight + CrownMargin,
+            MathF.Max(supported.Y, supported.X) + VerticalManeuverMargin * 2f);
+        Vector3 centre = interior.EntrancePrecinct.OuterMouthCentre
+            - outward * (length * .5f);
+        return new(
+            "interior-exclusion:entrance-arrival",
+            MegastationInteriorMacroExclusionRole.EntranceArrivalManeuver,
+            centre,
+            new(width, height, length),
+            right,
+            up,
+            -outward,
+            supported);
+    }
+
+    public bool IntersectsOrientedBox(
+        Vector3 centre,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Vector3 size,
+        float margin = 0f)
+    {
+        Vector3 delta = centre - Centre;
+        Vector3[] firstAxes = [Right, Up, Forward];
+        Vector3[] secondAxes = [right, up, forward];
+        Vector3 firstHalf = Size * .5f + new Vector3(margin);
+        Vector3 secondHalf = size * .5f;
+        for (int pass = 0; pass < 2; pass++)
+        for (int axisIndex = 0; axisIndex < 3; axisIndex++)
+        {
+            Vector3 axis = pass == 0 ? firstAxes[axisIndex] : secondAxes[axisIndex];
+            float firstRadius = ProjectionRadius(firstAxes, firstHalf, axis);
+            float secondRadius = ProjectionRadius(secondAxes, secondHalf, axis);
+            if (MathF.Abs(Vector3.Dot(delta, axis)) >= firstRadius + secondRadius)
+                return false;
+        }
+        for (int first = 0; first < 3; first++)
+        for (int second = 0; second < 3; second++)
+        {
+            Vector3 axis = Vector3.Cross(firstAxes[first], secondAxes[second]);
+            float lengthSquared = axis.LengthSquared();
+            if (lengthSquared < 1e-8f)
+                continue;
+            axis /= MathF.Sqrt(lengthSquared);
+            float firstRadius = ProjectionRadius(firstAxes, firstHalf, axis);
+            float secondRadius = ProjectionRadius(secondAxes, secondHalf, axis);
+            if (MathF.Abs(Vector3.Dot(delta, axis)) >= firstRadius + secondRadius)
+                return false;
+        }
+        return true;
+    }
+
+    private static float ProjectionRadius(
+        IReadOnlyList<Vector3> axes,
+        Vector3 halfSize,
+        Vector3 projectionAxis)
+        => MathF.Abs(Vector3.Dot(axes[0], projectionAxis)) * halfSize.X
+            + MathF.Abs(Vector3.Dot(axes[1], projectionAxis)) * halfSize.Y
+            + MathF.Abs(Vector3.Dot(axes[2], projectionAxis)) * halfSize.Z;
+}
 
 public sealed record MegastationInteriorMeshBuildResult(
     StationModuleMesh Mesh,
@@ -1570,6 +1744,7 @@ public static class MegastationInteriorMeshBuilder
         {
             (illuminatedFaceStart, illuminatedFaceCount, .82f),
         };
+        var shelfReceiverFaces = new List<int>();
 
         foreach (MegastationInteriorGuidanceElement element in presentation.Elements
                      .OrderBy(element => element.MaterialFamily)
@@ -1584,6 +1759,120 @@ public static class MegastationInteriorMeshBuilder
             int start = mesh.FaceCount;
             AddBox(mesh, element.Frame, element.Size, element.Colour);
             illuminationRanges.Add((start, mesh.FaceCount - start, element.Illumination));
+        }
+        foreach (MegastationInteriorStructuralSolid solid in
+                 plan.AddedStructuralSolids ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SystemMaterialBinding binding = materials?.DefaultStructuralBinding
+                ?? new(SystemMaterialFamilyId.DullStructuralMetal, new Color(86, 96, 104));
+            SetMaterial(mesh, binding.FamilyId);
+            mesh.CurrentDecorClass = solid.CastsStellarShadow
+                ? DecorClass.MegastationInteriorMajor
+                : DecorClass.MegastationInteriorMinor;
+            Matrix frame = new(
+                solid.Right.X, solid.Right.Y, solid.Right.Z, 0f,
+                solid.Up.X, solid.Up.Y, solid.Up.Z, 0f,
+                solid.Forward.X, solid.Forward.Y, solid.Forward.Z, 0f,
+                solid.Centre.X, solid.Centre.Y, solid.Centre.Z, 1f);
+            Color structuralColour = materials is null
+                ? binding.Tint
+                : ProceduralMaterialCpuGenerator.Blend(binding.Tint, secondary, .18f);
+            if (solid.Role == MegastationInteriorStructuralRole.MegaShelf)
+            {
+                MegastationMegaShelfFaceColours colours =
+                    MegastationMegaShelfPlanner.FaceColours(binding.Tint, secondary);
+                int firstShelfFace = mesh.FaceCount;
+                AddMegaShelfBody(mesh, solid, colours);
+                for (int face = firstShelfFace; face < mesh.FaceCount; face++)
+                    shelfReceiverFaces.Add(face);
+            }
+            else
+            {
+                AddBox(mesh, frame, solid.Size, structuralColour);
+            }
+        }
+        foreach (MegastationMegaShelfTruss truss in plan.AddedStructuralTrusses ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+            mesh.CurrentDecorClass = truss.CastsStellarShadow
+                ? DecorClass.MegastationInteriorMajor
+                : DecorClass.MegastationInteriorMinor;
+            Color trussColour = ProceduralMaterialCpuGenerator.Blend(
+                dominant, secondary, .55f);
+            StructuralTrussFactory.Append(mesh, truss.Spec, trussColour);
+        }
+        foreach (MegastationMegaShelfMarker shelfMarker in plan.AddedStructuralMarkers ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+            mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+            Matrix frame = new(
+                shelfMarker.Right.X, shelfMarker.Right.Y, shelfMarker.Right.Z, 0f,
+                shelfMarker.Up.X, shelfMarker.Up.Y, shelfMarker.Up.Z, 0f,
+                shelfMarker.Forward.X, shelfMarker.Forward.Y, shelfMarker.Forward.Z, 0f,
+                shelfMarker.Centre.X, shelfMarker.Centre.Y, shelfMarker.Centre.Z, 1f);
+            int start = mesh.FaceCount;
+            AddBox(mesh, frame, shelfMarker.Size, shelfMarker.Colour);
+            illuminationRanges.Add((start, mesh.FaceCount - start, shelfMarker.Illumination));
+        }
+        if (plan.ShelfLighting is { } shelfLighting)
+        {
+            mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+            SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+            foreach (MegastationShelfObstacleBeacon beacon in shelfLighting.Beacons)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Vector3 housingCentre = beacon.Position - beacon.Up * .16f;
+                Matrix frame = new(
+                    beacon.Right.X, beacon.Right.Y, beacon.Right.Z, 0f,
+                    beacon.Up.X, beacon.Up.Y, beacon.Up.Z, 0f,
+                    beacon.Forward.X, beacon.Forward.Y, beacon.Forward.Z, 0f,
+                    housingCentre.X, housingCentre.Y, housingCentre.Z, 1f);
+                AddBox(mesh, frame, new(.72f, .36f, .72f), new Color(62, 66, 69));
+                int lensStart = mesh.FaceCount;
+                Matrix lensFrame = frame;
+                lensFrame.Translation = beacon.Position + beacon.Up * .22f;
+                AddBox(mesh, lensFrame, new(.42f, .30f, .42f),
+                    MegastationShelfLightingPlanner.BeaconGlassOffColour);
+                illuminationRanges.Add((lensStart, mesh.FaceCount - lensStart, .18f));
+            }
+            foreach (MegastationShelfFloodFixture flood in shelfLighting.FloodFixtures)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Matrix fixtureFrame = new(
+                    flood.Right.X, flood.Right.Y, flood.Right.Z, 0f,
+                    flood.Up.X, flood.Up.Y, flood.Up.Z, 0f,
+                    flood.Direction.X, flood.Direction.Y, flood.Direction.Z, 0f,
+                    flood.Centre.X, flood.Centre.Y, flood.Centre.Z, 1f);
+                AddBox(mesh, fixtureFrame, new(1.65f, .86f, 1.05f), new Color(54, 58, 61));
+                int lensStart = mesh.FaceCount;
+                Matrix lensFrame = fixtureFrame;
+                Vector3 lensCentre = flood.Centre + flood.Direction * .57f;
+                lensFrame.Translation = lensCentre;
+                AddBox(mesh, lensFrame, new(1.34f, .60f, .16f), flood.Colour);
+                illuminationRanges.Add((lensStart, mesh.FaceCount - lensStart, .90f));
+
+                Vector3 bracketCentre = (flood.MountPoint + flood.Centre) * .5f;
+                Vector3 bracketAxis = flood.Centre - flood.MountPoint;
+                float bracketLength = bracketAxis.Length();
+                if (bracketLength > .05f)
+                {
+                    bracketAxis /= bracketLength;
+                    Vector3 bracketRight = Vector3.Cross(flood.Right, bracketAxis);
+                    if (bracketRight.LengthSquared() < 1e-5f) bracketRight = flood.Up;
+                    bracketRight.Normalize();
+                    Vector3 bracketUp = Vector3.Normalize(Vector3.Cross(bracketAxis, bracketRight));
+                    Matrix bracketFrame = new(
+                        bracketRight.X, bracketRight.Y, bracketRight.Z, 0f,
+                        bracketUp.X, bracketUp.Y, bracketUp.Z, 0f,
+                        bracketAxis.X, bracketAxis.Y, bracketAxis.Z, 0f,
+                        bracketCentre.X, bracketCentre.Y, bracketCentre.Z, 1f);
+                    AddBox(mesh, bracketFrame, new(.22f, .22f, bracketLength),
+                        new Color(67, 70, 72));
+                }
+            }
         }
         int portalCasterVertexCount = CountCasterVertices(mesh);
         int portalCasterIndexCount = CountCasterIndices(mesh);
@@ -1609,6 +1898,25 @@ public static class MegastationInteriorMeshBuilder
         if (facilityMesh is { } facilityWindows)
         foreach ((int face, float illumination) in facilityWindows.IlluminationFaces)
             mesh.SetFaceIllumination(face, illumination);
+        if (shelfReceiverFaces.Count > 0 && artificialLighting is not null)
+        {
+            void ApplyShelfLighting()
+            {
+                foreach (int face in shelfReceiverFaces)
+                {
+                    Vector3 normal = mesh.LocalFaceNormal(face);
+                    Vector3[] samples = mesh.GetFaceVertexPositions(face)
+                        .Select(position => MegastationArtificialLighting.Evaluate(
+                            position, normal, artificialLighting.Lights, artificialOcclusion))
+                        .ToArray();
+                    mesh.SetFaceArtificialLight(face, samples);
+                }
+            }
+            if (artificialOcclusion is null)
+                ApplyShelfLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyShelfLighting);
+        }
         if (landingMesh is { } districtMesh)
         {
             void ApplyLandingLighting() => MegastationLandingDistrictMeshBuilder.ApplyLighting(
@@ -1703,6 +2011,12 @@ public static class MegastationInteriorMeshBuilder
                 landingMesh?.Diagnostics.StructuralComponentRejectCount ?? 0,
             LandingDistrictStructuralRejectionSummary =
                 landingMesh?.Diagnostics.StructuralRejectionSummary ?? string.Empty,
+            LandingDistrictLandingSurfaceCount =
+                landingMesh?.Diagnostics.LandingSurfaceCount ?? 0,
+            LandingDistrictShelfSiteCount =
+                landingMesh?.Diagnostics.ShelfLandingSiteCount ?? 0,
+            LandingDistrictLandingSurfaceSummary =
+                landingMesh?.Diagnostics.LandingSurfaceSummary ?? string.Empty,
             LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
             BayHabitationAlgorithmVersion =
                 habitationMesh?.Diagnostics.AlgorithmVersion ?? 0,
@@ -1772,6 +2086,122 @@ public static class MegastationInteriorMeshBuilder
     private static void AddBox(StationModuleMesh mesh, Matrix frame, Vector3 size, Color colour)
         => mesh.AddOrientedBox(frame, size, colour);
 
+    internal static void AddMegaShelfBody(
+        StationModuleMesh mesh,
+        MegastationInteriorStructuralSolid solid,
+        MegastationMegaShelfFaceColours colours)
+    {
+        if (solid.ExposedCornerClip > 0f && solid.ExposedCornerRightSign != 0)
+        {
+            AddClippedMegaShelfBody(mesh, solid, colours);
+            return;
+        }
+        float halfWidth = solid.Size.X * .5f;
+        float halfHeight = solid.Size.Y * .5f;
+        float halfDepth = solid.Size.Z * .5f;
+
+        AddTessellatedShelfTop(mesh, solid, colours.Top, halfHeight);
+        mesh.AddQuad(solid.Centre - solid.Up * halfHeight,
+            -solid.Up, solid.Forward, solid.Size.X, solid.Size.Z, colours.Underside);
+        mesh.AddQuad(solid.Centre + solid.Forward * halfDepth,
+            solid.Forward, solid.Up, solid.Size.X, solid.Size.Y, colours.Side);
+        mesh.AddQuad(solid.Centre - solid.Forward * halfDepth,
+            -solid.Forward, solid.Up, solid.Size.X, solid.Size.Y, colours.Side);
+        mesh.AddQuad(solid.Centre + solid.Right * halfWidth,
+            solid.Right, solid.Up, solid.Size.Z, solid.Size.Y, colours.Side);
+        mesh.AddQuad(solid.Centre - solid.Right * halfWidth,
+            -solid.Right, solid.Up, solid.Size.Z, solid.Size.Y, colours.Side);
+    }
+
+    private static void AddTessellatedShelfTop(
+        StationModuleMesh mesh,
+        MegastationInteriorStructuralSolid solid,
+        Color colour,
+        float halfHeight)
+    {
+        const float TargetSpacing = 18f;
+        int across = Math.Max(1, (int)MathF.Ceiling(solid.Size.X / TargetSpacing));
+        int deep = Math.Max(1, (int)MathF.Ceiling(solid.Size.Z / TargetSpacing));
+        float width = solid.Size.X / across;
+        float depth = solid.Size.Z / deep;
+        for (int x = 0; x < across; x++)
+        for (int z = 0; z < deep; z++)
+        {
+            Vector3 centre = solid.Centre + solid.Up * halfHeight
+                + solid.Right * (-solid.Size.X * .5f + width * (x + .5f))
+                + solid.Forward * (-solid.Size.Z * .5f + depth * (z + .5f));
+            mesh.AddQuad(centre, solid.Up, solid.Forward, width, depth, colour);
+        }
+    }
+
+    private static void AddClippedMegaShelfBody(
+        StationModuleMesh mesh,
+        MegastationInteriorStructuralSolid solid,
+        MegastationMegaShelfFaceColours colours)
+    {
+        float x = solid.Size.X * .5f;
+        float z = solid.Size.Z * .5f;
+        float clip = MathHelper.Clamp(solid.ExposedCornerClip, 0f,
+            MathF.Min(solid.Size.X, solid.Size.Z) * .45f);
+        Vector2[] outline = solid.ExposedCornerRightSign > 0
+            ? [new(-x, -z), new(-x, z), new(x - clip, z), new(x, z - clip), new(x, -z)]
+            : [new(-x, -z), new(-x, z - clip), new(-x + clip, z), new(x, z), new(x, -z)];
+        float halfHeight = solid.Size.Y * .5f;
+        Vector3 Point(Vector2 p, float y) => solid.Centre
+            + solid.Right * p.X + solid.Up * y + solid.Forward * p.Y;
+
+        Vector3 topOrigin = Point(outline[0], halfHeight);
+        Vector3 bottomOrigin = Point(outline[0], -halfHeight);
+        for (int index = 1; index < outline.Length - 1; index++)
+        {
+            AddTriangleFacing(mesh, topOrigin,
+                Point(outline[index], halfHeight), Point(outline[index + 1], halfHeight),
+                solid.Up, colours.Top);
+            AddTriangleFacing(mesh, bottomOrigin,
+                Point(outline[index + 1], -halfHeight), Point(outline[index], -halfHeight),
+                -solid.Up, colours.Underside);
+        }
+        for (int index = 0; index < outline.Length; index++)
+        {
+            int next = (index + 1) % outline.Length;
+            Vector3 a = Point(outline[index], -halfHeight);
+            Vector3 b = Point(outline[next], -halfHeight);
+            Vector3 c = Point(outline[next], halfHeight);
+            Vector3 d = Point(outline[index], halfHeight);
+            Vector3 outward = Vector3.Normalize(Vector3.Cross(b - a, solid.Up));
+            AddQuadFacing(mesh, a, b, c, d, outward, colours.Side);
+        }
+    }
+
+    private static void AddTriangleFacing(
+        StationModuleMesh mesh,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 expectedNormal,
+        Color colour)
+    {
+        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
+            mesh.AddTriangle(a, c, b, colour);
+        else
+            mesh.AddTriangle(a, b, c, colour);
+    }
+
+    private static void AddQuadFacing(
+        StationModuleMesh mesh,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 d,
+        Vector3 expectedNormal,
+        Color colour)
+    {
+        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
+            mesh.AddQuad(a, d, c, b, colour);
+        else
+            mesh.AddQuad(a, b, c, d, colour);
+    }
+
     private static int CountCasterVertices(StationModuleMesh mesh)
         => mesh.DecorClassRanges
             .Where(range => range.decorClass == DecorClass.MegastationInteriorMajor)
@@ -1820,6 +2250,9 @@ public static class MegastationInteriorDebug
         var lines = new List<VertexPositionColor>();
         AddVolume(lines, plan.ThroatVolume, new Color(255, 176, 44));
         AddVolume(lines, plan.MainFlightVolume, new Color(64, 235, 112));
+        MegastationInteriorMacroExclusionVolume arrival = plan.ArrivalManeuverExclusion;
+        AddOrientedBox(lines, arrival.Centre, arrival.Right, arrival.Up, arrival.Forward,
+            arrival.Size, new Color(70, 150, 255));
         AddPortal(lines, plan, new Color(40, 220, 255));
         foreach (BoundaryFace face in topology.Faces.Where(face =>
                      face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary))
@@ -1830,6 +2263,11 @@ public static class MegastationInteriorDebug
             for (int edge = 0; edge < 4; edge++)
                 AddLine(lines, corners[edge], corners[(edge + 1) % 4], new Color(220, 72, 235));
         }
+        foreach (MegastationInteriorStructuralSolid solid in plan.AddedStructuralSolids ?? [])
+            AddOrientedBox(lines, solid.Centre, solid.Right, solid.Up, solid.Forward,
+                solid.Size, new Color(255, 214, 56));
+        foreach (MegastationLandingSurface surface in plan.AdditionalLandingSurfaces ?? [])
+            AddSurface(lines, surface, new Color(40, 240, 255));
         return lines.ToArray();
 #else
         return null;
@@ -1837,6 +2275,46 @@ public static class MegastationInteriorDebug
     }
 
 #if DEBUG
+    private static void AddSurface(
+        List<VertexPositionColor> lines,
+        MegastationLandingSurface surface,
+        Color colour)
+    {
+        Vector3 r = surface.Right * (surface.UsableSize.X * .5f);
+        Vector3 f = surface.Forward * (surface.UsableSize.Y * .5f);
+        Vector3[] corners =
+        [
+            surface.Centre - r - f,
+            surface.Centre + r - f,
+            surface.Centre + r + f,
+            surface.Centre - r + f,
+        ];
+        for (int i = 0; i < corners.Length; i++)
+            AddLine(lines, corners[i], corners[(i + 1) % corners.Length], colour);
+    }
+
+    private static void AddOrientedBox(
+        List<VertexPositionColor> lines,
+        Vector3 centre,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Vector3 size,
+        Color colour)
+    {
+        Vector3 r = right * (size.X * .5f);
+        Vector3 u = up * (size.Y * .5f);
+        Vector3 f = forward * (size.Z * .5f);
+        Vector3[] corners =
+        [
+            centre-r-u-f, centre+r-u-f, centre+r+u-f, centre-r+u-f,
+            centre-r-u+f, centre+r-u+f, centre+r+u+f, centre-r+u+f,
+        ];
+        int[] edges = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+        for (int i = 0; i < edges.Length; i += 2)
+            AddLine(lines, corners[edges[i]], corners[edges[i + 1]], colour);
+    }
+
     private static void AddPortal(
         List<VertexPositionColor> lines,
         MegastationInteriorPlan plan,

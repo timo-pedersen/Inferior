@@ -75,10 +75,16 @@ public sealed class MegastationArtificialOcclusion
         StructuralOccupancy occupancy,
         MegastationLandingDistrictPlan district,
         MegastationInteriorPresentationPlan presentation,
-        MegastationBayFacilityPlan? bayFacilities = null)
+        MegastationBayFacilityPlan? bayFacilities = null,
+        IEnumerable<MegastationInteriorStructuralSolid>? structuralSolids = null)
     {
         Vector3 up = district.FloorNormal;
         var occluders = new List<MegastationArtificialOccluder>();
+
+        foreach (MegastationInteriorStructuralSolid solid in structuralSolids ?? [])
+            if (solid.CastsStaticArtificialShadow)
+                Add(MegastationArtificialOccluderRole.MajorStructuralMass,
+                    solid.Centre, solid.Size, solid.Right, solid.Up, solid.Forward);
 
         foreach (MegastationLandingSitePlan site in district.Sites)
             Add(MegastationArtificialOccluderRole.MajorPlatform, site.ApronCentre,

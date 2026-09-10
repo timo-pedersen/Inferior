@@ -76,6 +76,17 @@ float    VertexIlluminationScale;
 // protected-volume boundary without consuming physical clearance. Zero elsewhere.
 float    PresentationDepthBias;
 
+// H1h: bounded, presentation-only interior atmospheric perspective. The CPU activation
+// is zero outside an authoritative H1 bay; the station-local volume gate additionally
+// prevents a combined megastation hull draw from hazing exterior receiver pixels.
+float    InteriorHazeActivation;
+float3   InteriorHazeVolumeMinimum;
+float3   InteriorHazeVolumeMaximum;
+float3   InteriorHazeColour;
+float    InteriorHazeStartDistance;
+float    InteriorHazeInvDistanceRange;
+float    InteriorHazeMaximumBlend;
+
 float4x4 ModuleToStationLocal;
 float4x4 StationLocalToLightView;
 float2   ShadowMinXY;
@@ -387,6 +398,25 @@ float3 PerturbNormalFromHeight(float3 baseNormal, float3 renderPos, float height
     return normalize(abs(det) * baseNormal - bumpStrength * surfGrad);
 }
 
+float3 ApplyInteriorHaze(float3 rgb, VertexOutput input)
+{
+    float3 aboveMinimum = step(InteriorHazeVolumeMinimum, input.StationPos);
+    float3 belowMaximum = step(input.StationPos, InteriorHazeVolumeMaximum);
+    float inVolume = aboveMinimum.x * aboveMinimum.y * aboveMinimum.z
+                   * belowMaximum.x * belowMaximum.y * belowMaximum.z;
+    float distanceMetres = length(input.RenderPos) * RenderScaleReciprocal;
+    float distanceFactor = saturate(
+        (distanceMetres - InteriorHazeStartDistance) * InteriorHazeInvDistanceRange);
+    distanceFactor = distanceFactor * distanceFactor * (3.0 - 2.0 * distanceFactor);
+    float blend = InteriorHazeActivation * inVolume
+                * InteriorHazeMaximumBlend * distanceFactor;
+    // Tint from the surface's own luminance rather than adding an absolute fog colour.
+    // Black therefore remains black: deep shadows cannot become self-luminous blue.
+    float luminance = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    float3 cooled = luminance * InteriorHazeColour;
+    return lerp(rgb, cooled, blend);
+}
+
 // Brief S1: single-source Blinn-Halfway specular. Per-pixel, not per-vertex — low-poly
 // hulls have few vertices, so a per-vertex specular would smear/wander across big flat
 // panels; re-normalizing the interpolated normal here matters more than for diffuse,
@@ -436,6 +466,7 @@ float4 PS_DynamicLit(VertexOutput input) : COLOR0
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
     rgb += SpecularHighlight(n, input.RenderPos, 1.0, gloss);
+    rgb = ApplyInteriorHaze(rgb, input);
     return float4(rgb, 1.0);
 }
 
@@ -466,6 +497,7 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
     rgb += SpecularHighlight(n, input.RenderPos, shadow, gloss);
+    rgb = ApplyInteriorHaze(rgb, input);
     return float4(rgb, 1.0);
 }
 

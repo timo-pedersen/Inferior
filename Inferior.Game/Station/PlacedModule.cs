@@ -14,6 +14,7 @@ public enum GlowType
     AmbientMarker,
     DockGuidance,
     MegastationEntranceGuidance,
+    ShelfWorkFlood,
 }
 
 public enum LightPattern
@@ -40,6 +41,9 @@ public sealed record StationLightInfo(
     // Ordinary station lights predate this field and retain their existing behaviour.
     public Vector3? SurfaceNormal { get; init; }
     public float? PresentationSizePixels { get; init; }
+    public float PresentationSizeScale { get; init; } = 1f;
+    public float? PresentationMinimumSizePixels { get; init; }
+    public float? PresentationMaximumSizePixels { get; init; }
     public float? PresentationFadeStartMeters { get; init; }
     public float? PresentationFadeEndMeters { get; init; }
 }
@@ -87,6 +91,9 @@ public sealed class PlacedModule
     public          VertexPositionColor[]?  NativeFabricDebugLines { get; init; }
     public          bool                    HasNativeMegastationServiceChannels { get; init; }
     public          bool                    HasNativeMegastationInterior { get; init; }
+    // Presentation capability: this module contains receiver geometry belonging to the
+    // authoritative H1 bay volume and may receive the bounded H1h distance haze.
+    public          bool                    ReceivesMegastationInteriorHaze { get; init; }
     // H1/H1a structural hulls opt into the vertex-alpha artificial readability floor.
     // Ordinary DynamicLit hulls leave it disabled, preserving their established response.
     public          bool                    UsesHullVertexIllumination { get; init; }

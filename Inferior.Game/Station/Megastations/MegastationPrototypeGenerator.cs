@@ -89,6 +89,7 @@ public sealed record MegastationPrototypeCpuResult(
     StructuralOccupancy Occupancy,
     StructuralOccupancy RegularisedOccupancy,
     MegastationInteriorPlan InteriorPlan,
+    MegastationMegaShelfPlan MegaShelfPlan,
     MegastationArtificialLightingPlan ArtificialLightingPlan,
     MegastationLandingDistrictPlan LandingDistrictPlan,
     MegastationBayHabitationPlan BayHabitationPlan,
@@ -202,6 +203,97 @@ public static class MegastationPrototypeGenerator
         var topologyStopwatch = Stopwatch.StartNew();
         BoundaryTopology topology = BoundaryTopologyBuilder.Build(regularised.Occupancy, settings);
         topologyStopwatch.Stop();
+        MegastationMegaShelfPlan megaShelfPlan = MegastationMegaShelfPlanner.Plan(
+            interiorPlan,
+            regularised.Occupancy,
+            topology,
+            settings.MegaShelfDevelopment,
+            cancellationToken);
+        interiorPlan = interiorPlan with
+        {
+            AddedStructuralSolids = megaShelfPlan.StructuralSolids,
+            AdditionalLandingSurfaces = megaShelfPlan.LandingSurfaces,
+            AddedStructuralMarkers = megaShelfPlan.Markers,
+            AddedStructuralTrusses = megaShelfPlan.Trusses,
+            Diagnostics = interiorPlan.Diagnostics with
+            {
+                MegaShelfAlgorithmVersion = megaShelfPlan.AlgorithmVersion,
+                MegaShelfCandidateCount = megaShelfPlan.Diagnostics.CandidateCount,
+                MegaShelfCount = megaShelfPlan.Diagnostics.AcceptedCount,
+                MegaShelfSupportRejectCount = megaShelfPlan.Diagnostics.SupportRejectCount,
+                MegaShelfStructuralRejectCount = megaShelfPlan.Diagnostics.StructuralRejectCount,
+                MegaShelfArrivalExclusionRejectCount =
+                    megaShelfPlan.Diagnostics.ArrivalExclusionRejectCount,
+                MegaShelfOverlapRejectCount = megaShelfPlan.Diagnostics.ShelfOverlapRejectCount,
+                MegaShelfVerticalSeparationRejectCount =
+                    megaShelfPlan.Diagnostics.VerticalSeparationRejectCount,
+                MegaShelfOperatingClearanceRejectCount =
+                    megaShelfPlan.Diagnostics.OperatingClearanceRejectCount,
+                MegaShelfLandingDowngradeCount =
+                    megaShelfPlan.Diagnostics.LandingDowngradeCount,
+                MegaShelfFullSpanFlightClearanceRejectCount =
+                    megaShelfPlan.Diagnostics.FullSpanFlightClearanceRejectCount,
+                MegaShelfCompositionRejectCount =
+                    megaShelfPlan.Diagnostics.CompositionRejectCount,
+                MegaShelfCantileverCandidateCount =
+                    megaShelfPlan.Diagnostics.CantileverCandidateCount,
+                MegaShelfCornerCandidateCount =
+                    megaShelfPlan.Diagnostics.CornerCandidateCount,
+                MegaShelfFullSpanCandidateCount =
+                    megaShelfPlan.Diagnostics.FullSpanCandidateCount,
+                MegaShelfCornerViableCandidateCount =
+                    megaShelfPlan.Diagnostics.CornerViableCandidateCount,
+                MegaShelfFullSpanViableCandidateCount =
+                    megaShelfPlan.Diagnostics.FullSpanViableCandidateCount,
+                MegaShelfCantileverAcceptedCount =
+                    megaShelfPlan.Diagnostics.CantileverAcceptedCount,
+                MegaShelfCornerAcceptedCount =
+                    megaShelfPlan.Diagnostics.CornerAcceptedCount,
+                MegaShelfFullSpanAcceptedCount =
+                    megaShelfPlan.Diagnostics.FullSpanAcceptedCount,
+                MegaShelfLowCandidateCount = megaShelfPlan.Diagnostics.LowCandidateCount,
+                MegaShelfMidCandidateCount = megaShelfPlan.Diagnostics.MidCandidateCount,
+                MegaShelfHighCandidateCount = megaShelfPlan.Diagnostics.HighCandidateCount,
+                MegaShelfLowAcceptedCount = megaShelfPlan.Diagnostics.LowAcceptedCount,
+                MegaShelfMidAcceptedCount = megaShelfPlan.Diagnostics.MidAcceptedCount,
+                MegaShelfHighAcceptedCount = megaShelfPlan.Diagnostics.HighAcceptedCount,
+                MegaShelfMinimumWidth = megaShelfPlan.Diagnostics.MinimumWidth,
+                MegaShelfMaximumWidth = megaShelfPlan.Diagnostics.MaximumWidth,
+                MegaShelfMinimumProjection = megaShelfPlan.Diagnostics.MinimumProjection,
+                MegaShelfMaximumProjection = megaShelfPlan.Diagnostics.MaximumProjection,
+                MegaShelfMinimumThickness = megaShelfPlan.Diagnostics.MinimumThickness,
+                MegaShelfMaximumThickness = megaShelfPlan.Diagnostics.MaximumThickness,
+                MegaShelfVisibleTriangleCount = megaShelfPlan.Diagnostics.VisibleTriangleCount,
+                MegaShelfCasterTriangleCount = megaShelfPlan.Diagnostics.CasterTriangleCount,
+                MegaShelfMarkerCount = megaShelfPlan.Diagnostics.MarkerCount,
+                MegaShelfCornerMarkerCount = megaShelfPlan.Diagnostics.CornerMarkerCount,
+                MegaShelfLowerEdgeMarkerCount = megaShelfPlan.Diagnostics.LowerEdgeMarkerCount,
+                MegaShelfTrussCount = megaShelfPlan.Diagnostics.TrussCount,
+                MegaShelfBoxTrussCount = megaShelfPlan.Diagnostics.BoxTrussCount,
+                MegaShelfTriangularTrussCount =
+                    megaShelfPlan.Diagnostics.TriangularTrussCount,
+                MegaShelfTrussVisibleTriangleCount =
+                    megaShelfPlan.Diagnostics.TrussVisibleTriangleCount,
+                MegaShelfTrussCasterTriangleCount =
+                    megaShelfPlan.Diagnostics.TrussCasterTriangleCount,
+                MegaShelfMacroLayout = megaShelfPlan.Diagnostics.MacroLayout,
+                MegaShelfBookcaseCount = megaShelfPlan.Diagnostics.BookcaseCount,
+                MegaShelfBookcaseShelfCount = megaShelfPlan.Diagnostics.BookcaseShelfCount,
+                MegaShelfBookcaseInsufficientHeightRejectCount =
+                    megaShelfPlan.Diagnostics.BookcaseInsufficientHeightRejectCount,
+                MegaShelfBookcaseArrivalRejectCount =
+                    megaShelfPlan.Diagnostics.BookcaseArrivalRejectCount,
+                MegaShelfBookcaseWallContinuityRejectCount =
+                    megaShelfPlan.Diagnostics.BookcaseWallContinuityRejectCount,
+                MegaShelfBookcaseStructuralRejectCount =
+                    megaShelfPlan.Diagnostics.BookcaseStructuralRejectCount,
+                MegaShelfBookcaseSymmetryRejectCount =
+                    megaShelfPlan.Diagnostics.BookcaseSymmetryRejectCount,
+                MegaShelfMacroSummary = megaShelfPlan.Diagnostics.MacroSummary,
+                MegaShelfSummary = megaShelfPlan.Diagnostics.Summary,
+                MegaShelfSignature = megaShelfPlan.Diagnostics.Signature,
+            },
+        };
         MegastationSemanticZoningResult semanticZoning = MegastationSemanticZoningBuilder.Build(
             rootSeed,
             regularised.Occupancy,
@@ -211,20 +303,29 @@ public static class MegastationPrototypeGenerator
             ? MegastationSystemMaterialAssignment.Create(materialContext, persistenceId)
             : null;
         MegastationLandingDistrictPlan landingDistrict =
-            MegastationLandingDistrictPlanner.Plan(interiorPlan, regularised.Occupancy);
+            MegastationLandingDistrictPlanner.Plan(
+                interiorPlan,
+                regularised.Occupancy,
+                megaShelfPlan,
+                settings.MegaShelfDevelopment.ForceLandingSiteOnShelf);
         MegastationBayWallCompositionPlan bayWallComposition =
             MegastationBayWallCompositionPlanner.Plan(
                 interiorPlan, landingDistrict, regularised.Occupancy, topology);
         MegastationBayHabitationPlan bayHabitation = bayWallComposition.Habitation;
         MegastationBayFacilityPlan bayFacilities = bayWallComposition.Facilities;
+        MegastationShelfLightingPlan shelfLighting =
+            MegastationShelfLightingPlanner.Plan(interiorPlan, megaShelfPlan);
         MegastationArtificialLightingPlan artificialLighting =
             MegastationArtificialLighting.WithAdditionalLights(
                 MegastationArtificialLighting.WithAdditionalLights(
-                    MegastationArtificialLighting.Plan(interiorPlan),
-                    landingDistrict.ArtificialLights),
-                bayFacilities.ArtificialLights);
+                    MegastationArtificialLighting.WithAdditionalLights(
+                        MegastationArtificialLighting.Plan(interiorPlan),
+                        landingDistrict.ArtificialLights),
+                    bayFacilities.ArtificialLights),
+                shelfLighting.ArtificialLights);
         interiorPlan = interiorPlan with
         {
+            ShelfLighting = shelfLighting,
             Diagnostics = interiorPlan.Diagnostics with
             {
                 ArtificialLightAlgorithmVersion = artificialLighting.AlgorithmVersion,
@@ -234,6 +335,10 @@ public static class MegastationPrototypeGenerator
                 ArtificialIndirectStrength = MegastationArtificialLighting.IndirectStrength,
                 ArtificialIndirectRangeScale = MegastationArtificialLighting.IndirectRangeScale,
                 ArtificialLightSignature = artificialLighting.Signature,
+                MegaShelfObstacleBeaconCount = shelfLighting.Beacons.Count,
+                MegaShelfFloodFixtureCount = shelfLighting.FloodFixtures.Count,
+                MegaShelfStaticWorkLightCount = shelfLighting.ArtificialLights.Count,
+                MegaShelfLightingSignature = shelfLighting.Signature,
             },
         };
         MegastationInteriorPresentationPlan interiorPresentation =
@@ -242,7 +347,8 @@ public static class MegastationPrototypeGenerator
                 materialAssignment);
         MegastationArtificialOcclusion artificialOcclusion =
             MegastationArtificialOcclusion.Build(
-                regularised.Occupancy, landingDistrict, interiorPresentation, bayFacilities);
+                regularised.Occupancy, landingDistrict, interiorPresentation, bayFacilities,
+                megaShelfPlan.StructuralSolids);
         MegastationInteriorMeshBuildResult interiorMesh = MegastationInteriorMeshBuilder.Build(
             interiorPlan,
             materialAssignment,
@@ -514,6 +620,7 @@ public static class MegastationPrototypeGenerator
             occupancy,
             regularised.Occupancy,
             interiorPlan,
+            megaShelfPlan,
             artificialLighting,
             landingDistrict,
             bayHabitation,
@@ -584,11 +691,17 @@ public static class MegastationPrototypeGenerator
             HullMesh = cpu.Mesh,
             HullShadowMesh = cpu.StructuralShadowMesh,
             UsesHullVertexIllumination = true,
+            ReceivesMegastationInteriorHaze = true,
             GlassMesh = cpu.WindowGlassMesh,
             HullMaterialRanges = cpu.Mesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
         module.GlowLights.AddRange(cpu.LightPlan.Lights.Select(light => light.ToStationLightInfo()));
         module.GlowLights.AddRange(CreateInteriorGuidanceLights(cpu.InteriorPresentationPlan));
+        if (cpu.InteriorPlan.ShelfLighting is { } shelfLighting)
+        {
+            module.GlowLights.AddRange(CreateShelfObstacleLights(shelfLighting));
+            module.GlowLights.AddRange(CreateShelfFloodGlowLights(shelfLighting));
+        }
         return module;
     }
 
@@ -607,7 +720,7 @@ public static class MegastationPrototypeGenerator
             Ports = [],
             MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
         };
-        return new PlacedModule
+        var module = new PlacedModule
         {
             Definition = definition,
             Transform = Matrix.Identity,
@@ -618,6 +731,7 @@ public static class MegastationPrototypeGenerator
             Mesh = cpu.InteriorMesh,
             IsHullLessPresentationLayer = true,
             HasNativeMegastationInterior = true,
+            ReceivesMegastationInteriorHaze = true,
             UsesDecorationVertexIllumination = true,
             UsesCoplanarStructuralOverlay = true,
             NativeInteriorDebugLines = MegastationInteriorDebug.BuildLines(
@@ -627,6 +741,7 @@ public static class MegastationPrototypeGenerator
             NativeApproachBeamVertices = cpu.ApproachBeamVertices,
             DecorationMaterialRanges = cpu.InteriorMesh.PrepareMaterialGroups()?.Ranges ?? [],
         };
+        return module;
     }
 
     private static IEnumerable<StationLightInfo> CreateInteriorGuidanceLights(
@@ -644,6 +759,42 @@ public static class MegastationPrototypeGenerator
             PresentationSizePixels = marker.GlowSizePixels,
             PresentationFadeStartMeters = marker.GlowFadeStartMeters,
             PresentationFadeEndMeters = marker.GlowFadeEndMeters,
+        });
+
+    internal static IEnumerable<StationLightInfo> CreateShelfObstacleLights(
+        MegastationShelfLightingPlan lighting)
+        => lighting.Beacons.Select(beacon => new StationLightInfo(
+            // The depth-tested sprite must sit beyond the physical cap. Keeping it at
+            // beacon.Position puts it inside the housing, so the fixture occludes its own glow.
+            beacon.Position + beacon.Up * .40f,
+            beacon.Colour,
+            GlowType.WarningStrobe,
+            .92f,
+            beacon.Rate,
+            beacon.Phase,
+            LightPattern.Strobe)
+        {
+            PresentationSizeScale = 4f,
+            PresentationMinimumSizePixels = 5f,
+            PresentationMaximumSizePixels = 280f,
+        });
+
+    internal static IEnumerable<StationLightInfo> CreateShelfFloodGlowLights(
+        MegastationShelfLightingPlan lighting)
+        => lighting.FloodFixtures.Select(flood => new StationLightInfo(
+            // Place the depth-tested glow just beyond the luminous face so the fixture
+            // cannot occlude its own sprite. It remains naturally hidden by the shelf.
+            flood.Centre + flood.Direction * .68f,
+            Color.White,
+            GlowType.ShelfWorkFlood,
+            .78f,
+            0f,
+            0f,
+            LightPattern.Continuous)
+        {
+            PresentationSizeScale = 4f,
+            PresentationMinimumSizePixels = 24f,
+            PresentationMaximumSizePixels = 640f,
         });
 
     public static PlacedModule? CreateMegaGreebleModule(MegastationPrototypeCpuResult cpu)

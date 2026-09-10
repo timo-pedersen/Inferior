@@ -1,5 +1,16 @@
 namespace Inferior.Game.StationGen;
 
+/// <summary>
+/// Authoritative maximum physical envelopes used when station architecture must support a
+/// ship class without depending on any particular hull identity.
+/// </summary>
+public static class SupportedShipEnvelopeStandards
+{
+    public const float LargeLength = 72f;
+    public const float LargeWidth = 36f;
+    public const float LargeHeight = 20f;
+}
+
 // Pad-mix-driven sizing for the docking-bay module. Computed once per station (from the
 // station's own seed, not the per-module seed drawn during attachment — see StationGenerator.Run)
 // so the resulting envelope is known before the module is placed, which is when it's needed for
@@ -33,9 +44,9 @@ public readonly record struct DockingBayLayout(
     // Cavity height = door height + this — reproduces the MVP's fixed 32m from its 24m door.
     private const float CavityHeightMargin  = 8f;
 
-    private const float LargeMaxHeight  = 20f;  // Docs-claude/inferior-ship-sizes-and-mass-claude.md
+    private const float LargeMaxHeight  = SupportedShipEnvelopeStandards.LargeHeight;
     private const float MediumMaxHeight = 12f;
-    private const float ShipMaxWidth    = 36f;  // shared by Medium and Large
+    private const float ShipMaxWidth    = SupportedShipEnvelopeStandards.LargeWidth;
 
     public static DockingBayLayout Compute(int stationSeed, StationScale stationScale)
     {

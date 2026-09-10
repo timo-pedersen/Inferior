@@ -129,6 +129,51 @@ public sealed partial class SystemSpaceState
             $"tests:{d.ArtificialLightVisibilityTestCount}," +
             $"blocked:{d.ArtificialLightBlockedVisibilityTestCount}," +
             $"bakeMs:{d.ArtificialLightBakeMilliseconds:F1}; " +
+            $"megaShelves=v{d.MegaShelfAlgorithmVersion},accepted:{d.MegaShelfCount}/" +
+            $"{d.MegaShelfCandidateCount}candidates," +
+            $"rejects:{d.MegaShelfSupportRejectCount}support/" +
+            $"{d.MegaShelfStructuralRejectCount}structure/" +
+            $"{d.MegaShelfArrivalExclusionRejectCount}arrival/" +
+            $"{d.MegaShelfOverlapRejectCount}overlap/" +
+            $"{d.MegaShelfVerticalSeparationRejectCount}separation/" +
+            $"{d.MegaShelfOperatingClearanceRejectCount}operating-clearance/" +
+            $"{d.MegaShelfFullSpanFlightClearanceRejectCount}span-flight/" +
+            $"{d.MegaShelfCompositionRejectCount}composition," +
+            $"downgraded:{d.MegaShelfLandingDowngradeCount}," +
+            $"families:{d.MegaShelfCantileverAcceptedCount}/{d.MegaShelfCantileverCandidateCount}cantilever/" +
+            $"{d.MegaShelfCornerAcceptedCount}/{d.MegaShelfCornerCandidateCount}corner/" +
+            $"{d.MegaShelfFullSpanAcceptedCount}/{d.MegaShelfFullSpanCandidateCount}full-span," +
+            $"viable:{d.MegaShelfCornerViableCandidateCount}corner/" +
+            $"{d.MegaShelfFullSpanViableCandidateCount}full-span," +
+            $"bands:{d.MegaShelfLowAcceptedCount}/{d.MegaShelfLowCandidateCount}low/" +
+            $"{d.MegaShelfMidAcceptedCount}/{d.MegaShelfMidCandidateCount}mid/" +
+            $"{d.MegaShelfHighAcceptedCount}/{d.MegaShelfHighCandidateCount}high," +
+            $"width:{d.MegaShelfMinimumWidth:F1}-{d.MegaShelfMaximumWidth:F1}m," +
+            $"projection:{d.MegaShelfMinimumProjection:F1}-{d.MegaShelfMaximumProjection:F1}m," +
+            $"thickness:{d.MegaShelfMinimumThickness:F1}-{d.MegaShelfMaximumThickness:F1}m," +
+            $"geometry:{d.MegaShelfVisibleTriangleCount}t/" +
+            $"{d.MegaShelfCasterTriangleCount}casterT," +
+            $"markers:{d.MegaShelfMarkerCount}/" +
+            $"{d.MegaShelfCornerMarkerCount}corner/" +
+            $"{d.MegaShelfLowerEdgeMarkerCount}lower," +
+            $"trusses:{d.MegaShelfTrussCount}" +
+            $"({d.MegaShelfBoxTrussCount}box/" +
+            $"{d.MegaShelfTriangularTrussCount}tri)," +
+            $"trussGeometry:{d.MegaShelfTrussVisibleTriangleCount}t/" +
+            $"{d.MegaShelfTrussCasterTriangleCount}casterT," +
+            $"macro:{d.MegaShelfMacroLayout}," +
+            $"bookcases:{d.MegaShelfBookcaseCount}/{d.MegaShelfBookcaseShelfCount}shelves," +
+            $"macroRejects:{d.MegaShelfBookcaseInsufficientHeightRejectCount}height/" +
+            $"{d.MegaShelfBookcaseArrivalRejectCount}arrival/" +
+            $"{d.MegaShelfBookcaseWallContinuityRejectCount}wall/" +
+            $"{d.MegaShelfBookcaseStructuralRejectCount}structure/" +
+            $"{d.MegaShelfBookcaseSymmetryRejectCount}symmetry," +
+            $"macroPlan:{d.MegaShelfMacroSummary}," +
+            $"plans:{d.MegaShelfSummary},signature:{d.MegaShelfSignature}; " +
+            $"shelfLighting=beacons:{d.MegaShelfObstacleBeaconCount}," +
+            $"floodFixtures:{d.MegaShelfFloodFixtureCount}," +
+            $"staticSources:{d.MegaShelfStaticWorkLightCount}," +
+            $"signature:{d.MegaShelfLightingSignature}; " +
             $"landingDistrict=sites:{d.LandingDistrictSiteCount}" +
             $"({d.LandingDistrictSmallSiteCount}S/{d.LandingDistrictMediumSiteCount}M/" +
             $"{d.LandingDistrictLargeSiteCount}L),pads:{d.LandingDistrictPadCount}," +
@@ -146,6 +191,9 @@ public sealed partial class SystemSpaceState
             $"structuralRejects:{d.LandingDistrictStructuralEnvelopeRejectCount} envelope/" +
             $"{d.LandingDistrictStructuralComponentRejectCount} component," +
             $"structuralRejections:{d.LandingDistrictStructuralRejectionSummary}," +
+            $"landingSurfaces:{d.LandingDistrictLandingSurfaceCount}," +
+            $"shelfSites:{d.LandingDistrictShelfSiteCount}," +
+            $"surfacePlans:{d.LandingDistrictLandingSurfaceSummary}," +
             $"sitePlans:{d.LandingDistrictSiteSummary}," +
             $"signature:{d.LandingDistrictSignature}; " +
             $"bayHabitation=v{d.BayHabitationAlgorithmVersion}," +
@@ -477,6 +525,36 @@ public sealed partial class SystemSpaceState
             yield return (station, position);
     }
 
+    private InteriorHazeParameters ResolveMegastationInteriorHaze(
+        Galaxy.Station station,
+        DVec3 universePosition,
+        bool? enabledOverride = null)
+    {
+        if (ResidentStationVisual?.MegastationInterior is not { } interior)
+            return InteriorHazeParameters.Disabled;
+
+        DVec3 cameraOffset = _camera.UniversePosition - universePosition;
+        var orientation = station.GetOrientation(_gameTimeSeconds);
+        var stationRotation = new Quaternion(
+            orientation.X, orientation.Y, orientation.Z, orientation.W);
+        Vector3 cameraStationLocal = Vector3.Transform(
+            cameraOffset.ToVector3(),
+            Quaternion.Inverse(stationRotation));
+        return MegastationInteriorHaze.Resolve(
+            cameraStationLocal,
+            interior,
+            enabledOverride
+                ?? (_megastationInteriorHazeStrength != MegastationInteriorHazeStrength.Off),
+            MegastationInteriorHaze.MaximumBlendFor(_megastationInteriorHazeStrength));
+    }
+
+    private float ProbeMegastationInteriorHazeActivation()
+    {
+        if (!TryGetResidentStation(out _, out Galaxy.Station station, out DVec3 position))
+            return 0f;
+        return ResolveMegastationInteriorHaze(station, position, enabledOverride: true).Activation;
+    }
+
     private bool ResidentVisualIntersectsDepthTier(DetailLevel level)
     {
         if (!TryGetResidentStation(
@@ -523,6 +601,8 @@ public sealed partial class SystemSpaceState
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > 30_000f) continue;
             IReadOnlyList<PlacedModule> modules = ResidentStationVisual!.Modules;
+            InteriorHazeParameters stationInteriorHaze =
+                ResolveMegastationInteriorHaze(station, universePos);
 
             bool useShadow = _stationShadowContext != null
                 && ReferenceEquals(_stationShadowContext.Station, station)
@@ -556,6 +636,10 @@ public sealed partial class SystemSpaceState
                 // receiver-plane correction can fix. See SystemSpaceState.Shadows.cs.
                 Matrix world = mod.Transform * Matrix.CreateScale(rs) * stationRot
                              * Matrix.CreateTranslation(renderPos);
+                InteriorHazeParameters interiorHaze =
+                    mod.ReceivesMegastationInteriorHaze
+                        ? stationInteriorHaze
+                        : InteriorHazeParameters.Disabled;
 
                 if (_megastationZoningDebug
                     && ResidentStationVisual.MegastationSemanticZoning is { } zoning
@@ -618,7 +702,8 @@ public sealed partial class SystemSpaceState
                                 _stationShadowBinaryView, _stationShadowDeltaView,
                                 ShadowKernelRadiusFor(_shadowKernelMode),
                                 material.MaterialMap, recipe.BumpStrength,
-                                vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
+                                vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f,
+                                interiorHaze: interiorHaze);
                         }
                         else
                         {
@@ -629,7 +714,9 @@ public sealed partial class SystemSpaceState
                                 recipe.SpecularStrength, recipe.SpecularShininess,
                                 material.Albedo, material.MaterialMap,
                                 recipe.BumpStrength,
-                                vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
+                                vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f,
+                                interiorHaze: interiorHaze,
+                                moduleToStationLocal: mod.Transform);
                         }
                     }
                 }
@@ -651,7 +738,8 @@ public sealed partial class SystemSpaceState
                         _stationShadowBinaryView, _stationShadowDeltaView,
                         ShadowKernelRadiusFor(_shadowKernelMode),
                         mod.MaterialInstance, StationBumpStrength,
-                        vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
+                        vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f,
+                        interiorHaze: interiorHaze);
                 }
                 else
                 {
@@ -659,7 +747,9 @@ public sealed partial class SystemSpaceState
                         Color.White, SceneLighting.SunDirection, sunCol, SceneLighting.Ambient,
                         specStrength, specShininess,
                         mod.TextureInstance, mod.MaterialInstance, StationBumpStrength,
-                        vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f);
+                        vertexIlluminationScale: mod.UsesHullVertexIllumination ? 1f : 0f,
+                        interiorHaze: interiorHaze,
+                        moduleToStationLocal: mod.Transform);
                 }
             }
         }
@@ -680,6 +770,8 @@ public sealed partial class SystemSpaceState
             bool useShadow = _stationShadowContext != null
                 && ReferenceEquals(_stationShadowContext.Station, station)
                 && _stationShadowMap != null;
+            InteriorHazeParameters stationInteriorHaze =
+                ResolveMegastationInteriorHaze(station, universePos);
 
             Matrix stationRot;
             if (useShadow)
@@ -706,6 +798,10 @@ public sealed partial class SystemSpaceState
                 // caster and ModuleToStationLocal exactly, not decomposed-then-rebuilt.
                 Matrix world = mod.Transform * Matrix.CreateScale(rs) * stationRot
                              * Matrix.CreateTranslation(renderPos);
+                InteriorHazeParameters interiorHaze =
+                    mod.ReceivesMegastationInteriorHaze
+                        ? stationInteriorHaze
+                        : InteriorHazeParameters.Disabled;
 
                 // StationTextureRegistry.Get(SurfaceTexture) fallback removed (Brief S2b-1,
                 // Report S2a §5): the upload step assigns TextureInstance to
@@ -741,7 +837,8 @@ public sealed partial class SystemSpaceState
                                 material.MaterialMap, recipe.BumpStrength,
                                 vertexIlluminationScale: mod.UsesDecorationVertexIllumination ? 1f : 0f,
                                 presentationDepthBias: mod.UsesCoplanarStructuralOverlay
-                                    ? H1CoplanarOverlayClipDepthBias : 0f);
+                                    ? H1CoplanarOverlayClipDepthBias : 0f,
+                                interiorHaze: interiorHaze);
                         }
                         else
                         {
@@ -754,7 +851,9 @@ public sealed partial class SystemSpaceState
                                 recipe.BumpStrength,
                                 vertexIlluminationScale: mod.UsesDecorationVertexIllumination ? 1f : 0f,
                                 presentationDepthBias: mod.UsesCoplanarStructuralOverlay
-                                    ? H1CoplanarOverlayClipDepthBias : 0f);
+                                    ? H1CoplanarOverlayClipDepthBias : 0f,
+                                interiorHaze: interiorHaze,
+                                moduleToStationLocal: mod.Transform);
                         }
                     }
                     continue;
@@ -1080,12 +1179,17 @@ public sealed partial class SystemSpaceState
                         StationGen.GlowType.AmbientMarker   => 400f,
                         StationGen.GlowType.DockGuidance    => 600f,   // AmbientMarker x1.5, per Timo's ask
                         StationGen.GlowType.MegastationEntranceGuidance => 18_000f,
+                        // Roughly twice the angular width of the 1.34 m shelf-flood lens.
+                        StationGen.GlowType.ShelfWorkFlood => 2_400f,
                         _                                   => 400f,
                     };
                     float size = light.PresentationSizePixels
                         ?? (light.SurfaceNormal != null
                             ? MegastationGlowSizePixels
-                            : MathHelper.Clamp(baseSize / distance, 6f, 140f));
+                            : MathHelper.Clamp(
+                                baseSize / distance * light.PresentationSizeScale,
+                                light.PresentationMinimumSizePixels ?? 6f,
+                                light.PresentationMaximumSizePixels ?? 140f));
                     float scale = size / _navGlowTex.Width;
 
                     if (intensity < 0.01f) continue;
@@ -1188,15 +1292,21 @@ public sealed partial class SystemSpaceState
     {
         if (light.Rate <= 0f) return light.BaseIntensity;
         float t = (float)((GameClock.SimTime * light.Rate + light.Phase) % 1.0);
-        return light.Pattern switch
+        return EvaluateGlowPattern(light.Pattern, t) * light.BaseIntensity;
+    }
+
+    internal static float EvaluateGlowPattern(LightPattern pattern, float t)
+    {
+        t -= MathF.Floor(t);
+        return pattern switch
         {
-            LightPattern.Strobe    => t < 0.18f ? light.BaseIntensity : 0f,
-            LightPattern.SlowPulse => (MathF.Sin(t * MathF.Tau) * 0.5f + 0.5f) * light.BaseIntensity,
-            LightPattern.Heartbeat => t < 0.10f ? light.BaseIntensity
+            LightPattern.Strobe    => t < 0.18f ? 1f : 0f,
+            LightPattern.SlowPulse => MathF.Sin(t * MathF.Tau) * 0.5f + 0.5f,
+            LightPattern.Heartbeat => t < 0.10f ? 1f
                                     : t < 0.22f ? 0f
-                                    : t < 0.32f ? light.BaseIntensity * 0.65f
+                                    : t < 0.32f ? .65f
                                     : 0f,
-            _ => light.BaseIntensity,
+            _ => 1f,
         };
     }
 }

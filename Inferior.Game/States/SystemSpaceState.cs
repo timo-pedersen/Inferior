@@ -169,6 +169,8 @@ public sealed partial class SystemSpaceState : GameState
     private bool _megastationZoningDebug;
     private bool _megastationInfrastructureDebug;
     private bool _megastationInteriorDebug;
+    private MegastationInteriorHazeStrength _megastationInteriorHazeStrength =
+        MegastationInteriorHazeStrength.Subtle;
     private bool _engineModuleDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
@@ -648,8 +650,13 @@ public sealed partial class SystemSpaceState : GameState
         bool shiftF5JustPressed = !ctrlDown && shiftDown
             && keys.IsKeyDown(Keys.F5)
             && !_prevKeys.IsKeyDown(Keys.F5);
+        bool altF5JustPressed = !ctrlDown && !shiftDown && altDown
+            && keys.IsKeyDown(Keys.F5)
+            && !((_prevKeys.IsKeyDown(Keys.LeftAlt) || _prevKeys.IsKeyDown(Keys.RightAlt))
+                && _prevKeys.IsKeyDown(Keys.F5));
         bool f5JustPressed  = !ctrlDown
             && !shiftDown
+            && !altDown
             && keys.IsKeyDown(Keys.F5)
             && !_prevKeys.IsKeyDown(Keys.F5);
         bool shipPositionMarkerToggledOn = false;
@@ -775,6 +782,20 @@ public sealed partial class SystemSpaceState : GameState
                 _megastationInfrastructureDebug
                     ? "Megastation detail debug enabled: G2 and mega-greeble markers; Fabric archetypes; service-channel primary/secondary routes and junction nodes."
                     : "Megastation detail debug disabled.",
+                SystemMessagePriority.Info));
+        }
+        if (altF5JustPressed)
+        {
+            _megastationInteriorHazeStrength =
+                (MegastationInteriorHazeStrength)(
+                    ((int)_megastationInteriorHazeStrength + 1)
+                    % Enum.GetValues<MegastationInteriorHazeStrength>().Length);
+            float activation = ProbeMegastationInteriorHazeActivation();
+            float maximumBlend = MegastationInteriorHaze.MaximumBlendFor(
+                _megastationInteriorHazeStrength);
+            _hudAlert.AddMessage(new SystemMessage(
+                $"H1 interior haze: {_megastationInteriorHazeStrength} "
+                + $"(max {maximumBlend:P0}, bay activation {activation:F2}).",
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);

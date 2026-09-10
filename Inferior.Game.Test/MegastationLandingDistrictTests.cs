@@ -71,8 +71,9 @@ public sealed class MegastationLandingDistrictTests
             }
             for (int i = 0; i < plan.Sites.Count; i++)
             for (int j = i + 1; j < plan.Sites.Count; j++)
-                Assert.False(plan.Sites[i].InfrastructureEnvelope.Intersects(
-                    plan.Sites[j].InfrastructureEnvelope));
+                if (plan.Sites[i].LandingSurfaceIdentity == plan.Sites[j].LandingSurfaceIdentity)
+                    Assert.False(plan.Sites[i].InfrastructureEnvelope.Intersects(
+                        plan.Sites[j].InfrastructureEnvelope));
             Assert.All(plan.Pads, pad =>
                 Assert.True(Vector3.Dot(pad.PadSurface.Normal, plan.FloorNormal) > .9999f));
             if (plan.Diagnostics.PadCapacityDeficit == 0)
@@ -99,7 +100,12 @@ public sealed class MegastationLandingDistrictTests
             Maximum = centre + new Vector3(45f),
         };
         MegastationLandingDistrictPlan plan = MegastationLandingDistrictPlanner.Plan(
-            baseline with { CavityEnvelope = constrained });
+            baseline with
+            {
+                CavityEnvelope = constrained,
+                AddedStructuralSolids = null,
+                AdditionalLandingSurfaces = null,
+            });
 
         Assert.True(plan.Diagnostics.PadCapacityDeficit > 0);
         Assert.True(plan.Diagnostics.LargePadCapacityDeficit > 0);
@@ -132,8 +138,15 @@ public sealed class MegastationLandingDistrictTests
         }
         for (int i = 0; i < district.Pads.Count; i++)
         for (int j = i + 1; j < district.Pads.Count; j++)
-            Assert.False(district.Pads[i].FutureBerthClearance.Intersects(
-                district.Pads[j].FutureBerthClearance));
+        {
+            MegastationLandingSitePlan first = district.Sites.Single(site =>
+                site.PadIds.Contains(district.Pads[i].PadId));
+            MegastationLandingSitePlan second = district.Sites.Single(site =>
+                site.PadIds.Contains(district.Pads[j].PadId));
+            if (first.LandingSurfaceIdentity == second.LandingSurfaceIdentity)
+                Assert.False(district.Pads[i].FutureBerthClearance.Intersects(
+                    district.Pads[j].FutureBerthClearance));
+        }
     }
 
     [Fact]
@@ -142,7 +155,8 @@ public sealed class MegastationLandingDistrictTests
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
             MegastationLandingDistrictPlanner.Plan(
-                result.InteriorPlan, result.RegularisedOccupancy);
+                result.InteriorPlan, result.RegularisedOccupancy,
+                result.MegaShelfPlan, forceLandingSiteOnShelf: true);
         MegastationArtificialLightingPlan baseline =
             MegastationArtificialLighting.Plan(result.InteriorPlan);
 
@@ -166,11 +180,16 @@ public sealed class MegastationLandingDistrictTests
                 replanned.Pads[i].BuildingSetbackClearance);
         }
         Assert.Equal(12, baseline.Lights.Count);
-        Assert.Equal(baseline.Lights.Count + result.LandingDistrictPlan.ArtificialLights.Count,
+        Assert.Equal(baseline.Lights.Count + result.LandingDistrictPlan.ArtificialLights.Count
+                + result.BayFacilityPlan.ArtificialLights.Count,
             result.ArtificialLightingPlan.Lights.Count);
         Assert.Equal(baseline.Lights, result.ArtificialLightingPlan.Lights.Take(12));
         Assert.Equal(result.LandingDistrictPlan.ArtificialLights,
-            result.ArtificialLightingPlan.Lights.Skip(12));
+            result.ArtificialLightingPlan.Lights.Skip(12)
+                .Take(result.LandingDistrictPlan.ArtificialLights.Count));
+        Assert.Equal(result.BayFacilityPlan.ArtificialLights,
+            result.ArtificialLightingPlan.Lights.Skip(
+                12 + result.LandingDistrictPlan.ArtificialLights.Count));
     }
 
     [Fact]
@@ -543,7 +562,8 @@ public sealed class MegastationLandingDistrictTests
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
             MegastationLandingDistrictPlanner.Plan(
-                result.InteriorPlan, result.RegularisedOccupancy);
+                result.InteriorPlan, result.RegularisedOccupancy,
+                result.MegaShelfPlan, forceLandingSiteOnShelf: true);
 
         Assert.Equal(result.LandingDistrictPlan.ServiceBuildings.Count,
             replanned.ServiceBuildings.Count);
@@ -570,7 +590,8 @@ public sealed class MegastationLandingDistrictTests
                 + result.LandingDistrictPlan.Sites.Count * 2
                 + result.LandingDistrictPlan.ServiceBuildings.Count * 2,
             result.LandingDistrictPlan.ArtificialLights.Count);
-        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count,
+        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count
+                + result.BayFacilityPlan.ArtificialLights.Count,
             result.ArtificialLightingPlan.Lights.Count);
         Assert.All(result.LandingDistrictPlan.ServiceBuildings, building =>
             Assert.Contains("frontage", building.Frontage.Identity, StringComparison.Ordinal));
@@ -918,7 +939,8 @@ public sealed class MegastationLandingDistrictTests
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationLandingDistrictPlan replanned =
             MegastationLandingDistrictPlanner.Plan(
-                result.InteriorPlan, result.RegularisedOccupancy);
+                result.InteriorPlan, result.RegularisedOccupancy,
+                result.MegaShelfPlan, forceLandingSiteOnShelf: true);
 
         Assert.Equal(result.LandingDistrictPlan.Diagnostics.Signature,
             replanned.Diagnostics.Signature);
@@ -931,7 +953,8 @@ public sealed class MegastationLandingDistrictTests
             Assert.Equal(expected.Containers, actual.Containers);
         }
         Assert.Equal(result.LandingDistrictPlan.KeepClearZones, replanned.KeepClearZones);
-        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count,
+        Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count
+                + result.BayFacilityPlan.ArtificialLights.Count,
             result.ArtificialLightingPlan.Lights.Count);
     }
 

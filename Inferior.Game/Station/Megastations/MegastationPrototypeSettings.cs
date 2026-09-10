@@ -35,6 +35,8 @@ public sealed record MegastationPrototypeSettings
     public float DesiredStructuralChamferMetres { get; init; } = 0.75f;
     public float MinimumStructuralChamferMetres { get; init; } = 0.05f;
     public float StructuralChamferSpanFraction { get; init; } = 0.10f;
+    public MegastationMegaShelfDevelopmentOptions MegaShelfDevelopment { get; init; } =
+        MegastationMegaShelfDevelopmentOptions.Runtime;
 
     public Vector3 CoreDimensions { get; init; } = new(1400f, 520f, 900f);
     public IntRange CoreXSlices { get; init; } = new(26, 34);

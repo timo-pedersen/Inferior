@@ -4,6 +4,22 @@ using Microsoft.Xna.Framework.Graphics;
 namespace Inferior.Rendering;
 
 /// <summary>
+/// Optional receiver-local distance haze for a bounded architectural volume. A zero
+/// activation is the exact off state used by every established caller.
+/// </summary>
+public readonly record struct InteriorHazeParameters(
+    float Activation,
+    Vector3 VolumeMinimum,
+    Vector3 VolumeMaximum,
+    Vector3 Colour,
+    float StartDistanceMetres,
+    float EndDistanceMetres,
+    float MaximumBlend)
+{
+    public static InteriorHazeParameters Disabled => default;
+}
+
+/// <summary>
 /// Unified 3D draw call over the shared LitSurface.fx effect (Docs/station-lighting-pipeline-spec.md).
 /// All meshes drawn here use VertexPositionNormalColorTexture. Two techniques:
 ///   DynamicLit    — real-time ambient + saturate(N.L) model (ships, containers, station hull).
@@ -65,7 +81,9 @@ public sealed class MeshRenderer : IDisposable
         float specularStrength, float specularShininess,
         Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f,
         Vector3? eyePositionWorld = null,
-        float vertexIlluminationScale = 0f)
+        float vertexIlluminationScale = 0f,
+        InteriorHazeParameters interiorHaze = default,
+        Matrix? moduleToStationLocal = null)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
@@ -78,6 +96,8 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
         fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        fx.Parameters["ModuleToStationLocal"].SetValue(moduleToStationLocal ?? Matrix.Identity);
+        SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         Draw(vb, ib, fx);
     }
@@ -91,7 +111,9 @@ public sealed class MeshRenderer : IDisposable
         Texture2D? texture = null, Texture2D? materialMap = null, float bumpStrength = 0f,
         Vector3? eyePositionWorld = null,
         float vertexIlluminationScale = 0f,
-        float presentationDepthBias = 0f)
+        float presentationDepthBias = 0f,
+        InteriorHazeParameters interiorHaze = default,
+        Matrix? moduleToStationLocal = null)
     {
         if (startIndex < 0 || indexCount <= 0 || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
             throw new ArgumentOutOfRangeException(nameof(indexCount), "The indexed triangle range must lie within the index buffer.");
@@ -107,6 +129,8 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
         fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        fx.Parameters["ModuleToStationLocal"].SetValue(moduleToStationLocal ?? Matrix.Identity);
+        SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         Draw(vb, ib, fx, startIndex, indexCount / 3, presentationDepthBias);
     }
@@ -146,7 +170,8 @@ public sealed class MeshRenderer : IDisposable
         bool binaryShadowView, bool deltaShadowView, int shadowKernelRadius,
         Texture2D? materialMap = null, float bumpStrength = 0f,
         Vector3? eyePositionWorld = null,
-        float vertexIlluminationScale = 0f)
+        float vertexIlluminationScale = 0f,
+        InteriorHazeParameters interiorHaze = default)
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
@@ -159,6 +184,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
         fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
             shadowMinXY, shadowInvSize, shadowNear, shadowDepthSpan, shadowTexelSize,
@@ -182,7 +208,8 @@ public sealed class MeshRenderer : IDisposable
         Texture2D? materialMap = null, float bumpStrength = 0f,
         Vector3? eyePositionWorld = null,
         float vertexIlluminationScale = 0f,
-        float presentationDepthBias = 0f)
+        float presentationDepthBias = 0f,
+        InteriorHazeParameters interiorHaze = default)
     {
         if (startIndex < 0 || indexCount <= 0
             || startIndex + indexCount > ib.IndexCount || indexCount % 3 != 0)
@@ -200,6 +227,7 @@ public sealed class MeshRenderer : IDisposable
         fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
         fx.Parameters["Texture"].SetValue(texture);
         fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess,
             materialMap ?? _neutralMaterialTexture, bumpStrength,
             eyePositionWorld ?? Vector3.Zero);
@@ -267,6 +295,24 @@ public sealed class MeshRenderer : IDisposable
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
+
+    private static void SetInteriorHazeParameters(
+        Effect effect,
+        InteriorHazeParameters haze)
+    {
+        float distanceRange = haze.EndDistanceMetres - haze.StartDistanceMetres;
+        effect.Parameters["InteriorHazeActivation"].SetValue(
+            MathHelper.Clamp(haze.Activation, 0f, 1f));
+        effect.Parameters["InteriorHazeVolumeMinimum"].SetValue(haze.VolumeMinimum);
+        effect.Parameters["InteriorHazeVolumeMaximum"].SetValue(haze.VolumeMaximum);
+        effect.Parameters["InteriorHazeColour"].SetValue(haze.Colour);
+        effect.Parameters["InteriorHazeStartDistance"].SetValue(
+            MathF.Max(haze.StartDistanceMetres, 0f));
+        effect.Parameters["InteriorHazeInvDistanceRange"].SetValue(
+            distanceRange > 1e-4f ? 1f / distanceRange : 0f);
+        effect.Parameters["InteriorHazeMaximumBlend"].SetValue(
+            MathHelper.Clamp(haze.MaximumBlend, 0f, 1f));
+    }
 
     private void Draw(
         VertexBuffer vb,

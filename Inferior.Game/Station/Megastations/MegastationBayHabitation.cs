@@ -114,6 +114,7 @@ public static class MegastationBayHabitationPlanner
                 if (!TryPlanRegion(wall, regionSeed, index,
                         regions.Where(region => region.WallIdentity == wall.Identity).ToArray(),
                         landingDistrict.ServiceBuildings,
+                        interior.AddedStructuralSolids ?? [],
                         occupancy, topology,
                         out MegastationBayHabitationRegion? region)
                     || region is null)
@@ -140,6 +141,7 @@ public static class MegastationBayHabitationPlanner
                 if (!TryPlanRegion(wall, regionSeed, index,
                         regions.Where(region => region.WallIdentity == wall.Identity).ToArray(),
                         landingDistrict.ServiceBuildings,
+                        interior.AddedStructuralSolids ?? [],
                         occupancy, topology,
                         out MegastationBayHabitationRegion? planned)
                     || planned is null)
@@ -225,7 +227,7 @@ public static class MegastationBayHabitationPlanner
             ? 0
             : Math.Clamp((int)MathF.Ceiling(usableArea / 30_000f), 6, 12);
 
-    private static MegastationBayWallSurface[] CreateWalls(MegastationInteriorPlan interior)
+    internal static MegastationBayWallSurface[] CreateWalls(MegastationInteriorPlan interior)
     {
         Vector3 right = Vector3.Normalize(interior.PortalRight);
         Vector3 up = Vector3.Normalize(interior.PortalUp);
@@ -270,6 +272,7 @@ public static class MegastationBayHabitationPlanner
         int index,
         IReadOnlyList<MegastationBayHabitationRegion> accepted,
         IReadOnlyList<MegastationLandingServiceBuilding> buildings,
+        IReadOnlyList<MegastationInteriorStructuralSolid> structuralSolids,
         StructuralOccupancy? occupancy,
         BoundaryTopology? topology,
         out MegastationBayHabitationRegion? region)
@@ -303,6 +306,9 @@ public static class MegastationBayHabitationPlanner
                 continue;
             if (buildings.Any(building => OverlapsBuilding(
                     wall, new(x, y), new(width, height), building)))
+                continue;
+            if (structuralSolids.Any(solid => OverlapsStructuralRoot(
+                    wall, new(x, y), new(width, height), solid)))
                 continue;
             if (occupancy is not null && topology is not null
                 && !TryFindSupportingFace(wall, new(x, y), new(width, height),
@@ -355,6 +361,40 @@ public static class MegastationBayHabitationPlanner
             .OrderBy(face => face.Key)
             .FirstOrDefault();
         return supportingFace is not null;
+    }
+
+    private static bool OverlapsStructuralRoot(
+        MegastationBayWallSurface wall,
+        Vector2 centre,
+        Vector2 size,
+        MegastationInteriorStructuralSolid solid)
+    {
+        Vector3 half = solid.Right * (solid.Size.X * .5f);
+        Vector3 halfUp = solid.Up * (solid.Size.Y * .5f);
+        Vector3 halfForward = solid.Forward * (solid.Size.Z * .5f);
+        Vector3[] corners =
+        [
+            solid.Centre - half - halfUp - halfForward,
+            solid.Centre - half - halfUp + halfForward,
+            solid.Centre - half + halfUp - halfForward,
+            solid.Centre - half + halfUp + halfForward,
+            solid.Centre + half - halfUp - halfForward,
+            solid.Centre + half - halfUp + halfForward,
+            solid.Centre + half + halfUp - halfForward,
+            solid.Centre + half + halfUp + halfForward,
+        ];
+        float normalMin = corners.Min(point => Vector3.Dot(point - wall.Centre, wall.Normal));
+        float normalMax = corners.Max(point => Vector3.Dot(point - wall.Centre, wall.Normal));
+        if (normalMin > .01f || normalMax < -.01f)
+            return false;
+        float minX = corners.Min(point => Vector3.Dot(point - wall.Centre, wall.Right));
+        float maxX = corners.Max(point => Vector3.Dot(point - wall.Centre, wall.Right));
+        float minY = corners.Min(point => Vector3.Dot(point - wall.Centre, wall.Up));
+        float maxY = corners.Max(point => Vector3.Dot(point - wall.Centre, wall.Up));
+        return centre.X - size.X * .5f - RegionSeparation < maxX
+            && centre.X + size.X * .5f + RegionSeparation > minX
+            && centre.Y - size.Y * .5f - RegionSeparation < maxY
+            && centre.Y + size.Y * .5f + RegionSeparation > minY;
     }
 
     private static void PlanWindows(
