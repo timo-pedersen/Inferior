@@ -23,14 +23,15 @@
 
 ## 0. Status update — findings acted on (2026-09-11)
 
-Per Timo's instruction, eight findings were acted on (five, then three more low-risk
-clusters in a follow-up pass the same day). Everything else in this document is still an
+Per Timo's instruction, ten findings were acted on (five, then three more low-risk clusters,
+then two final follow-ups — all the same day). Everything else in this document is still an
 open finding, not a task queue — nothing else was changed as a result of this inventory.
 
 | Finding | Action taken | Result |
 |---|---|---|
-| §2 Deterministic string/seed hashing — `SeededRandom.StableStringHash` vs `StationGenerator.NameHash` | `NameHash` now delegates to `SeededRandom`/`StableStringHash` instead of its own hand-rolled polynomial hash (`StationGenerator.cs`). `StationTextureRegistry.HashPalette` (the `GetHashCode()`-chain flagged separately in the same section) was **not** touched — still open. | Done. Deliberately reshuffles every existing station's generated layout (procedural baselines are regenerated, not persisted — expected, not a regression, per `!invariants.md`). Downstream pinned-fixture tests that assumed the old seed were refreshed to match (`StationTextureCompactionTests`, several `Megastation*Tests`). |
-| §2 Triangle winding — `StationModuleMesh.AddQuad` had no correction or validation | Added finite-vertex, degenerate-first-triangle, degenerate-second-triangle, and winding-consistency checks; throws instead of silently accepting bad input. Does **not** auto-correct like `AddQuadProjected`/`ChamferedBox.WindFace` — validates-and-throws, a third posture (see §2/§8, still not unified with the other five). Per Timo: needed during development, to be gated behind a debug flag later — not done this pass. | Done (gates only, no debug-flag gating yet). Verified against the full Fast suite: no existing production call site trips the new checks. |
+| §2 Deterministic string/seed hashing — `SeededRandom.StableStringHash` vs `StationGenerator.NameHash` | `NameHash` now delegates to `SeededRandom`/`StableStringHash` instead of its own hand-rolled polynomial hash (`StationGenerator.cs`). | Done. Deliberately reshuffles every existing station's generated layout (procedural baselines are regenerated, not persisted — expected, not a regression, per `!invariants.md`). Downstream pinned-fixture tests that assumed the old seed were refreshed to match (`StationTextureCompactionTests`, several `Megastation*Tests`). |
+| §2 Deterministic string/seed hashing — `StationTextureRegistry.HashPalette`'s `GetHashCode()` chain | Follow-up to the above, closing the cluster fully: `HashPalette` now mixes each field (surface enum, `Color.PackedValue`, and `BitConverter.SingleToInt32Bits` of each float) through `SeededRandom`'s own `Derive` chain instead of `h = h*31 + value.GetHashCode()`. | Done. Reshuffles the RNG-driven pixel noise for every station's generated textures (the seed `GeneratePixels` mixes in changes) — not the pixel *counts*/dedup already refreshed for the `NameHash` change, a separate pinned pixel-checksum fixture (`SystemMaterialLibraryTests.OrdinaryStationTextureFixtureRemainsByteIdentical`) needed refreshing too. |
+| §2 Triangle winding — `StationModuleMesh.AddQuad` had no correction or validation | Added finite-vertex, degenerate-first-triangle, degenerate-second-triangle, and winding-consistency checks. Follow-up: converted from unconditional `throw` to `Debug.Assert`, matching the codebase's existing dev-only-check convention (`MegastationInteriors.cs` etc.) — closes the "gate behind a debug flag later" promise from the original request. Still does **not** auto-correct like `AddQuadProjected`/`ChamferedBox.WindFace` — a third posture (see §2/§8, still not unified with the other five). | Done. **Behavioural note:** in a Release build (no `DEBUG` symbol) these checks now compile away entirely — bad geometry propagates silently instead of throwing. That's the deliberate trade-off Timo asked for (a dev-time diagnostic, not a production contract), flagged here since it's a real behaviour change, not pure refactoring. |
 | §2 UI text measurement — `FontHelper.Measure` bypassed at 8+ call sites | Fixed all of them: `TextBox.cs` (`MeasureWidth`, used on arbitrary player-typed substrings for cursor placement — the most plausible actual bypass exception source — plus 3 `"A"`-glyph sites), `TextBlock.cs` (2 sites), `SystemConsole.cs` (1 site), `LedIndicator.cs` (2 sites), `UIRenderer.cs` (2 sites, already-sanitised input so lower risk but now consistent). | Done. Solution-wide grep for `.MeasureString(` outside `FontHelper.cs`/tests now returns nothing. |
 | §3/§4 `MeshFactory.CreateBox`/`CreateQuad` dead ends — "perhaps replaced?" | Investigated via `git log --all --oneline --follow`; traced to the earliest "Phase 2" commit, predates station generation entirely. `StationGenerator.PrepareBoxHullMesh` (not `MeshFactory`) is the real, current box-hull builder. | Answered, not replaced — confirmed genuinely dead code, not superseded by something central. No removal action taken; still listed in §4. |
 | §5 `architecture-map-ai.md` drift | DataBus row corrected (8→11 channels); `## Inferior.Rendering` section completed (10→21 files, with dead-code/duplication notes); `Station/Megastations/` section added from scratch (was entirely absent — now ~49 files across Structural/Zoning/Flight-interior/Landing/Bolon subsections, explicitly flagged as name/class-derived locators, not individually deep-read). | Done for this pass. Timo noted he'll revisit for a fuller regeneration later — this was "get it in order now," not the wholesale regeneration the doc's own header describes. |
@@ -41,10 +42,11 @@ open finding, not a task queue — nothing else was changed as a result of this 
 | §2 `DVec3` → `Vector3` narrowing — 3 independent implementations | `SemanticHullMeshBuilder`'s private duplicate `ToVector3(DVec3)` removed; all 7 call sites now call `DVec3.ToVector3()` directly. `EngineMeshBuilder.ToVector3(value, mirroredAcrossHullX)` kept (public API, 6 external call sites across `ShipMeshRenderer` and a test) but now internally delegates to `DVec3.ToVector3()` and applies the mirror sign-flip as an explicit separate step, per the inventory's own suggested fix, instead of fusing both into one set of casts. `CockpitMeshBuilder` was already on the canonical extension method — untouched. | Done. |
 
 **Not requested, not touched:** everything else in §1/§2 (basis-from-normal, the other four
-winding postures, UV-sphere duplication (`MeshFactory.CreateSphere` vs
-`CelestialBodyRenderer.BuildPlanetSphere` — considered and explicitly deferred, not chosen
-in the 2026-09-11 follow-up pass), `StationTextureRegistry.HashPalette`, the text-mirroring
-root-cause candidate) remains exactly as originally found. See §8 for the updated
+winding postures, the text-mirroring root-cause candidate) remains exactly as originally
+found. UV-sphere duplication (`MeshFactory.CreateSphere` vs
+`CelestialBodyRenderer.BuildPlanetSphere`) was considered and explicitly deferred — Timo
+doesn't want to touch planet sphere generation now, since planets are getting an overhaul
+eventually and this would just be code to throw away or rebase. See §8 for the updated
 canonical-paths table.
 
 **Incidental consequence of the hash change:** because `NameHash` now produces different
@@ -75,12 +77,12 @@ to reserve its separation margin in the wall's own local frame. Documented in co
 | Text on 3D surfaces | 1 primitive (`PlanarTextGeometry`) + ~10 call sites that each choose their own `readingDirection`/`surfaceNormal` | Divergent behaviour (in caller inputs, not the primitive) | Low (primitive already consolidated) | `PlanarTextGeometry.Add`/`DeriveFrame` — already canonical |
 | Container mesh generation | 1 (`ShippingContainerFactory.GenerateVertices`) | — (already consolidated) | — | Already canonical |
 | Basis/frame construction from a normal | 6 independent implementations | Divergent behaviour (different threshold constants, different validation) | Medium | `PlanarTextGeometry.DeriveFrame`'s pattern (explicit input contract + throw-on-reflection) as the model; needs a shared low-level `Frame.FromNormal` |
-| Triangle winding: trust vs. correct vs. validate | 5 independent postures across otherwise-similar "build mesh from triangles/quad" code. **Updated 2026-09-11:** `StationModuleMesh.AddQuad` moved from "trust" to a 6th posture, "validate-and-throw" — still not unified with the other five. | Divergent behaviour | Medium-high (touches hot generation paths) | `ChamferedBox.WindFace` (auto-correct + comment explaining why) as the model |
+| Triangle winding: trust vs. correct vs. validate | 5 independent postures across otherwise-similar "build mesh from triangles/quad" code. **Updated 2026-09-11:** `StationModuleMesh.AddQuad` moved from "trust" to a 6th posture, "validate via `Debug.Assert`, dev-builds-only" — still not unified with the other five. | Divergent behaviour | Medium-high (touches hot generation paths) | `ChamferedBox.WindFace` (auto-correct + comment explaining why) as the model |
 | UV sphere tessellation | 2 (`MeshFactory.CreateSphere`, `CelestialBodyRenderer.BuildPlanetSphere`) | Pure duplication (same ring/segment math, different vertex format) | Low | `MeshFactory.CreateSphere`'s loop, parameterised on vertex-build delegate |
 | CPU-mesh → GPU-buffer upload | ~~3 near-identical~~ **Fixed 2026-09-11:** the allocate/`SetData` step now shared via `GpuBufferFactory.Create` | Pure duplication | Low | Shared generic uploader — **now `GpuBufferFactory`** |
 | `BasicEffect` unlit/vertex-colour preset | ~~4 independent constructions~~ **Fixed 2026-09-11:** all 4 now call `BasicEffectPresets.UnlitVertexColour(gd)` | Cosmetic duplication | Low | A `BasicEffectPresets.UnlitVertexColour(gd)` factory — **now exists** |
 | `MeshRenderer` per-draw-call parameter blocks | ~~Repeated ~8-line block across 6 `Draw*` overloads~~ **Fixed 2026-09-11:** the 4 `DynamicLit*` overloads' shared 9-parameter block now factored into `SetCoreParameters`; `BakedColorLit*` (a genuinely different parameter set) left alone | Cosmetic duplication | Low | Private `SetCoreParameters` helper — **now exists** |
-| Deterministic string/seed hashing | ~~2 independent hash functions~~ **Fixed 2026-09-11:** `NameHash` now delegates to `SeededRandom`. 1 `GetHashCode()`-chain (`StationTextureRegistry.HashPalette`) still open. | Divergent behaviour (different hash values for the same string) | Medium (touches save-compatible seeds) | `SeededRandom.StableStringHash`/`.Derive(string)` — **now the only station-generation hash** |
+| Deterministic string/seed hashing | ~~2 independent hash functions + 1 `GetHashCode()`-chain~~ **Fixed 2026-09-11:** `NameHash` now delegates to `SeededRandom`; `StationTextureRegistry.HashPalette` now mixes fields through `SeededRandom.Derive` instead of `GetHashCode()`. | Divergent behaviour (different hash values for the same string) | Medium (touches save-compatible seeds) | `SeededRandom.StableStringHash`/`.Derive(string)` — **now the only station/texture-generation hash path** |
 | `DVec3` → `Vector3` narrowing (no scale) | ~~3+ independent one-liners~~ **Fixed 2026-09-11:** `SemanticHullMeshBuilder`'s duplicate removed (calls `DVec3.ToVector3()` directly); `EngineMeshBuilder.ToVector3` kept as public API but now delegates to `DVec3.ToVector3()` with the mirror flip as a separate step | Cosmetic duplication | Low | A single extension method, used everywhere — **now the case, mirroring kept as an explicit add-on** |
 | UI text measurement | ~~`FontHelper.Measure` (sanitised) vs. 8+ raw `font.MeasureString()` call sites~~ **Fixed 2026-09-11:** all 8+ sites now go through `FontHelper.Measure` | Divergent behaviour (unsanitised path can throw/blank on unsupported glyphs) | Low-medium | `FontHelper.Measure`/`.Draw` |
 | Sun/ambient lighting factor | ~~2 (`SceneLighting.LightFactor`, inline copy in `CelestialBodyRenderer.BuildPlanetSphere`)~~ **Fixed 2026-09-11:** `BuildPlanetSphere` now calls `SceneLighting.LightFactor` | Pure duplication (identical formula) | Low | `SceneLighting.LightFactor` |
@@ -178,7 +180,7 @@ otherwise-comparable "build a mesh from a list of triangles/quads" code:
 | `SemanticHullMeshBuilder.Build` | Computes, compares to author-declared `OutwardNormal`, **throws** if wrong or near-zero-area |
 | `EngineMeshBuilder.Build` | No correction; **conditionally swaps** `(b,c)` only when `mirroredAcrossHullX` is true |
 | `CockpitMeshBuilder.Build` | No correction, only a degenerate-triangle throw; **trusts** input winding entirely |
-| `StationModuleMesh.AddQuad` | ~~No correction, no degenerate check; **trusts** input winding entirely~~ **Updated 2026-09-11:** now checks finite vertices, both triangles for near-zero area, and winding consistency between the two triangles — **throws** rather than trusting, but still does not auto-correct like `AddQuadProjected` |
+| `StationModuleMesh.AddQuad` | ~~No correction, no degenerate check; **trusts** input winding entirely~~ **Updated 2026-09-11:** now checks finite vertices, both triangles for near-zero area, and winding consistency between the two triangles via `Debug.Assert` (dev-builds-only, compiles away in Release) — still does not auto-correct like `AddQuadProjected` |
 | `StationModuleMesh.AddQuadProjected` | Computes, compares to `expectedNormal`, **auto-flips** — different posture from its sibling `AddQuad` in the *same class* |
 
 The `AddQuad`/`AddQuadProjected` split is worth calling out specifically: two methods on the
@@ -190,10 +192,18 @@ decoration, including every glyph quad `PlanarTextGeometry` emits).
 "gates" were needed for development and do pop up from time to time. This narrows the
 `AddQuad`/`AddQuadProjected` gap (both now reject bad input instead of one silently
 accepting it) but doesn't close it (one throws, the other self-corrects) — that's still an
-open decision for §8. Timo's stated intent is to put these gates behind a debug flag later
-rather than have them throw in production release builds; that gating has not been done
-yet. Verified against the full Fast test suite (851 tests at the time) that no existing
-production call site currently trips the new checks.
+open decision for §8. Verified against the full Fast test suite (851 tests at the time) that
+no existing production call site currently trips the new checks.
+
+**Follow-up update (2026-09-11):** the checks are now gated behind `Debug.Assert` instead of
+unconditional `throw`, closing the "put these behind a debug flag later" intent from the
+original request — matches the same convention already used throughout
+`MegastationInteriors.cs` and elsewhere (active in Debug builds, compiled away entirely when
+`DEBUG` isn't defined, per `[Conditional("DEBUG")]` on `Debug.Assert` itself). Real
+consequence: a Release build no longer enforces these checks at all — bad geometry
+(NaN vertices, a degenerate or twisted quad) now propagates through silently in Release,
+where before this follow-up it would have thrown there too. That's the deliberate trade-off
+Timo described (a development-time diagnostic, not a production input-validation contract).
 
 ### UV sphere tessellation
 
@@ -313,6 +323,35 @@ nothing guarantees a future runtime keeps `float.GetHashCode()`'s bit pattern st
 project's own stated policy is "must not use ... runtime object hashes." Flagged for Timo's
 judgment rather than treated as settled either way — I can't tell from reading alone whether
 this has ever caused an observable problem.
+
+**Update (2026-09-11):** Closed, as a follow-up to the `NameHash` consolidation above.
+`HashPalette` now reads:
+
+```csharp
+private const int PaletteSeedRoot = 0x50414C54; // "PALT"
+
+private static int HashPalette(TexturePalette p, SurfaceTexture surface)
+    => new SeededRandom(PaletteSeedRoot)
+        .Derive((int)surface)
+        .Derive(unchecked((int)p.BaseColour.PackedValue))
+        .Derive(unchecked((int)p.AccentColour.PackedValue))
+        .Derive(unchecked((int)p.GrimeColour.PackedValue))
+        .Derive(BitConverter.SingleToInt32Bits(p.NoiseStrength))
+        .Derive(BitConverter.SingleToInt32Bits(p.SubPanelContrast))
+        .Derive(BitConverter.SingleToInt32Bits(p.GrimeStrength))
+        .Seed;
+```
+
+`Color.PackedValue` is already a plain `uint` — no hashing needed, just a cast. Each `float`
+goes through `BitConverter.SingleToInt32Bits`, a spec-guaranteed IEEE-754 bit
+reinterpretation (not an implementation-defined hash like `float.GetHashCode()`), and the
+whole thing is mixed through `SeededRandom`'s own `Derive` chain (`MixSeeds`/
+boost::hash_combine) rather than a hand-rolled `h*31+` accumulator. This reshuffles the
+RNG-driven pixel noise `GeneratePixels` produces for every station's generated textures
+(the mixed value feeds `new System.Random(seed ^ HashPalette(...))`) — a separate, further
+pinned fixture (`SystemMaterialLibraryTests.OrdinaryStationTextureFixtureRemainsByteIdentical`,
+a SHA-256 over exact pixel bytes) needed refreshing on top of the ones already refreshed for
+the `NameHash` change.
 
 ### `DVec3` → `Vector3` narrowing (no scale)
 
@@ -508,11 +547,11 @@ Not a profiling pass — only what was obvious in passing while reading for dupl
 | Text on a 3D surface | `PlanarTextGeometry.Add`/`DeriveFrame` | The primitive is safe; the caller-chosen `readingDirection`/`surfaceNormal` for each face is not automatically checked against "does this actually read correctly to a viewer" — that's still a per-call-site judgment call. |
 | Container geometry | `ShippingContainerFactory.GenerateVertices` | Already the only path; keep it that way — do not let a future megastation-scale container variant reimplement inline. |
 | Orthonormal frame from one direction | *(none yet — 6 candidates in §2)* | Pick one input contract (arbitrary-reference-axis vs. authored-tangent vs. reading-direction) per use case; standardise the reference-axis threshold if that variant is kept. |
-| Triangle winding correction | `ChamferedBox.WindFace`'s auto-flip pattern | Decide once whether "trust caller" (`CockpitMeshBuilder`), "validate-and-throw" (`SemanticHullMeshBuilder`, and `AddQuad` as of 2026-09-11), or "auto-correct" (`GeometryBuilder`, `ChamferedBox`, `AddQuadProjected`) is the house style — right now all three exist for no documented reason. `AddQuad`'s gates are meant to move behind a debug flag eventually per Timo, not become the permanent production posture as-is. |
+| Triangle winding correction | `ChamferedBox.WindFace`'s auto-flip pattern | Decide once whether "trust caller" (`CockpitMeshBuilder`), "validate-and-throw" (`SemanticHullMeshBuilder`), "validate via `Debug.Assert`, dev-only" (`AddQuad` as of 2026-09-11's follow-up), or "auto-correct" (`GeometryBuilder`, `ChamferedBox`, `AddQuadProjected`) is the house style — right now all four exist for no documented reason. `AddQuad`'s gates are now dev-builds-only per Timo's original intent — Release builds don't enforce them at all. |
 | UV sphere mesh | `MeshFactory.CreateSphere`, generalised with a per-vertex delegate | `BuildPlanetSphere`'s checkerboard/lighting bake would need to become that delegate. |
 | CPU mesh → GPU buffers | ~~A new shared generic uploader~~ **Partially done 2026-09-11:** `GpuBufferFactory.Create` shares the allocate/SetData scaffolding; the per-caller vertex struct/record differences (Semantic/Cockpit/Engine) were judged genuine enough to leave as three separate mapping steps calling the one shared factory, rather than building a fully generic delegate-based uploader for three call sites. | Keep per-caller vertex struct differences (Semantic/Cockpit/Engine) as separate mapping code, not baked into three copies of the allocate/SetData scaffolding — the latter is now shared, the former deliberately isn't. |
 | `BasicEffect` unlit/vertex-colour debug preset | ~~New `BasicEffectPresets.UnlitVertexColour(gd)` in `Inferior.Rendering`~~ **Done 2026-09-11** — exists, all 4 sites use it. | Don't fold in `SystemSpaceState.cs`'s *different* lit/no-vertex-colour preset by mistake — that one is genuinely distinct. (Confirmed left alone.) |
-| Deterministic string hash / seed derivation | `SeededRandom.StableStringHash` / `.Derive(string)` | ~~`StationGenerator.NameHash` produces different values for the same input — migrating it is a determinism-affecting change..., needs an explicit compatibility decision~~ **Done 2026-09-11**, with Timo's explicit authorization: `NameHash` now delegates to `SeededRandom`. Existing generated station layouts reshuffled as an accepted consequence (procedural baselines are regenerated, not persisted). `StationTextureRegistry.HashPalette` was intentionally left untouched — still a separate, unresolved case. |
+| Deterministic string hash / seed derivation | `SeededRandom.StableStringHash` / `.Derive(string)` | ~~`StationGenerator.NameHash` produces different values for the same input... `StationTextureRegistry.HashPalette` was intentionally left untouched~~ **Done 2026-09-11 (both halves)**: `NameHash` delegates to `SeededRandom`; `HashPalette` mixes its fields through `SeededRandom.Derive` instead of `GetHashCode()`. Existing generated station layouts and texture-palette pixel noise both reshuffled as an accepted consequence (procedural baselines are regenerated, not persisted). This cluster is now fully closed. |
 | `DVec3` → `Vector3` narrowing (no scale) | The existing `DVec3.ToVector3()` extension method | ~~Keep `EngineMeshBuilder`'s mirroring sign-flip as a separate, explicitly-named step, not fused into the conversion itself.~~ **Done 2026-09-11** — `SemanticHullMeshBuilder`'s duplicate removed; `EngineMeshBuilder.ToVector3` kept (public, external callers) but now delegates to `DVec3.ToVector3()` with the mirror flip separated out. |
 | UI text measurement | `FontHelper.Measure` | ~~`UIRenderer.MeasureText` and the raw `font.MeasureString()` call sites in `TextBlock`/`TextBox`/`SystemConsole`/`LedIndicator` all need to move over~~ **Done 2026-09-11** — all of them now go through `FontHelper.Measure`; a solution-wide grep for `.MeasureString(` outside `FontHelper.cs`/tests returns nothing. |
 | `MeshRenderer` per-draw-call parameters | New private `SetCoreParameters` helper | ~~Cosmetic, but four copies of the same nine `SetValue` calls is real drift surface~~ **Done 2026-09-11** for the 4 `DynamicLit*` overloads; `BakedColorLit*`'s different parameter set deliberately left separate. |

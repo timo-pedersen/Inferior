@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Inferior.Rendering;
 using Inferior.Game.StationGen.Megastations;
 using Microsoft.Xna.Framework;
@@ -174,14 +175,18 @@ public sealed class StationModuleMesh
     // didn't actually lie in the v0/v1/v2 plane (or was ordered backwards) produced a
     // twisted/inside-out quad with no error at all. These gates catch both classes at
     // generation time instead of shipping bad geometry silently — a real, if intermittent,
-    // source of inverted-normal/backwards-looking faces during development. Deliberately
-    // unconditional for now (matches every other throwing geometry check in this codebase —
-    // SemanticHullMeshBuilder, CockpitMeshBuilder, PlanarTextGeometry); gating these behind
-    // a debug-only flag is planned follow-up work, not done here.
+    // source of inverted-normal/backwards-looking faces during development.
+    // A1 follow-up (per Timo): gated behind Debug.Assert rather than throwing
+    // unconditionally, matching the codebase's existing dev-only-check convention
+    // (MegastationInteriors.cs etc.) — these are diagnostic aids for generation-time bugs,
+    // not a production input-validation contract. In a Release build these checks compile
+    // away entirely: bad geometry propagates through (NaN/garbage vertices, a twisted quad)
+    // rather than throwing.
     public int AddQuad(Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Color color)
     {
-        if (!IsFiniteVector(v0) || !IsFiniteVector(v1) || !IsFiniteVector(v2) || !IsFiniteVector(v3))
-            throw new ArgumentException("AddQuad vertices must be finite (no NaN/Infinity).");
+        Debug.Assert(
+            IsFiniteVector(v0) && IsFiniteVector(v1) && IsFiniteVector(v2) && IsFiniteVector(v3),
+            "AddQuad vertices must be finite (no NaN/Infinity).");
 
         int b = _verts.Count;
 
@@ -189,22 +194,19 @@ public sealed class StationModuleMesh
         Vector3 edge1  = v2 - v0;
         Vector3 normal = Vector3.Cross(edge0, edge1);
         float   nLen   = normal.Length();
-        if (nLen <= 1e-6f)
-            throw new InvalidOperationException(
-                "AddQuad's first triangle (v0, v1, v2) is degenerate or near-zero-area.");
+        Debug.Assert(nLen > 1e-6f,
+            "AddQuad's first triangle (v0, v1, v2) is degenerate or near-zero-area.");
         normal /= nLen;
 
         // Second triangle (v0, v2, v3) should wind the same way as the first — a
         // differently-ordered or non-planar v3 flips or degenerates it, producing a
         // twisted quad that would otherwise pass through unnoticed.
         Vector3 normal2 = Vector3.Cross(v2 - v0, v3 - v0);
-        if (normal2.LengthSquared() <= 1e-12f)
-            throw new InvalidOperationException(
-                "AddQuad's second triangle (v0, v2, v3) is degenerate or near-zero-area.");
-        if (Vector3.Dot(Vector3.Normalize(normal2), normal) <= 0f)
-            throw new InvalidOperationException(
-                "AddQuad's four vertices do not form a consistently-wound planar quad — " +
-                "check v3's position/order relative to v0, v1, v2.");
+        Debug.Assert(normal2.LengthSquared() > 1e-12f,
+            "AddQuad's second triangle (v0, v2, v3) is degenerate or near-zero-area.");
+        Debug.Assert(Vector3.Dot(Vector3.Normalize(normal2), normal) > 0f,
+            "AddQuad's four vertices do not form a consistently-wound planar quad — " +
+            "check v3's position/order relative to v0, v1, v2.");
 
         Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));

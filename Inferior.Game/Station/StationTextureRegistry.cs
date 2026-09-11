@@ -687,18 +687,29 @@ public static class StationTextureRegistry
     // No longer a cache key (the shared static cache is gone, Brief S2b-1) — still used
     // by Generate() to mix a rolled variant seed with the station-wide palette so two
     // different surfaces/palettes never collide onto the same RNG stream.
+    // A1 inventory finding: this used to be a `h = h*31 + value.GetHashCode()` chain over
+    // Color.PackedValue/float fields — not the specific process-randomized-hash bug
+    // !invariants.md names (float/uint GetHashCode() isn't process-salted like
+    // string.GetHashCode() is), but still a GetHashCode() chain feeding a generation seed,
+    // against the project's stated "no runtime object hashes" policy, and with no
+    // guarantee float.GetHashCode()'s bit pattern stays stable across runtimes. Replaced
+    // with SeededRandom's own Derive-chain mixing (MixSeeds/boost::hash_combine, already
+    // the canonical seed-combining primitive elsewhere) over each field's own
+    // deterministic bit representation: PackedValue is already a plain uint (no hashing
+    // needed), and BitConverter.SingleToInt32Bits is a spec-guaranteed IEEE-754 bit
+    // reinterpretation, not an implementation-defined hash.
+    private const int PaletteSeedRoot = 0x50414C54; // "PALT"
+
     private static int HashPalette(TexturePalette p, SurfaceTexture surface)
-    {
-        int h = 17;
-        h = h * 31 + surface.GetHashCode();
-        h = h * 31 + p.BaseColour.PackedValue.GetHashCode();
-        h = h * 31 + p.AccentColour.PackedValue.GetHashCode();
-        h = h * 31 + p.GrimeColour.PackedValue.GetHashCode();
-        h = h * 31 + p.NoiseStrength.GetHashCode();
-        h = h * 31 + p.SubPanelContrast.GetHashCode();
-        h = h * 31 + p.GrimeStrength.GetHashCode();
-        return h;
-    }
+        => new SeededRandom(PaletteSeedRoot)
+            .Derive((int)surface)
+            .Derive(unchecked((int)p.BaseColour.PackedValue))
+            .Derive(unchecked((int)p.AccentColour.PackedValue))
+            .Derive(unchecked((int)p.GrimeColour.PackedValue))
+            .Derive(BitConverter.SingleToInt32Bits(p.NoiseStrength))
+            .Derive(BitConverter.SingleToInt32Bits(p.SubPanelContrast))
+            .Derive(BitConverter.SingleToInt32Bits(p.GrimeStrength))
+            .Seed;
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 

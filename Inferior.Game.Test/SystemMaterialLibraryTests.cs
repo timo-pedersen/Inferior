@@ -146,8 +146,12 @@ public sealed class SystemMaterialLibraryTests
         // OffsetPaletteForVariant reads those live defaults, so ordinary-station texture
         // output legitimately changed bytes; the hash below is recomputed against the
         // merged (post-B5) defaults, not a behaviour regression.
+        // Refreshed after StationTextureRegistry.HashPalette was consolidated onto
+        // SeededRandom (Docs/architecture-inventory-A1.md) — this changes the RNG seed
+        // GeneratePixels mixes in for every surface/palette combination, so pixel noise
+        // output legitimately changed bytes; not a behaviour regression.
         Assert.Equal(
-            "3B1C8D5600D53CA4C97A49CF81E982500FB6B22C48075BEC5D4D8D80C472D528",
+            "E38649577A1F956FFA8842AA79CD410C16C7CFEAE5734D66D8DE1CD180D7D9CF",
             PixelSignature(pixels.Albedo, pixels.Material));
     }
 
