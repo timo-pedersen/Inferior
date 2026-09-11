@@ -64,7 +64,7 @@ public sealed class SystemConsole : Control
             theme.PanelBorder);
 
         // Available width for text (inside padding, excluding widest prefix "!! ")
-        float prefixW  = theme.Font.MeasureString("!! ").X * mScale;
+        float prefixW  = FontHelper.Measure(theme.Font, "!! ", mScale).X;
         int   availW   = ab.Width - pad * 2 - (int)prefixW;
 
         int y      = divY + 4;

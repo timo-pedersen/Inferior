@@ -84,7 +84,7 @@ public sealed class UIRenderer : IDisposable
             return;
         var safe = FontHelper.Sanitize(font, text);
         if (safe.Length == 0) return;
-        var size = font.MeasureString(safe) * scale;
+        var size = FontHelper.Measure(font, safe, scale);
         var pos  = new Vector2(
             bounds.X + (bounds.Width  - size.X) * 0.5f,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);
@@ -98,7 +98,7 @@ public sealed class UIRenderer : IDisposable
             return;
         var safe = FontHelper.Sanitize(font, text);
         if (safe.Length == 0) return;
-        var size = font.MeasureString(safe) * scale;
+        var size = FontHelper.Measure(font, safe, scale);
         var pos  = new Vector2(
             bounds.X + padding,
             bounds.Y + (bounds.Height - size.Y) * 0.5f);

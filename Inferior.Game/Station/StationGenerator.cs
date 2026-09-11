@@ -1462,13 +1462,23 @@ public sealed class StationGenerator
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    // A1 inventory finding: this used to be a second, hand-rolled string hash
+    // (h=17; h=h*31+c) independent of Inferior.Core.Random.SeededRandom's own
+    // StableStringHash/Derive(string) — the canonical deterministic-seed-from-identity
+    // path used everywhere else (galaxy/system generation, StationTextureRegistry's own
+    // VariantSeedRoot-salted Derive(persistenceId)). Consolidated onto that convention;
+    // StationSeedRoot gives station generation its own namespace the same way
+    // VariantSeedRoot does for texture variants, so the two don't collide when derived
+    // from the same station identity string.
+    // NOTE: this changes the seed every existing station generates from — deliberate,
+    // per Timo's instruction; procedural station layouts are regenerated baselines, not
+    // persisted state (!invariants.md), so this is expected to reshuffle the galaxy's
+    // station layouts on next generation, not a regression.
+    private const int StationSeedRoot = 0x53544154; // "STAT"
+
     // internal, not private: Brief P1's Nova Anchorage regression test needs to reconstruct
     // the exact same StationProfile (and therefore economy/palette) that Generate() derived
     // internally, without a second, drifting seed derivation living in test code.
     internal static int NameHash(string name)
-    {
-        int h = 17;
-        foreach (char c in name) h = h * 31 + c;
-        return h;
-    }
+        => new SeededRandom(StationSeedRoot).Derive(name).Seed;
 }

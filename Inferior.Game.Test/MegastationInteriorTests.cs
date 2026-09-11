@@ -348,11 +348,32 @@ public sealed class MegastationInteriorTests
             + result.BayFacilityPlan.Diagnostics.CutoutCount * 8;
         Assert.Equal(expectedInteriorFaces * 2,
             result.InteriorPlan.Diagnostics.InteriorStructuralTriangleCount);
+        // A1 follow-up: this formula originally assumed caster geometry was only the fixed
+        // portal frame (8 boxes = 192 verts / 96 tris) plus one 24-vert/12-tri box per
+        // shadow-casting throat guidance element. Since then, MegaShelf structural solids
+        // and trusses were added as interior caster geometry too (CastsStellarShadow,
+        // tagged MegastationInteriorMajor same as the frame/throat boxes) - and a MegaShelf
+        // top is a size-dependent tessellation (AddTessellatedShelfTop, spaced ~18 units),
+        // not a fixed vertex count, so it can't be folded back into a closed-form constant
+        // here without duplicating that tessellation math. Confirmed this is NOT a Bolon-vs-
+        // Standard archetype mixup: these tests call GenerateCpu directly, bypassing
+        // MegastationArchetypeSelector entirely, and that selector's hash was untouched by
+        // the NameHash consolidation. Keep the frame+throat baseline as a floor (shelves add
+        // to it, never replace it), and verify the two diagnostics stay internally
+        // consistent with each other regardless of how much extra shelf/truss geometry is
+        // present (every caster range is quads: 4 verts / 2 tris each).
+        int baselineCasterVertices = 192 + result.InteriorPresentationPlan.ThroatCasterCount * 24;
+        int baselineCasterTriangles = 96 + result.InteriorPresentationPlan.ThroatCasterCount * 12;
+        Assert.True(
+            result.InteriorPlan.Diagnostics.PortalCasterVertexCount >= baselineCasterVertices,
+            $"Expected at least the frame+throat caster baseline of {baselineCasterVertices} " +
+            $"vertices, got {result.InteriorPlan.Diagnostics.PortalCasterVertexCount}.");
+        Assert.True(
+            result.InteriorPlan.Diagnostics.PortalCasterTriangleCount >= baselineCasterTriangles,
+            $"Expected at least the frame+throat caster baseline of {baselineCasterTriangles} " +
+            $"triangles, got {result.InteriorPlan.Diagnostics.PortalCasterTriangleCount}.");
         Assert.Equal(
-            192 + result.InteriorPresentationPlan.ThroatCasterCount * 24,
-            result.InteriorPlan.Diagnostics.PortalCasterVertexCount);
-        Assert.Equal(
-            96 + result.InteriorPresentationPlan.ThroatCasterCount * 12,
+            result.InteriorPlan.Diagnostics.PortalCasterVertexCount / 4 * 2,
             result.InteriorPlan.Diagnostics.PortalCasterTriangleCount);
 
         int previousCasterFaces = result.BoundaryTopology.Faces.Count(face =>
@@ -448,8 +469,13 @@ public sealed class MegastationInteriorTests
 #else
         Assert.Null(presentationModule.NativeInteriorDebugLines);
 #endif
+        // CreatePlacedModule appends base LightPlan lights, then guidance lights, then (when
+        // ShelfLighting is present) shelf obstacle/flood glow lights — Take(a.Markers.Count)
+        // isolates just the guidance segment instead of assuming it's everything after the
+        // base lights, which broke once shelf lights started actually being present here.
         StationLightInfo[] guidanceLights = module.GlowLights
             .Skip(first.LightPlan.Lights.Count)
+            .Take(a.Markers.Count)
             .ToArray();
         Assert.Equal(a.Markers.Select(marker => marker.Position),
             guidanceLights.Select(light => light.WorldPosition));

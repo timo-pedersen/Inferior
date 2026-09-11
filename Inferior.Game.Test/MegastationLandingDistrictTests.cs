@@ -82,7 +82,13 @@ public sealed class MegastationLandingDistrictTests
                 Assert.True(plan.Pads.Count(pad => pad.IsLarge) >= 2);
         }
 
-        Assert.Equal([1, 2, 3], siteCounts.Order());
+        // Per Timo: floor sites alone are 1-3 by design (DistrictUsesCoherentCardinal...
+        // asserts that directly against the un-swept baseline). This direct Plan() call
+        // additionally hosts sites on mostly-occupied Mega Shelf surfaces (L4g), so the
+        // combined total can exceed 3 — the invariant that actually matters for a megastation
+        // landing bay is a floor of at least 3 sites total, never fewer.
+        Assert.All(siteCounts, count => Assert.True(count >= 3,
+            $"Expected at least 3 total landing sites (floor + shelf), got {count}."));
         Assert.Equal(Enum.GetValues<MegastationLandingSiteSize>().Order(), sizes.Order());
         Assert.Equal(Enum.GetValues<MegastationLandingSiteCharacter>().Order(), characters.Order());
         Assert.Equal(Enum.GetValues<MegastationLandingSiteOrientation>().Order(),
@@ -180,8 +186,15 @@ public sealed class MegastationLandingDistrictTests
                 replanned.Pads[i].BuildingSetbackClearance);
         }
         Assert.Equal(12, baseline.Lights.Count);
+        // A1/hash-consolidation follow-up: this sum was missing shelf lighting (L4f floods/
+        // beacons, concatenated last by MegastationPrototypeGenerator) — invisible while Nova's
+        // old seed happened to occupy zero shelves, exposed once the seed consolidation (see
+        // Docs/architecture-inventory-A1.md) changed which shelves get used. Per Timo: shelves
+        // are meant to be mostly occupied, so shelf lighting should normally be present, not an
+        // edge case this formula can ignore.
+        int shelfLightCount = result.InteriorPlan.ShelfLighting?.ArtificialLights.Count ?? 0;
         Assert.Equal(baseline.Lights.Count + result.LandingDistrictPlan.ArtificialLights.Count
-                + result.BayFacilityPlan.ArtificialLights.Count,
+                + result.BayFacilityPlan.ArtificialLights.Count + shelfLightCount,
             result.ArtificialLightingPlan.Lights.Count);
         Assert.Equal(baseline.Lights, result.ArtificialLightingPlan.Lights.Take(12));
         Assert.Equal(result.LandingDistrictPlan.ArtificialLights,
@@ -189,7 +202,12 @@ public sealed class MegastationLandingDistrictTests
                 .Take(result.LandingDistrictPlan.ArtificialLights.Count));
         Assert.Equal(result.BayFacilityPlan.ArtificialLights,
             result.ArtificialLightingPlan.Lights.Skip(
-                12 + result.LandingDistrictPlan.ArtificialLights.Count));
+                    12 + result.LandingDistrictPlan.ArtificialLights.Count)
+                .Take(result.BayFacilityPlan.ArtificialLights.Count));
+        Assert.Equal(result.InteriorPlan.ShelfLighting?.ArtificialLights ?? [],
+            result.ArtificialLightingPlan.Lights.Skip(
+                12 + result.LandingDistrictPlan.ArtificialLights.Count
+                    + result.BayFacilityPlan.ArtificialLights.Count));
     }
 
     [Fact]
@@ -590,8 +608,10 @@ public sealed class MegastationLandingDistrictTests
                 + result.LandingDistrictPlan.Sites.Count * 2
                 + result.LandingDistrictPlan.ServiceBuildings.Count * 2,
             result.LandingDistrictPlan.ArtificialLights.Count);
+        // See the shelf-lighting note in DistrictPlanAndLocalLightExtensionAreDeterministicAndIndependent.
         Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count
-                + result.BayFacilityPlan.ArtificialLights.Count,
+                + result.BayFacilityPlan.ArtificialLights.Count
+                + (result.InteriorPlan.ShelfLighting?.ArtificialLights.Count ?? 0),
             result.ArtificialLightingPlan.Lights.Count);
         Assert.All(result.LandingDistrictPlan.ServiceBuildings, building =>
             Assert.Contains("frontage", building.Frontage.Identity, StringComparison.Ordinal));
@@ -953,8 +973,10 @@ public sealed class MegastationLandingDistrictTests
             Assert.Equal(expected.Containers, actual.Containers);
         }
         Assert.Equal(result.LandingDistrictPlan.KeepClearZones, replanned.KeepClearZones);
+        // See the shelf-lighting note in DistrictPlanAndLocalLightExtensionAreDeterministicAndIndependent.
         Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count
-                + result.BayFacilityPlan.ArtificialLights.Count,
+                + result.BayFacilityPlan.ArtificialLights.Count
+                + (result.InteriorPlan.ShelfLighting?.ArtificialLights.Count ?? 0),
             result.ArtificialLightingPlan.Lights.Count);
     }
 

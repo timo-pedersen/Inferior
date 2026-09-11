@@ -24,11 +24,21 @@ public sealed class MegastationSemanticZoningTests
             materialAssignment: result.MaterialAssignment,
             interiorPlan: result.InteriorPlan,
             artificialLighting: result.ArtificialLightingPlan,
+            // Determinism-discrepancy fix: production also passes megaShelfPlan.StructuralSolids
+            // as occluders (MegastationPrototypeGenerator.cs) — omitting it here made this
+            // rebuild's occlusion silently miss shelf-cast shadows, producing a real (if tiny,
+            // +1/channel) artificial-light discrepancy at interior faces near Mega Shelf
+            // structures. Dormant while Nova Anchorage's old seed had few/no relevant shelf
+            // solids; exposed once the seed consolidation (Docs/architecture-inventory-A1.md)
+            // changed that. Confirmed by a field-level diff: Position/Normal/Colour/UV were
+            // already byte-identical — only ArtificialLight differed, exactly as this missing
+            // occluder set would explain.
             artificialOcclusion: MegastationArtificialOcclusion.Build(
                 result.RegularisedOccupancy,
                 result.LandingDistrictPlan,
                 result.InteriorPresentationPlan,
-                result.BayFacilityPlan),
+                result.BayFacilityPlan,
+                result.MegaShelfPlan.StructuralSolids),
             bayFacilities: result.BayFacilityPlan);
         var (expectedVertices, expectedIndices) = result.Mesh.ToIntArrays();
         var (actualVertices, actualIndices) = rebuilt.ToIntArrays();

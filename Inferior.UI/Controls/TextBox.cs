@@ -247,7 +247,7 @@ public sealed class TextBox : Control
                 return;
             }
 
-            float lineH = font.MeasureString("A").Y * scale;
+            float lineH = FontHelper.Measure(font, "A", scale).Y;
 
             if (Multiline)
                 DrawMultiline(sb, renderer, theme, textArea, font, scale, lineH);
@@ -369,7 +369,7 @@ public sealed class TextBox : Control
         string[] lines = _text.ToString().Split('\n');
         var font = EffectiveFont(theme);
         float scale = EffectiveFontScale(theme);
-        float lineH = font.MeasureString("A").Y * scale;
+        float lineH = FontHelper.Measure(font, "A", scale).Y;
         int pad     = theme.Padding;
 
         int totalH   = (int)(lines.Length * lineH);
@@ -580,7 +580,7 @@ public sealed class TextBox : Control
             _selAnchor = -1;
 
         string text = _text.ToString();
-        float lineH = font.MeasureString("A").Y * scale;
+        float lineH = FontHelper.Measure(font, "A", scale).Y;
 
         if (!Multiline)
         {
@@ -617,8 +617,14 @@ public sealed class TextBox : Control
         _blinkState = true;
     }
 
+    // A1 inventory finding: this used to call font.MeasureString directly on arbitrary
+    // player-typed text (cursor placement, selection highlight width, click-to-position) —
+    // the exact unsanitized path FontHelper exists to prevent. A single unsupported
+    // character typed into the box would throw here, on every affected frame while the box
+    // is focused. Routed through FontHelper.Measure, which strips characters outside the
+    // font's glyph set before measuring.
     private static float MeasureWidth(string text, SpriteFont font, float scale)
-        => text.Length == 0 ? 0f : font.MeasureString(text).X * scale;
+        => text.Length == 0 ? 0f : FontHelper.Measure(font, text, scale).X;
 
     private static int FindCharIndexAtX(string text, float targetX, SpriteFont font, float scale)
     {

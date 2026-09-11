@@ -154,7 +154,7 @@ public sealed class LedIndicator : IDisposable
     /// <summary>Total size in pixels including lamp and label.</summary>
     public Point MeasureSize()
     {
-        Vector2 label  = (LabelFont?.MeasureString(LabelText) ?? Vector2.Zero) * LabelFontScale;
+        Vector2 label  = LabelFont is null ? Vector2.Zero : FontHelper.Measure(LabelFont, LabelText, LabelFontScale);
         const int gap  = 4;
         return LabelAnchor switch
         {
@@ -181,7 +181,7 @@ public sealed class LedIndicator : IDisposable
 
     private void ComputeOffsets(out Point labelOff, out Point lampOff)
     {
-        Vector2 labelSize = (LabelFont?.MeasureString(LabelText) ?? Vector2.Zero) * LabelFontScale;
+        Vector2 labelSize = LabelFont is null ? Vector2.Zero : FontHelper.Measure(LabelFont, LabelText, LabelFontScale);
         const int gap = 4;
 
         lampOff  = Point.Zero;

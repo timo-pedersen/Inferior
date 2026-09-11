@@ -27,7 +27,7 @@ Foundation layer — no dependencies on any other Inferior project.
 - `BusSubscription.cs` — `IDisposable` wrapper pairing one `Bus<T>` subscribe/unsubscribe into a single disposable.
 - `CommandBus.cs` — reverse-direction string-command channel (UI → sim thread), drained on the sim thread.
 - `ComponentCommand.cs` — `readonly record struct` payload for `CommandBus` (`Topic` + optional `double Value`).
-- `DataBus.cs` — static hub declaring the 8 named `Bus<T>` instances (System, Instruments, InstrumentState, InstrumentRanges, Radar, RadarLost, Spectra, Target) and `Drain()`.
+- `DataBus.cs` — static hub declaring the 11 named channels (`SystemMessages`, `ScalarTelemetry`, `VectorTelemetry`, `SpectrumTelemetry`, `TelemetryInfo`, `DeviceInfo`, `DeviceState`, `ShipSystemsTopology`, `Radar`, `RadarLost`, `Target`) and `Drain()`.
 - `RadarContact.cs` — `RadarContact` record + `ContactType` enum for radar/targeting data.
 - `RangeValue.cs` — `readonly record struct` (Low, High) — an instrument's operating envelope.
 - `SystemMessage.cs` — `SystemMessage` record + `SystemMessagePriority` enum for the System bus / console / HUD alerts.
@@ -198,19 +198,27 @@ Simulation domain model. Depends on Core, Galaxy.
 
 ## Inferior.Rendering
 
-3D rendering utilities and the per-subsystem GPU-mesh owners extracted this session. Depends on Core, Gameplay.
+3D rendering utilities and the per-subsystem GPU-mesh owners extracted this session. Depends on Core, Gameplay. 21 source files — this section is now complete (verified against `Inferior.Rendering/*.cs` during the A1 inventory pass, 2026-09-11).
 
-- `Camera3D.cs` — quaternion free-look camera, origin-shift rendering, `RenderScale` constant.
-- `CelestialBodyRenderer.cs` — star/planet body+glow+atmosphere drawing, orbit rings, planet-sphere GPU meshes.
+- `Camera3D.cs` — quaternion free-look camera, origin-shift rendering, `RenderScale` constant (`1e-9`), `ToRenderSpace`.
+- `CelestialBodyRenderer.cs` — star/planet body+glow+atmosphere drawing, orbit rings, planet-sphere GPU meshes (own UV-sphere tessellation, independent of `MeshFactory.CreateSphere`).
+- `ChamferedBox.cs` — generic axis-aligned chamfered-box geometry (6 faces/12 edge chamfers/8 corners) from one canonical 24-vertex set, auto-corrected winding.
+- `DetailLevel.cs` — render detail-tier enum (accepted by several draw calls, not yet used for LOD branching).
+- `DynamicLitMaterialSettings.cs` — named specular presets (Off/Subtle/Default/Strong/Tight) for `DynamicLit*` draw calls.
+- `EngineMeshBuilder.cs` / `EngineGpuMesh.cs` — build and upload authored engine visual geometry, including the mirrored-across-hull-X winding flip.
 - `GeometryBuilder.cs` — face/winding helpers (`AddConvexFace`/`AddFace`), `BuildDynamic` (VertexPositionNormalColorTexture, White baked, ship hull/nacelle/pylon), `BuildBaked` (VertexPositionColor, currently no callers).
-- `MeshFactory.cs` — sphere/ring mesh generation.
+- `MeshFactory.cs` — sphere/ring/billboard-quad/box mesh generation. `CreateSphere` is used (star sphere); `CreateBox`/`CreateQuad` are dead code (zero callers) — early prototype geometry that predates station generation, superseded in spirit by `ChamferedBox`/`StationGenerator.PrepareBoxHullMesh`, never wired up or removed.
 - `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`). DynamicLit callers share explicit specular/shininess, material-map, bump-strength and render-space eye-position binding; the default eye remains `Vector3.Zero` for origin-shifted `Camera3D` passes.
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
-- `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes.
-- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules through the same DynamicLit material/effect path. Cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override, local render scale and preview eye position, then invalidate the semantic mesh cache after edits.
+- `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes; `LightFactor(normal)` is the canonical N·L-vs-ambient formula.
+- `SemanticHullMeshBuilder.cs` / `SemanticHullGpuMesh.cs` — build and upload authored semantic ship-hull geometry from `SemanticHullGeometry`, grouped by render role (structural/engine-mount/cargo-door/cockpit frame/cockpit glass); validates winding against the author-declared outward normal.
+- `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules through the same DynamicLit material/effect path. Cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override, local render scale and preview eye position, then invalidate the semantic mesh cache after edits. Also owns a small baked-line debug-glyph renderer (surface-role axis labels), independent of the station bitmap-font/`PlanarTextGeometry` text path.
 - `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
-- `Type1HullFactory.cs` — builds the Type-1 ship hull/nacelle/pylon meshes.
+- `StationBrightnessTuning.cs` — live-tunable decoration-brightness multiplier, variant value floor, compression strength, and saturation falloff for station texture generation; baked defaults after Brief B5.
+- `SunTuning.cs` — live-tunable sun glare/disc parameters (glare layer alphas, size multiplier, disc floor pixels) backing the sun tuning panel.
+- `Type1HullFactory.cs` — builds the Type-1 (legacy fallback) ship hull/nacelle/pylon meshes, used only when a hull has no `VisualGeometry`.
+- `VertexPositionNormalColorTexture.cs` — the shared lit-mesh vertex format (position/normal/colour/UV/`ArtificialLight`).
 
 ---
 
@@ -400,11 +408,17 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 **Station/** — procedural station generation
 
-- `BitmapFonts.cs` — 5×7 pixel bitmap font glyphs (A–Z, 0–9, space, hyphen, plus) with lit-pixel queries.
+- `BitmapFonts.cs` — 5×7 pixel bitmap font glyphs (A–Z, 0–9, space, hyphen, plus) with lit-pixel queries; the glyph source both `PlanarTextGeometry` and `TexturePainter` read.
+- `DockingBayHull.cs` — `MeshFactory`-built docking-bay hull: chamfered walls, door frame, throat, interior walls; pad-driven sizing via `DockingBayLayout`.
+- `DockingBayLayout.cs` — `DockingBayLayout.Compute`: seeded pad-mix envelope/door-dimension derivation for docking bays.
 - `PlacedModule.cs` — a placed station module: transform, decoration meshes, lights, ports.
+- `PlanarTextGeometry.cs` — the sole low-level bitmap-font-to-mesh authority for text on any planar 3D surface (containers, tanks, docking-bay signage, calibration cube, landing pads, megastation identity/pad markings). `DeriveFrame` guarantees a proper-handed `(right, up, normal)` triple from a caller-supplied surface normal + reading direction, throwing rather than emitting a reflected frame — see `Docs/architecture-inventory-A1.md` for where mirroring can still arise from a caller's own choice of reading direction.
 - `StationArchetypes.cs` — port-scoring/category-biasing growth strategies (cluster, linear-spine, hub-spoke).
 - `StationCableGenerator.cs` — routes cable bundles between greeble connectors on module faces.
-- `StationDecorator.cs` — adds per-module decoration (windows, hatches, antennas, dishes, lights, pipes). Tags `mesh.CurrentDecorClass` before each pass call (Phase C); `DecorCastingPolicy` is the static `DecorClass → bool` casting-policy table (with `C1Classes`.. `C4Classes` rollout groupings), the executable form of `Docs/station-lighting-pipeline-spec.md`'s documented casting policy.
+- `StationDecorator.cs` + `.Antennas.cs`/`.Containers.cs`/`.Faces.cs`/`.Greebles.cs`/`.Lights.cs`/`.Panels.cs`/`.Pipes.cs`/`.Structures.cs`/`.Tanks.cs`/`.Windows.cs`/`.Zones.cs` — adds per-module decoration (windows, hatches, antennas, dishes, lights, pipes, tanks, containers, panel seams, zoning); split into 11 `partial` files by section, pure move, see `!current-state.md`'s "StationDecorator mechanical split" entry. `StationDecorator.cs` itself holds `Decorate`/policy/AO; tags `mesh.CurrentDecorClass` before each pass call (Phase C); `DecorCastingPolicy` is the static `DecorClass → bool` casting-policy table (with `C1Classes`.. `C4Classes` rollout groupings), the executable form of `Docs/station-lighting-pipeline-spec.md`'s documented casting policy.
+- `StationIndustrialPrimitives.cs` — shared industrial-greeble primitives (tank core/cap geometry, vent framing) factored out of `StationDecorator.Tanks.cs` for reuse by megastation infrastructure.
+- `StationWindowVisuals.cs` — window/porthole/cupola visual geometry helpers used by `StationDecorator.Windows.cs` and megastation window placement.
+- `StructuralTrussFactory.cs` — stateless reusable box/triangular manufactured lattice geometry, used by megastation wall/ceiling trusses and shelf structures.
 - `StationGenerator.cs` — builds stations by port-to-port module attachment and collision detection. `PrepareCpu` creates module/decor geometry, flat/AO variants, megastation geometry, procedural texture pixels, final vertex/index arrays, shadow-caster selections/bounds, and the ordered station upload plan without a `GraphicsDevice`. The legacy standalone `Generate` convenience path still uses `UploadPrepared`; dynamic residency uses the frame-budgeted session instead.
 - `StationModuleDefinition.cs` — hull definition for a module: bounding box, category, ports, mesh factory, weight.
 - `StationModuleMesh.cs` — CPU-side mesh accumulator for quads/triangles in local module space. Phase C: `DecorClass` enum + `CurrentDecorClass`/`DecorClassRanges`; every index-appending call records its range via `RecordDecorClassRange`; `PrepareIndexRanges` performs the same compact remap as `BuildIndexRanges` but returns final CPU arrays for worker-side upload preparation; `ComputeFaceRangeBounds`/`ComputeIndexRangeBounds` return module-local AABBs used by shadow fitting.
@@ -420,7 +434,9 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `TexturePainter.cs` — CPU pixel-buffer text drawing using `BitmapFonts`.
 - `TexturePalette.cs` — per-economy colour scheme (base/accent/grime, panel noise/contrast).
 
-**Station/Megastations/** — occupancy-generated megastation prototype path
+**Station/Megastations/** — occupancy-generated megastation structural path plus the presentation layers built on top of it. 49 source files; this section was significantly incomplete (20/49 listed) until the A1 inventory pass (2026-09-11) — one-liners below for the newly-added files are name/class-derived, not individually deep-read the way `Inferior.Rendering`'s were; treat as a locator, verify against the file for anything load-bearing.
+
+*Structural massing (Prototypes A→C2, see `!current-state.md`):*
 
 - `ConnectivityValidation.cs` — GraphicsDevice-free validation of occupied-volume connected components and sealed empty cavities.
 - `BoundaryMeshValidation.cs` — CPU-side final-array mesh validation for finite vertices, bounds, degenerates, duplicate triangles, open/non-manifold edges, T-junctions, and sliver components.
@@ -433,15 +449,57 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `MegastationPrototypeGenerator.cs` — CPU/GPU entry point for megastation generation, diagnostics, and single-module station-model wrapping.
 - `MegastationPrototypeMeshBuilder.cs` — consumes regularised occupancy boundary topology, validates sharp/final meshes, and emits the current render mesh with debug colour modes.
 - `MegastationPrototypeSettings.cs` — generation settings, development-selection source, and generator/seed compatibility version declarations.
-- `MegastationServiceChannels.cs` — SC2/SC2a deterministic planar network planner (primary trunks, light/channel-rich secondary composition, turns, covered utility-junction variants, dead ends and bridges), full-footprint support/reservation rejection, false-trench and node visible/caster emission, M1 material grouping, diagnostics, and Debug route/node lines.
 - `MegastationSeed.cs` — stable semantic FNV-style seed derivation for megastation subsystems.
 - `RegionPlans.cs` — stable region identities and edge/corner plan records.
 - `SliceGrid.cs` — deterministic non-uniform rectilinear grid, core ranges, exterior layers, and cell coordinate helpers.
 - `StructuralOccupancy.cs` — compact per-cell occupancy flags, owner metadata, and stable region ids.
 - `StructuralVolumeGenerator.cs` — fills the current cuboid structural core occupancy baseline.
 - `SurfacePatch.cs` — exposed-face patch records and patch-local coordinate discovery.
+- `TopologyRegularisation.cs` — `TopologyRegulariser`: C0's material-only topology-regularisation pass between raw massing and mesh generation.
 - `UrbanGrowth.cs` — monotonic face-interior district/depth-map growth for each major surface patch.
 - `UrbanStyle.cs` — station-wide style tendencies and deterministic per-face settings modifiers.
+- `MegastationDevelopmentPolicy.cs` — one authority for the development-time ordinary-vs-megastation decision (which stations in the galaxy become megastations).
+
+*Zoning, presentation substrate, materials:*
+
+- `SemanticZoning.cs` — Z1 deterministic semantic-zone assignment from exact boundary topology (`MegastationSemanticZoningResult`).
+- `MegastationWindows.cs` — `MegastationWindowPlanner`: Z2a deterministic habitation-window geometry.
+- `MegastationLighting.cs` — `MegastationLightingPlanner`: Z2b topology/role-driven glow lights.
+- `MegastationPlanarRegions.cs` — canonical CPU-side connected coplanar substrate shared by G1 attachments, G2a infrastructure, Fabric, mega-greeble, and Service Channels.
+- `MegastationAttachments.cs` — `MegastationAttachmentTransform`: G1 attached secondary-structure (module-as-greeble) placement/transform.
+- `MegastationInfrastructure.cs` — `MegastationInfrastructurePlanner`: G2a native machinery-housing/ventilation/tank installations.
+- `MegastationMegaGreebles.cs` — `MegastationMegaGreeblePlanner`: mega-greeble solar arrays (`SurfaceArray`, `RadialSolarWing`) and parabolic dishes — locked, see `!current-state.md`.
+- `MegastationFabricStructures.cs` — `MegastationFabricPlanner`: Fabric architectural layer (`UtilityHall`/`SteppedBlock`/`Warehouse`/`TechnicalTower`/`MachineryBlock`/`ServiceCompound`).
+- `SystemMaterialLibrary.cs` — M1 shared system-lifetime material library (`DullStructuralMetal`/`PaintedCoatedMetal`/`HeavyIndustrialPlate`/`CleanTechnicalAlloy`), reused by structural hull and Fabric.
+- `MegastationServiceChannels.cs` — SC1/SC2/SC2a deterministic planar network planner (primary trunks, light/channel-rich secondary composition, turns, covered utility-junction variants, dead ends and bridges), full-footprint support/reservation rejection, false-trench and node visible/caster emission, M1 material grouping, diagnostics, and Debug route/node lines.
+- `MegastationChannelComposition.cs` — SC3: derives buildable G2/Fabric relationships from the authoritative SC2 channel plan, making those layers channel-aware.
+
+*Flight interior, entrances, artificial lighting (H1 series):*
+
+- `MegastationInteriors.cs` — `MegastationInteriorPlanner`: H1/H1a/H1b protected flight cavity, exterior throat, and the thick-walled tube replacing the raw excavation.
+- `MegastationApproachFixtures.cs` — H1e's accepted crown/face-mounted approach-guidance-beam fixture, shared by both mount styles.
+- `MegastationArtificialLighting.cs` — H1c-A/B static per-vertex artificial interior lighting (direct sources + weak bounce term).
+- `MegastationArtificialOcclusion.cs` — H1c-C generation-only visibility scene for static artificial light against structural mass and major occluders.
+- `MegastationInteriorHaze.cs` — H1h distance-based interior colour-separation presentation policy (halted proof of concept, not finalized atmosphere).
+
+*Landing infrastructure and Mega Shelves (L series):*
+
+- `MegastationLandingDistrict.cs` — `MegastationLandingPadAssemblyStandards`: Landing Site/pad geometry, frontage, markings, and identity placards (includes several `PlanarTextGeometry.Add` call sites).
+- `MegastationBayHabitation.cs` — `MegastationBayHabitationPlanner`: L3a/L3b sparse habitation windows and facility/gallery selection on bay walls.
+- `MegastationBayFacilities.cs` — `MegastationBayWallCompositionPlanner`: coordinates habitation/facility/truss/cable/utility wall composition into one plan (L3b.2).
+- `MegastationBayStructuralTrusses.cs` — `MegastationBayStructuralTrussPlanner`: L3d-A deterministic wall/ceiling truss fields via the shared truss factory.
+- `MegastationBayUtilities.cs` — `MegastationBayUtilityPlanner`: L3d-B cable-trunk/branch/junction-box networks anchored to wall frames.
+- `MegastationBaySecondaryUtilities.cs` — `MegastationBaySecondaryUtilityPlanner`: L3d-C rigid pipe banks, transverse supports, manifolds, vents, hatches, ladders.
+- `MegastationMegaShelves.cs` — macro-structural shelf planner: Cantilever/Corner/FullSpan shelf families (L4a-c).
+- `MegastationBookcases.cs` — stacked multi-level Bookcase shelf composition (L4d-g).
+- `MegastationShelfLighting.cs` — L4f shelf-owned static work floods and paired obstacle beacons.
+
+*Bolon (separate molecular-vessel megastation archetype):*
+
+- `BolonMegastations.cs` — `BolonVesselRelationshipMode` + B1: low-degree molecular graph of joined C60 pressure vessels.
+- `BolonMegastationSurfaces.cs` — `BolonSurfacePresentationPlanner`: B2 vessel-wide surface-history material regions.
+- `BolonPentagonalUtilities.cs` — `BolonPentagonalUtilityPlanner`: B3a pentagonal reinforcement collars/irises/rosettes.
+- `BolonAmbassadorBay.cs` — B4a/B4a.1: one deterministic flyable ambassador bay on a reserved hex face, with H1e-style approach beams and a rear visitor port.
 
 ---
 

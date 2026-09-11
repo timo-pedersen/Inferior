@@ -19,7 +19,7 @@ public sealed class TextBlock : Control
             float scale = FontScale ?? 1f;
             int width = Bounds.Width > 0 ? Bounds.Width : 240;
             string[] lines = BuildLines(font, scale, Math.Max(1, width - Padding * 2)).ToArray();
-            int lineHeight = (int)MathF.Ceiling(font.MeasureString("A").Y * scale);
+            int lineHeight = (int)MathF.Ceiling(FontHelper.Measure(font, "A", scale).Y);
             return new Point(width, Padding * 2 + lineHeight * Math.Max(1, lines.Length));
         }
     }
@@ -29,7 +29,7 @@ public sealed class TextBlock : Control
         if (!Visible || string.IsNullOrEmpty(Text)) return;
         SpriteFont font = EffectiveFont(theme);
         float scale = EffectiveFontScale(theme);
-        int lineHeight = (int)MathF.Ceiling(font.MeasureString("A").Y * scale);
+        int lineHeight = (int)MathF.Ceiling(FontHelper.Measure(font, "A", scale).Y);
         Rectangle area = AbsoluteBounds;
         IEnumerable<string> lines = BuildLines(font, scale, Math.Max(1, area.Width - Padding * 2));
         renderer.DrawWithClip(sb, EffectiveClipBoundsForSelf(), () =>

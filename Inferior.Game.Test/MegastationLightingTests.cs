@@ -248,11 +248,13 @@ public sealed class MegastationLightingTests
             materialAssignment: result.MaterialAssignment,
             interiorPlan: result.InteriorPlan,
             artificialLighting: result.ArtificialLightingPlan,
+            // See the same fix + explanation in MegastationWindowTests.cs / MegastationSemanticZoningTests.cs.
             artificialOcclusion: MegastationArtificialOcclusion.Build(
                 result.RegularisedOccupancy,
                 result.LandingDistrictPlan,
                 result.InteriorPresentationPlan,
-                result.BayFacilityPlan),
+                result.BayFacilityPlan,
+                result.MegaShelfPlan.StructuralSolids),
             bayFacilities: result.BayFacilityPlan);
         PlacedModule module = MegastationPrototypeGenerator.CreatePlacedModule(result);
 
@@ -267,8 +269,15 @@ public sealed class MegastationLightingTests
         Assert.Equal(
             result.LightPlan.Lights.Select(light => light.ToStationLightInfo()),
             module.GlowLights.Take(result.LightPlan.Lights.Count));
+        // Same missing-term class as the occlusion fix above: module.GlowLights also carries
+        // shelf obstacle-beacon and flood-fixture glow lights (CreatePlacedModule, gated on
+        // InteriorPlan.ShelfLighting) on top of the base LightPlan lights and guidance markers
+        // this assertion originally accounted for alone.
+        int shelfGlowLightCount = result.InteriorPlan.ShelfLighting is { } shelfLighting
+            ? shelfLighting.Beacons.Count + shelfLighting.FloodFixtures.Count
+            : 0;
         Assert.Equal(
-            result.InteriorPresentationPlan.Markers.Count,
+            result.InteriorPresentationPlan.Markers.Count + shelfGlowLightCount,
             module.GlowLights.Count - result.LightPlan.Lights.Count);
         Assert.Same(result.InfrastructureMesh, module.Mesh);
         Assert.True(module.HasNativeMegastationInfrastructure);

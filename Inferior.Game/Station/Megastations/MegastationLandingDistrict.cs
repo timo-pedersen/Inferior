@@ -701,9 +701,20 @@ public static class MegastationLandingDistrictPlanner
                 $"shelf-utilization-priority:{surface.Surface.Identity}")))
             .ToArray();
         int desiredOccupiedShelves = DesiredOccupiedShelfCount(seed, shelfSurfaces.Length);
+        // Timo: "I definitely do not want less than three [total landing sites] in a mega
+        // station landing bay." DesiredOccupiedShelfCount's own "mostly occupied" quota above
+        // is a target, not a floor (it can legitimately land on 0 for a sparse/single-shelf
+        // station) and the floor-only roll above can land on 1-2 sites — neither on its own
+        // guaranteed a 3-site total, and forceLandingSiteOnShelf (which only forces ONE site)
+        // defaults to false in Runtime settings, so production wasn't enforcing this either.
+        // MinimumTotalSites keeps the loop going past the ordinary quota, still preferring
+        // shelf surfaces first (keeping shelves themselves "mostly occupied" true), only
+        // falling through to the floor-capacity top-up below once shelf surfaces run out.
+        const int minimumTotalSites = 3;
         foreach (SurfaceCandidate surface in shelfSurfaces)
         {
-            if (placements.Count(item => !item.Surface.IsMainFloor) >= desiredOccupiedShelves)
+            if (placements.Count(item => !item.Surface.IsMainFloor) >= desiredOccupiedShelves
+                && placements.Count >= minimumTotalSites)
                 break;
             int siteIndex = placements.Count;
             int child = MegastationSeed.Derive(seed,
@@ -747,6 +758,27 @@ public static class MegastationLandingDistrictPlanner
                 structuralClearance, structuralRejections,
                 ref structuralEnvelopeRejects, ref structuralComponentRejects,
                 forceShelf: true);
+        }
+
+        // Floor-only fallback for the minimumTotalSites guarantee above: fires only when a
+        // station has too few (or zero) eligible shelf surfaces to reach 3 sites via shelf
+        // hosting alone. Same "target, not permission" discipline as the pad-capacity top-up
+        // earlier — degrades to whatever fits rather than forcing an invalid placement.
+        {
+            int floorTopUpAttempts = 0;
+            while (placements.Count < minimumTotalSites && floorTopUpAttempts++ < 3)
+            {
+                int index = placements.Count;
+                int child = MegastationSeed.Derive(seed, $"minimum-site:{index}");
+                var minimumSpec = new SiteSpecification(
+                    3 + (int)(Unit(child, "pad-count") * 3f), PickCharacter(child), child);
+                if (!TryPlaceBest(minimumSpec, index, placements, floorSurfaces,
+                        canonicalRight, canonicalForward, up,
+                        structuralClearance, structuralRejections,
+                        ref structuralEnvelopeRejects, ref structuralComponentRejects,
+                        forceShelf: false))
+                    break;
+            }
         }
 
         var sites = new List<MegastationLandingSitePlan>(placements.Count);
@@ -1386,10 +1418,26 @@ public static class MegastationLandingDistrictPlanner
                 MegastationBerthClearance footprint = OrientedEnvelope(
                     centre, canonicalRight, canonicalForward, right, forward,
                     metrics.ApronSize.X, metrics.ApronSize.Y, 0f);
-                if (!surface.Usable.Contains(footprint)) return;
+                // A1 follow-up: only the bare apron footprint is checked against the
+                // surface's usable bounds here. `envelope` below (footprint + a
+                // SiteSeparation/2 halo) is what actually gets stored as the site's
+                // InfrastructureEnvelope, and it CAN legitimately poke past surface.Usable -
+                // most visibly for WallIntegrated shelf sites, where the candidate frame is
+                // the host wall's own local right/forward, not necessarily aligned with the
+                // canonical axes surface.Usable is expressed in, so checking the padded
+                // envelope here isn't a like-for-like comparison for those. Tried gating on
+                // `surface.Usable.Contains(envelope)` and it regressed WallIntegrated
+                // shelf-site placement (ForcedBookcaseLayoutsAreCoherentProductionCompositions
+                // and others) - reverted. The known gap is real (confirmed via
+                // MegastationMegaShelfTests.LargeBayCanAcceptMoreThanTwoBayWideShelvesWithoutOverlap,
+                // a WallIntegrated site sitting exactly SiteSeparation/2 outside its shelf's
+                // usable bounds) but fixing it properly needs the WallIntegrated branch to
+                // reserve its own separation margin in the wall's local frame, not a canonical-
+                // axis containment check - left as a separate, scoped follow-up.
                 MegastationBerthClearance envelope = OrientedEnvelope(
                     centre, canonicalRight, canonicalForward, right, forward,
                     metrics.ApronSize.X, metrics.ApronSize.Y, SiteSeparation * .5f);
+                if (!surface.Usable.Contains(footprint)) return;
                 if (accepted.Any(item =>
                         MathF.Abs(Vector3.Dot(item.Surface.Centre, up) - surface.Height)
                             < MathF.Max(item.RequiredClearHeight, requiredHeight)

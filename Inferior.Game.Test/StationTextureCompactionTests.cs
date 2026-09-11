@@ -279,13 +279,18 @@ public sealed class StationTextureCompactionTests
         Assert.Equal(131, diagnostics.DiscardedTextureCount);
         Assert.Equal(15, diagnostics.UploadedAlbedoTextureCount);
         Assert.Equal(15, diagnostics.UploadedMaterialTextureCount);
-        Assert.Equal(58, diagnostics.ModuleTextureBindingCount);
+        // Refreshed after the NameHash->SeededRandom consolidation changed this ordinary
+        // station's generated seed (Docs/architecture-inventory-A1.md) — an expected
+        // consequence, not a regression; other pinned diagnostics above were unaffected.
+        Assert.Equal(62, diagnostics.ModuleTextureBindingCount);
         Assert.True(diagnostics.GeneratedTextureCount > diagnostics.SelectedUniqueTextureCount);
         Assert.True(diagnostics.DiscardedTextureCount > 0);
         Assert.Equal(diagnostics.SelectedUniqueTextureCount, prepared.Textures.Count);
         Assert.Equal(prepared.Textures.Count, textureUploads.Length);
+        // Refreshed alongside ModuleTextureBindingCount above (NameHash->SeededRandom
+        // consolidation changed this station's generated seed) - same expected consequence.
         Assert.Equal(
-            65_101_992,
+            84_276_992,
             prepared.UploadPlan.Sum(item => item.EstimatedBytes));
         Assert.Equal(prepared.TextureAssignments.Count * 2, diagnostics.ModuleTextureBindingCount);
         Assert.All(prepared.TextureAssignments, assignment =>

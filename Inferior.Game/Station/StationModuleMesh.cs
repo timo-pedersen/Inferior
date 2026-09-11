@@ -167,15 +167,45 @@ public sealed class StationModuleMesh
     // Adds a flat quad from four explicit corner vertices (CW from normal side).
     // UV coordinates are projected from the face plane; 1 UV unit = 5 metres.
     // Returns the index of v0 in the vertex array.
+    // A1 inventory finding: unlike its sibling AddQuadProjected (which validates the
+    // computed normal against a caller-supplied expectedNormal and flips if wrong), this
+    // method used to trust caller winding unconditionally — a degenerate v0/v1/v2 left
+    // `normal` un-normalized (near-zero or garbage) and kept going silently, and a v3 that
+    // didn't actually lie in the v0/v1/v2 plane (or was ordered backwards) produced a
+    // twisted/inside-out quad with no error at all. These gates catch both classes at
+    // generation time instead of shipping bad geometry silently — a real, if intermittent,
+    // source of inverted-normal/backwards-looking faces during development. Deliberately
+    // unconditional for now (matches every other throwing geometry check in this codebase —
+    // SemanticHullMeshBuilder, CockpitMeshBuilder, PlanarTextGeometry); gating these behind
+    // a debug-only flag is planned follow-up work, not done here.
     public int AddQuad(Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Color color)
     {
+        if (!IsFiniteVector(v0) || !IsFiniteVector(v1) || !IsFiniteVector(v2) || !IsFiniteVector(v3))
+            throw new ArgumentException("AddQuad vertices must be finite (no NaN/Infinity).");
+
         int b = _verts.Count;
 
         Vector3 edge0  = v1 - v0;
         Vector3 edge1  = v2 - v0;
         Vector3 normal = Vector3.Cross(edge0, edge1);
         float   nLen   = normal.Length();
-        if (nLen > 1e-6f) normal /= nLen;
+        if (nLen <= 1e-6f)
+            throw new InvalidOperationException(
+                "AddQuad's first triangle (v0, v1, v2) is degenerate or near-zero-area.");
+        normal /= nLen;
+
+        // Second triangle (v0, v2, v3) should wind the same way as the first — a
+        // differently-ordered or non-planar v3 flips or degenerates it, producing a
+        // twisted quad that would otherwise pass through unnoticed.
+        Vector3 normal2 = Vector3.Cross(v2 - v0, v3 - v0);
+        if (normal2.LengthSquared() <= 1e-12f)
+            throw new InvalidOperationException(
+                "AddQuad's second triangle (v0, v2, v3) is degenerate or near-zero-area.");
+        if (Vector3.Dot(Vector3.Normalize(normal2), normal) <= 0f)
+            throw new InvalidOperationException(
+                "AddQuad's four vertices do not form a consistently-wound planar quad — " +
+                "check v3's position/order relative to v0, v1, v2.");
+
         Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
@@ -190,6 +220,9 @@ public sealed class StationModuleMesh
         _faces.Add((b, 4));
         return b;
     }
+
+    private static bool IsFiniteVector(Vector3 v)
+        => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
 
     private static Vector2 FaceUV(Vector3 offset, Vector3 uAxis, Vector3 vAxis, float uvScale)
         => new(Vector3.Dot(offset, uAxis) / uvScale,
