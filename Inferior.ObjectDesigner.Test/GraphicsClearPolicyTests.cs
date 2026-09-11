@@ -45,6 +45,21 @@ public sealed class GraphicsClearPolicyTests
         Assert.InRange(rootClear.Index, source.IndexOf("protected override void Draw", StringComparison.Ordinal), source.IndexOf("private void RenderPerspectiveTarget", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void ObjectDesigner_solid_preview_forces_opaque_shared_ship_renderer_path()
+    {
+        string source = File.ReadAllText(FindRepoFile("Inferior.ObjectDesigner", "ObjectDesignerGame.cs"));
+        string prepare = ExtractMethod(source, "private void RenderPerspectiveTarget");
+        int solidBranch = prepare.IndexOf("PerspectiveDisplayMode.Solid", StringComparison.Ordinal);
+        int opaque = prepare.IndexOf("GraphicsDevice.BlendState = BlendState.Opaque;", solidBranch, StringComparison.Ordinal);
+        int draw = prepare.IndexOf("_shipRenderer.Draw(", solidBranch, StringComparison.Ordinal);
+
+        Assert.True(solidBranch >= 0, "Solid display branch was not found.");
+        Assert.True(opaque > solidBranch, "Solid display branch must force opaque blending before shared rendering.");
+        Assert.True(draw > opaque, "Solid display branch must use the shared ship renderer after forcing opaque blending.");
+        Assert.DoesNotContain("DrawGlassPreviewHull(GraphicsDevice, renderHull", prepare[..draw]);
+    }
+
     private static string ExtractMethod(string source, string signature)
     {
         int start = source.IndexOf(signature, StringComparison.Ordinal);

@@ -15,6 +15,7 @@ public sealed class ObjectDesignerCompositionFixtureTests
         AssertPositive("toolbar", fixture.Toolbar.AbsoluteBounds);
         AssertPositive("2d", fixture.TwoD.ContentBounds);
         AssertPositive("3d", fixture.ThreeD.ContentBounds);
+        AssertPositive("3d footer", fixture.ThreeDFooter.AbsoluteBounds);
         AssertPositive("properties", fixture.Properties.AbsoluteBounds);
         AssertPositive("diagnostics", fixture.Diagnostics.AbsoluteBounds);
         AssertPositive("status", fixture.Status.AbsoluteBounds);
@@ -22,6 +23,8 @@ public sealed class ObjectDesignerCompositionFixtureTests
         AssertNonEmptyClip("3d", fixture.ThreeD);
         AssertNoTotalOverlap(fixture.Toolbar.AbsoluteBounds, fixture.TwoD.ContentBounds);
         AssertNoTotalOverlap(fixture.Toolbar.AbsoluteBounds, fixture.ThreeD.ContentBounds);
+        Assert.True(fixture.ThreeD.ContentBounds.Bottom <= fixture.ThreeDFooter.AbsoluteBounds.Top, "3D render viewport overlapped the footer.");
+        AssertNoTotalOverlap(fixture.ThreeDFooter.AbsoluteBounds, fixture.Properties.AbsoluteBounds);
         AssertNoTotalOverlap(fixture.TwoD.ContentBounds, fixture.Properties.AbsoluteBounds);
         AssertNoTotalOverlap(fixture.ThreeD.ContentBounds, fixture.Status.AbsoluteBounds);
     }
@@ -61,6 +64,9 @@ public sealed class ObjectDesignerCompositionFixtureTests
         StackPanel Toolbar,
         DesignerSurfaceControl TwoD,
         DesignerSurfaceControl ThreeD,
+        Panel ThreeDFooter,
+        Button DisplayModeButton,
+        Label PreviewStateLabel,
         CollapsiblePanel Properties,
         TextBlock Diagnostics,
         Label Status)
@@ -96,8 +102,21 @@ public sealed class ObjectDesignerCompositionFixtureTests
             right.Rows.Add(GridLength.Fixed(310));
             root.Add(right, 1, 1);
 
+            var perspectivePane = new GridPanel { Overflow = OverflowMode.Clip };
+            perspectivePane.Columns.Add(GridLength.Star());
+            perspectivePane.Rows.Add(GridLength.Star());
+            perspectivePane.Rows.Add(GridLength.Fixed(34));
+            right.Add(perspectivePane, 0, 0);
+
             var threeD = new DesignerSurfaceControl(DesignerSurfaceKind.Perspective, "3D preview");
-            right.Add(threeD, 0, 0);
+            perspectivePane.Add(threeD, 0, 0);
+
+            var footer = new Panel { ContentPadding = 3 };
+            var displayButton = new Button("DISPLAY: SOLID", new Rectangle(0, 0, 150, 28));
+            var previewLabel = new Label("CURRENT", new Rectangle(170, 2, 160, 24));
+            footer.Add(displayButton);
+            footer.Add(previewLabel);
+            perspectivePane.Add(footer, 0, 1);
 
             var properties = new CollapsiblePanel { Header = "Properties", Margin = new Thickness(0, 6, 0, 0) };
             var panel = new Panel { Bounds = new Rectangle(0, 0, 330, 270), ContentPadding = 8 };
@@ -112,9 +131,10 @@ public sealed class ObjectDesignerCompositionFixtureTests
 
             root.Update(0);
             right.Update(0);
+            perspectivePane.Update(0);
             properties.Update(0);
             panel.Update(0);
-            return new ObjectDesignerFixture(toolbar, twoD, threeD, properties, diagnostics, status);
+            return new ObjectDesignerFixture(toolbar, twoD, threeD, footer, displayButton, previewLabel, properties, diagnostics, status);
         }
     }
 }

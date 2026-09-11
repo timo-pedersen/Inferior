@@ -80,26 +80,7 @@ public sealed class ObjectDesignerRenderedSmokeTests
     public void ObjectDesigner_3d_overlay_draws_invalid_current_perimeter_over_last_valid_preview()
     {
         using TempAsset asset = TempAsset.FromBeren();
-        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
-        session.Document.Hull.VisualGeometry.RequireClosedHull = false;
-        session.Document.Hull.VisualGeometry.Vertices.Clear();
-        session.Document.Hull.VisualGeometry.Faces.Clear();
-        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.a", Position = Vec3Dto.From(new DVec3(-4, -2, 0)) });
-        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.b", Position = Vec3Dto.From(new DVec3(4, -2, 0.4)) });
-        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.c", Position = Vec3Dto.From(new DVec3(4, 2, 0)) });
-        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.d", Position = Vec3Dto.From(new DVec3(-4, 2, 0)) });
-        session.Document.Hull.VisualGeometry.Faces.Add(new SemanticHullFaceDto
-        {
-            Id = "overlay.invalid",
-            VertexIds = ["overlay.a", "overlay.b", "overlay.c", "overlay.d"],
-            Role = HullSurfaceRole.ServiceSurface,
-            MaterialGroup = "test",
-            OutwardNormal = Vec3Dto.From(DVec3.UnitZ),
-            ContributesToClosedHull = false,
-        });
-        session.Rebuild();
-        session.SelectVertex("overlay.a", extend: false);
-        Assert.True(session.SelectActiveFace("overlay.invalid"));
+        ObjectDesignerSession session = BuildOverlaySession(asset.Path, includeOrdinaryFace: false);
         Assert.True(session.IsPreviewStale);
 
         RenderedFrame frame = RenderHarness.Render(320, 240, gd =>
@@ -116,7 +97,7 @@ public sealed class ObjectDesignerRenderedSmokeTests
 
             Matrix view = Matrix.CreateLookAt(new Vector3(0, 0, 30), Vector3.Zero, Vector3.UnitY);
             Matrix projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(35f), 320f / 240f, 0.05f, 400f);
-            typeof(ObjectDesignerGame).GetMethod("DrawPerspectiveEditorOverlay", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, [gd, view, projection]);
+            typeof(ObjectDesignerGame).GetMethod("DrawPerspectiveEditorOverlay", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, [gd, view, projection, PerspectiveDisplayMode.Glass]);
         });
 
         int shadedPixels = CountPixels(frame, ThreeD);
@@ -126,6 +107,72 @@ public sealed class ObjectDesignerRenderedSmokeTests
         Assert.True(shadedPixels > 70_000, $"The overlay should not clear or replace the shaded preview background; remaining blue pixels: {shadedPixels}.");
         Assert.True(invalidPixels > 0, "The invalid current face perimeter did not render in the 3D overlay.");
         Assert.True(activePixels > 0, "The active-face secondary outline did not render distinctly from the invalid highlight.");
+    }
+
+    [Fact]
+    public void ObjectDesigner_glass_preview_renders_translucent_shaded_faces()
+    {
+        RenderedFrame frame = RenderHarness.Render(320, 240, gd =>
+        {
+            gd.Clear(Color.Red);
+            var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+            typeof(ObjectDesignerGame).GetField("_glassEffect", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, new BasicEffect(gd)
+            {
+                VertexColorEnabled = true,
+                LightingEnabled = true,
+                TextureEnabled = false,
+                PreferPerPixelLighting = true,
+                SpecularColor = new Vector3(0.75f, 0.85f, 0.9f),
+                SpecularPower = 42f,
+            });
+            Matrix view = Matrix.CreateLookAt(new Vector3(0, 4, 42), Vector3.Zero, Vector3.UnitY);
+            Matrix projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(45f), 320f / 240f, 0.05f, 400f);
+            typeof(ObjectDesignerGame).GetMethod("DrawGlassPreviewHull", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(
+                game,
+                [gd, HullDefinitionLibrary.Get(BerenHullDefinitionFactory.HullId), view, projection]);
+        });
+
+        int redPixels = CountPixels(frame, Color.Red);
+        int tintedPixels = frame.Pixels.Count(pixel => pixel.R > pixel.G && pixel.G > pixel.B && pixel != Color.Red);
+        int brightPixels = frame.Pixels.Count(pixel => pixel.R > 95 && pixel.G > 45 && pixel.B > 40 && pixel != Color.Red);
+
+        Assert.True(redPixels > 40_000, $"Glass should preserve visible background through the hull; red pixels: {redPixels}.");
+        Assert.True(tintedPixels > 300, $"Glass did not blend shaded faces with the background; tinted pixels: {tintedPixels}.");
+        Assert.True(brightPixels > 10, $"Glass did not retain visible lighting/specular response; bright pixels: {brightPixels}.");
+    }
+
+    [Fact]
+    public void ObjectDesigner_solid_overlay_xrays_diagnostics_but_not_ordinary_wireframe()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = BuildOverlaySession(asset.Path, includeOrdinaryFace: true);
+
+        RenderedFrame frame = RenderHarness.Render(320, 240, gd =>
+        {
+            gd.Clear(ThreeD);
+            DrawDepthOccluder(gd);
+            var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+            typeof(ObjectDesignerGame).GetField("_session", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, session);
+            typeof(ObjectDesignerGame).GetField("_lineEffect", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(game, new BasicEffect(gd)
+            {
+                VertexColorEnabled = true,
+                LightingEnabled = false,
+                TextureEnabled = false,
+            });
+            Matrix view = Matrix.CreateLookAt(new Vector3(0, 0, 30), Vector3.Zero, Vector3.UnitY);
+            Matrix projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(35f), 320f / 240f, 0.05f, 400f);
+            typeof(ObjectDesignerGame).GetMethod("DrawPerspectiveEditorOverlay", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(
+                game,
+                [gd, view, projection, PerspectiveDisplayMode.Solid]);
+        });
+
+        int invalidPixels = CountPixelsNear(frame, new Color(245, 76, 64), tolerance: 40);
+        int activePixels = CountPixelsNear(frame, new Color(80, 230, 255), tolerance: 40);
+        int ordinaryPixels = CountPixelsNear(frame, new Color(112, 126, 130), tolerance: 24);
+
+        Assert.True(invalidPixels > 0, "Solid x-ray did not show the occluded invalid perimeter.");
+        Assert.True(activePixels > 0, "Solid x-ray did not show the active-face outline.");
+        Assert.True(ordinaryPixels < invalidPixels, $"Ordinary occluded wireframe should not be promoted to diagnostic x-ray strength: ordinary={ordinaryPixels}, invalid={invalidPixels}.");
     }
 
     [Fact]
@@ -372,6 +419,75 @@ public sealed class ObjectDesignerRenderedSmokeTests
         var lines = new List<VertexPositionColor>();
         typeof(ObjectDesignerGame).GetMethod("AddGrid", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(game, [lines, viewport]);
         return [.. lines];
+    }
+
+    private static ObjectDesignerSession BuildOverlaySession(string path, bool includeOrdinaryFace)
+    {
+        ObjectDesignerSession session = ObjectDesignerSession.Load(path);
+        session.Document.Hull.VisualGeometry.RequireClosedHull = false;
+        session.Document.Hull.VisualGeometry.Vertices.Clear();
+        session.Document.Hull.VisualGeometry.Faces.Clear();
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.a", Position = Vec3Dto.From(new DVec3(-4, -2, -2)) });
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.b", Position = Vec3Dto.From(new DVec3(4, -2, -1.6)) });
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.c", Position = Vec3Dto.From(new DVec3(4, 2, -2)) });
+        session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "overlay.d", Position = Vec3Dto.From(new DVec3(-4, 2, -2)) });
+        session.Document.Hull.VisualGeometry.Faces.Add(new SemanticHullFaceDto
+        {
+            Id = "overlay.invalid",
+            VertexIds = ["overlay.a", "overlay.b", "overlay.c", "overlay.d"],
+            Role = HullSurfaceRole.ServiceSurface,
+            MaterialGroup = "test",
+            OutwardNormal = Vec3Dto.From(DVec3.UnitZ),
+            ContributesToClosedHull = false,
+        });
+        if (includeOrdinaryFace)
+        {
+            session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "ordinary.a", Position = Vec3Dto.From(new DVec3(-1.5, -1.5, -2)) });
+            session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "ordinary.b", Position = Vec3Dto.From(new DVec3(1.5, -1.5, -2)) });
+            session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "ordinary.c", Position = Vec3Dto.From(new DVec3(1.5, 1.5, -2)) });
+            session.Document.Hull.VisualGeometry.Vertices.Add(new SemanticHullVertexDto { Id = "ordinary.d", Position = Vec3Dto.From(new DVec3(-1.5, 1.5, -2)) });
+            session.Document.Hull.VisualGeometry.Faces.Add(new SemanticHullFaceDto
+            {
+                Id = "overlay.ordinary",
+                VertexIds = ["ordinary.a", "ordinary.b", "ordinary.c", "ordinary.d"],
+                Role = HullSurfaceRole.ServiceSurface,
+                MaterialGroup = "test",
+                OutwardNormal = Vec3Dto.From(DVec3.UnitZ),
+                ContributesToClosedHull = false,
+            });
+        }
+        session.Rebuild();
+        session.SelectVertex("overlay.a", extend: false);
+        Assert.True(session.SelectActiveFace("overlay.invalid"));
+        return session;
+    }
+
+    private static void DrawDepthOccluder(GraphicsDevice gd)
+    {
+        using var effect = new BasicEffect(gd)
+        {
+            VertexColorEnabled = true,
+            Projection = Matrix.CreatePerspectiveFieldOfView(MathHelper.ToRadians(35f), 320f / 240f, 0.05f, 400f),
+            View = Matrix.CreateLookAt(new Vector3(0, 0, 30), Vector3.Zero, Vector3.UnitY),
+            World = Matrix.Identity,
+        };
+        var vertices = new[]
+        {
+            new VertexPositionColor(new Vector3(-5, 3, 0), Color.Black),
+            new VertexPositionColor(new Vector3(5, 3, 0), Color.Black),
+            new VertexPositionColor(new Vector3(5, -3, 0), Color.Black),
+            new VertexPositionColor(new Vector3(-5, 3, 0), Color.Black),
+            new VertexPositionColor(new Vector3(5, -3, 0), Color.Black),
+            new VertexPositionColor(new Vector3(-5, -3, 0), Color.Black),
+        };
+        gd.BlendState = BlendState.Opaque;
+        gd.DepthStencilState = DepthStencilState.Default;
+        gd.RasterizerState = RasterizerState.CullNone;
+        foreach (EffectPass pass in effect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            gd.DrawUserPrimitives(PrimitiveType.TriangleList, vertices, 0, 2);
+        }
     }
 
     private static void AssertFramebufferFade(float[] zooms, double coordinate, string label)

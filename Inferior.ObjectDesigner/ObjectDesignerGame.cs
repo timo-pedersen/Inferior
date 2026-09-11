@@ -24,6 +24,7 @@ public sealed class ObjectDesignerGame : Game
     private MeshRenderer _meshRenderer = null!;
     private ShipMeshRenderer _shipRenderer = null!;
     private BasicEffect _lineEffect = null!;
+    private BasicEffect _glassEffect = null!;
 
     private MouseState _previousMouse;
     private KeyboardState _previousKeys;
@@ -39,6 +40,7 @@ public sealed class ObjectDesignerGame : Game
     private bool _showCargo = true;
     private EditingConstraintMode _constraintMode = EditingConstraintMode.ViewPlane;
     private LinearSnapMode _snapMode = LinearSnapMode.Off;
+    private PerspectiveDisplayMode _perspectiveDisplayMode = PerspectiveDisplayMode.Solid;
     private float _yaw = -0.6f;
     private float _pitch = -0.25f;
     private float _distance = 42f;
@@ -75,6 +77,9 @@ public sealed class ObjectDesignerGame : Game
     private IncidentFaceRow[] _faceRows = [];
     private readonly Dictionary<IncidentFaceRow, string> _faceRowIds = [];
     private Label _statusLabel = null!;
+    private Button _displayModeButton = null!;
+    private Label _previewStateLabel = null!;
+    private PopupMenu? _displayModeMenu;
     private ChoiceGroup<ProjectionKind> _projectionChoices = null!;
     private ChoiceGroup<EditingConstraintMode> _constraintChoices = null!;
     private ChoiceGroup<LinearSnapMode> _snapChoices = null!;
@@ -119,6 +124,15 @@ public sealed class ObjectDesignerGame : Game
             VertexColorEnabled = true,
             LightingEnabled = false,
             TextureEnabled = false,
+        };
+        _glassEffect = new BasicEffect(GraphicsDevice)
+        {
+            VertexColorEnabled = true,
+            LightingEnabled = true,
+            TextureEnabled = false,
+            PreferPerPixelLighting = true,
+            SpecularColor = new Vector3(0.75f, 0.85f, 0.9f),
+            SpecularPower = 42f,
         };
 
         string assetPath = AssetPathResolver.ResolveAssetPath(BerenHullDefinitionFactory.AssetPath);
@@ -241,35 +255,44 @@ public sealed class ObjectDesignerGame : Game
             DynamicLitMaterialSettings material = DynamicLitMaterialSettings.Tight;
 
             HullDefinition previewHull = _session.PreviewHullDefinition;
+            HullDefinition renderHull = _session.IsPreviewStale ? previewHull : _session.HullDefinition;
             IReadOnlyList<EngineMountPresentationSnapshot>? engines = _showEngines
                 ? BuildEngineMountSnapshots(previewHull)
                 : null;
             CockpitPresentationSnapshot? cockpit = _showCockpit
                 ? BuildCockpitSnapshot(previewHull)
                 : null;
-            _shipRenderer.Draw(
-                camera,
-                view,
-                projection,
-                previewHull.HullTypeId,
-                DVec3.Zero,
-                Quaternion.Identity,
-                DetailLevel.Full,
-                specularStrength: material.SpecularStrength,
-                specularShininess: material.SpecularShininess,
-                _debugMode,
-                engines,
-                engineModuleDebug: false,
-                engineVisualTimeSeconds: _time,
-                cockpit,
-                previewHull,
-                renderScaleOverride: 1.0f,
-                eyePositionWorld: cameraPosition);
+            if (_perspectiveDisplayMode == PerspectiveDisplayMode.Solid)
+            {
+                GraphicsDevice.BlendState = BlendState.Opaque;
+                _shipRenderer.Draw(
+                    camera,
+                    view,
+                    projection,
+                    renderHull.HullTypeId,
+                    DVec3.Zero,
+                    Quaternion.Identity,
+                    DetailLevel.Full,
+                    specularStrength: material.SpecularStrength,
+                    specularShininess: material.SpecularShininess,
+                    _debugMode,
+                    engines,
+                    engineModuleDebug: false,
+                    engineVisualTimeSeconds: _time,
+                    cockpit,
+                    renderHull,
+                    renderScaleOverride: 1.0f,
+                    eyePositionWorld: cameraPosition);
+            }
+            else
+            {
+                DrawGlassPreviewHull(GraphicsDevice, renderHull, view, projection);
+            }
 
             if (_showCargo)
                 DrawCargoPreview(view, projection);
 
-            DrawPerspectiveEditorOverlay(GraphicsDevice, view, projection);
+            DrawPerspectiveEditorOverlay(GraphicsDevice, view, projection, _perspectiveDisplayMode);
         }
         finally
         {
@@ -289,13 +312,9 @@ public sealed class ObjectDesignerGame : Game
             return;
         renderer.FillRect(sb, viewport, new Color(8, 10, 11));
         sb.Draw(_previewTargetTexture, viewport, Color.White);
-        if (_session.IsPreviewStale)
-            renderer.DrawText(sb, "3D PREVIEW: LAST VALID", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(230, 190, 80));
-        else
-            renderer.DrawText(sb, "3D PREVIEW: CURRENT", new Vector2(viewport.X + 10, viewport.Y + 28), _font, 0.78f, new Color(150, 205, 185));
     }
 
-    private void DrawPerspectiveEditorOverlay(GraphicsDevice graphicsDevice, Matrix view, Matrix projection)
+    private void DrawPerspectiveEditorOverlay(GraphicsDevice graphicsDevice, Matrix view, Matrix projection, PerspectiveDisplayMode displayMode)
     {
         SemanticHullGeometry geometry = _session.HullDefinition.VisualGeometry!;
         if (geometry.Vertices.Count == 0)
@@ -303,11 +322,14 @@ public sealed class ObjectDesignerGame : Game
 
         GeometryDiagnosticOverlay diagnostics = _session.DiagnosticOverlay;
         Dictionary<string, DVec3> verticesById = geometry.Vertices.ToDictionary(v => v.Id, v => v.Position, StringComparer.Ordinal);
-        var lines = new List<VertexPositionColor>();
+        var ordinaryLines = new List<VertexPositionColor>();
+        var diagnosticLines = new List<VertexPositionColor>();
 
         foreach (SemanticHullFace face in geometry.Faces)
         {
-            Color colour = FaceOverlayColour(face.Id, diagnostics);
+            bool diagnostic = IsDiagnosticFace(face.Id, diagnostics);
+            Color colour = diagnostic ? FaceOverlayColour(face.Id, diagnostics, xray: displayMode == PerspectiveDisplayMode.Solid) : CurrentWireColour;
+            List<VertexPositionColor> target = diagnostic ? diagnosticLines : ordinaryLines;
             for (int i = 0; i < face.VertexIds.Count; i++)
             {
                 if (!verticesById.TryGetValue(face.VertexIds[i], out DVec3 a)
@@ -315,7 +337,7 @@ public sealed class ObjectDesignerGame : Game
                 {
                     continue;
                 }
-                AddWorldLine(lines, a, b, colour);
+                AddWorldLine(target, a, b, colour);
             }
         }
 
@@ -325,7 +347,7 @@ public sealed class ObjectDesignerGame : Game
         {
             DVec3 offset = ActiveFaceNormalForOverlay(activeFaceVertices) * 0.035;
             for (int i = 0; i < activeFaceVertices.Count; i++)
-                AddWorldLine(lines, activeFaceVertices[i] + offset, activeFaceVertices[(i + 1) % activeFaceVertices.Count] + offset, ActiveFaceColour);
+                AddWorldLine(diagnosticLines, activeFaceVertices[i] + offset, activeFaceVertices[(i + 1) % activeFaceVertices.Count] + offset, ActiveFaceColour);
         }
 
         foreach (SemanticHullVertex vertex in geometry.Vertices)
@@ -338,24 +360,79 @@ public sealed class ObjectDesignerGame : Game
 
             Color colour = active ? ActiveVertexColour : selected ? SelectedVertexColour : InvalidVertexColour;
             double radius = active ? 0.42 : selected ? 0.32 : 0.25;
-            AddWorldCross(lines, vertex.Position, radius, colour);
+            AddWorldCross(diagnosticLines, vertex.Position, radius, colour);
         }
 
-        if (lines.Count == 0)
+        if (ordinaryLines.Count == 0 && diagnosticLines.Count == 0)
             return;
 
         _lineEffect.World = Matrix.Identity;
         _lineEffect.View = view;
         _lineEffect.Projection = projection;
         graphicsDevice.BlendState = BlendState.AlphaBlend;
-        graphicsDevice.DepthStencilState = DepthStencilState.None;
         graphicsDevice.RasterizerState = RasterizerState.CullNone;
+        DrawLineBatch(graphicsDevice, ordinaryLines, displayMode == PerspectiveDisplayMode.Solid ? DepthStencilState.Default : DepthStencilState.None);
+        DrawLineBatch(graphicsDevice, diagnosticLines, DepthStencilState.None);
+        graphicsDevice.DepthStencilState = DepthStencilState.Default;
+    }
+
+    private void DrawLineBatch(GraphicsDevice graphicsDevice, List<VertexPositionColor> lines, DepthStencilState depth)
+    {
+        if (lines.Count == 0)
+            return;
+        graphicsDevice.DepthStencilState = depth;
         foreach (EffectPass pass in _lineEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
             graphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, lines.ToArray(), 0, lines.Count / 2);
         }
+    }
+
+    private void DrawGlassPreviewHull(GraphicsDevice graphicsDevice, HullDefinition hull, Matrix view, Matrix projection)
+    {
+        if (hull.VisualGeometry is null)
+            return;
+
+        SemanticHullCpuMesh mesh = SemanticHullMeshBuilder.Build(hull.VisualGeometry);
+        _glassEffect.World = Matrix.Identity;
+        _glassEffect.View = view;
+        _glassEffect.Projection = projection;
+        _glassEffect.Alpha = 0.38f;
+        _glassEffect.AmbientLightColor = new Vector3(SceneLighting.Ambient);
+        _glassEffect.DirectionalLight0.Enabled = true;
+        _glassEffect.DirectionalLight0.Direction = Vector3.Normalize(-SceneLighting.SunDirection);
+        _glassEffect.DirectionalLight0.DiffuseColor = SceneLighting.SunColour;
+        _glassEffect.DirectionalLight0.SpecularColor = SceneLighting.SunColour;
+        _glassEffect.DirectionalLight1.Enabled = false;
+        _glassEffect.DirectionalLight2.Enabled = false;
+
+        graphicsDevice.BlendState = BlendState.AlphaBlend;
+        graphicsDevice.DepthStencilState = DepthStencilState.DepthRead;
+        graphicsDevice.RasterizerState = RasterizerState.CullNone;
+        foreach (SemanticHullMeshPart part in mesh.Parts)
+        {
+            VertexPositionColor[] vertices = BuildGlassVertices(part);
+            foreach (EffectPass pass in _glassEffect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                if (vertices.Length > 0)
+                    graphicsDevice.DrawUserPrimitives(PrimitiveType.TriangleList, vertices, 0, vertices.Length / 3);
+            }
+        }
         graphicsDevice.DepthStencilState = DepthStencilState.Default;
+    }
+
+    private static VertexPositionColor[] BuildGlassVertices(SemanticHullMeshPart part)
+    {
+        Color colour = new(
+            Math.Min(255, part.MaterialColour.R + 36),
+            Math.Min(255, part.MaterialColour.G + 48),
+            Math.Min(255, part.MaterialColour.B + 56),
+            96);
+        var vertices = new VertexPositionColor[part.Indices.Count];
+        for (int i = 0; i < part.Indices.Count; i++)
+            vertices[i] = new VertexPositionColor(part.Vertices[part.Indices[i]].Position, colour);
+        return vertices;
     }
 
     private void EnsurePreviewTarget(int width, int height)
@@ -667,11 +744,34 @@ public sealed class ObjectDesignerGame : Game
         rightGrid.Columns.Add(GridLength.Star());
         _rootLayout.Add(rightGrid, 1, 1);
 
+        var perspectivePane = new GridPanel
+        {
+            Overflow = OverflowMode.Clip,
+        };
+        perspectivePane.Rows.Add(GridLength.Star());
+        perspectivePane.Rows.Add(GridLength.Fixed(34));
+        perspectivePane.Columns.Add(GridLength.Star());
+        rightGrid.Add(perspectivePane, 0, 0);
+
         _perspectiveSurface = new DesignerSurfaceControl(DesignerSurfaceKind.Perspective, "3D preview")
         {
             DrawContent = DrawPerspectiveTexture,
         };
-        rightGrid.Add(_perspectiveSurface, 0, 0);
+        perspectivePane.Add(_perspectiveSurface, 0, 0);
+
+        var perspectiveFooter = new Panel
+        {
+            ContentPadding = 3,
+            DrawBackground = true,
+            DrawBorder = true,
+            BackColor = new Color(14, 18, 20),
+        };
+        _displayModeButton = new Button("", new Rectangle(0, 0, 150, 28));
+        _displayModeButton.Clicked += _ => OpenDisplayModeMenu();
+        _previewStateLabel = new Label("", new Rectangle(170, 2, 160, 24)) { FontScale = 0.72f };
+        perspectiveFooter.Add(_displayModeButton);
+        perspectiveFooter.Add(_previewStateLabel);
+        perspectivePane.Add(perspectiveFooter, 0, 1);
 
         var properties = new CollapsiblePanel
         {
@@ -712,6 +812,28 @@ public sealed class ObjectDesignerGame : Game
         _statusLabel = new Label("", new Rectangle(0, 0, 1000, 24)) { FontScale = 0.78f };
         _rootLayout.Add(_statusLabel, 0, 2, 2, 1);
         RefreshUiText();
+    }
+
+    private void OpenDisplayModeMenu()
+    {
+        if (_displayModeMenu is not null)
+            _ui.RemoveOverlay(_displayModeMenu);
+
+        var menu = new PopupMenu
+        {
+            Bounds = new Rectangle(_displayModeButton.AbsoluteBounds.X, _displayModeButton.AbsoluteBounds.Top - 52, 150, 52),
+            Visible = true,
+        };
+        menu.AddItem(new MenuItem("Solid", () => SetPerspectiveDisplayMode(PerspectiveDisplayMode.Solid)));
+        menu.AddItem(new MenuItem("Glass", () => SetPerspectiveDisplayMode(PerspectiveDisplayMode.Glass)));
+        _displayModeMenu = menu;
+        _ui.AddOverlay(menu);
+    }
+
+    private void SetPerspectiveDisplayMode(PerspectiveDisplayMode mode)
+    {
+        _perspectiveDisplayMode = mode;
+        RefreshDynamicLabels();
     }
 
     private void AddButton(StackPanel parent, string text, Action action)
@@ -826,8 +948,11 @@ public sealed class ObjectDesignerGame : Game
             : string.Join("\n", diagnostics.Select(d => $"{d.Severity} [{d.Code}]: {d.Summary}"));
         _validationBlock.Text = validation;
         string summary = ValidationSummary();
+        _displayModeButton.Text = $"DISPLAY: {_perspectiveDisplayMode.ToString().ToUpperInvariant()}";
+        _previewStateLabel.Text = _session.IsPreviewStale ? "LAST VALID" : "CURRENT";
+        _previewStateLabel.TextColor = _session.IsPreviewStale ? new Color(230, 190, 80) : new Color(150, 205, 185);
         _statusLabel.Text = string.IsNullOrWhiteSpace(_status)
-            ? (_session.IsPreviewStale ? $"{summary}  3D PREVIEW: LAST VALID" : $"{summary}  3D PREVIEW: CURRENT")
+            ? summary
             : _status;
     }
 
@@ -968,7 +1093,7 @@ public sealed class ObjectDesignerGame : Game
         Dictionary<string, DVec3> vertices = geometry.Vertices.ToDictionary(v => v.Id, v => v.Position, StringComparer.Ordinal);
         foreach (SemanticHullFace face in geometry.Faces)
         {
-            Color colour = FaceOverlayColour(face.Id, overlay);
+            Color colour = FaceOverlayColour(face.Id, overlay, xray: false);
             for (int i = 0; i < face.VertexIds.Count; i++)
             {
                 if (!vertices.TryGetValue(face.VertexIds[i], out DVec3 a) || !vertices.TryGetValue(face.VertexIds[(i + 1) % face.VertexIds.Count], out DVec3 b))
@@ -978,15 +1103,20 @@ public sealed class ObjectDesignerGame : Game
         }
     }
 
-    private Color FaceOverlayColour(string faceId, GeometryDiagnosticOverlay overlay)
+    private bool IsDiagnosticFace(string faceId, GeometryDiagnosticOverlay overlay)
+        => overlay.InvalidFaceIds.Contains(faceId)
+            || overlay.WarningFaceIds.Contains(faceId)
+            || string.Equals(faceId, _session.ActiveFaceId, StringComparison.Ordinal);
+
+    private Color FaceOverlayColour(string faceId, GeometryDiagnosticOverlay overlay, bool xray)
     {
         bool active = string.Equals(faceId, _session.ActiveFaceId, StringComparison.Ordinal);
         if (overlay.InvalidFaceIds.Contains(faceId))
-            return InvalidFaceColour;
+            return xray ? new Color(245, 76, 64, 190) : InvalidFaceColour;
         if (overlay.WarningFaceIds.Contains(faceId))
-            return WarningFaceColour;
+            return xray ? new Color(235, 148, 44, 175) : WarningFaceColour;
         if (active)
-            return ActiveFaceColour;
+            return xray ? new Color(80, 230, 255, 190) : ActiveFaceColour;
         return CurrentWireColour;
     }
 

@@ -7,6 +7,7 @@ using Inferior.Gameplay.Hull.Authoring;
 using Inferior.ObjectDesigner.Controls;
 using Inferior.ObjectDesigner.Editing;
 using Inferior.UI;
+using Inferior.UI.Controls;
 using Microsoft.Xna.Framework;
 using Xunit;
 
@@ -1362,6 +1363,62 @@ public sealed class ObjectDesignerEditingTests
         Assert.DoesNotContain(face.Id, session.DiagnosticOverlay.InvalidFaceIds);
     }
 
+    [Fact]
+    public void Perspective_display_mode_defaults_to_solid()
+    {
+        var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+
+        Assert.Equal(PerspectiveDisplayMode.Solid, GetField(game, "_perspectiveDisplayMode"));
+    }
+
+    [Fact]
+    public void Switching_perspective_display_mode_changes_no_authoring_state()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        session.History.MarkClean();
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        session.SelectVertex(face.VertexIds[0], extend: false);
+        session.SelectVertex(face.VertexIds[1], extend: true);
+        Assert.True(session.SelectActiveFace(face.Id));
+        ObjectDesignerGame game = DisplayModeHarness(session);
+        Vector3 target = new(1, 2, 3);
+        SetField(game, "_previewTarget", target);
+
+        InvokePrivate(game, "SetPerspectiveDisplayMode", PerspectiveDisplayMode.Glass);
+
+        Assert.Equal(PerspectiveDisplayMode.Glass, GetField(game, "_perspectiveDisplayMode"));
+        Assert.False(session.IsDirty);
+        Assert.Equal(0, session.History.Count);
+        Assert.Equal([face.VertexIds[0], face.VertexIds[1]], session.SelectedVertexIds);
+        Assert.Equal(face.Id, session.ActiveFaceId);
+        Assert.Equal(target, GetField(game, "_previewTarget"));
+    }
+
+    [Fact]
+    public void Display_mode_and_preview_currency_are_independent()
+    {
+        using TempAsset asset = TempAsset.FromBeren();
+        ObjectDesignerSession session = ObjectDesignerSession.Load(asset.Path);
+        ObjectDesignerGame game = DisplayModeHarness(session);
+
+        Assert.Equal(PerspectiveDisplayMode.Solid, GetField(game, "_perspectiveDisplayMode"));
+        Assert.False(session.IsPreviewStale);
+
+        InvokePrivate(game, "SetPerspectiveDisplayMode", PerspectiveDisplayMode.Glass);
+        Assert.Equal(PerspectiveDisplayMode.Glass, GetField(game, "_perspectiveDisplayMode"));
+        Assert.False(session.IsPreviewStale);
+
+        SemanticHullFaceDto face = FirstQuadFace(session);
+        session.SetVertexPosition(face.VertexIds[1], session.GetVertexPosition(face.VertexIds[1]) + new DVec3(0, 0.25, 0));
+        Assert.True(session.IsPreviewStale);
+        Assert.Equal(PerspectiveDisplayMode.Glass, GetField(game, "_perspectiveDisplayMode"));
+
+        InvokePrivate(game, "SetPerspectiveDisplayMode", PerspectiveDisplayMode.Solid);
+        Assert.True(session.IsPreviewStale);
+        Assert.Equal(PerspectiveDisplayMode.Solid, GetField(game, "_perspectiveDisplayMode"));
+    }
+
     private static string[] FirstVertexIds(ObjectDesignerSession session, int count)
         => session.Document.Hull.VisualGeometry.Vertices
             .Take(count)
@@ -1392,6 +1449,20 @@ public sealed class ObjectDesignerEditingTests
         SetField(game, "_initializedProjectionPans", new HashSet<ProjectionKind> { ProjectionKind.Top, ProjectionKind.Side, ProjectionKind.Front });
         if (session is not null)
             SetField(game, "_session", session);
+        return game;
+    }
+
+    private static ObjectDesignerGame DisplayModeHarness(ObjectDesignerSession session)
+    {
+        var game = (ObjectDesignerGame)RuntimeHelpers.GetUninitializedObject(typeof(ObjectDesignerGame));
+        SetField(game, "_session", session);
+        SetField(game, "_titleLabel", new Label("", Rectangle.Empty));
+        SetField(game, "_selectionLabel", new Label("", Rectangle.Empty));
+        SetField(game, "_validationBlock", new TextBlock());
+        SetField(game, "_statusLabel", new Label("", Rectangle.Empty));
+        SetField(game, "_displayModeButton", new Button("", Rectangle.Empty));
+        SetField(game, "_previewStateLabel", new Label("", Rectangle.Empty));
+        SetField(game, "_faceRows", Array.Empty<IncidentFaceRow>());
         return game;
     }
 
