@@ -16,19 +16,21 @@ public class StationShadowCasterMeshTests
             ChamferDepth = StationGenerator.ChamferDepthForSeed(seed),
         };
 
-    // Regression test: BuildStationShadowCasterMeshes used to special-case
+    // Regression test: station shadow preparation used to special-case
     // Category == "docking-bay" instead of the general "any MeshFactory module" condition,
     // so every other MeshFactory module (hab-block-octagonal, science-block-octagonal, ...)
     // silently got no hull caster while its decoration still composed — floating greeble
-    // shadows with nothing underneath. TryGetMeshFactoryHullFaceRange is the exact decision
-    // BuildStationShadowCasterMeshes uses to pick the hull caster's face range; this
-    // exercises it directly against real octagonal modules, no GraphicsDevice required
-    // (StationDecorator.Decorate is pure CPU-side geometry accumulation).
+    // shadows with nothing underneath. HasMeshFactoryHull is the exact decision
+    // the upload plan uses to pick the hull caster; this exercises it
+    // directly against real octagonal modules, no GraphicsDevice required
+    // (StationDecorator.Decorate is pure CPU-side geometry accumulation). Brief U1: reads
+    // mod.HullMesh (a separate mesh) instead of a face range within mod.Mesh — same
+    // regression coverage, updated API shape.
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    public void OctagonalMeshFactoryModules_YieldNonEmptyHullFaceRange(int seed)
+    public void OctagonalMeshFactoryModules_YieldNonEmptyHullMesh(int seed)
     {
         var hab     = BuildModule(StationModuleRegistry.HabBlockOctagonal, seed);
         var science = BuildModule(StationModuleRegistry.ScienceBlockOctagonal, seed * 7);
@@ -39,15 +41,13 @@ public class StationShadowCasterMeshTests
         {
             Assert.NotEqual("docking-bay", mod.Definition.Category);
             Assert.True(
-                SystemSpaceState.TryGetMeshFactoryHullFaceRange(mod, out int baseFaceCount),
-                $"Expected a non-empty hull caster face range for '{mod.Definition.Id}' " +
+                SystemSpaceState.HasMeshFactoryHull(mod),
+                $"Expected a non-empty hull mesh for '{mod.Definition.Id}' " +
                 $"(category '{mod.Definition.Category}')");
-            Assert.True(baseFaceCount > 0);
 
             // Same call the real caster composition makes — must also succeed, not just the
-            // face-count check, since a bogus range (count > 0 but out of bounds) would
-            // still fail here.
-            var bounds = mod.Mesh!.ComputeFaceRangeBounds(0, baseFaceCount);
+            // presence check, since a bogus/empty mesh would still fail here.
+            var bounds = mod.HullMesh!.ComputeFaceRangeBounds(0, mod.HullMesh.FaceCount);
             Assert.True(bounds.HasValue);
         }
     }
@@ -57,10 +57,45 @@ public class StationShadowCasterMeshTests
     {
         // Sanity check on the other branch: an ordinary box module (MeshFactory == null) is
         // handled unconditionally by BuildHullMesh instead — a different code path entirely
-        // — and must not report a MeshFactory hull face range.
+        // — and must not report a MeshFactory hull.
         var box = BuildModule(StationModuleRegistry.HabBlock, 99);
         StationDecorator.Decorate([box]);
 
-        Assert.False(SystemSpaceState.TryGetMeshFactoryHullFaceRange(box, out _));
+        Assert.False(SystemSpaceState.HasMeshFactoryHull(box));
+        Assert.Null(box.HullMesh);
+    }
+
+    [Fact]
+    public void ProductionCasterStageExplicitlyIncludesNativeMegastationMajorClasses()
+    {
+        DecorClass[] enabled = SystemSpaceState.ClassesForStage(
+            SystemSpaceState.CasterStage.AllClasses).ToArray();
+
+        Assert.Contains(DecorClass.MegastationInfrastructureMajor, enabled);
+        Assert.Contains(DecorClass.MegastationMegaGreebleMajor, enabled);
+        Assert.Contains(DecorClass.MegastationFabricMajor, enabled);
+        Assert.Contains(DecorClass.MegastationServiceChannelMajor, enabled);
+        Assert.Contains(DecorClass.MegastationInteriorMajor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationInfrastructureMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationMegaGreebleMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationFabricMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationServiceChannelMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationInteriorMinor, enabled);
+    }
+
+    [Fact]
+    public void HullLessPresentationCasterStillContributesShadowFitBounds()
+    {
+        var decoration = (min: new Vector3(-80f, -20f, 3f), max: new Vector3(90f, 25f, 70f));
+
+        bool included = SystemSpaceState.TryCombineStationShadowCasterBounds(
+            hullBounds: null,
+            decorationBounds: decoration,
+            out Vector3 min,
+            out Vector3 max);
+
+        Assert.True(included);
+        Assert.Equal(decoration.min, min);
+        Assert.Equal(decoration.max, max);
     }
 }

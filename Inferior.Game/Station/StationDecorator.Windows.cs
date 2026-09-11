@@ -20,11 +20,11 @@ public static partial class StationDecorator
         _            => 0.25f,
     };
 
-    private static readonly Color WarmWhiteColor    = new(255, 250, 220);
-    private static readonly Color NeutralWhiteColor = new(240, 240, 248);
-    private static readonly Color CoolBlueColor     = new(210, 225, 255);
-    private static readonly Color DimAmberColor     = new(200, 170, 100);
-    private static readonly Color DarkWindowColor   = new( 31,  30,  26);  // WarmWhite × 0.12f
+    private static readonly Color WarmWhiteColor    = StationWindowVisuals.WarmWhite;
+    private static readonly Color NeutralWhiteColor = StationWindowVisuals.NeutralWhite;
+    private static readonly Color CoolBlueColor     = StationWindowVisuals.CoolBlue;
+    private static readonly Color DimAmberColor     = StationWindowVisuals.DimAmber;
+    private static readonly Color DarkWindowColor   = StationWindowVisuals.DarkWarm;
 
     private static Color PickWindowColor(string category, System.Random rng)
     {
@@ -124,15 +124,28 @@ public static partial class StationDecorator
         return (gridW, gridH, cols, rows, winW, winH);
     }
 
+    // Brief F1 Fix 4: `guaranteed` skips the WindowProbability gate and the 20% blank-face
+    // roll — for a zone the Z1 count mechanism already allocated as Windows (0-3/face,
+    // capped 5/module; StationDecorator.Zones.cs' AssignZoneTypes), those two rolls were
+    // what let an allocated window zone still render nothing (observed in-engine on a mega
+    // bay). Default false, so every existing caller — the single-zone/unzoned per-face
+    // path in Decorate(), which must stay byte-for-byte identical for the ordinary module
+    // catalogue — is completely untouched; only RunZonePasses' Windows case (which only
+    // ever runs for multi-zone faces — the unzoned path never calls it) passes true. The
+    // per-cell ~20% skip below is NOT gated by this: that scatter is what keeps the grid
+    // from reading as a perfect lattice, wanted in both cases.
     private static void GenerateWindows(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, StationModuleMesh glassMesh,
-        FaceOccupancy occupancy)
+        FaceOccupancy occupancy, bool guaranteed = false)
     {
         if (!face.IsExposed)  return;
         if (face.Width  < 3f) return;
         if (face.Height < 3f) return;
-        if (rng.NextDouble() > WindowProbability(mod.Definition.Category)) return;
-        if (rng.NextDouble() < 0.20) return;  // 20% blank face
+        if (!guaranteed)
+        {
+            if (rng.NextDouble() > WindowProbability(mod.Definition.Category)) return;
+            if (rng.NextDouble() < 0.20) return;  // 20% blank face
+        }
 
         bool   sparse    = rng.NextDouble() < 0.30;
         double sizeTier   = rng.NextDouble();
@@ -358,13 +371,9 @@ public static partial class StationDecorator
 
     // ── Glass gradient helpers ────────────────────────────────────────────────
 
-    private static Color GlassTopColor(Color c) => Color.Lerp(c, Color.White, 0.18f);
+    private static Color GlassTopColor(Color c) => StationWindowVisuals.GlassTop(c);
 
-    private static Color GlassBottomColor(Color c) => new Color(
-        (byte)MathF.Min(c.R * 0.72f, 255f),
-        (byte)MathF.Min(c.G * 0.72f, 255f),
-        (byte)Math.Min((int)(c.B * 0.72f) + 8, 255),
-        c.A);
+    private static Color GlassBottomColor(Color c) => StationWindowVisuals.GlassBottom(c);
 
     // Maps a vertex position along `upDir` to a gradient colour between bottom and top.
     private static Color GlassGradientColor(Color c, Vector3 v, Vector3 upDir, float minY, float maxY)

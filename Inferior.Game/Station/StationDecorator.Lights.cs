@@ -1,4 +1,3 @@
-using Inferior.Game.Containers;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 
@@ -270,8 +269,8 @@ public static partial class StationDecorator
                             + up * (doorH * 0.5f + signMargin)
                             + doorNormal * 0.02f;   // proud of the frame surface, avoids z-fighting
 
-        ShippingContainerFactory.AddTextGeometry(mesh, text, textOrigin,
-            textRight: right, textUp: up, textNormal: doorNormal, pixelSize, signColor);
+        PlanarTextGeometry.Add(mesh, text, textOrigin,
+            surfaceNormal: doorNormal, readingDirection: right, pixelSize, signColor);
     }
 
     // ── Pass 8: Ambient position markers ─────────────────────────────────────

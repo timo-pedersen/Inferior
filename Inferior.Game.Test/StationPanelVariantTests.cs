@@ -218,6 +218,17 @@ public sealed class StationPanelVariantTests
         Assert.Equal(first, second);
     }
 
+    [Fact]
+    public void SelectVariantIndex_NegativeSemanticSeed_RemainsInRange()
+    {
+        for (int seed = -10_000; seed < 0; seed++)
+        {
+            int selected = StationTextureRegistry.SelectVariantIndex(
+                seed, variantCount: 20, baseShareRatio: 0f);
+            Assert.InRange(selected, 1, 19);
+        }
+    }
+
     [Theory]
     [InlineData(5)]
     [InlineData(100)]

@@ -1,11 +1,14 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Inferior.Core.Random;
+using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
 
 public static class StationTextureRegistry
 {
+    public sealed record TexturePixels(Color[] Albedo, Color[] Material);
+
     private static bool _initialized;
 
     public static Texture2D White { get; private set; } = null!;
@@ -24,9 +27,9 @@ public static class StationTextureRegistry
     // Replaces the old process-lifetime GetOrCreate/_cache (Report S2a §1/§6: shared
     // across every module of a (surface, economy) pair, galaxy-wide, ~24 textures total,
     // ever — mod.Seed threaded in and ignored by the cache key). Each station now owns
-    // its own N-texture variant set per surface it actually uses; the caller
-    // (StationGenerator.AssignTextures) is responsible for disposal (see
-    // SystemSpaceState's _stationPanelTextures) — these are NOT cached here.
+    // its own N-texture variant set per surface it actually uses. Prepared pixels are
+    // uploaded on the render thread and the resident StationVisualPackage owns disposal;
+    // these are NOT cached here.
     //
     // Gate-fix history: the first cut of this method passed the SAME TexturePalette to
     // every Generate() call — all N variants converged to the same mean colour, only
@@ -65,10 +68,8 @@ public static class StationTextureRegistry
     /// a (albedo, material) pair (Brief S2c-1: material is the RGBA gloss/height carrier,
     /// same size as albedo, same UV). Not cached or shared — the caller owns every
     /// returned texture (both elements of both pair) and must dispose them all when the
-    /// station unloads (see SystemSpaceState's _stationPanelTextures dictionary, disposed
-    /// alongside _hullMeshes/_decoMeshes in OnEnter/OnExit — material maps are folded
-    /// into that same disposal list, not a second dictionary, since disposal doesn't care
-    /// about the albedo/material distinction). colourSpread bounds how far each variant's
+    /// station unloads. The residency path folds them into its package disposal manifest.
+    /// colourSpread bounds how far each variant's
     /// seeded colour offset may wander from palette.BaseColour (Brief S2b-2:
     /// StationEconomyVariance.Profiles, economy-keyed).
     /// </summary>
@@ -76,14 +77,51 @@ public static class StationTextureRegistry
         GraphicsDevice gd, SurfaceTexture surface, TexturePalette palette,
         string persistenceId, float colourSpread, int count = DefaultVariantCount)
     {
+        var prepared = GenerateVariantPixels(
+            surface, palette, persistenceId, colourSpread, count);
+        var variants = new (Texture2D, Texture2D)[prepared.Length];
+        for (int i = 0; i < prepared.Length; i++)
+            variants[i] = Upload(gd, prepared[i]);
+        return variants;
+    }
+
+    public static TexturePixels[] GenerateVariantPixels(
+        SurfaceTexture surface,
+        TexturePalette palette,
+        string persistenceId,
+        float colourSpread,
+        int count = DefaultVariantCount,
+        CancellationToken cancellationToken = default)
+    {
         var seeds = RollVariantSeeds(persistenceId, surface, count);
-        var variants = new (Texture2D, Texture2D)[count];
+        var variants = new TexturePixels[count];
         for (int i = 0; i < count; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var variantPalette = OffsetPaletteForVariant(palette, seeds[i], colourSpread);
-            variants[i] = Generate(gd, surface, variantPalette, seeds[i]);
+            variants[i] = GeneratePixels(surface, variantPalette, seeds[i]);
         }
         return variants;
+    }
+
+    public static (Texture2D Albedo, Texture2D Material) Upload(
+        GraphicsDevice gd,
+        TexturePixels pixels)
+    {
+        var albedo = new Texture2D(gd, Size, Size);
+        var material = new Texture2D(gd, Size, Size);
+        try
+        {
+            albedo.SetData(pixels.Albedo);
+            material.SetData(pixels.Material);
+            return (albedo, material);
+        }
+        catch
+        {
+            albedo.Dispose();
+            material.Dispose();
+            throw;
+        }
     }
 
     // Brief S2b-2 item 1: biases mod.Seed's variant pick so the dominant variant (index
@@ -98,7 +136,9 @@ public static class StationTextureRegistry
         if (variantCount <= 1) return 0;
         var dominantRoll = new System.Random(seed ^ 0x424D5348); // "BMSH" — base-share roll salt
         if (dominantRoll.NextDouble() < baseShareRatio) return 0;
-        return 1 + (seed % (variantCount - 1));
+        // Derived semantic seeds are signed and may legitimately be negative. Preserve
+        // the existing mapping for positive seeds while keeping the selected index valid.
+        return 1 + (int)((uint)seed % (uint)(variantCount - 1));
     }
 
     // Builds a per-variant TexturePalette whose BaseColour/GrimeColour are hue-rotated
@@ -112,6 +152,33 @@ public static class StationTextureRegistry
     // so this offset is deterministic per variant seed without perturbing pixel layout.
     // internal, not private: StationPanelVariantTests asserts variants actually differ in
     // colour, not just position — the exact regression the S2b-1 gate-fix addressed.
+    //
+    // Brief P1 Fix A: BaseColour's HSV value is floored (D-NovaTank — Nova Anchorage's
+    // Independent-economy docking-bay rolled a variant whose brightnessDelta crushed V to 0,
+    // producing a literal (0,0,0) BaseColour and a ~17-mean-luminance texture; both the hull
+    // (PS_DynamicLit) and every decoration pass (PS_BakedColorLit) multiply through that same
+    // bitmap, so a black variant reads as "no surface" rather than "a dark module"). The floor
+    // applies to BaseColour only, not GrimeColour — grime is deliberately near-black already
+    // by design (e.g. Industrial's GrimeColour has V≈0.11, already below the floor), so
+    // flooring it too would brighten ordinary wear patches as a side effect rather than only
+    // fixing the pathological all-black case. Hue/saturation spread are untouched either way —
+    // the wide colour variance on high-spread economies (Independent, Agricultural) is
+    // intentional and must survive.
+    //
+    // Brief B4 Fix 2: the floor alone piles modules up AT the floor rather than spreading them
+    // — D-Bright measured the real problem as a wide, low-tailed distribution (P10 66.2,
+    // median 129.6), not uniform darkness, so a plain floor raise would flatten variety at the
+    // dark end without lifting the tail that actually reads as "too dark to navigate by."
+    // VariantCompressionStrength remaps the WHOLE [floor,1] range with a power curve instead:
+    // t=(v-floor)/(1-floor), t'=t^gamma where gamma=1/(1+strength) — strength=0 gives gamma=1
+    // (t'=t, an exact no-op, so the pre-B4 hard-floor-only behaviour is untouched at the
+    // default), strength>0 gives gamma<1, which lifts LOW t (near the floor) sharply while
+    // leaving HIGH t (near 1, i.e. already-bright variants) nearly unchanged — exactly "lift
+    // the tail, hold the top" without a second, independently-tuned curve shape. Both
+    // VariantValueFloor and VariantCompressionStrength are live (StationBrightnessTuning),
+    // read fresh every time a variant is generated — see that class's own doc comment for why
+    // this only affects textures generated AFTER a change, not ones already baked into a
+    // loaded station.
     internal static TexturePalette OffsetPaletteForVariant(TexturePalette basePalette, int seed, float colourSpread)
     {
         var rng = new System.Random(seed ^ 0x484F4655); // "HOFU" — colour-offset salt
@@ -124,9 +191,13 @@ public static class StationTextureRegistry
         // (wear is what can actually drive a texel toward true matte).
         float baseGloss = 0.4f + (float)rng.NextDouble() * 0.6f;
 
+        float valueFloor          = StationBrightnessTuning.VariantValueFloor;
+        float compressionStrength = StationBrightnessTuning.VariantCompressionStrength;
+        float saturationFalloff   = StationBrightnessTuning.SaturationFalloff;
+
         return new TexturePalette
         {
-            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
+            BaseColour       = ApplyHsvOffset(basePalette.BaseColour, hueDeltaDegrees, saturationDelta, brightnessDelta, valueFloor, compressionStrength, saturationFalloff),
             AccentColour     = basePalette.AccentColour,
             GrimeColour      = ApplyHsvOffset(basePalette.GrimeColour, hueDeltaDegrees, saturationDelta, brightnessDelta),
             NoiseStrength    = basePalette.NoiseStrength,
@@ -138,12 +209,44 @@ public static class StationTextureRegistry
         };
     }
 
-    private static Color ApplyHsvOffset(Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta)
+    private static Color ApplyHsvOffset(
+        Color c, float hueDeltaDegrees, float saturationDelta, float brightnessDelta,
+        float minValue = 0f, float compressionStrength = 0f, float saturationFalloff = 0f)
     {
         RgbToHsv(c, out float h, out float s, out float v);
         h = (h + hueDeltaDegrees + 360f) % 360f;
         s = Math.Clamp(s + saturationDelta, 0f, 1f);
-        v = Math.Clamp(v + brightnessDelta, 0f, 1f);
+
+        // Brief B4a Fix 2: the "natural" value this variant would have with NO floor/
+        // compression applied — kept separately so the floor/compression's own artificial
+        // lift (vFinal - vNatural, below) can be measured and partly traded back out of s,
+        // without that trade also firing for colours the floor/compression never touched.
+        float vNatural = Math.Clamp(v + brightnessDelta, 0f, 1f);
+        v = Math.Clamp(v + brightnessDelta, minValue, 1f);
+
+        // Brief B4 Fix 2: power-curve compression over [minValue, 1] — see the big comment
+        // on OffsetPaletteForVariant above for the shape/rationale. Guarded so a floor of
+        // exactly 1 (degenerate, not reachable by any real tuning range) can't divide by
+        // zero, and skipped entirely at strength<=0 (the neutral default) to keep that case
+        // a byte-identical no-op rather than a pow() call that happens to return its input.
+        if (compressionStrength > 0f && minValue < 1f)
+        {
+            float t     = (v - minValue) / (1f - minValue);
+            float gamma = 1f / (1f + compressionStrength);
+            v = minValue + MathF.Pow(t, gamma) * (1f - minValue);
+        }
+
+        // Brief B4a Fix 2: flooring/lifting V alone reads as a large apparent saturation
+        // increase — v*s is chroma, so raising v while holding s fixed raises chroma, which
+        // is what Timo's floor=0.9 diagnostic test read as "over-saturated." Physically,
+        // brightly lit paint reads LESS saturated, not more. saturationFalloff (default 0,
+        // an exact no-op) trades some of THIS colour's own artificial lift back out of s —
+        // a colour the floor/compression never raised (vNatural already >= minValue, lift=0)
+        // is left untouched regardless of the falloff value.
+        float lift = MathF.Max(0f, v - vNatural);
+        if (saturationFalloff > 0f && lift > 0f)
+            s = Math.Clamp(s * (1f - saturationFalloff * lift), 0f, 1f);
+
         return HsvToRgb(h, s, v);
     }
 
@@ -205,8 +308,7 @@ public static class StationTextureRegistry
     private const float OxidationRaiseAmount = 0.06f;
     private const float OxidationNoiseAmount = 0.03f;
 
-    private static (Texture2D Albedo, Texture2D Material) Generate(
-        GraphicsDevice gd,
+    private static TexturePixels GeneratePixels(
         SurfaceTexture surface,
         TexturePalette palette,
         int            seed)
@@ -326,9 +428,6 @@ public static class StationTextureRegistry
             }
         }
 
-        var albedoTex = new Texture2D(gd, Size, Size);
-        albedoTex.SetData(pixels);
-
         // Gate-fix (aliased/pixelated bump lines): every height pass above wrote a hard
         // 1-2px edge (seam grooves, sub-panel steps, scratch incisions) — a near-
         // discontinuous height step differentiates to a near-discontinuous gradient,
@@ -346,10 +445,7 @@ public static class StationTextureRegistry
             byte g = (byte)Math.Clamp(MathF.Round(gloss[i] * 255f), 0f, 255f);
             materialPixels[i] = new Color(h, g, (byte)0, (byte)255);
         }
-        var materialTex = new Texture2D(gd, Size, Size);
-        materialTex.SetData(materialPixels);
-
-        return (albedoTex, materialTex);
+        return new TexturePixels(pixels, materialPixels);
     }
 
     // ── Pipeline steps ────────────────────────────────────────────────────────
@@ -547,15 +643,7 @@ public static class StationTextureRegistry
     // generation (process-randomized for strings), but this is a plain arithmetic
     // function of two ints, not an object hash, so it's exempt and always reproducible.
     internal static float PixelNoise01(int x, int y)
-    {
-        unchecked
-        {
-            int h = x * 374761393 + y * 668265263;
-            h = (h ^ (h >> 13)) * 1274126177;
-            h ^= h >> 16;
-            return (h & 0xFFFFFF) / (float)0xFFFFFF;
-        }
-    }
+        => Megastations.ProceduralMaterialCpuGenerator.PixelNoise01(x, y);
 
     // Separable box blur, wrap-around (matches MaterialSampler's Wrap addressing — a
     // clamped blur would visibly seam at the UV wrap boundary). Flat regions (the vast
@@ -590,21 +678,10 @@ public static class StationTextureRegistry
     // ── Colour helpers ────────────────────────────────────────────────────────
 
     private static Color ShiftLuminance(Color c, float delta)
-    {
-        return new Color(
-            Math.Clamp(c.R + (int)delta, 0, 255),
-            Math.Clamp(c.G + (int)delta, 0, 255),
-            Math.Clamp(c.B + (int)delta, 0, 255));
-    }
+        => Megastations.ProceduralMaterialCpuGenerator.ShiftLuminance(c, delta);
 
     private static Color BlendColor(Color a, Color b, float t)
-    {
-        t = Math.Clamp(t, 0f, 1f);
-        return new Color(
-            (int)(a.R + (b.R - a.R) * t),
-            (int)(a.G + (b.G - a.G) * t),
-            (int)(a.B + (b.B - a.B) * t));
-    }
+        => Megastations.ProceduralMaterialCpuGenerator.Blend(a, b, t);
 
     // ── RNG seed mixing ───────────────────────────────────────────────────────
     // No longer a cache key (the shared static cache is gone, Brief S2b-1) — still used

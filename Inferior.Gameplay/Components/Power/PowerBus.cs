@@ -20,6 +20,11 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerBus : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+    [
+        new(ShipSystemMetricRole.PowerFlow, $"{Name}.Consumption"),
+        new(ShipSystemMetricRole.CapacitorFill, $"{Name}.Level"),
+    ];
     // ── Throughput limits (watts — rate, not stored energy) ───────────────────
     /// <summary>Total throughput ceiling (watts).</summary>
     public double MaxPower              { get; init; }
@@ -60,7 +65,7 @@ public sealed class PowerBus : ShipComponent
     /// </summary>
     public double Draw(double requestedWatts, double dt)
     {
-        if (dt <= 0.0) return 0.0;
+        if (Status != ComponentStatus.Running || dt <= 0.0) return 0.0;
         double cappedWatts = Math.Min(requestedWatts, MaxPower);
         double deliveredJ  = Capacitor.Draw(cappedWatts * dt);
         double deliveredW  = deliveredJ / dt;
@@ -92,10 +97,17 @@ public sealed class PowerBus : ShipComponent
         TickSensors();
     }
 
+    protected override void OnPowerOffTick(double dt)
+    {
+        DrawnWatts = 0.0;
+        _drawnThisTick = 0.0;
+        TickSensors();
+    }
+
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {Capacitor.MaxJ / 1e6:F1} MJ bus"));
     }
 
@@ -105,13 +117,15 @@ public sealed class PowerBus : ShipComponent
             $"{Name}.Level",
             () => Capacitor.FillFraction,
             safeRange:  new RangeValue(0.2, 1.0),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         double maxW = MaxPower < 1e15 ? MaxPower : 1e9;  // sensible range if unset
         _sensors.Add(new ComponentSensor(
             $"{Name}.Consumption",
             () => DrawnWatts,
             safeRange:  new RangeValue(0, maxW),
-            totalRange: new RangeValue(0, maxW)));
+            totalRange: new RangeValue(0, maxW),
+            quantity: PhysicalQuantity.Power));
     }
 }

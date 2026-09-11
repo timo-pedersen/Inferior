@@ -28,6 +28,8 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    internal const string DefaultStarterHullTypeId = CosmoHullDefinitionFactory.HullId;
+
     internal readonly record struct ChaseCameraTargets(
         DVec3 DesiredPosition,
         DVec3 LookTarget);
@@ -95,13 +97,27 @@ public sealed partial class SystemSpaceState
 
     private void SpawnShip(DVec3 startPos, Quaternion orientation)
     {
-        var ship = ShipBuilder.NewShip(AsteriskHullDefinitionFactory.HullId)
+        var ship = ShipBuilder.NewShip(DefaultStarterHullTypeId)
             .WithPosition(startPos)
             .WithOrientation(orientation)
             .WithDefaultStartingComponents()
             .Build();
 
         _simulation.SetShip(ship);
+    }
+
+    private void EnsureShipExists(DVec3 startPos, Quaternion orientation)
+    {
+        if (_simulation.ShipState == null)
+            SpawnShip(startPos, orientation);
+    }
+
+    private void PlaceShipAtEntryPoint(DVec3 startPos, Quaternion orientation)
+    {
+        if (_simulation.ShipState == null)
+            SpawnShip(startPos, orientation);
+        else
+            _simulation.TeleportShip(startPos, orientation);
     }
 
     // Returns the quaternion that rotates the camera's default forward (-UnitZ) to face `dir`.
@@ -184,7 +200,7 @@ public sealed partial class SystemSpaceState
         };
 
     private void PublishCameraMessage(string text)
-        => DataBus.System.Publish(
+        => DataBus.SystemMessages.Publish(
             Topics.System.All,
             new SystemMessage(text, SystemMessagePriority.NB));
 
@@ -201,13 +217,13 @@ public sealed partial class SystemSpaceState
         switch (result.Kind)
         {
             case StationCycleResultKind.NoStations:
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage("Station cycle: current system has no stations.",
                         SystemMessagePriority.ImportantWarning));
                 break;
 
             case StationCycleResultKind.InvalidStation:
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage(
                         $"Station cycle rejected: {result.StationName ?? "<unnamed>"} has no stable persistence id.",
                         SystemMessagePriority.ImportantWarning));
@@ -215,7 +231,7 @@ public sealed partial class SystemSpaceState
 
             case StationCycleResultKind.Requested:
                 StationCycleRequest request = result.Request!.Value;
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage(
                         $"Station cycle: {request.StationName} ({request.OneBasedIndex}/{request.TotalCount})",
                         SystemMessagePriority.NB));
@@ -234,6 +250,9 @@ public sealed partial class SystemSpaceState
         _simulation.RequestStationRelocation(
             request.StationPersistenceId,
             request.SurfaceStandOffMeters);
+        RequestExplicitStationVisual(
+            request.StationPersistenceId,
+            "debug station cycle");
         return true;
     }
 

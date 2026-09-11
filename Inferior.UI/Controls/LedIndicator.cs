@@ -14,7 +14,7 @@ public record LedColorRange(double Min, double Max, Color Color)
 }
 
 /// <summary>
-/// Standalone LED indicator. Subscribes to a DataBus.Instruments topic (double),
+/// Standalone LED indicator. Subscribes to a DataBus.ScalarTelemetry topic (double),
 /// lights up based on configurable on/blink/colour ranges, and eases brightness
 /// transitions to simulate an incandescent lamp warming up and cooling down.
 /// Not a Control subclass — drawn directly via Draw(SpriteBatch, Point).
@@ -56,8 +56,7 @@ public sealed class LedIndicator : IDisposable
     // ── Internal state ────────────────────────────────────────────────────────
     private double              _value              = 0.0;
     private double              _currentBrightness  = 0.0;
-    private readonly Action<double> _subscription;
-    private readonly Bus<double>    _bus;
+    private readonly IDisposable _subscription;
 
     // ── Shared textures (all instances, same size) ────────────────────────────
     private static Texture2D? _circleTexCache = null;
@@ -66,19 +65,16 @@ public sealed class LedIndicator : IDisposable
 
     // ── Constructor ───────────────────────────────────────────────────────────
 
-    public LedIndicator(string topic, Bus<double> bus, GraphicsDevice gd, SpriteFont labelFont)
+    public LedIndicator(string topic, TelemetryChannel<double> bus, GraphicsDevice gd, SpriteFont labelFont)
     {
         Topic     = topic;
         LabelFont = labelFont;
-        _bus      = bus;
         EnsurePixel(gd);
 
-        _subscription = v => _value = v;
-        _bus.Subscribe(topic, _subscription);
+        _subscription = bus.Subscribe(topic, v => _value = v);
     }
 
-    public void Dispose()
-        => _bus.Unsubscribe(Topic, _subscription);
+    public void Dispose() => _subscription.Dispose();
 
     // ── Update ────────────────────────────────────────────────────────────────
 

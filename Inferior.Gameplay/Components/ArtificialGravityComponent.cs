@@ -14,6 +14,10 @@ namespace Inferior.Gameplay.Components;
 /// </summary>
 public sealed class ArtificialGravityComponent : ShipComponent
 {
+    public override bool CanSetPower => false;
+
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+        [new(ShipSystemMetricRole.PowerInput, $"{Name}.{Topics.ArtificialGravity.Power}")];
     public ArtificialGravityComponent(string name, double powerWatts)
     {
         Name               = name;
@@ -32,6 +36,7 @@ public sealed class ArtificialGravityComponent : ShipComponent
             $"{Name}.{Topics.ArtificialGravity.Power}",
             () => Status == ComponentStatus.Running ? PowerConsumption : 0.0,
             safeRange:  new RangeValue(0, PowerConsumption),
-            totalRange: new RangeValue(0, PowerConsumption)));
+            totalRange: new RangeValue(0, PowerConsumption),
+            quantity: PhysicalQuantity.Power));
     }
 }

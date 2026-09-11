@@ -5,7 +5,7 @@ namespace Inferior.Gameplay.Sensors;
 
 /// <summary>
 /// Reusable passive sensor. Reads a raw physical value, applies layered noise,
-/// and publishes the result to DataBus.Instruments.
+/// and publishes the result to DataBus.ScalarTelemetry.
 ///
 /// Called from the sim thread — Publish() is thread-safe via the bus queue.
 ///
@@ -36,6 +36,14 @@ public sealed class PassiveSensor
 
     /// <summary>Maximum physical value the sensor can measure. Used for noise scaling.</summary>
     public double MaxValue   { get; init; } = 1.0;
+
+    /// <summary>Physical meaning of the scalar value; raw values remain SI.</summary>
+    public PhysicalQuantity Quantity { get; init; } = PhysicalQuantity.Unspecified;
+
+    /// <summary>
+    /// False when a multi-output sensor publishes one combined DeviceInfo itself.
+    /// </summary>
+    public bool PublishDeviceInfo { get; init; } = true;
 
     /// <summary>
     /// Unique seed — decorrelates noise from other sensors of the same type.
@@ -74,17 +82,19 @@ public sealed class PassiveSensor
     public double PostThresholdMinValue { get; set; } = double.NegativeInfinity;
 
     private double _timeSinceLastPost;
+    private bool _infoPublished;
 
     // ── Publish ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Apply noise to <paramref name="rawValue"/> and publish to DataBus.Instruments,
+    /// Apply noise to <paramref name="rawValue"/> and publish to DataBus.ScalarTelemetry,
     /// subject to <see cref="PostThresholdMinValue"/> and <see cref="PostsPerSecond"/>.
     /// <paramref name="dt"/> is the sim tick duration in seconds; pass 0 to skip rate limiting.
     /// Safe to call from the sim thread.
     /// </summary>
     public void Publish(double rawValue, double dt = 1.0 / 60.0)
     {
+        PublishInfoOnce();
         if (rawValue < PostThresholdMinValue) return;
 
         if (PostsPerSecond > 0)
@@ -101,6 +111,46 @@ public sealed class PassiveSensor
         foreach (var source in ExternalNoiseSources)
             noise += source();
 
-        DataBus.Instruments.Publish($"{TopicPrefix}.{ValueName}", rawValue + noise);
+        DataBus.ScalarTelemetry.Publish($"{TopicPrefix}.{ValueName}", rawValue + noise);
+    }
+
+    private void PublishInfoOnce()
+    {
+        if (_infoPublished)
+            return;
+
+        _infoPublished = true;
+        string topic = $"{TopicPrefix}.{ValueName}";
+        var policy = TopicPolicy.LatestState;
+        DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = topic,
+            DeviceId = TopicPrefix,
+            ValueKind = TelemetryValueKind.Scalar,
+            Quantity = Quantity,
+            OperatingRange = new RangeValue(0.0, MaxValue),
+            SuggestedDisplayRange = new RangeValue(0.0, MaxValue),
+            Publication = PostsPerSecond > 0
+                ? new PublicationInfo(PublicationMode.Periodic, PostsPerSecond)
+                : new PublicationInfo(PublicationMode.EveryTick),
+            TopicPolicy = policy,
+        });
+
+        if (PublishDeviceInfo)
+        {
+            DataBus.DeviceInfo.Publish(TopicPrefix, new DeviceInfo
+            {
+                DeviceId = TopicPrefix,
+                PublishedTopics = [topic],
+                Power = new PowerProfile(0.0, 0.0),
+            });
+        }
+
+        DataBus.DeviceState.Publish(TopicPrefix, new DeviceState(
+            TopicPrefix,
+            DeviceOperationalStatus.Running,
+            Damage: 0.0,
+            Efficiency: 1.0,
+            SimulationTime: GameClock.SimTime));
     }
 }

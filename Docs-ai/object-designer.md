@@ -91,7 +91,7 @@ BerenHullDefinitionFactory.AssetPath
     -> HullDefinitionLibrary.Register(...)
 ```
 
-The old hard-coded Beren geometry factory body has been removed. Aries, Asterisk, Antega, Sidewinder and Cobra remain on their existing paths.
+The old hard-coded Beren geometry factory body has been removed. Aries, Cosmo, Asterisk, Antega, Sidewinder and Cobra remain on their existing paths.
 
 ## Validation
 

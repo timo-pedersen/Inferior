@@ -10,6 +10,19 @@ namespace Inferior.Gameplay.Physics;
 /// </summary>
 public class CelestialBody
 {
+    public static CelestialBody FromStar(Star star, DVec3 position)
+    {
+        ArgumentNullException.ThrowIfNull(star);
+        return new CelestialBody
+        {
+            Position = position,
+            Radius = star.RadiusMeters,
+            Mass = star.MassKg,
+            Class = star.SpectralClass,
+            SurfaceTemperatureKelvin = star.Temperature,
+        };
+    }
+
     /// <summary>Current universe position in metres.</summary>
     public DVec3  Position       { get; set; }
 
@@ -21,6 +34,9 @@ public class CelestialBody
 
     /// <summary>Spectral classification — used by StarPhysics for pressure/temperature calculations.</summary>
     public SpectralClass Class   { get; set; }
+
+    /// <summary>Actual generated stellar surface temperature in kelvin; zero for non-stars.</summary>
+    public double SurfaceTemperatureKelvin { get; set; }
 
     /// <summary>Axial tilt in radians — used by periodic noise sources.</summary>
     public double AxialTilt      { get; set; }

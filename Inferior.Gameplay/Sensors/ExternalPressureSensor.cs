@@ -1,3 +1,4 @@
+using Inferior.Core.DataBus;
 using Inferior.Core.Simulation;
 using Inferior.Gameplay.SensorData;
 using Env = Inferior.Gameplay.SensorData.Environment;
@@ -19,6 +20,7 @@ public sealed class ExternalPressureSensor
         {
             TopicPrefix = name,
             ValueName   = Core.DataBus.Topics.ExternalPressure.Value,
+            Quantity    = PhysicalQuantity.Pressure,
             MaxValue    = 1_000_000.0,  // 10 atm — upper bound for dense atmospheres
             Seed        = (double)HashCode.Combine(name + ".Pressure"),
             NoiseWhite  = 0.002,

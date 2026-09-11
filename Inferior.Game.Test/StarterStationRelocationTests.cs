@@ -17,6 +17,12 @@ public sealed class StarterStationRelocationTests
     private static readonly DVec3 DefaultStarterSpawn = new(0, 0.5e11, 3e11);
 
     [Fact]
+    public void DefaultStarterHullIsCosmo()
+        => Assert.Equal(
+            CosmoHullDefinitionFactory.HullId,
+            SystemSpaceState.DefaultStarterHullTypeId);
+
+    [Fact]
     public void InitialNewGameStarterEntryQueuesStarterStationRelocation()
     {
         var (star, system, starterStation) = StarterSystemWithStarterStation();
@@ -121,7 +127,7 @@ public sealed class StarterStationRelocationTests
         void Handler(SystemMessage message) => messages.Add(message);
 
         DataBus.Drain();
-        DataBus.System.Subscribe(Topics.System.All, Handler);
+        DataBus.SystemMessages.Subscribe(Topics.System.All, Handler);
         try
         {
             RunStarterRelocation(star, system, starterStation);
@@ -129,7 +135,7 @@ public sealed class StarterStationRelocationTests
         }
         finally
         {
-            DataBus.System.Unsubscribe(Topics.System.All, Handler);
+            DataBus.SystemMessages.Unsubscribe(Topics.System.All, Handler);
         }
 
         Assert.DoesNotContain(messages, message => message.Text == "X-Stop complete");

@@ -231,10 +231,10 @@ Current empty mass:     78,000 kg
 Current aggregate propulsion at maximum output:
 
 ```text
-Forward force:          312 kN
-Forward acceleration:   4.0 m/s²
-Maneuvering force:      156 kN
-Maneuver acceleration:  2.0 m/s²
+Forward force:          1,560 kN
+Forward acceleration:   20.0 m/s²
+Maneuvering force:      780 kN
+Maneuver acceleration:  10.0 m/s²
 ```
 
 ### Antega
@@ -257,11 +257,11 @@ Dry mass: 96,000 kg
 At maximum harmony, the configured Antega currently produces approximately:
 
 ```text
-Total forward force:      14.341 MN
-Forward acceleration:      4.0 m/s²
-Lift acceleration:         2.0 m/s²
-Lift-only hover rating:     0.204 g
-Conservative hover rating:  0.163 g
+Total forward force:      71.704 MN
+Forward acceleration:     20.0 m/s²
+Lift acceleration:        10.0 m/s²
+Lift-only hover rating:     1.020 g
+Conservative hover rating:  0.816 g
 ```
 
 The conservative diagnostic divides the theoretical hover rating by a temporary 1.25 control-reserve factor.
@@ -366,23 +366,23 @@ With unchanged maximum engine output:
 
 ```text
 Forward acceleration:
-14.341 MN / 15.5852 million kg
-≈ 0.92 m/s²
+71.704 MN / 15.5852 million kg
+≈ 4.60 m/s²
 ```
 
 With a 0.50 lift fraction:
 
 ```text
 Lift acceleration:
-7.1705 MN / 15.5852 million kg
-≈ 0.46 m/s²
-≈ 0.047 g theoretical hover capability
+35.852 MN / 15.5852 million kg
+≈ 2.30 m/s²
+≈ 0.235 g theoretical hover capability
 ```
 
 Conservative hover rating with 25% reserve:
 
 ```text
-≈ 0.038 g
+≈ 0.188 g
 ```
 
 This means a fully loaded Antega can operate only on extremely low-gravity bodies. That is desirable.
@@ -682,7 +682,7 @@ Current design:
 Forward/reverse controls:
     longitudinal engine output
 
-A/D:
+Q/E:
     lateral thrust
 
 F/R:
@@ -810,7 +810,7 @@ Mouse Y:
 Mouse X:
     roll
 
-Q / E:
+A / D:
     yaw
 ```
 
@@ -937,20 +937,20 @@ This is a planning estimate, not a hard legal limit.
 Current empty Antega at maximum harmony:
 
 ```text
-Lift acceleration:          2.0 m/s²
-Theoretical hover gravity:  0.204 g
-Conservative rating:        0.163 g
+Lift acceleration:         10.0 m/s²
+Theoretical hover gravity:  1.020 g
+Conservative rating:        0.816 g
 ```
 
-Therefore an empty Antega can operate on small low-gravity moons.
+Therefore an empty Antega can lift-only hover near 1g, with limited reserve.
 
-It cannot lift-only hover on an ordinary 1g world.
+It remains cargo-sensitive and needs reserve, orientation, or operational margin for ordinary high-gravity work.
 
 A fully loaded Antega falls to approximately:
 
 ```text
-Theoretical hover gravity: 0.047 g
-Conservative rating:       0.038 g
+Theoretical hover gravity: 0.235 g
+Conservative rating:       0.188 g
 ```
 
 This makes orbital freight infrastructure and transfer craft meaningful.
@@ -973,8 +973,8 @@ If the pilot pitches the ship so the main engines point upward, forward thrust c
 Example using empty Antega at maximum harmony:
 
 ```text
-Forward acceleration: 4.0 m/s²
-Lift acceleration:    2.0 m/s²
+Forward acceleration: 20.0 m/s²
+Lift acceleration:    10.0 m/s²
 ```
 
 Full forward plus full lift shares the thrust envelope:
@@ -988,9 +988,9 @@ If both forces align vertically:
 
 ```text
 Vertical thrust acceleration
-    = 4.0 × 0.7071 + 2.0 × 0.7071
-    ≈ 4.24 m/s²
-    ≈ 0.43 g
+    = 20.0 × 0.7071 + 10.0 × 0.7071
+    ≈ 21.21 m/s²
+    ≈ 2.16 g
 ```
 
 Thus skilled piloting can extend landability beyond the lift-only rating.

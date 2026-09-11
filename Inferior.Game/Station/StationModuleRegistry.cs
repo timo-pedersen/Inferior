@@ -261,12 +261,15 @@ public static class StationModuleRegistry
         BoundingBox  = new Vector3(18, 14, 18),
         MinScale     = StationScale.Station,
         SelectWeight = 0.8f,
+        // Brief U1: the whole mesh is hull (a plain octagonal prism, no separate structural
+        // decoration content like docking-bay's door frame) — Deco starts empty, exactly
+        // like a box module's mod.Mesh, with StationDecorator's own passes building it up
+        // from there.
         MeshFactory  = seed =>
         {
-            var mesh = new StationModuleMesh();
-            AddOctagonalPrism(mesh, radius: 9f, height: 14f, color: new Color(200, 195, 185));
-            mesh.BaseFaceCount = mesh.FaceCount;
-            return mesh;
+            var hull = new StationModuleMesh();
+            AddOctagonalPrism(hull, radius: 9f, height: 14f, color: new Color(200, 195, 185));
+            return (hull, new StationModuleMesh());
         },
         Ports        =
         [
@@ -287,12 +290,12 @@ public static class StationModuleRegistry
         BoundingBox  = new Vector3(14, 14, 14),
         MinScale     = StationScale.Station,
         SelectWeight = 0.7f,
+        // Brief U1: see HabBlockOctagonal's MeshFactory comment — Deco starts empty.
         MeshFactory  = seed =>
         {
-            var mesh = new StationModuleMesh();
-            AddOctagonalPrism(mesh, radius: 7f, height: 14f, color: new Color(155, 165, 175));
-            mesh.BaseFaceCount = mesh.FaceCount;
-            return mesh;
+            var hull = new StationModuleMesh();
+            AddOctagonalPrism(hull, radius: 7f, height: 14f, color: new Color(155, 165, 175));
+            return (hull, new StationModuleMesh());
         },
         Ports        =
         [

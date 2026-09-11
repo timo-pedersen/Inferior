@@ -6,6 +6,7 @@ using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Galaxy;
 using Inferior.Game.StationGen;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.UI;
 using Inferior.UI.Controls;
 using Inferior.UI.Controls.Cockpit;
@@ -67,6 +68,7 @@ public sealed class SystemMapState : GameState
     // StationGenerator.FindDockingBay (growth-loop only, no mesh building; ~0.5 ms/call
     // measured), not recomputed on every hover.
     private readonly Dictionary<Station, StationModuleDefinition?> _dockingBayInfo = [];
+    private readonly Dictionary<Station, MegastationSelection> _stationTypeInfo = [];
 
     // ── Nav target (right-click selection, passed back to flight) ─────────────
     private OrbitalBody? _navBody;
@@ -170,8 +172,20 @@ public sealed class SystemMapState : GameState
         _cameraPos       = Vector2.Zero;
 
         _dockingBayInfo.Clear();
+        _stationTypeInfo.Clear();
+        MegastationDevelopmentSelection development =
+            MegastationPrototypeSettings.DevelopmentSelection;
+        Station? starter = development.ForceStarterStation
+            || development.Mode == MegastationPrototypeSelectionMode.ForceStarterStation
+                ? StarterSystemSelector.SelectStarterStation(_system.Stations)
+                : null;
         foreach (var station in _system.Stations)
+        {
+            MegastationSelection selection =
+                MegastationDevelopmentPolicy.Resolve(station, starter, development);
+            _stationTypeInfo[station] = selection;
             _dockingBayInfo[station] = StationGenerator.FindDockingBay(station);
+        }
 
         _pixel = new Texture2D(_gd, 1, 1);
         _pixel.SetData([Color.White]);
@@ -179,6 +193,12 @@ public sealed class SystemMapState : GameState
 
         UpdateScreenCentre();
         FitSystemToView();
+
+        // Seed input history so a key still held down from the keypress that
+        // opened this state (e.g. M/N) isn't misread as a fresh press on the
+        // very first Update() and immediately closes the map back to flight.
+        _prevMouse = Mouse.GetState();
+        _prevKeys  = Keyboard.GetState();
 
         var theme = Theme.InferiorDark(_font);
         _ui?.Dispose();
@@ -336,7 +356,7 @@ public sealed class SystemMapState : GameState
             {
                 if (string.IsNullOrWhiteSpace(hitStation.PersistenceId))
                 {
-                    DataBus.System.Publish(Topics.System.All,
+                    DataBus.SystemMessages.Publish(Topics.System.All,
                         new SystemMessage(
                             $"Station arrival rejected: {hitStation.Name} has no stable persistence id.",
                             SystemMessagePriority.ImportantWarning));
@@ -696,7 +716,11 @@ public sealed class SystemMapState : GameState
         DrawText(sb, station.Name, new Vector2(tx, ty), Color.White, 1.05f);
         ty += (int)(lineH * 1.3f);
 
-        DrawText(sb, $"{station.Size} Station", new Vector2(tx, ty), ColStation);
+        MegastationSelection selection = _stationTypeInfo.GetValueOrDefault(station);
+        string typeLabel = selection.IsMegastation
+            ? selection.DisplayName
+            : $"{station.Size} Station";
+        DrawText(sb, typeLabel, new Vector2(tx, ty), ColStation);
         ty += lineH;
 
         string parentName = station.OrbitParent?.Name ?? _star.Name;

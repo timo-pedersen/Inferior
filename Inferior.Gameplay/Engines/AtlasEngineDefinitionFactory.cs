@@ -175,7 +175,7 @@ public static class AtlasEngineDefinitionFactory
             "Atlas Civilian Drive",
             new DVec3(5.45, 5.25, 58.40),
             dryMassKg: 96_000.0,
-            maximumForwardThrustN: 3_585_200.0,
+            maximumForwardThrustN: 17_926_000.0,
             reverseThrustFraction: 1.0,
             lateralThrustFraction: 0.25,
             liftThrustFraction: 0.50,

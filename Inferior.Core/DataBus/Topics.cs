@@ -21,6 +21,13 @@ public static class Topics
         public const string DamagePercent = "DamagePercent";
     }
 
+    public static class Engineering
+    {
+        public const string PowerInput     = "PowerInput";
+        public const string HeatGeneration = "HeatGeneration";
+        public const string ThermalLoad    = "ThermalLoad";
+    }
+
     public static class Shield
     {
         public const string Name = "Shield";
@@ -55,9 +62,7 @@ public static class Topics
     public static class GravitySensor
     {
         public const string Strength   = "Strength";    // m/s² — net gravitational acceleration
-        public const string DirectionX = "DirectionX";  // normalised gravity vector components
-        public const string DirectionY = "DirectionY";
-        public const string DirectionZ = "DirectionZ";
+        public const string Direction  = "Direction";   // normalised system-ecliptic vector
     }
 
     public static class Engine
@@ -106,9 +111,7 @@ public static class Topics
     public static class MagneticField
     {
         public const string Strength = "Strength";  // Tesla
-        public const string X        = "X";
-        public const string Y        = "Y";
-        public const string Z        = "Z";
+        public const string Direction = "Direction"; // normalised system-ecliptic vector
     }
 
     public static class ExternalPressure
@@ -135,18 +138,23 @@ public static class Topics
     public static class PlanetCoord
     {
         public const string Altitude      = "PlanetCoord.Altitude";       // metres above surface
-        public const string Latitude      = "PlanetCoord.Latitude";       // degrees, +N/-S
-        public const string Longitude     = "PlanetCoord.Longitude";      // degrees, +E/-W
-        public const string Heading       = "PlanetCoord.Heading";        // degrees, 0–360
+        public const string Latitude      = "PlanetCoord.Latitude";       // radians, +N/-S
+        public const string Longitude     = "PlanetCoord.Longitude";      // radians, +E/-W
+        public const string Heading       = "PlanetCoord.Heading";        // radians, 0–2π
         public const string GroundSpeed   = "PlanetCoord.GroundSpeed";    // m/s horizontal
         public const string VerticalSpeed = "PlanetCoord.VerticalSpeed";  // m/s, +up/-down
         public const string Temperature   = "PlanetCoord.Temperature";    // kelvin
-        public const string Pressure      = "PlanetCoord.Pressure";       // bar; 0 if no atmosphere
+        public const string Pressure      = "PlanetCoord.Pressure";       // pascals; 0 if no atmosphere
     }
 
     public static class SolarSpectrum
     {
         public const string Data = "Data";  // double[] — 10-bin normalised Planck spectrum (0-1 per bin)
+    }
+
+    public static class SolarHeat
+    {
+        public const string Irradiance = "Irradiance"; // bolometric heat flux, W/m²
     }
 
     public static class Target
@@ -158,15 +166,13 @@ public static class Topics
     {
         public const string PadTargeted   = "Docking.PadTargeted";    // 1.0 when a pad is targeted, 0.0 otherwise
         public const string PadDistance   = "Docking.PadDistance";    // metres to pad world position
-        public const string PadDirectionX = "Docking.PadDirectionX";  // ship-frame direction to pad (normalised)
-        public const string PadDirectionY = "Docking.PadDirectionY";
-        public const string PadDirectionZ = "Docking.PadDirectionZ";
+        public const string PadDirection  = "Docking.PadDirection";   // ship-frame direction to pad (normalised)
         public const string PadSizeClass  = "Docking.PadSizeClass";   // 0.0 = Small, 1.0 = Large
     }
 
     /// <summary>
     /// LandingSupportSystem component — approach geometry relative to targeted pad.
-    /// All numeric topics published on DataBus.Instruments every sim tick.
+    /// All numeric topics published on DataBus.ScalarTelemetry every sim tick.
     /// </summary>
     public static class LandingSupport
     {
@@ -176,13 +182,14 @@ public static class Topics
         public const string HeightAbovePad     = "LandingSupport.HeightAbovePad";     // metres along pad normal; positive = correct side
         public const string LateralOffset      = "LandingSupport.LateralOffset";      // metres along pad short axis
         public const string LongitudinalOffset = "LandingSupport.LongitudinalOffset"; // metres along pad forward axis
-        public const string HeadingDeviation   = "LandingSupport.HeadingDeviation";   // degrees; 0 = aligned with pad forward
-        public const string PitchDeviation     = "LandingSupport.PitchDeviation";     // degrees; 0 = face-on
+        public const string HeadingDeviation   = "LandingSupport.HeadingDeviation";   // radians; 0 = aligned with pad forward
+        public const string PitchDeviation     = "LandingSupport.PitchDeviation";     // radians; 0 = face-on
         public const string UpsideDown         = "LandingSupport.UpsideDown";         // 1.0 = inverted relative to pad
     }
 
     public static class Ship
     {
+        public const string SystemsTopology = "Ship.SystemsTopology";
         /// <summary>Sum of all component ThermalNode.LastHeatInputW — total heat generation rate (watts).</summary>
         public const string ThermalSignature = "Ship.ThermalSignature";
         /// <summary>Warning level: 0=clear, 1=monitoring, 2=caution, 3=warning, 4=critical.</summary>
@@ -201,6 +208,9 @@ public static class Topics
         public const string LkmZone         = "Flight.LkmZone";         // double (0=none, 1/2/3)
         public const string LkmCompliance   = "Flight.LkmCompliance";   // double countdown seconds
         public const string XStopActive     = "Flight.XStop";           // double (1.0 = active)
+        public const string FlightAssistActive = "Flight.Assist";       // double (1.0 = active)
+        public const string FlightAssistForceN = "Flight.AssistForce";  // double, latest assist force magnitude in N
+        public const string FlightAssistAccelerationMs2 = "Flight.AssistAcceleration"; // double, latest assist acceleration magnitude
         public const string RelativeSpeedMs  = "Flight.RelativeSpeed";    // double, m/s magnitude of (vel - refVel)
         public const string ForwardSpeedMs  = "Flight.ForwardSpeed";    // double, m/s signed (negative = backwards)
         public const string AccelerationMs2 = "Flight.Acceleration";    // double, m/s² signed forward acceleration (Newtonian only)

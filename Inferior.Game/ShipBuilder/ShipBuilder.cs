@@ -6,6 +6,7 @@ using Inferior.Gameplay.Cockpit;
 using Inferior.Gameplay.Engines;
 using Inferior.Gameplay.Hull;
 using Inferior.Gameplay.Ship;
+using Inferior.Gameplay.Sensors;
 using Inferior.Persistence.Data;
 using Microsoft.Xna.Framework;
 
@@ -108,14 +109,20 @@ public sealed class ShipBuilder
             Position    = _position,
         };
         ship.SetOrientation(_orientation);
+        ship.ConfigureSystemSlots(hull.Slots);
         AddEngineMounts(ship, hull);
         InstallDefaultEngines(ship, hull, _engineVariantId);
+        ship.SynchronizeEngineTopology();
 
         if (_installDefaultComponents)
         {
             var reactor = new PowerReactor("Reactor", maxPower: 120e6, outputCapacitorJ: 50e6);
 
-            var bus = new PowerBus("MainBus", capacityJ: 10e6, maxPower: 120e6);
+            var bus = new PowerBus(
+                "MainBus",
+                capacityJ: 10e6,
+                maxPower: 120e6,
+                maxConnections: 8);
             bus.ConnectSource(reactor.OutputCapacitor);
 
             var powerManager = new PowerPriorityManager();
@@ -138,19 +145,48 @@ public sealed class ShipBuilder
             coolant.RegisterThermalNode(reactor.ThermalNode!);
             coolant.RegisterThermalNode(shield.ThermalNode!);
 
-            ship.Install(reactor);
-            ship.Install(bus);
-            ship.Install(powerManager);
-            ship.Install(shield);
-            ship.Install(shieldConnector);
-            ship.Install(heatsink);
-            ship.Install(coolant);
+            string reactorSlot = FindSlot(hull, SlotCategory.PowerReactor);
+            string busSlot = FindSlot(hull, SlotCategory.PowerBus);
+            string shieldSlot = FindSlot(hull, SlotCategory.Shield);
+            string heatSinkSlot = FindSlot(hull, SlotCategory.HeatSink);
+            string coolantSlot = FindSlot(hull, SlotCategory.CoolantSystem);
+            string solarHeatSensorSlot = FindSlot(hull, SlotCategory.Sensor);
+
+            ship.Install(reactorSlot, reactor);
+            ship.Install(busSlot, bus);
+            ship.SystemsTopology.ConfigurePowerBus(bus.Name, bus.MaxConnections);
+            // The priority manager is the current runtime implementation of the fixed
+            // ship-computer power controller. It is not an exchangeable hull component.
+            ship.InstallFixedSystem("fixed:ship-computer", "Ship Computer", powerManager);
+            ship.Install(shieldSlot, shield);
+            ship.InstallOnPowerBus(bus.Name, 1, shieldConnector);
+            ship.Install(heatSinkSlot, heatsink);
+            ship.Install(coolantSlot, coolant);
+            ship.Install(solarHeatSensorSlot, new SolarHeatSensor());
+            ship.SystemsTopology.ConnectPowerSource(
+                "power.reactor-mainbus",
+                reactor.Name,
+                bus.Name,
+                bus.MaxPower,
+                flowTopic: $"{reactor.Name}.Drawn");
+            ship.SystemsTopology.ConnectPowerConsumer(
+                "power.mainbus-shield",
+                bus.Name,
+                portIndex: 1,
+                shield.Name,
+                flowTopic: $"{shieldConnector.Name}.Flow",
+                capacityWatts: shieldConnector.MaxPower);
             shield.PowerOn = false;  // starts off — player enables via SYS panel; Install() defaults PowerOn
                                      // true for everything, this deliberately overrides it after the fact
         }
 
         return ship;
     }
+
+    private static string FindSlot(HullDefinition hull, SlotCategory category)
+        => hull.Slots.FirstOrDefault(slot => slot.Category == category)?.SlotId
+            ?? throw new InvalidOperationException(
+                $"Hull '{hull.HullTypeId}' has no {category} component slot.");
 
     private static InstalledCockpit? CreateDefaultCockpit(HullDefinition hull)
     {

@@ -115,6 +115,7 @@ Simulation domain model. Depends on Core, Galaxy.
 - `HullDefinition.cs` — immutable hull-class template: component slots, physical cockpit mounts, mass, size, aerodynamics, and optional designed-single-engine propulsion efficiencies.
 - `HullDefinitionLibrary.cs` — static registry of hull definitions, looked up by stable `HullTypeId`.
 - `AriesHullDefinitionFactory.cs` — Aries hull metadata, semantic geometry, component slots, and its physical C2 cockpit mount.
+- `CosmoHullDefinitionFactory.cs` — compact no-cargo Cosmo sport hull: C1 top cockpit, dorsal single Needle H2 mount, tapered octagonal semantic geometry.
 - `AsteriskHullDefinitionFactory.cs` — compact one-container Asterisk hull, front cargo-door assembly, starboard C2 cockpit mount, and single port H2 engine mount.
 - `BerenHullDefinitionFactory.cs` — thin loader-backed adapter for `Assets/Ships/beren.ship.json`.
 - `AntegaHullDefinitionFactory.cs` — 99 m, 120-container civilian hauler with segmented forward hatch, dorsal aft C5 bridge mount, and four external Atlas H10 engine mounts.
@@ -140,11 +141,12 @@ Simulation domain model. Depends on Core, Galaxy.
 **Cockpit/**
 
 - `CockpitDefinitions.cs` — cockpit mount/module definitions plus mount-class, facing, and installation-rotation enums.
-- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Asterisk starboard command blister, Beren underslung command pod, and Antega C5 civilian bridge.
+- `CockpitDefinitionLibrary.cs` — immutable cockpit-module registry containing the Aries roof canopy, Cosmo C1 sport cockpit, Asterisk starboard command blister, Beren underslung command pod, and Antega C5 civilian bridge.
 - `CockpitCommandTopics.cs` — command-bus topic constants for canopy and internal cockpit lights.
 - `InstalledCockpit.cs` — simulation-owned installation/runtime state and mount → installation → module camera-pose resolution.
 - `CockpitVisualGeometry.cs` — immutable module-local cockpit mesh parts and material roles owned by cockpit definitions.
 - `AriesCivilianCockpitGeometryFactory.cs` — C2 mounting body, housing, canopy, frame, dark backing, and light geometry for the Aries civilian cockpit.
+- `CosmoC1CockpitGeometryFactory.cs` — compact C1 top sport cockpit geometry: low canopy, housing, frame, backing, and independent light geometry.
 - `AsteriskStarboardCockpitGeometryFactory.cs` — compact C2 side-blister housing, forward/outward glass, frame, backing, and independent light geometry.
 - `BerenUnderslungCockpitGeometryFactory.cs` — full downward-mounted C2 command pod with collar, housing, faceted canopy, frame, backing, and independent light geometry.
 - `AntegaCivilianBridgeGeometryFactory.cs` — broad keyed C5 bridge plug, armoured base and housing, framed forward/side glazing, backing, and restrained light geometry.
@@ -336,7 +338,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
 - `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); owns shared pilot harmony changes, applies per-engine allocated force/current-mass translation and harmony-scaled torque/box-inertia assisted rotation, and publishes immutable propulsion/rotation diagnostics. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
-- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
+- `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Cosmo -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
@@ -345,12 +347,13 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `SystemSpaceState.CalibrationCube.cs` — fixed-position 10m lighting test-card cube near the starter station: six axis-coded face albedos + labels, rails orientation, `DrawDynamicLit`.
 - `SystemSpaceState.CelestialBodies.cs` — nearly empty; one Stations-owned texture helper left (`CreateNavGlowTexture`).
 - `SystemSpaceState.Containers.cs` — station-placed shipping containers: real `ShippingContainerFactory` geometry, standard rendering path, rails kinematics (`SpawnContainers`/`PlacedContainer`/`DrawContainers`).
-- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
+- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; system change invalidates the resident station visual package before replacing lightweight system data; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
+- `SystemSpaceState.StationResidency.cs` — presentation owner for the lightweight station visual catalogue, asynchronous CPU preparation request/token, render-thread upload, zero-or-one `StationVisualPackage`, bounded residency diagnostics, actual/conservative bounds, and idempotent disposal of all station-owned CPU/GPU/texture/shadow resources. Simulation/system data remains authoritative for station identity and orbit.
 - `SystemSpaceState.Ship.cs` — spawn/input mapping, bounds-centred third-person camera math, cockpit-layout capture.
 - `ChaseCameraState.cs` — persistent chase/orbital direction, radius, and roll; enforces a generic minimum framing radius from snapshot-published composite ship bounds.
-- `SystemSpaceState.Shadows.cs` — station shadow-map owner: 2048² StationMap render target, CullNone caster pass, fitted station-local light camera, F6/F7/F8/F9 diagnostics. Phase C: separate `_decoCasterMeshes` per module (one extra draw, hull caster unchanged) composed from `StationModuleMesh.DecorClassRanges` filtered by the current `CasterStage`; Ctrl+F6 cycles `CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }`, defaulting to whatever `StationDecorator.DecorCastingPolicy` already has landed. `FitStationShadowLight` fits from `_shadowCasterHullBounds` ∪ `_shadowCasterDecoBounds` (module-local AABBs precomputed once at caster-build time from real caster vertex data via `StationModuleMesh.ComputeFaceRangeBounds`/`ComputeIndexRangeBounds`), not `Definition.BoundingBox`. `TryGetMeshFactoryHullFaceRange` (internal, pure, no GraphicsDevice) is the single decision for which face range a MeshFactory module's hull caster uses — generalized off any category special-case after a bug where non-docking-bay MeshFactory modules (octagonal blocks) got no hull caster while their decoration still cast (floating shadows); a post-composition safety net warns via SystemMessage if any module ends up with no hull caster at all.
+- `SystemSpaceState.Shadows.cs` — renders the resident package's StationMap only (none when no detailed station is resident): lazy 8192² standard / 16384² mega target owned by that package, CullNone caster pass, fitted station-local light camera, F6/F7/F8/F9 diagnostics. Hull/deco caster buffers and exact caster bounds are package-owned and disposed on residency change. `HasMeshFactoryHull` is the GraphicsDevice-free decision for MeshFactory hull casters; a safety warning catches modules with no hull caster.
 - `SystemSpaceState.Skybox.cs` — star hover/click hyperspace-target selection (rendering itself lives in `SkyboxRenderer`).
-- `SystemSpaceState.Stations.cs` — station mesh/glow/dot drawing (next extraction candidate — see current-state doc).
+- `SystemSpaceState.Stations.cs` — lightweight dots/orbit rings for every station; detailed hull/deco/glass/glow drawing only for the resident package. Actual resident bounds gate far/mid/near tier intersection so the complete mesh is not blindly submitted to all passes.
 - `SystemSpaceState.Targeting.cs` — `FeedRadarContacts`/`UpdatePadTargetPosition` (world state → targeting system).
 - `CockpitLayout.cs` — snapshot of open cockpit panels + active tabs, persisted across state transitions.
 - `GalaxyMapPayload.cs` — return-to-flight payload for `GalaxyMapState` (star, time, spawn pos/orient).
@@ -402,20 +405,53 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `StationArchetypes.cs` — port-scoring/category-biasing growth strategies (cluster, linear-spine, hub-spoke).
 - `StationCableGenerator.cs` — routes cable bundles between greeble connectors on module faces.
 - `StationDecorator.cs` — adds per-module decoration (windows, hatches, antennas, dishes, lights, pipes). Tags `mesh.CurrentDecorClass` before each pass call (Phase C); `DecorCastingPolicy` is the static `DecorClass → bool` casting-policy table (with `C1Classes`.. `C4Classes` rollout groupings), the executable form of `Docs/station-lighting-pipeline-spec.md`'s documented casting policy.
-- `StationGenerator.cs` — builds stations by port-to-port module attachment, collision detection, landing pads.
+- `StationGenerator.cs` — builds stations by port-to-port module attachment and collision detection. `PrepareCpu` creates module/decor geometry, flat/AO variants, megastation geometry, procedural texture pixels, final vertex/index arrays, shadow-caster selections/bounds, and the ordered station upload plan without a `GraphicsDevice`. The legacy standalone `Generate` convenience path still uses `UploadPrepared`; dynamic residency uses the frame-budgeted session instead.
 - `StationModuleDefinition.cs` — hull definition for a module: bounding box, category, ports, mesh factory, weight.
-- `StationModuleMesh.cs` — CPU-side mesh accumulator for quads/triangles in local module space; can build a face range for docking-bay hull-only shadow casting. Phase C: `DecorClass` enum + `CurrentDecorClass`/`DecorClassRanges`; every index-appending call records its range via `RecordDecorClassRange`; `BuildIndexRanges` composes a remapped (vb, ib, triCount) from an arbitrary set of index ranges (used to build the per-module deco shadow caster from casting-enabled classes); `ComputeFaceRangeBounds`/`ComputeIndexRangeBounds` return module-local AABBs (no GPU buffers) over the same face/index-range selections, used by `FitStationShadowLight`'s C3 fit extension.
+- `StationModuleMesh.cs` — CPU-side mesh accumulator for quads/triangles in local module space. Phase C: `DecorClass` enum + `CurrentDecorClass`/`DecorClassRanges`; every index-appending call records its range via `RecordDecorClassRange`; `PrepareIndexRanges` performs the same compact remap as `BuildIndexRanges` but returns final CPU arrays for worker-side upload preparation; `ComputeFaceRangeBounds`/`ComputeIndexRangeBounds` return module-local AABBs used by shadow fitting.
 - `StationModuleRegistry.cs` — registry of all module types (hab, cargo, docking, science, connector).
 - `StationPort.cs` — attachment point on a module: size, category filters, terminal/docking flags.
+- `StationPreparationTask.cs` — station-specific worker boundary and exactly-once task observation handle. Request-token `OperationCanceledException` becomes a normal cancelled outcome inside the delegate; unrelated exceptions remain fault outcomes. Normal polling and reset/state-exit detachment are the two explicit observation paths.
 - `StationProfile.cs` — generated station attributes: economy, age, wealth, population.
-- `StationTextureRegistry.cs` — procedural panel texture generation + caching by palette.
+- `StationTextureRegistry.cs` — deterministic procedural panel texture-pixel preparation plus render-thread upload helpers; station variants are package-owned, not globally cached.
+- `StationVisualResidency.cs` — GraphicsDevice-free `StationVisualResidencyPolicy` (default 200 km load / 250 km unload with visual-class overrides), deterministic hysteresis/request-sequence state machine, and the zero-or-one disposable package slot used by `SystemSpaceState`.
+- `StationVisualUpload.cs` — station-specific 2 ms cooperative upload scheduler, ordered resource metadata, accumulated/frame/operation timing, oversized-operation detection, resource ownership transfer, and frame-budgeted cancellation/failure cleanup. It contains no `GraphicsDevice` dependency and is exercised directly by lifecycle tests.
 - `StationYagiAntenna.cs` — Yagi antenna element builder: randomized geometry and placement.
 - `SurfaceTexture.cs` — enum of surface types (CleanPanel, TechPanel, Glass, etc.).
 - `TexturePainter.cs` — CPU pixel-buffer text drawing using `BitmapFonts`.
 - `TexturePalette.cs` — per-economy colour scheme (base/accent/grime, panel noise/contrast).
 
+**Station/Megastations/** — occupancy-generated megastation prototype path
+
+- `ConnectivityValidation.cs` — GraphicsDevice-free validation of occupied-volume connected components and sealed empty cavities.
+- `BoundaryMeshValidation.cs` — CPU-side final-array mesh validation for finite vertices, bounds, degenerates, duplicate triangles, open/non-manifold edges, T-junctions, and sliver components.
+- `BoundaryTopology.cs` — exact-grid boundary face/edge/vertex topology classification and conservative chamfer eligibility.
+- `BoundaryTopologySignature.cs` — canonical semantic SHA-256 signature for boundary topology and chamfer eligibility.
+- `CornerRegionGenerator.cs` — plans and applies eight shared corner-region masses around the structural core.
+- `EdgeRegionGenerator.cs` — plans and applies twelve shared edge-region profiles plus face-region support shoulders.
+- `ExteriorSpace.cs` — flood-fills externally accessible empty cells and tests exposed structural faces.
+- `MegastationMassingSignature.cs` — canonical SHA-256 signatures for accepted megastation occupancy/massing regression fixtures.
+- `MegastationPrototypeGenerator.cs` — CPU/GPU entry point for megastation generation, diagnostics, and single-module station-model wrapping.
+- `MegastationPrototypeMeshBuilder.cs` — consumes regularised occupancy boundary topology, validates sharp/final meshes, and emits the current render mesh with debug colour modes.
+- `MegastationPrototypeSettings.cs` — generation settings, development-selection source, and generator/seed compatibility version declarations.
+- `MegastationServiceChannels.cs` — SC2/SC2a deterministic planar network planner (primary trunks, light/channel-rich secondary composition, turns, covered utility-junction variants, dead ends and bridges), full-footprint support/reservation rejection, false-trench and node visible/caster emission, M1 material grouping, diagnostics, and Debug route/node lines.
+- `MegastationSeed.cs` — stable semantic FNV-style seed derivation for megastation subsystems.
+- `RegionPlans.cs` — stable region identities and edge/corner plan records.
+- `SliceGrid.cs` — deterministic non-uniform rectilinear grid, core ranges, exterior layers, and cell coordinate helpers.
+- `StructuralOccupancy.cs` — compact per-cell occupancy flags, owner metadata, and stable region ids.
+- `StructuralVolumeGenerator.cs` — fills the current cuboid structural core occupancy baseline.
+- `SurfacePatch.cs` — exposed-face patch records and patch-local coordinate discovery.
+- `UrbanGrowth.cs` — monotonic face-interior district/depth-map growth for each major surface patch.
+- `UrbanStyle.cs` — station-wide style tendencies and deterministic per-face settings modifiers.
+
 ---
 
 ## Inferior.Game.Test
 
+- Test execution is repository-wide and tiered by `Directory.Build.props`: `dotnet test Inferior.slnx`
+  uses `TestProfiles/Fast.runsettings` and excludes `[Trait("Category", "Slow")]`; passing
+  `-p:RunSlowTests=true` selects `TestProfiles/All.runsettings`. Slow tests cover production-scale
+  generation, seed sweeps and broad preparation/integration. See `testing-ai.md` for commands and
+  classification/verification policy.
+- `MegastationPrototypeTests.cs` — xUnit coverage for the occupancy-generated megastation prototype: slice grid, exterior flood fill, face/edge/corner ownership, connectivity, massing signatures, version/seed compatibility, and mesh sanity.
+- `StationVisualResidencyTests.cs` — GraphicsDevice-free boundary/hysteresis, deterministic selection/tie, explicit supersession, system reset, stale-result rejection, visual-class override, zero-or-one package, lightweight-data independence, and repeated-disposal coverage.
 - `ShipRecordContainmentTests.cs` — xUnit test enforcing that `ShipRecord` only appears in `ShipBuilder`/`ShipExtensions`/`ShipPersistenceService`.

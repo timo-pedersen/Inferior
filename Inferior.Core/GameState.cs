@@ -48,15 +48,20 @@ public sealed class StateTransition
 {
     public GameStateId Target  { get; }
     public object?     Payload { get; }   // optional data passed to next state
+    public bool        SuspendCurrent { get; }
 
-    public StateTransition(GameStateId target, object? payload = null)
+    public StateTransition(GameStateId target, object? payload = null, bool suspendCurrent = false)
     {
-        Target  = target;
-        Payload = payload;
+        Target         = target;
+        Payload        = payload;
+        SuspendCurrent = suspendCurrent;
     }
 
     public static StateTransition To(GameStateId target, object? payload = null)
         => new(target, payload);
+
+    public static StateTransition SuspendTo(GameStateId target, object? payload = null)
+        => new(target, payload, suspendCurrent: true);
 }
 
 // ── Base class ────────────────────────────────────────────────────────────────
@@ -153,7 +158,8 @@ public sealed class GameStateMachine
         if (!_states.TryGetValue(transition.Target, out var next))
             throw new InvalidOperationException($"State {transition.Target} not registered.");
 
-        _current.OnExit();
+        if (!transition.SuspendCurrent)
+            _current.OnExit();
         _current = next;
         _current.OnEnter(transition.Payload);
     }

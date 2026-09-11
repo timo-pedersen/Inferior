@@ -21,6 +21,18 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerReactor : ShipComponent
 {
+    public override IReadOnlyList<ShipSystemMetricBinding> EngineeringMetrics =>
+    [
+        new(ShipSystemMetricRole.PowerOutput, $"{Name}.Output"),
+        new(ShipSystemMetricRole.PowerFlow, $"{Name}.Drawn"),
+        new(ShipSystemMetricRole.CapacitorFill, $"{Name}.Capacitor"),
+        new(ShipSystemMetricRole.HeatGeneration, $"{Name}.{Topics.Engineering.HeatGeneration}"),
+        new(ShipSystemMetricRole.ThermalLoad, $"{Name}.{Topics.Engineering.ThermalLoad}"),
+        new(ShipSystemMetricRole.Temperature, $"{Name}.Temperature"),
+    ];
+
+    protected override IReadOnlyList<string> DeviceCommandTopics => [$"{Name}.Throttle.Set"];
+
     public double MaxPower      { get; }
     public double Throttle      { get; private set; } = 1.0;
     public double CurrentOutput { get; private set; }
@@ -71,10 +83,19 @@ public sealed class PowerReactor : ShipComponent
         TickSensors();
     }
 
+    protected override void OnPowerOffTick(double dt)
+    {
+        CurrentOutput = 0.0;
+        double drawnJ = OutputCapacitor.SnapshotAndResetDrawn();
+        DrawnWatts = dt > 0.0 ? drawnJ / dt : 0.0;
+        ThermalNode?.Update(0.0, dt);
+        TickSensors();
+    }
+
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {MaxPower / 1e6:F0} MW reactor, " +
                 $"{OutputCapacitor.MaxJ / 1e6:F1} MJ capacitor"));
     }
@@ -91,42 +112,63 @@ public sealed class PowerReactor : ShipComponent
             $"{Name}.Output",
             () => CurrentOutput,                           // watts — ScaleFactor=1e-6 for MW display
             safeRange:  new RangeValue(0, MaxPower * 0.85),
-            totalRange: new RangeValue(0, MaxPower)));
+            totalRange: new RangeValue(0, MaxPower),
+            quantity: PhysicalQuantity.Power));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Drawn",
             () => DrawnWatts,                              // watts — ScaleFactor=1e-6 for MW display
             safeRange:  new RangeValue(0, MaxPower * 0.85),
-            totalRange: new RangeValue(0, MaxPower)));
+            totalRange: new RangeValue(0, MaxPower),
+            quantity: PhysicalQuantity.Power));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Capacitor",
             () => OutputCapacitor.FillFraction,
             safeRange:  new RangeValue(0.1, 1.0),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Temperature",
             () => ThermalNode?.Temperature ?? 0.0,         // Kelvin
             safeRange:  new RangeValue(0, safeTempK),
-            totalRange: new RangeValue(0, maxTempK)));
+            totalRange: new RangeValue(0, maxTempK),
+            quantity: PhysicalQuantity.Temperature));
+
+        double maxHeatW = MaxPower * Math.Max(0.0, 1.0 - Efficiency) * 4.0;
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.HeatGeneration}",
+            () => ThermalNode?.LastHeatInputW ?? 0.0,
+            safeRange: new RangeValue(0, maxHeatW * 0.7),
+            totalRange: new RangeValue(0, maxHeatW),
+            quantity: PhysicalQuantity.Power));
+
+        _sensors.Add(new ComponentSensor(
+            $"{Name}.{Topics.Engineering.ThermalLoad}",
+            () => ThermalNode?.NormalizedTemperature ?? 0.0,
+            safeRange: new RangeValue(0, 0.7),
+            totalRange: new RangeValue(0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Efficiency",
             () => Efficiency,
             safeRange:  new RangeValue(0.75, 1.0),
-            totalRange: new RangeValue(0.0,  1.0)));
+            totalRange: new RangeValue(0.0,  1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Damage",
             () => Damage,
             safeRange:  new RangeValue(0.0, 0.2),
-            totalRange: new RangeValue(0.0, 1.0)));
+            totalRange: new RangeValue(0.0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
     }
 
     private void RegisterCommands()
     {
-        CommandBus.Subscribe($"{Name}.Throttle.Set",
+        RegisterCommand($"{Name}.Throttle.Set",
             cmd => Throttle = Math.Clamp(cmd.Value, 0.0, 1.0));
     }
 }

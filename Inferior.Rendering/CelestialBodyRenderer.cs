@@ -38,10 +38,38 @@ public sealed class CelestialBodyRenderer : IDisposable
     // ── Visual constants (duplicated from SystemSpaceState — plain constants,
     // cheap to duplicate rather than plumb through as parameters) ───────────────
     private const float StarVisualRadius   = 8f;
-    private const float StarMinPixels      = 1f;
     private const float PlanetMinPixels    = 1f;
     private const float PlanetMaxBoostDist = 4500f; // ~30 AU — no boost beyond this
     private const float PlanetVisualScale  = 1f;
+
+    // Brief B1 Fix 1 / B1a Fix 2: the glare stack's per-layer relative SIZE (radius as a
+    // fraction of the outermost, GlareLayer4Radius, since Fix 2 decoupled glare from disc
+    // size entirely — see GlareOuterRadius/DrawStarGlow) — not live-tunable, only each
+    // layer's ALPHA is (Brief B2 Fix 3, SunTuning.GlareLayer0-4Alpha; these consts are now
+    // just each layer's DEFAULT alpha, read by SunTuning's own defaults, and are kept here as
+    // the historical/documentation record of the relative-radius shape, which stays fixed).
+    private const float GlareLayer0Radius = 1.1f; // white, innermost
+    private const float GlareLayer1Radius = 2.5f; // coloured
+    private const float GlareLayer2Radius = 6f;   // coloured
+    private const float GlareLayer3Radius = 14f;  // coloured
+    private const float GlareLayer4Radius = 30f;  // coloured, outermost — long falloff tail
+
+    // Brief B1a Fix 2: glare size driven by the star's own apparent brightness
+    // (Luminosity/distanceAU^2), NOT disc size — see DrawStarGlow/GlareOuterRadius. Brief B2
+    // Fix 3 generalised the compression from a fixed sqrt to a live-tunable exponent
+    // (SunTuning.GlareCompressionExponent, default 0.5 = sqrt, unchanged behaviour) and added
+    // a live size multiplier (SunTuning.GlareSizeMultiplier) on top of this fixed baseline
+    // scale. Reference: a Sol-like G star (Luminosity~1) at 1 AU with the default 0.5
+    // exponent and 1x multiplier gives brightnessFactor=1, so GlareOuterScale IS the
+    // outermost layer's radius in pixels at that reference point — chosen (500px) for a
+    // dramatic near-approach halo per B1a's brief ("a small disc inside an enormous halo").
+    // GlareFloorPixels/GlareMaxPixels are NOT in Brief B2's tunable-parameter list (only the
+    // multiplier is) — they stay fixed safety/visibility bounds; the multiplier is applied
+    // AFTER this clamp (Brief B2: "scales computed glare radius"), so it can push the
+    // effective size above or below these reference bounds deliberately.
+    private const float GlareOuterScale  = 500f;
+    private const float GlareFloorPixels = 20f;
+    private const float GlareMaxPixels   = 2000f;
 
     private static readonly Color ColOrbitRing = new(25, 35, 55, 180);
 
@@ -80,19 +108,105 @@ public sealed class CelestialBodyRenderer : IDisposable
 
     // ── Opaque pass ───────────────────────────────────────────────────────────
 
+    /// <summary>Brief B2 Fix 3: readout data for the live tuning panel.</summary>
+    public readonly record struct StarRenderMetrics(
+        double DistanceAU, float DiscRadiusPixels, bool DiscFloorBound, float GlareOuterRadiusPixels);
+
+    /// <summary>
+    /// Brief B2 Fix 3: computes the SAME disc/glare metrics DrawStar/DrawStarGlow actually
+    /// use, without drawing anything — the tuning panel's readout calls this once per frame
+    /// so it reports exactly what the real formulas produce, not a second, independently
+    /// re-derived copy (the exact "two copies of a formula silently drift apart" class of bug
+    /// Brief D-SunSize found and traced to its root).
+    /// </summary>
+    public StarRenderMetrics GetStarMetrics(Camera3D camera, Star star)
+    {
+        Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
+        float   dist      = renderPos.Length();
+        double  distAU    = dist / (Units.AU * Camera3D.RenderScale);
+
+        float physRadius   = (float)(star.RadiusMeters * Camera3D.RenderScale);
+        float discRadiusRU = StarApparentRadius(renderPos, star.RadiusMeters);
+        bool  floorBound   = discRadiusRU > physRadius + 1e-6f;
+
+        float glareRadiusRU = GlareOuterRadius(renderPos, star.Luminosity);
+
+        float projScale = ProjScale();
+        float discPx  = dist < 0.001f ? discRadiusRU  : discRadiusRU  * projScale / dist;
+        float glarePx = dist < 0.001f ? glareRadiusRU : glareRadiusRU * projScale / dist;
+
+        return new StarRenderMetrics(distAU, discPx, floorBound, glarePx);
+    }
+
     // level is accepted but not yet used — planets/star already render as a single
     // cheap representation; no LOD variants exist yet.
+    //
+    // Brief B2 Fix 2: caller now draws this BEFORE DrawStarGlow (was after) — additive
+    // blending only ever adds, so drawing the disc first means the glare's brightest, closest
+    // layer can brighten the disc's own pixels toward white where they overlap; the old
+    // opaque-disc-LAST ordering structurally prevented the core from ever reaching white (an
+    // opaque draw can only replace what's under it, never add to it).
     public void DrawStar(Camera3D camera, Star star, DetailLevel level)
     {
         Vector3 renderPos = camera.ToRenderSpace(DVec3.Zero);
-        float   radius    = StarApparentRadius(renderPos);
-        _effect.LightingEnabled    = false;
-        _effect.VertexColorEnabled = false;
+        float   radius    = StarApparentRadius(renderPos, star.RadiusMeters);
+
         // Star surface colour — white base tinted toward LightColor by a per-class factor.
         // Hot stars (O/B) stay near-white; cool stars (K/M) show clear yellow/orange/red.
+        // This IS the limb colour, below — the sphere is the tinted base the overlay reveals
+        // at the edge, not a separate "background".
+        _gd.BlendState = BlendState.Opaque;
+        _effect.LightingEnabled    = false;
+        _effect.VertexColorEnabled = false;
         Color bodyColor = Color.Lerp(Color.White, star.LightColor, star.BodyTintStrength);
         DrawSphere(renderPos, radius, bodyColor, false);
-        _effect.LightingEnabled = true;
+
+        // Brief B2 Fix 2: limb-darkening overlay — the SAME shared white/Gaussian-alpha
+        // texture the glare billboards use (_starGlowTex), drawn ALPHA-BLENDED (not additive)
+        // directly on top of the tinted sphere at the disc's own radius. High alpha at centre
+        // reads as saturated white; near-zero alpha at the edge lets the tinted sphere
+        // underneath show through untouched — "saturated white at centre, falling to the
+        // star-class tint toward the limb," with no shader and no second texture asset.
+        // SunTuning.LimbDarkeningStrength scales the overlay's peak alpha; at 0 this is a
+        // no-op (Color*0 has zero effect) and the disc is the flat tinted circle pre-B2
+        // shipped. DepthRead (not Default) matches the glare billboards' own depth handling —
+        // test against what's already there (so a foreground planet still occludes correctly)
+        // without writing new depth from a flat billboard sitting at the sphere's centre.
+        //
+        // Timo-reported fix: LightingEnabled must stay FALSE through this draw too — it used
+        // to be reset to true right after the disc (above), before this billboard, so this
+        // quad was drawn WITH lighting enabled despite using VertexPositionColorTexture, a
+        // format with no normal channel at all. BasicEffect lit it anyway against whatever
+        // undefined/leftover normal data happened to be bound, producing a directional-light-
+        // dependent shading pattern baked onto what should be a uniform, symmetric alpha
+        // gradient — reported as an off-centre "iris" that tracked a fixed direction (the
+        // star's own light direction) relative to the camera, growing as the disc grew. Kept
+        // unlit through the whole draw, matching DrawStarGlow's own explicit
+        // LightingEnabled=false for the same reason; restored to true only once this method
+        // returns, for the planet draws that come after and do need it.
+        _gd.BlendState        = BlendState.AlphaBlend;
+        _gd.DepthStencilState = DepthStencilState.DepthRead;
+        _effect.TextureEnabled     = true;
+        _effect.VertexColorEnabled = true;
+        // Timo-reported fix #2 (same underlying pattern as the LightingEnabled fix above, a
+        // second leftover-state bug from the same B2 Fix 2 code, in the same method): DrawSphere
+        // sets _effect.DiffuseColor to the disc's tinted bodyColor, and this was NEVER reset
+        // before this overlay draw. BasicEffect multiplies DiffuseColor * VertexColor *
+        // TextureColor when VertexColorEnabled/TextureEnabled are both set, so the overlay was
+        // being drawn tinted by whatever colour the disc happened to be — confirmed by a
+        // temporary GPU harness (deleted, never committed): forcing DiffuseColor back to white
+        // was the single change that took the overlay from contributing nothing to blending
+        // exactly as designed. Reset here for the same reason LightingEnabled is: this draw
+        // should be self-contained, not implicitly dependent on what the previous draw call in
+        // this same method happened to leave behind in shared effect state.
+        _effect.DiffuseColor       = Vector3.One;
+        _effect.Texture            = _starGlowTex;
+        _effect.World              = Matrix.Identity;
+        DrawGlowBillboard(renderPos, radius, camera.Right, camera.Up,
+            Color.White * SunTuning.LimbDarkeningStrength);
+        _effect.TextureEnabled     = false;
+        _effect.VertexColorEnabled = false;
+        _effect.LightingEnabled    = true;
     }
 
     public void DrawPlanet(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)
@@ -138,9 +252,9 @@ public sealed class CelestialBodyRenderer : IDisposable
         if (Vector4.Transform(new Vector4(renderPos, 1f),
                               camera.ViewMatrix * camera.ProjectionMatrix).W <= 0f) return;
 
-        float baseRU = StarApparentRadius(renderPos);
-        var   right  = camera.Right;
-        var   up     = camera.Up;
+        float outerRU = GlareOuterRadius(renderPos, star.Luminosity);
+        var   right   = camera.Right;
+        var   up      = camera.Up;
 
         _effect.TextureEnabled     = true;
         _effect.VertexColorEnabled = true;
@@ -148,22 +262,186 @@ public sealed class CelestialBodyRenderer : IDisposable
         _effect.Texture            = _starGlowTex;
         _effect.World              = Matrix.Identity;
 
-        DrawGlowBillboard(renderPos, baseRU * 14f,  right, up, star.GlowColor * 0.07f);
-        DrawGlowBillboard(renderPos, baseRU * 6f,   right, up, star.GlowColor * 0.28f);
-        DrawGlowBillboard(renderPos, baseRU * 2.5f, right, up, star.GlowColor * 0.65f);
-        DrawGlowBillboard(renderPos, baseRU * 1.1f, right, up, Color.White    * 0.90f);
+        // Brief B1a Fix 2: each layer is a fixed fraction of the outermost (GlareLayer4Radius
+        // is the normalising denominator, not a disc-relative multiplier any more) — same
+        // relative shape as B1's stack, now scaled as a whole by brightness/distance instead
+        // of by disc size. Brief B2 Fix 3: each layer's alpha is now SunTuning's live value
+        // (not the old fixed const), further scaled by GlareIntensityMultiplier uniformly —
+        // "scales all layer alphas together" on top of each layer's own individual control.
+        float intensity = SunTuning.GlareIntensityMultiplier;
+        DrawGlowBillboard(renderPos, outerRU,                                          right, up, star.GlowColor * (SunTuning.GlareLayer4Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer3Radius / GlareLayer4Radius), right, up, star.GlowColor * (SunTuning.GlareLayer3Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer2Radius / GlareLayer4Radius), right, up, star.GlowColor * (SunTuning.GlareLayer2Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer1Radius / GlareLayer4Radius), right, up, star.GlowColor * (SunTuning.GlareLayer1Alpha * intensity));
+        DrawGlowBillboard(renderPos, outerRU * (GlareLayer0Radius / GlareLayer4Radius), right, up, Color.White    * (SunTuning.GlareLayer0Alpha * intensity));
 
         _effect.TextureEnabled     = false;
         _effect.VertexColorEnabled = false;
     }
 
+    /// <summary>
+    /// Brief B1a Fix 2: the outermost glare layer's render-space radius, driven by the star's
+    /// apparent brightness (Luminosity/distanceAU^2) rather than disc size — decoupled
+    /// entirely from <see cref="StarApparentRadius"/>. Floored in PIXELS (converted to
+    /// render-space via the same <see cref="ProjScale"/> technique StarApparentRadius uses,
+    /// so it doesn't drift with resolution or FOV) so the sun always carries a halo distinctly
+    /// larger than a background starfield point regardless of class or distance; capped as a
+    /// safety net against extreme luminosity or extreme proximity.
+    ///
+    /// Brief B2 Fix 1: routed through the shared, corrected ProjScale() — this function's own
+    /// inline copy had the SAME tan(60°) bug as StarApparentRadius's (copied from it in B1a,
+    /// before the bug was known), so the glare's absolute pixel targets were likewise ~3x
+    /// their stated values; now corrected, and now the panel (Fix 3) can retune GlareOuterScale
+    /// against real numbers instead of bug-inflated ones.
+    ///
+    /// Brief B2 Fix 3: the compression exponent is now SunTuning.GlareCompressionExponent
+    /// (default 0.5, reproducing the original fixed sqrt exactly: (L/d²)^0.5 = sqrt(L)/d), and
+    /// the result is scaled by SunTuning.GlareSizeMultiplier AFTER the floor/cap clamp — "scales
+    /// COMPUTED glare radius," a multiplier on the already-bounded value, not on the raw
+    /// brightness ratio feeding into it.
+    /// </summary>
+    private float GlareOuterRadius(Vector3 renderPos, double luminosity)
+    {
+        float distRU = renderPos.Length();
+        double distAU = distRU / (Units.AU * Camera3D.RenderScale);
+        double ratio = luminosity > 0.0
+            ? luminosity / (System.Math.Max(distAU, 0.001) * System.Math.Max(distAU, 0.001))
+            : 0.0;
+        double brightnessFactor = ratio > 0.0
+            ? System.Math.Pow(ratio, SunTuning.GlareCompressionExponent)
+            : 0.0;
+
+        float outerPixels = System.Math.Clamp(
+            GlareOuterScale * (float)brightnessFactor, GlareFloorPixels, GlareMaxPixels);
+        outerPixels *= SunTuning.GlareSizeMultiplier;
+
+        if (distRU < 0.001f) return outerPixels; // camera essentially at the star; pixels ~= RU here, degenerate case
+
+        return outerPixels * distRU / ProjScale();
+    }
+
+    // Timo-reported fix, corrected after an empirically-disproven first attempt (see below).
+    // The disc/glow/limb-overlay billboards are flat quads centred at exactly the star's own
+    // 3D position — the same point the opaque disc sphere is built around — and tested
+    // (DepthRead, no write) against whatever the sphere already wrote there. A flat quad
+    // through a sphere's centre sits at almost exactly the same depth as the sphere's own
+    // silhouette (where the curved near-hemisphere surface tangents back toward that plane),
+    // and the far render pass's projection (SystemSpaceState.BuildActivePasses:
+    // near≈5.7e-5, far=50_000 render units — an even more extreme ratio than a flat
+    // 0.001/50_000 guess) leaves very little depth-buffer precision at typical star-viewing
+    // distances, worse for physically smaller stars since their near-hemisphere's own depth
+    // range is itself narrower.
+    //
+    // FIRST ATTEMPT (reverted): a small fixed fractional nudge (0.5%) of the billboard's
+    // *centre* only. Verified in-engine to still fight at ~2.8 AU (Elmiea, O-class) — measured
+    // afterward, the real required separation grows close to linearly with distance and reaches
+    // needing the billboard pushed to within ~13% of its true distance by ~2.8 AU, decades
+    // larger than 0.5%; a flat percentage cannot cover both close and moderate range. Nudging
+    // the centre only, with the offset (±right±up)*radius added afterward at unscaled size,
+    // also visibly enlarges the quad as distance shrinks (an object of fixed absolute size
+    // looks bigger the closer it is) — fine at 0.5% (imperceptible) but not at the 10-90%
+    // nudges moderate-range stars actually need.
+    //
+    // CORRECTED FIX: scale the ENTIRE final corner point (both the centre AND the ±radius
+    // offset) by a factor k, rather than just the centre. Because the camera sits at the
+    // render-space origin (Camera3D.ViewMatrix = CreateLookAt(Vector3.Zero, ...)) and the
+    // projection matrix has no x/y translation term, uniformly scaling a 3D point toward the
+    // origin leaves its projected screen X/Y EXACTLY unchanged (clip.x/clip.w and clip.y/clip.w
+    // both have k cancel top and bottom) while still reducing its depth (clip.z has a
+    // k-INDEPENDENT additive term, M43 — from the point's homogeneous w=1 — that clip.x/y
+    // don't have, so scaling doesn't cancel there). This means k can be as large as needed
+    // with NO visual side effect at all — verified both analytically and empirically (a
+    // temporary GPU harness rendering real coplanar quads through the actual far-pass
+    // projection matrix, at k values matching this formula, found ZERO pixel differences
+    // between a biased and unbiased render of the same quad, and confirmed the depth test
+    // reliably resolves correctly from 0.066 AU out to 150 AU — the harness also caught that
+    // RasterizerState.DepthBias, the "normal" GPU-native tool for this exact problem, is a
+    // total no-op on this project's GraphicsDevice/backend even at magnitude 1e12, ruling it
+    // out; not committed, deleted after use).
+    //
+    // k is derived from the ACTIVE projection's own M33/M43 (read directly off
+    // _effect.Projection, whichever of the far/mid/near passes is currently active — see
+    // SystemSpaceState.BuildActivePasses) rather than a hardcoded near/far pair, so this stays
+    // correct if those constants are ever retuned, with no second copy to keep in sync.
+    // Timo-reported fix #2, then #3: two successive attempts at a "beat the sphere's near
+    // pole" constraint (an additive margin, then a proportional one) both still showed real
+    // artifacts in-engine — an additive margin stayed thin once radius/dist grew large, and
+    // even the proportional version (dist-radius)*0.5 wasn't enough for Timo's third report
+    // (a distance-tied "stable, then jumps" flicker, not per-frame noise — matching quantized
+    // depth-test instability, not a clean miss). Both versions computed the bias from a
+    // multi-step radius/dist formula (subtraction then division), each step its own source of
+    // float32 rounding, and had an edge case (radius >= dist silently disabled the
+    // constraint) that was never stress-tested at the extreme proximity ratios Timo was
+    // actually flying at.
+    //
+    // Replaced with something structurally simpler and unconditionally robust: rather than
+    // reasoning about exactly where the sphere's own geometry can be, just push the billboard
+    // to a small FIXED fraction of its true distance — independent of radius entirely, so
+    // there is no per-star-size formula to get subtly wrong and no edge case where the
+    // constraint silently stops applying. A billboard at 1% of its true distance sits closer
+    // to the camera than a sphere's near pole for ANY radius up to 99% of the viewing
+    // distance (i.e. unless the camera is essentially touching the star's surface) — far more
+    // margin than the sphere's own geometry could plausibly need, and — as established
+    // throughout this fix (see the class doc comment above, both proven analytically and
+    // empirically) — completely free: scaling the whole point by k preserves screen position
+    // exactly regardless of magnitude, so extra aggression costs nothing visually. The only
+    // real constraint left is not clipping through the ACTIVE pass's own near plane, which is
+    // guarded explicitly below (derived from the same M33/M43 already read off the live
+    // projection, not a second hardcoded copy).
+    private float ComputeGlowDepthBiasK(float dist)
+    {
+        if (dist < 0.0001f) return 1f;
+
+        float m33 = _effect.Projection.M33;
+        float m43 = _effect.Projection.M43;
+
+        // Constraint 1 — beat the silhouette at large distance, where even a fixed small
+        // fraction of dist isn't automatically enough (required world-space separation grows
+        // roughly with dist, not a fixed fraction of it — see the class doc comment above).
+        float kUlp = 1f;
+        if (m43 != 0f)
+        {
+            // Comfortably above the 1-ULP minimum a 24-bit depth buffer requires to resolve
+            // two otherwise-adjacent stored values — generous margin is free.
+            const float marginUlps = 64f;
+            const float ulp        = 1f / 16777216f; // 2^24, Depth24Stencil8
+            float targetShift = marginUlps * ulp;
+            float denom = 1f - targetShift * dist / m43;
+            if (denom > 0.0001f) kUlp = System.Math.Clamp(1f / denom, 0.01f, 1f);
+        }
+
+        // Constraint 2 — unconditional aggressive fixed floor, covering close approach to a
+        // physically large star (see the big comment above for why a fixed fraction, not a
+        // radius-dependent formula).
+        const float kFixed = 0.01f;
+
+        float k = System.Math.Min(kUlp, kFixed);
+
+        // Constraint 3 — never let the biased point collapse into/behind the active pass's
+        // own near plane. near = M43/M33 is exact for CreatePerspectiveFieldOfView's standard
+        // form (M33 = far/(near-far), M43 = near*far/(near-far), so M43/M33 = near).
+        if (m33 != 0f)
+        {
+            float near = m43 / m33;
+            if (near > 0f)
+            {
+                const float nearSafetyMultiple = 10f;
+                float minK = System.Math.Min(1f, (near * nearSafetyMultiple) / dist);
+                k = System.Math.Max(k, minK);
+            }
+        }
+
+        return k;
+    }
+
     private void DrawGlowBillboard(Vector3 center, float radius, Vector3 right, Vector3 up, Color color)
     {
         if (radius < 0.0001f) return;
-        var tl = center + (-right + up) * radius;
-        var tr = center + ( right + up) * radius;
-        var bl = center + (-right - up) * radius;
-        var br = center + ( right - up) * radius;
+        float k = ComputeGlowDepthBiasK(center.Length());
+        var tl = (center + (-right + up) * radius) * k;
+        var tr = (center + ( right + up) * radius) * k;
+        var bl = (center + (-right - up) * radius) * k;
+        var br = (center + ( right - up) * radius) * k;
         _glowVerts[0] = new(tl, color, new Vector2(0, 0));
         _glowVerts[1] = new(tr, color, new Vector2(1, 0));
         _glowVerts[2] = new(bl, color, new Vector2(0, 1));
@@ -178,6 +456,20 @@ public sealed class CelestialBodyRenderer : IDisposable
     }
 
     // Gaussian radial gradient baked into a texture — reused for every glow layer.
+    //
+    // Timo-reported fix: t used to be clamped to 1 (MathF.Min(dist/r, 1f)), which is correct
+    // along the flat edges (t=1 there already, by construction) but wrong at the four
+    // corners, where the true radial distance reaches r*sqrt(2) (t≈1.41). Clamping held every
+    // corner pixel at the SAME alpha as the flat-edge falloff target (exp(-3)≈0.05) instead of
+    // letting the Gaussian keep decaying out to the corner's real distance — since every
+    // billboard quad is a SQUARE circumscribing this circular gradient, that left a faint but
+    // visible constant-alpha square "shelf" surrounding the round core on every layer,
+    // compounding across the limb-darkening overlay and all five additive glow layers,
+    // reported as a square artifact around the disc. Removing the clamp lets t range up to
+    // sqrt(2) naturally — the Gaussian is well-defined there and decays the corners to
+    // exp(-6)≈0.0025, ~20x lower than the old clamped shelf and visually negligible — while
+    // the flat-edge value at t=1 (~0.05, the documented "soft edge" every layer's own outer
+    // radius is tuned against) is completely unchanged.
     private static Texture2D CreateStarGlowTexture(GraphicsDevice gd, int size)
     {
         var   tex  = new Texture2D(gd, size, size);
@@ -187,14 +479,29 @@ public sealed class CelestialBodyRenderer : IDisposable
         for (int y = 0; y < size; y++)
         for (int x = 0; x < size; x++)
         {
-            float t     = MathF.Min(MathF.Sqrt((x - r) * (x - r) + (y - r) * (y - r)) / r, 1f);
-            float alpha = MathF.Exp(-t * t * 3f); // gaussian: 1.0 at center → ~0.05 at edge
+            float t     = MathF.Sqrt((x - r) * (x - r) + (y - r) * (y - r)) / r;
+            float alpha = MathF.Exp(-t * t * 3f); // gaussian: 1.0 at center → ~0.05 at t=1 (flat edge) → ~0.0025 at the corners (t≈1.41)
             data[y * size + x] = Color.White * alpha;
         }
 
         tex.SetData(data);
         return tex;
     }
+
+    /// <summary>
+    /// Brief B2 Fix 1: single shared, correct projScale implementation — every caller (disc
+    /// floor, glare floor, planet floor, and the tuning-panel readout) now goes through this
+    /// ONE place instead of each duplicating (and risking re-diverging) the tan()/half-angle
+    /// math. Camera3D's real vertical FOV is 60 degrees as the FULL angle (confirmed:
+    /// Camera3D.SetProjection and SystemSpaceState's own per-pass CreatePerspectiveFieldOfView
+    /// call both pass ToRadians(60f) directly to that API, whose first parameter is
+    /// documented, MonoGame/XNA standard, as the full vertical FOV) — the half-angle for this
+    /// formula is therefore 30 degrees, not 60. Brief D-SunSize found exactly this bug in the
+    /// (now-deleted) duplicate inline copy inside StarApparentRadius/GlareOuterRadius: the
+    /// comment there said "half of 60°" but the code used 60 directly instead of 30.
+    /// PlanetApparentRadius already had this right; it's now just routed through here too.
+    /// </summary>
+    private float ProjScale() => _gd.Viewport.Height / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
 
     /// <summary>
     /// Minimum render-space radius for a planet within boost range.
@@ -206,29 +513,41 @@ public sealed class CelestialBodyRenderer : IDisposable
         float baseRadius = VisualRadius(body);
         if (dist > PlanetMaxBoostDist) return baseRadius;
 
-        float projScale      = _gd.Viewport.Height
-                             / (2f * MathF.Tan(MathHelper.ToRadians(30f)));
-        float minRenderRadius = PlanetMinPixels * dist / projScale;
+        float minRenderRadius = PlanetMinPixels * dist / ProjScale();
         return System.Math.Max(baseRadius, minRenderRadius);
     }
 
     /// <summary>
-    /// Minimum render-space radius that keeps the star at least <see cref="StarMinPixels"/>
-    /// pixels across at any distance. Grows with distance so the star is always visible;
-    /// never shrinks below StarVisualRadius when close.
+    /// Brief B1 Fix 3: true angular-size render-space radius derived from the star's actual
+    /// RadiusMeters, replacing the old flat StarVisualRadius constant that rendered every
+    /// star class at the same size (a red giant and a dwarf looked identical — D-Bright's
+    /// own finding). Floored to a minimum screen size (<see cref="SunTuning.DiscFloorPixels"/>,
+    /// Brief B2 Fix 3 — live-tunable, was the fixed StarMinPixels constant) so a distant or
+    /// genuinely tiny star doesn't vanish — the floor is pixel-based (grows with distance),
+    /// not a fixed render-space constant, so a small star up close still shows its true small
+    /// size rather than being inflated to match a bigger class.
+    ///
+    /// Brief B2 Fix 1: this formula's OWN projScale used to duplicate <see cref="ProjScale"/>
+    /// inline with a real bug (tan(60°) where the correct half-angle is tan(30°) — see
+    /// ProjScale's own comment; Brief D-SunSize found and quantified it, exactly 3x). Now
+    /// routed through the single shared, correct ProjScale() — physically-bound discs were
+    /// ALREADY rendering correctly on screen even with the bug (this function returns
+    /// physRadius untouched in that regime, and the real camera projection matrix was always
+    /// correct), so this fix changes nothing visible there; it corrects the FLOOR's own
+    /// world-radius (previously ~3x too large — a "1px" floor rendered at ~3px) and the
+    /// CROSSOVER distance (previously 3x too close). Corrected crossovers, DiscFloorPixels=1:
+    /// M-dwarf ~0.68 AU, K ~3.38 AU, G ~4.48 AU, O-giant ~67.4 AU (all exactly 3x the B1a-era
+    /// figures) — meaning a giant now correctly still shows true physical size at 37 AU,
+    /// where B1a's own (bug-affected) report had it floor-locked.
     /// </summary>
-    private float StarApparentRadius(Vector3 renderPos)
+    private float StarApparentRadius(Vector3 renderPos, double radiusMeters)
     {
-        float dist = renderPos.Length();
-        if (dist < 0.001f) return StarVisualRadius;
+        float physRadius = (float)(radiusMeters * Camera3D.RenderScale);
+        float dist        = renderPos.Length();
+        if (dist < 0.001f) return physRadius;
 
-        // projScale converts render-space size at unit distance to screen pixels.
-        // For a symmetric frustum: projScale = screenHeight / (2 * tan(halfFov))
-        float projScale = _gd.Viewport.Height
-                        / (2f * MathF.Tan(MathHelper.ToRadians(60f))); // half of 60°
-
-        float minRenderRadius = StarMinPixels * dist / projScale;
-        return System.Math.Max(StarVisualRadius, minRenderRadius);
+        float minRenderRadius = SunTuning.DiscFloorPixels * dist / ProjScale();
+        return System.Math.Max(physRadius, minRenderRadius);
     }
 
     public void DrawAtmosphere(Camera3D camera, OrbitalBody body, DVec3 universePos, DetailLevel level)

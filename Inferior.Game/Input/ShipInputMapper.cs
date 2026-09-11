@@ -14,14 +14,14 @@ internal static class ShipInputMapper
         MouseLookInput lookInput)
     {
         // Thrust: keyboard axes, -1..1
-        // W/S = fwd/back  A/D = strafe  R/F = up/down  Q/E = yaw
+        // W/S = fwd/back  Q/E = strafe  R/F = up/down  A/D = yaw
         double fwd  = (keys.IsKeyDown(Keys.W) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.S) ? 1.0 : 0.0);
-        double lat  = (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0);
+        double lat  = (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0) - (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0);
         double vert = (keys.IsKeyDown(Keys.R) || keys.IsKeyDown(Keys.Space) ? 1.0 : 0.0)
                     - (keys.IsKeyDown(Keys.F) ? 1.0 : 0.0);
         bool useLiftChannel = keys.IsKeyDown(Keys.Space) && vert > 0.0;
-        double keyboardYaw = (keys.IsKeyDown(Keys.Q) ? 1.0 : 0.0)
-                           - (keys.IsKeyDown(Keys.E) ? 1.0 : 0.0);
+        double keyboardYaw = (keys.IsKeyDown(Keys.A) ? 1.0 : 0.0)
+                           - (keys.IsKeyDown(Keys.D) ? 1.0 : 0.0);
 
         // V = Flight Assist toggle, G = Slipstream/mode toggle, X = X-Stop, Z = Afterburner.
         // All rising-edge sent to sim; sim owns the actual enabled/disabled state.

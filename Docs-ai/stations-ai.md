@@ -25,6 +25,203 @@ separate `SpriteBatch` pass using `BlendState.Additive`.
 > experiment is quarantined on `wip/station-lighting-shadows`
 > (`Docs-archive/Shadow_fail_retrospective.md`). Next spec phase (B) adds the shadow map.
 
+### Megastation prototypes
+
+The megastation generator is an explicit alternate station-generation path, not a replacement for
+the ordinary port/module growth path. Ordinary stations still use `StationGenerator` /
+`StationGrowthEngine`-style port attachment plus `StationDecorator`; occupancy-generated
+megastations are a separate macro path and are not an implementation of the old module-budget
+table.
+
+Prototype A produced one large filled cuboid structural volume with one dense positive-Y urban
+face and five plain structural faces. Timo visually accepted that one-face result in-engine.
+
+Prototype B wraps the accepted city identity around the whole cuboid: all six faces grow city
+interiors, all twelve edges are shared generated regions, and all eight corners are shared
+generated regions. Timo visually accepted Prototype B in-engine after checking multiple seeds,
+all faces, shared edges/corners, close and distant views, silhouette readability, immense scale,
+organic departure from the cuboid, and mixed small/large masses. Its raw occupied massing is
+frozen unless a later explicit brief reopens it. The positive-Y face preserves Prototype A's
+accepted seed path.
+
+Prototype C0 is implemented and merged on `mega-stations`. It adds deterministic topology
+regularisation after raw Prototype B massing, producing a separate regularised structural solid
+for rendering and later boundary/chamfer work. Timo has visually confirmed C0. The 24-station
+deterministic/manifold sweep passed: no edge-critical or vertex-critical configurations remained,
+no material was removed, connected-component and sealed-cavity state stayed unchanged, and the
+ordinary sharp boundary mesh was manifold for every checked station.
+
+Implementation:
+
+- `Inferior.Game/Station/Megastations/SliceGrid.cs` owns one non-uniform rectilinear grid with
+  deterministic X/Y/Z slice widths, explicit core ranges, exterior growth layers, and centralized
+  cell coordinate helpers.
+- `StructuralOccupancy` stores compact per-cell flags for structural mass, urban mass,
+  externally accessible empty space, generation owner (`StructuralCore`, `FaceInterior`,
+  `EdgeRegion`, `CornerRegion`, `TopologyRegularisation`), and a stable region id.
+- `CuboidStructuralVolumeGenerator` fills the structural core only. Later rectilinear/Boolean
+  generators should produce the same occupancy shape rather than changing urban growth.
+- `ExteriorSpace` flood-fills empty cells from the generation boundary. A solid face is external
+  only when adjacent to externally accessible empty space, so sealed cavities are not treated as
+  outside hull.
+- `SurfacePatchFinder` discovers connected coplanar exposed face patches with stable geometric
+  identities, outward normals, and patch-local U/V axes.
+- `MegastationUrbanStyle` derives station-wide density/depth/tower/trench/courtyard/edge/corner
+  tendencies from stable station identity. Each non-accepted face gets deterministic patch-local
+  modifiers from its patch id; `PositiveY` keeps the old `root -> "district layout"` seed path.
+- `CornerRegionGenerator` plans eight corner regions first as coherent stepped octant masses.
+- `EdgeRegionGenerator` plans twelve edge profiles using the adjacent corner endpoint depths.
+  Edge profiles include strong spine, broken spine, low structural band, irregular towers, and
+  mostly-open edge summaries. Edge generation also fills face-region support shoulders along
+  reserved perimeters so edge/corner mass is six-neighbor connected without changing face depth
+  maps.
+- `UrbanGrowth` runs on all six major patches through each patch's local U/V basis, reserves a
+  perimeter band for shared edge/corner work, BSP-splits usable area into rectilinear districts,
+  assigns coherent district depth, broad tower attractors, trenches/courtyards, and a small
+  cleanup pass, then writes monotonic outward occupancy from layer 1 through target depth.
+- `TopologyRegulariser` derives a valid structural solid from the raw accepted occupancy using
+  material addition only. It audits edge-diagonal and vertex-only contacts, preserves the raw
+  occupancy separately, and records repair counts, critical configurations, connected components,
+  sealed-cavity state, and owner-pair summaries.
+- `BoundaryTopologyBuilder` builds a canonical CPU-side boundary graph from exact integer grid
+  identities on `RegularisedOccupancy`: boundary faces, canonical edge segments, grid vertices,
+  edge classes, vertex classes, conservative chamfer eligibility, and per-edge clamp widths.
+- `BoundaryMeshValidator` validates sharp and final boundary meshes from the exact rendered
+  vertex/index arrays for finite vertices, bounds, degenerate triangles, duplicate triangles,
+  open edges, non-manifold edge incidence, axis-aligned T-junctions, and isolated sliver
+  components.
+- `MegastationPrototypeMeshBuilder` consumes `BoundaryTopology` and emits the final exterior
+  boundary mesh through `StationModuleMesh`; it uses the existing station hull lighting/render
+  path and does not add a prototype shader. Optional mesh colouring supports structural-vs-urban,
+  region-owner, outward-normal, edge-classification, chamfer-eligibility, vertex-complexity, and
+  run-validation debug modes. Complete convex runs are merged from canonical edge segments by
+  axis and incident surface pair, use the minimum safe clamped width across the run, and render
+  as continuous bevels with corner caps or tapered endpoints at deliberately sharp simple
+  corners. Complex/concave endpoints remain suppressed.
+- `MegastationMassingSignatureBuilder` computes GraphicsDevice-free SHA-256 regression
+  signatures over canonical bytes, not GPU buffers. The long-lived raw massing signature covers
+  seed compatibility, raw massing algorithm versions, slice widths, core ranges, station-wide
+  style, raw per-cell occupied/owner/region data, face depth maps, edge profiles, and corner
+  plans. The separate regularised structural-solid signature covers the authoritative mesh input.
+
+Authoritative megastation pipeline:
+
+```text
+Raw deterministic urban massing
+-> topology regularisation
+-> regularised structural solid
+-> boundary extraction and sharp mesh validation
+-> chamfer eligibility and final mesh validation
+```
+
+Development controls:
+
+- `MegastationPrototypeSettings.DevelopmentSelection` is the one source location.
+- Current active development setting: `Frequent`, `MegastationProbability = 0.50`,
+  `ForceStarterStation = true`.
+- `Canonical` remains supported by changing that value; generator identity and geometry do not
+  depend on selection mode.
+
+Versioning:
+
+- `GeneratorVersion = 4` is the current C2 generator/output version reported in diagnostics and
+  included in complete regression signatures.
+- `SeedCompatibilityVersion = 1` is intentionally retained for accepted massing. The root seed is
+  derived from this compatibility version, not from the diagnostic generator version, so C0
+  version reporting does not alter accepted raw Prototype B massing.
+- `TopologyRegularisationAlgorithmVersion = 1` is the current regularisation algorithm version.
+- `BoundaryTopologyAlgorithmVersion = 1` is the current exact-grid boundary topology algorithm version.
+- `StructuralChamferAlgorithmVersion = 1` is the current conservative chamfer eligibility/final mesh algorithm version.
+- `PositiveYUrbanSeedVersion`, `FaceUrbanAlgorithmVersion`, `EdgeAlgorithmVersion`, and
+  `CornerAlgorithmVersion` are explicit version declarations for future intentional revisions.
+
+Diagnostics are published as a `SystemMessage` whenever a prototype is generated: station
+persistent identity, generator version/root seed, topology regularisation, boundary topology, and
+chamfer algorithm versions, slice counts, grid cells, raw structural/urban occupied cells,
+regularised occupied cells, repair additions and removals, urbanized face count,
+face/edge/corner occupied cells, total district count, maximum face depth, per-face summaries,
+per-edge profile summaries, per-corner extent summaries, raw and regularised connected
+components, sealed-cavity state, edge/vertex critical counts before and after regularisation,
+boundary face/edge/vertex class counts, mesh path, rendered vertex/triangle counts,
+eligible/suppressed chamfer segment counts, accepted/suppressed run counts, rendered
+bevel/corner-cap counts, topology signature, sharp/final validation reports, exposed quads,
+mesh pages, topology/mesh timings, and generation time.
+
+Measured Prototype B CPU stats from `MegastationPrototypeGenerator.GenerateCpu` on this branch:
+
+| Config | Slices | Cells | Structural | Urban | Face | Edge | Corner | Districts | Quads | Tris | Verts | Time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Default prototype | 41x28x36 | 41,328 | 8,100 | 12,003 | 6,326 | 5,375 | 302 | 49 | 11,678 | 23,356 | 46,712 | 283 ms |
+| Stress | 67x41x59 | 162,073 | 30,096 | 45,779 | 24,784 | 20,088 | 907 | 81 | 32,968 | 65,936 | 131,872 | 859 ms |
+
+Prototype B is visually accepted and frozen at the raw occupied-massing layer. C0 is visually
+accepted and frozen as the topology-regularised baseline. Prototypes A, B, C0, and C2 are merged
+and pushed to `mega-stations`. C2's exact-grid boundary topology, deterministic signatures,
+sharp/final-array validation, and chamfer diagnostics are retained. Its rendered chamfers were
+visually rejected as sparse and tapering into sharp vertices. Production therefore uses the
+clean sharp manifold mesh. Complete visual edge treatment is deferred, and chamfers must not be
+reopened without an explicit new brief. Deferred by design:
+semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
+attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges, overhangs,
+docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
+
+### Detailed visual residency
+
+Station identity, orbit, map/radar/targeting data, and distant-dot presentation are lightweight
+system data and remain available for every station. Detailed visual data is proximity-resident
+presentation state: `SystemSpaceState` owns zero or one `StationVisualPackage`.
+
+`StationVisualResidencyPolicy` is the single threshold owner. Its defaults are a 200,000 m load
+distance and 250,000 m unload distance, measured from a conservative station visual envelope.
+The policy is keyed by `StationVisualClassification`, so megastations and future visual classes
+can receive larger overrides without checking station identity, name, category strings, or
+persistence ids.
+
+When no visual is resident, the nearest eligible surface/envelope distance wins, with ordinal
+persistent identity as the final tie-breaker. A resident remains until its unload boundary,
+system change, state exit, generation failure, or an explicit starter/system-map/debug-cycle
+arrival supersedes it. A nearer station does not displace a valid resident. Normal navigation
+target selection does not request a mesh.
+
+`StationGenerator.PrepareCpu` prepares module/decor geometry, megastation geometry, AO variants,
+procedural texture pixels, final mesh arrays, selected shadow-caster arrays/bounds, and an ordered
+upload plan away from the render thread. `GraphicsDevice` texture/buffer creation and disposal
+happen only on the game/render thread.
+
+CPU completion starts one hidden pending upload session rather than constructing a resident
+package synchronously. `StationVisualUploadScheduler.DefaultFrameBudgetMilliseconds` is the
+single initial budget source (2 ms). Each operation uploads one existing texture or one existing
+hull/deco/flat/glass/shadow-caster mesh resource. A frame always makes at least one operation's
+worth of progress when possible, then stops before starting another operation after its
+cooperative budget is exhausted. An indivisible operation may overrun; its resource type,
+identity, estimated bytes, and measured duration are retained for bounded diagnostics. Phase 1
+does not page or range-upload a large megastation mesh.
+
+The pending package is inaccessible to drawing and shadows. After all operations finish, a small
+final commit revalidates identity/token, assigns prepared textures and landing pads, performs the
+residency transition, transfers GPU ownership, and publishes the complete package atomically.
+Cancellation and upload failure stop new work and dispose already-created resources under the
+same cooperative scheduler; system reset and state exit force immediate complete cleanup because
+no later frame is guaranteed. Deferred superseding requests start only after the previous chain
+is resolved. Request sequences prevent stale preparation or upload results from installing, and
+the failed-eligibility no-retry rule remains unchanged.
+
+`StationPreparationTask<T>` is the sole asynchronous preparation boundary. It catches
+`OperationCanceledException` only when the request token is cancelled and matches the exception's
+token, converting that expected lifecycle event into a successful task carrying a cancelled
+outcome. Non-cancellation exceptions, cancellation exceptions while the request token is live,
+and exceptions from another token remain genuine fault outcomes. The main-thread polling path or
+the reset/state-exit detachment path claims observation exactly once. A detached successful result
+releases its CPU references; cancelled and faulted tasks are explicitly observed. Expected
+cancellation does not report generation failure, set retry suppression, upload, or install.
+
+The installed package owns modules, CPU mesh references, station textures,
+hull/deco/flat/glass GPU buffers, shadow casters/bounds, the station-specific shadow
+target/context, generation diagnostics, and actual bounds through one idempotent disposal path.
+Detailed draw and shadow passes read only this package; actual bounds gate which depth tiers can
+intersect it. Dots and orbital positions do not consult the package. Shadow resolution,
+frequency, fitting, shaders, sampling, bias, and caster policy are unchanged.
+
 ---
 
 ## Station size classes

@@ -31,7 +31,7 @@ public sealed class ThermalNode
     /// </summary>
     public double LastHeatInputW { get; private set; }
 
-    /// <summary>Physical temperature in Kelvin — published to DataBus.Instruments for display.</summary>
+    /// <summary>Physical temperature in Kelvin — published to DataBus.ScalarTelemetry for display.</summary>
     public double Temperature => CurrentHeat / HeatCapacity;
 
     /// <summary>Normalised 0–1 — used for damage thresholds and gauge colour ranges.</summary>
@@ -53,7 +53,9 @@ public sealed class ThermalNode
     /// </summary>
     public void Update(double netHeatWatts, double dt)
     {
-        if (netHeatWatts > 0.0)
+        // A component's zero/positive update establishes its current generation rate.
+        // Later negative coolant updates transport heat and must not erase that reading.
+        if (netHeatWatts >= 0.0)
             LastHeatInputW = netHeatWatts;
         CurrentHeat = Math.Max(0.0, CurrentHeat + netHeatWatts * dt);
     }

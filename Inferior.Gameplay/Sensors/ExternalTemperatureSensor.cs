@@ -1,3 +1,4 @@
+using Inferior.Core.DataBus;
 using Inferior.Core.Simulation;
 using Inferior.Gameplay.SensorData;
 using Env = Inferior.Gameplay.SensorData.Environment;
@@ -20,6 +21,7 @@ public sealed class ExternalTemperatureSensor
         {
             TopicPrefix = name,
             ValueName   = Core.DataBus.Topics.ExternalTemperature.Value,
+            Quantity    = PhysicalQuantity.Temperature,
             MaxValue    = 30_000.0,   // K — near stellar photosphere
             Seed        = (double)HashCode.Combine(name + ".Temperature"),
             NoiseWhite  = 0.003,

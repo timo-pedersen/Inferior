@@ -94,7 +94,7 @@ public sealed partial class SystemSpaceState
         var plan = CreateInitialStarterStationRelocationPlan(payload, _system.Stations);
 
         if (plan.Diagnostic != null)
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(plan.Diagnostic, SystemMessagePriority.ImportantWarning));
 
         if (!plan.ShouldRelocate)
@@ -126,7 +126,7 @@ public sealed partial class SystemSpaceState
     {
         if (string.IsNullOrWhiteSpace(target.PersistenceId))
         {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(
                     "Station arrival rejected: destination has no stable persistence id.",
                     SystemMessagePriority.ImportantWarning));
@@ -136,7 +136,7 @@ public sealed partial class SystemSpaceState
         if (!double.IsFinite(target.SurfaceStandOffMeters) || target.SurfaceStandOffMeters < 0.0)
         {
             string name = target.DisplayName ?? target.PersistenceId;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(
                     $"Station arrival rejected: {name} has invalid stand-off {target.SurfaceStandOffMeters:R} m.",
                     SystemMessagePriority.ImportantWarning));
@@ -169,23 +169,27 @@ public sealed partial class SystemSpaceState
         => CoordinateTransforms.GalaxyToEcliptic(
             pos, _system.EclipticTiltAzimuthRadians, _system.EclipticTiltRadians);
 
-    // Enters a different star system, re-using OnEnter logic without a full state transition.
-    //
-    // Known gap (pre-existing, not introduced here): this does not rebuild station
-    // geometry at all (_stationGeometry/_hullMeshes/_decoMeshes stay whatever they were
-    // for the previous system) — see _current-state.md. Brief S2b-1's
-    // _stationPanelTextures inherits the exact same gap for the exact same reason: it's
-    // populated/disposed alongside those dictionaries in OnEnter/OnExit only, so a
-    // mid-session EnterSystem leaves it stale too, not newly leaking beyond what already
-    // doesn't refresh here. When station-rebuild-on-EnterSystem lands, disposing and
-    // repopulating _stationPanelTextures belongs in that same fix, not a separate one.
+    // Enters a different star system without a full state transition. The old resident
+    // package is invalidated before the system changes, then the new lightweight visual
+    // catalogue is built; proximity can request a new package on a later update.
     private void EnterSystem(Star star, DVec3 spawnPos, Quaternion spawnOri, FlightMode mode)
     {
+        ResetStationVisualResidency("system change");
+        foreach (var container in _containers)
+        {
+            container.Vb.Dispose();
+            container.Ib.Dispose();
+        }
+        _containers.Clear();
+        _stationPositions.Clear();
+
         _star   = star;
         _system = StarSystem.Generate(star, GalaxyGenerator.SystemSeed(star));
         _stationCycle.Reset();
         ComputeEclipticRotation();
         _simulation.InstallSystem(_star, _system);
+        InitializeSystemMaterialLibrary();
+        BuildStationVisualCatalog();
 
         // Rebuild skybox for new star
         var (skyPoints, skyGlow, targetable) = SkyboxRenderer.Build(_star, GalaxyGenerator.Generate());
@@ -196,7 +200,7 @@ public sealed partial class SystemSpaceState
         _simulation.TeleportShip(spawnPos, spawnOri);
         _simulation.SetFlightMode(mode);
 
-        DataBus.System.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new($"Arrived in {star.Name}"));
     }
 
     // ── 3-tier render passes ─────────────────────────────────────────────────

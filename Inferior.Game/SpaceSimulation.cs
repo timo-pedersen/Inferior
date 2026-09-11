@@ -93,15 +93,112 @@ public sealed class SpaceSimulation : Simulation
     // ── Ship ──────────────────────────────────────────────────────────────────
     private volatile Ship? _ship;
     private IDisposable? _cockpitCommandSubscription;
+    private int _publishedSystemsTopologyRevision = -1;
+
+    public SpaceSimulation()
+    {
+        PublishFlightTelemetryInfo();
+    }
 
     public void SetShip(Ship ship)
     {
         ArgumentNullException.ThrowIfNull(ship);
         _cockpitCommandSubscription?.Dispose();
+        if (_ship != null && !ReferenceEquals(_ship, ship))
+            foreach (ShipComponent component in _ship.Components)
+                component.DeactivateBus();
+
         _ship = ship;
+        _publishedSystemsTopologyRevision = -1;
+        foreach (ShipComponent component in ship.Components)
+            component.ActivateBus();
         _cockpitCommandSubscription = CommandBus.Subscribe(
             CockpitCommandTopics.Prefix,
             command => _ship?.ApplyCockpitCommand(command));
+    }
+
+    private static void PublishFlightTelemetryInfo()
+    {
+        const string flightDevice = "FlightComputer";
+        (string Topic, PhysicalQuantity Quantity, RangeValue? Range)[] flightTopics =
+        [
+            (Topics.Flight.Mode, PhysicalQuantity.Count, null),
+            (Topics.Flight.Gear, PhysicalQuantity.Count, null),
+            (Topics.Flight.GearCount, PhysicalQuantity.Count, null),
+            (Topics.Flight.GearCeilingMs, PhysicalQuantity.Speed, null),
+            (Topics.Flight.MaxGear, PhysicalQuantity.Count, null),
+            (Topics.Flight.HarmonicIndex, PhysicalQuantity.Count, null),
+            (Topics.Flight.HarmonicCount, PhysicalQuantity.Count, null),
+            (Topics.Flight.LkmZone, PhysicalQuantity.Count, new RangeValue(0.0, 3.0)),
+            (Topics.Flight.LkmCompliance, PhysicalQuantity.Time, null),
+            (Topics.Flight.XStopActive, PhysicalQuantity.Boolean, new RangeValue(0.0, 1.0)),
+            (Topics.Flight.FlightAssistActive, PhysicalQuantity.Boolean, new RangeValue(0.0, 1.0)),
+            (Topics.Flight.FlightAssistForceN, PhysicalQuantity.Force, null),
+            (Topics.Flight.FlightAssistAccelerationMs2, PhysicalQuantity.Acceleration, null),
+            (Topics.Flight.RelativeSpeedMs, PhysicalQuantity.Speed, null),
+            (Topics.Flight.ForwardSpeedMs, PhysicalQuantity.Speed, null),
+            (Topics.Flight.AccelerationMs2, PhysicalQuantity.Acceleration, null),
+        ];
+
+        foreach (var (topic, quantity, range) in flightTopics)
+        {
+            DataBus.PublishTelemetryInfo(new TelemetryInfo
+            {
+                Topic = topic,
+                DeviceId = flightDevice,
+                ValueKind = TelemetryValueKind.Scalar,
+                Quantity = quantity,
+                OperatingRange = range,
+                SuggestedDisplayRange = range,
+                Publication = new PublicationInfo(PublicationMode.EveryTick),
+                TopicPolicy = TopicPolicy.LatestState,
+            });
+        }
+
+        DataBus.DeviceInfo.Publish(flightDevice, new DeviceInfo
+        {
+            DeviceId = flightDevice,
+            PublishedTopics = [.. flightTopics.Select(topic => topic.Topic)],
+            Power = new PowerProfile(0.0, 0.0),
+        });
+        DataBus.DeviceState.Publish(flightDevice, new DeviceState(
+            flightDevice,
+            DeviceOperationalStatus.Running,
+            Damage: 0.0,
+            Efficiency: 1.0,
+            SimulationTime: GameClock.SimTime));
+
+        const string shipDevice = "Ship";
+        RegisterShipTopic(Topics.Ship.ThermalSignature, PhysicalQuantity.Power);
+        RegisterShipTopic(Topics.Ship.WarnLevel, PhysicalQuantity.Count, new RangeValue(0.0, 4.0));
+        DataBus.DeviceInfo.Publish(shipDevice, new DeviceInfo
+        {
+            DeviceId = shipDevice,
+            PublishedTopics = [Topics.Ship.ThermalSignature, Topics.Ship.WarnLevel],
+            Power = new PowerProfile(0.0, 0.0),
+        });
+        DataBus.DeviceState.Publish(shipDevice, new DeviceState(
+            shipDevice,
+            DeviceOperationalStatus.Running,
+            Damage: 0.0,
+            Efficiency: 1.0,
+            SimulationTime: GameClock.SimTime));
+
+        static void RegisterShipTopic(
+            string topic,
+            PhysicalQuantity quantity,
+            RangeValue? range = null)
+            => DataBus.PublishTelemetryInfo(new TelemetryInfo
+            {
+                Topic = topic,
+                DeviceId = shipDevice,
+                ValueKind = TelemetryValueKind.Scalar,
+                Quantity = quantity,
+                OperatingRange = range,
+                SuggestedDisplayRange = range,
+                Publication = new PublicationInfo(PublicationMode.EveryTick),
+                TopicPolicy = TopicPolicy.LatestState,
+            });
     }
 
     // ── Ship state snapshot (written by sim thread, read by main thread) ──────
@@ -181,11 +278,6 @@ public sealed class SpaceSimulation : Simulation
     public void RequestCycleShipHull()
         => Interlocked.Increment(ref _shipHullCycleRequests);
 
-    private int _shieldPowerRequest = -1;
-
-    public void RequestSetShieldPower(bool enabled)
-        => Interlocked.Exchange(ref _shieldPowerRequest, enabled ? 1 : 0);
-
     private sealed record StationRelocationRequest(string StationPersistenceId, double SurfaceStandOffMeters);
     private volatile StationRelocationRequest? _stationRelocationRequest;
     private bool _stationRelocationAppliedThisTick;
@@ -261,9 +353,14 @@ public sealed class SpaceSimulation : Simulation
     // ── Flight mode (sim-internal) ────────────────────────────────────────────
     private FlightMode _currentFlightMode = FlightMode.SystemNewtonian;
 
-    // ── Flight Assist (atmospheric only) ─────────────────────────────────────
+    // ── Flight Assist ────────────────────────────────────────────────────────
     private bool _flightAssistEnabled    = true;
     private bool _prevFlightAssistToggle = false;
+    private const double FlightAssistForceFactor = 1.0;
+    private const double FlightAssistTelemetryIntervalSeconds = 0.25;
+    private double _flightAssistTelemetryTimer;
+    private double _lastFlightAssistForceN;
+    private double _lastFlightAssistAccelerationMps2;
 
     // ── Atmospheric Slipstream state (used when _currentFlightMode == AtmosphericNewtonian) ─
     private bool   _slipstreamModeActive  = false;
@@ -386,18 +483,13 @@ public sealed class SpaceSimulation : Simulation
         if (ship == null) return;
         _lastPropulsionApplication = default;
         _lastTargetAngularVelocityLocalRadPerSec = DVec3.Zero;
+        _lastFlightAssistForceN = 0.0;
+        _lastFlightAssistAccelerationMps2 = 0.0;
         EngineVisualState engineVisualState = EngineVisualState.Idle;
 
         int shipCycleRequests = Interlocked.Exchange(ref _shipHullCycleRequests, 0);
         for (int i = 0; i < shipCycleRequests; i++)
             ship = CycleShipHull(ship);
-
-        int shieldPowerRequest = Interlocked.Exchange(ref _shieldPowerRequest, -1);
-        if (shieldPowerRequest >= 0)
-        {
-            foreach (ShieldComponent shield in ship.Components.OfType<ShieldComponent>())
-                shield.PowerOn = shieldPowerRequest == 1;
-        }
 
         int engineRemovalRequest = Interlocked.Exchange(ref _debugEngineRemovalRequest, 0);
         if (engineRemovalRequest != 0)
@@ -405,7 +497,8 @@ public sealed class SpaceSimulation : Simulation
             EngineMountSide side = (EngineMountSide)(engineRemovalRequest - 1);
             EngineMount? mount = ship.EngineMounts.FirstOrDefault(candidate => candidate.Side == side);
             EngineInstance? removed = mount?.RemoveInstalledEngine();
-            DataBus.System.Publish(
+            ship.SynchronizeEngineTopology();
+            DataBus.SystemMessages.Publish(
                 Topics.System.All,
                 new SystemMessage(
                     removed is null
@@ -450,7 +543,7 @@ public sealed class SpaceSimulation : Simulation
         {
             _afterburnerActive        = true;
             _afterburnerTimeRemaining = FlightConstants.AfterburnerDurationSeconds;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage("Afterburner engaged"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Afterburner engaged"));
         }
         _prevAfterburnerToggle = input.AfterburnerToggle;
 
@@ -460,7 +553,7 @@ public sealed class SpaceSimulation : Simulation
             if (_afterburnerTimeRemaining <= 0)
             {
                 _afterburnerActive = false;
-                DataBus.System.Publish(Topics.System.All, new SystemMessage("Afterburner burned out"));
+                DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Afterburner burned out"));
             }
         }
 
@@ -487,8 +580,8 @@ public sealed class SpaceSimulation : Simulation
         if (input.FlightAssistToggle && !_prevFlightAssistToggle)
         {
             _flightAssistEnabled = !_flightAssistEnabled;
-            DataBus.System.Publish(Topics.System.All,
-                new SystemMessage(_flightAssistEnabled ? "Flight Assist ON" : "Flight Assist OFF"));
+            DataBus.SystemMessages.Publish(Topics.System.All,
+                new SystemMessage(_flightAssistEnabled ? "flight assist on" : "flight assist off"));
         }
         _prevFlightAssistToggle = input.FlightAssistToggle;
 
@@ -497,7 +590,7 @@ public sealed class SpaceSimulation : Simulation
         {
             _xStopActive = !_xStopActive;
             if (_xStopActive) _xStopCompleteAnnounced = false;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage(_xStopActive ? "X-Stop active" : "X-Stop cancelled"));
         }
 
@@ -604,7 +697,7 @@ public sealed class SpaceSimulation : Simulation
 
             _currentFlightMode = newMode;
             UpdateReferenceFrame(ship);
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
                 newMode == FlightMode.AtmosphericNewtonian ? "Entering atmosphere" : "Leaving atmosphere"));
         }
 
@@ -815,7 +908,7 @@ public sealed class SpaceSimulation : Simulation
             rotation.AvailableAngularAccelerationRadPerSec2,
             ship.AngularVelocityLocalRadPerSec,
             _lastTargetAngularVelocityLocalRadPerSec,
-            FlightAssistOn: true);
+            FlightAssistOn: _flightAssistEnabled);
     }
 
     private void TickAssistedRotation(
@@ -867,7 +960,7 @@ public sealed class SpaceSimulation : Simulation
             .ToArray();
         if (portMounts.Length != 1 || starboardMounts.Length != 1)
         {
-            DataBus.System.Publish(
+            DataBus.SystemMessages.Publish(
                 Topics.System.All,
                 new SystemMessage(
                     "ENGINE CONFIGURATION\nDebug cycling requires exactly one mirrored engine pair.",
@@ -885,7 +978,7 @@ public sealed class SpaceSimulation : Simulation
             && (!variant.IsCompatibleWith(port.MountStandardId)
                 || !variant.IsCompatibleWith(starboard.MountStandardId)))
         {
-            DataBus.System.Publish(
+            DataBus.SystemMessages.Publish(
                 Topics.System.All,
                 new SystemMessage(
                     $"ENGINE CONFIGURATION\n{variant.Engine.DisplayName} is incompatible with " +
@@ -904,8 +997,9 @@ public sealed class SpaceSimulation : Simulation
                 starboard);
         }
         SetSharedEngineHarmony(ship, _newtonianGear + 1);
+        ship.SynchronizeEngineTopology();
 
-        DataBus.System.Publish(
+        DataBus.SystemMessages.Publish(
             Topics.System.All,
             new SystemMessage(next.Notification, SystemMessagePriority.NB));
     }
@@ -924,7 +1018,7 @@ public sealed class SpaceSimulation : Simulation
         SetShip(replacement);
 
         HullDefinition hull = HullDefinitionLibrary.Get(nextHullTypeId);
-        DataBus.System.Publish(
+        DataBus.SystemMessages.Publish(
             Topics.System.All,
             new SystemMessage(
                 $"SHIP CHANGED\n{hull.DisplayName}",
@@ -1028,7 +1122,7 @@ public sealed class SpaceSimulation : Simulation
             (input.ThrustForward != 0 || input.ThrustLateral != 0 || input.ThrustVertical != 0))
         {
             _xStopActive = false;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop cancelled"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("X-Stop cancelled"));
         }
 
         // X-Stop: maximum braking toward reference velocity, then hold indefinitely.
@@ -1044,7 +1138,7 @@ public sealed class SpaceSimulation : Simulation
                 if (!_xStopCompleteAnnounced)
                 {
                     _xStopCompleteAnnounced = true;
-                    DataBus.System.Publish(Topics.System.All, new SystemMessage("X-Stop complete"));
+                    DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("X-Stop complete"));
                 }
                 MatchShipVelocityToReference(ship, refVel);
             }
@@ -1094,12 +1188,87 @@ public sealed class SpaceSimulation : Simulation
             propulsion,
             allocation,
             forwardScale);
-        ApplyPropulsionForce(ship, propulsion, appliedForceLocal, dt, allocation);
+        DVec3 assistForceLocal = ResolveFlightAssistForceShipLocal(
+            ship,
+            propulsion,
+            relVel,
+            allocation,
+            dt);
+        RecordFlightAssistApplication(propulsion, assistForceLocal);
+        ApplyPropulsionForce(ship, propulsion, appliedForceLocal + assistForceLocal, dt, allocation);
 
         ship.Position += ship.Velocity * dt;
     }
 
     // ── SystemSlipstream physics ──────────────────────────────────────────────
+
+    private DVec3 ResolveFlightAssistForceShipLocal(
+        Ship ship,
+        ShipPropulsionCapability propulsion,
+        DVec3 relativeVelocityWorld,
+        EngineTranslationAllocation pilotAllocation,
+        double dt)
+    {
+        if (!_flightAssistEnabled || dt <= 0.0 || propulsion.CurrentMassKg <= 0.0)
+            return DVec3.Zero;
+
+        DVec3 relativeVelocityLocal = WorldToShipLocal(ship, relativeVelocityWorld);
+        double lateralAuthorityFraction = Math.Clamp(1.0 - Math.Abs(pilotAllocation.Lateral), 0.0, 1.0);
+        double verticalAuthorityFraction = Math.Clamp(1.0 - Math.Abs(pilotAllocation.Vertical), 0.0, 1.0);
+        double lateralAccelerationLimit =
+            propulsion.AvailableLateralThrustN / propulsion.CurrentMassKg
+            * FlightAssistForceFactor
+            * lateralAuthorityFraction;
+        double liftAccelerationLimit =
+            propulsion.AvailableLiftThrustN / propulsion.CurrentMassKg
+            * FlightAssistForceFactor
+            * verticalAuthorityFraction;
+        double downAccelerationLimit =
+            propulsion.AvailableLateralThrustN / propulsion.CurrentMassKg
+            * FlightAssistForceFactor
+            * verticalAuthorityFraction;
+        if (lateralAccelerationLimit <= 0.0
+            && liftAccelerationLimit <= 0.0
+            && downAccelerationLimit <= 0.0)
+            return DVec3.Zero;
+
+        double lateralAcceleration = ResolveAssistAxisAcceleration(
+            relativeVelocityLocal.X,
+            lateralAccelerationLimit,
+            dt);
+        double verticalAcceleration = ResolveAssistAxisAcceleration(
+            relativeVelocityLocal.Y,
+            relativeVelocityLocal.Y < 0.0 ? liftAccelerationLimit : downAccelerationLimit,
+            dt);
+
+        return new DVec3(
+            lateralAcceleration * propulsion.CurrentMassKg,
+            verticalAcceleration * propulsion.CurrentMassKg,
+            0.0);
+    }
+
+    private static double ResolveAssistAxisAcceleration(
+        double currentVelocity,
+        double accelerationLimit,
+        double dt)
+    {
+        if (dt <= 0.0 || accelerationLimit <= 0.0)
+            return 0.0;
+
+        double maxDeltaVelocity = accelerationLimit * dt;
+        double deltaVelocity = Math.Clamp(-currentVelocity, -maxDeltaVelocity, maxDeltaVelocity);
+        return deltaVelocity / dt;
+    }
+
+    private void RecordFlightAssistApplication(
+        ShipPropulsionCapability propulsion,
+        DVec3 assistForceShipLocalN)
+    {
+        _lastFlightAssistForceN = assistForceShipLocalN.Length;
+        _lastFlightAssistAccelerationMps2 = propulsion.CurrentMassKg > 0.0
+            ? _lastFlightAssistForceN / propulsion.CurrentMassKg
+            : 0.0;
+    }
 
     private void TickSystemSlipstreamPhysics(Ship ship, double dt)
     {
@@ -1125,7 +1294,7 @@ public sealed class SpaceSimulation : Simulation
             else
                 ship.Velocity = GetRefVelocity();
 
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
             ExitSystemSlipstreamToNewtonian(ship);
             TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
@@ -1135,7 +1304,7 @@ public sealed class SpaceSimulation : Simulation
         // Forced dropout — stations
         if (_nearestStationDistance < FlightConstants.SlipstreamStationDropoutRange)
         {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Slipstream disengaged — proximity limit", SystemMessagePriority.ImportantWarning));
             ExitSystemSlipstreamToNewtonian(ship, capVelocity: true);
             TickNewtonianPhysics(ship, PlayerInput.Zero, dt);
@@ -1197,7 +1366,7 @@ public sealed class SpaceSimulation : Simulation
             {
                 _slipstreamChargeTimer = 0;
                 _slipstreamModeActive  = true;
-                DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
+                DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
             }
         }
 
@@ -1205,7 +1374,7 @@ public sealed class SpaceSimulation : Simulation
         if (_slipstreamModeActive && density < AtmoSlipstreamMinDensity)
         {
             _slipstreamModeActive = false;
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Slipstream disengaged — insufficient atmosphere",
                     SystemMessagePriority.ImportantWarning));
         }
@@ -1310,7 +1479,7 @@ public sealed class SpaceSimulation : Simulation
             if (!_surfaceContact)
             {
                 _surfaceContact = true;
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage("Surface contact.", SystemMessagePriority.Info));
             }
         }
@@ -1332,7 +1501,7 @@ public sealed class SpaceSimulation : Simulation
         if (activeZone > _currentLkmZone)
         {
             double maxSpeed = GetSpeedCeilingAtHarmonyIndex(ship, newMax);
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage($"LKM: Zone {activeZone} — max speed {maxSpeed:N0} m/s. " +
                     $"Comply within {FlightConstants.LkmComplianceWindow:N0}s."));
             _lkmComplianceTimer = FlightConstants.LkmComplianceWindow;
@@ -1341,7 +1510,7 @@ public sealed class SpaceSimulation : Simulation
             // Force exit from SystemSlipstream when entering any LKM zone
             if (_currentFlightMode == FlightMode.SystemSlipstream)
             {
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new SystemMessage("Slipstream disengaged — LKM zone", SystemMessagePriority.ImportantWarning));
                 ExitSystemSlipstreamToNewtonian(ship);
             }
@@ -1387,7 +1556,7 @@ public sealed class SpaceSimulation : Simulation
     }
 
     private static void FlagLkmViolation()
-        => DataBus.System.Publish(Topics.System.All,
+        => DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage("LKM violation recorded. Commander flagged.", SystemMessagePriority.ImportantWarning));
 
     // ── Slipstream helpers ────────────────────────────────────────────────────
@@ -1396,14 +1565,14 @@ public sealed class SpaceSimulation : Simulation
     {
         if (_nearBodyAltitude < FlightConstants.SlipstreamPlanetDropoutAltitude)
         {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Cannot engage Slipstream — clear space required"));
             return;
         }
 
         if (_currentLkmZone > 0)
         {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Cannot engage Slipstream — LKM zone active"));
             return;
         }
@@ -1422,7 +1591,7 @@ public sealed class SpaceSimulation : Simulation
 
         _currentFlightMode = FlightMode.SystemSlipstream;
         _xStopActive = false;
-        DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Slipstream engaged"));
     }
 
     private void ExitSystemSlipstream(Ship ship)
@@ -1441,14 +1610,14 @@ public sealed class SpaceSimulation : Simulation
             double len = System.Math.Sqrt(ax * ax + ay * ay);
             if (len > 0.001)
                 ship.ApplyAngularImpulse(new DVec3(ax / len, ay / len, 0) * impulseMag);
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Warning — high-speed Slipstream exit", SystemMessagePriority.ImportantWarning));
         }
 
         // Zero relative speed — set velocity to the gravity-dominant body's reference velocity.
         ship.Velocity = GetRefVelocity();
 
-        DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
         ExitSystemSlipstreamToNewtonian(ship);
     }
 
@@ -1655,15 +1824,15 @@ public sealed class SpaceSimulation : Simulation
             nearDensity = nb.Body.DensityAtAltitude(System.Math.Max(nb.AltitudeM, 0));
 
         if (shieldsActive)
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Slipstream unavailable — shields active"));
         else if (nearDensity < AtmoSlipstreamMinDensity)
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Slipstream unavailable — insufficient atmospheric pressure"));
         else
         {
             _slipstreamChargeTimer = AtmoSlipstreamStartupTime;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream charging..."));
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Slipstream charging..."));
         }
     }
 
@@ -1676,7 +1845,7 @@ public sealed class SpaceSimulation : Simulation
 
         _slipstreamModeActive  = false;
         _slipstreamChargeTimer = 0;
-        DataBus.System.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage("Slipstream disengaged"));
 
         if (speedFrac > 0.5)
         {
@@ -1687,7 +1856,7 @@ public sealed class SpaceSimulation : Simulation
             double len = System.Math.Sqrt(ax * ax + ay * ay);
             if (len > 0.001)
                 ship.ApplyAngularImpulse(new DVec3(ax / len, ay / len, 0) * impulseMag);
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("Warning — high-speed slipstream exit", SystemMessagePriority.ImportantWarning));
         }
     }
@@ -1788,7 +1957,7 @@ public sealed class SpaceSimulation : Simulation
     }
 
     private static void RejectStationRelocation(string reason)
-        => DataBus.System.Publish(Topics.System.All,
+        => DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage($"Station relocation rejected: {reason}", SystemMessagePriority.ImportantWarning));
 
     internal static void MatchShipVelocityToReference(Ship ship, DVec3 referenceVelocity)
@@ -2058,14 +2227,9 @@ public sealed class SpaceSimulation : Simulation
         world.MassiveBodies.Clear();
         world.OrbitalBodies.Clear();
 
-        world.MassiveBodies.Add(new CelestialBody
-        {
-            Position       = DVec3.Zero,
-            Mass           = context.Star.MassKg,
-            Radius         = context.Star.RadiusMeters,
-            Class          = context.Star.SpectralClass,
-            RotationPeriod = 2.192e6,
-        });
+        CelestialBody liveStar = CelestialBody.FromStar(context.Star, DVec3.Zero);
+        liveStar.RotationPeriod = 2.192e6;
+        world.MassiveBodies.Add(liveStar);
 
         foreach (var planet in context.System.Planets)
             CollectBody(world, planet, DVec3.Zero, simTime);
@@ -2237,20 +2401,20 @@ public sealed class SpaceSimulation : Simulation
 
         if (!_startupPublished)
         {
-            DataBus.System.Publish(Topics.System.All, new("Power systems online"));
-            DataBus.System.Publish(Topics.System.All, new("Navigation ready"));
-            DataBus.System.Publish(Topics.System.All, new("Sensors nominal"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new("Power systems online"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new("Navigation ready"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new("Sensors nominal"));
             _startupPublished = true;
         }
 
         double heartbeat = System.Math.Sin(t * 0.614) * 50.0 + 50.0;
-        DataBus.Instruments.Publish($"Debug.{Topics.Debug.Heartbeat}", heartbeat);
-        DataBus.Instruments.Publish($"Debug.{Topics.Debug.SimTime}", t);
+        DataBus.ScalarTelemetry.Publish($"Debug.{Topics.Debug.Heartbeat}", heartbeat);
+        DataBus.ScalarTelemetry.Publish($"Debug.{Topics.Debug.SimTime}", t);
 
         if (_lastHeartbeat < 90.0 && heartbeat >= 90.0)
-            DataBus.System.Publish(Topics.System.All, new("Heartbeat threshold exceeded"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new("Heartbeat threshold exceeded"));
         if (_lastHeartbeat > 10.0 && heartbeat <= 10.0)
-            DataBus.System.Publish(Topics.System.All, new("Heartbeat below minimum"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new("Heartbeat below minimum"));
         _lastHeartbeat = heartbeat;
 
         _gravity.Tick();
@@ -2259,32 +2423,50 @@ public sealed class SpaceSimulation : Simulation
 
         if (_ship != null)
         {
+            if (_publishedSystemsTopologyRevision != _ship.SystemsTopology.Revision)
+            {
+                DataBus.ShipSystemsTopology.Publish(
+                    Topics.Ship.SystemsTopology,
+                    _ship.SystemsTopology.CreateSnapshot(_ship.Id));
+                _publishedSystemsTopologyRevision = _ship.SystemsTopology.Revision;
+            }
+
             double sig = 0.0;
             foreach (var c in _ship.Components)
                 if (c.ThermalNode != null) sig += c.ThermalNode.LastHeatInputW;
-            DataBus.Instruments.Publish(Topics.Ship.ThermalSignature, sig);
+            DataBus.ScalarTelemetry.Publish(Topics.Ship.ThermalSignature, sig);
         }
 
         // Publish flight-mode topics for instrument subscribers
         var snap = _shipSnapshot;
         if (snap != null)
         {
-            DataBus.Instruments.Publish(Topics.Flight.Mode,            (double)snap.FlightMode);
-            DataBus.Instruments.Publish(Topics.Flight.Gear,            (double)(snap.NewtonianGear + 1));
-            DataBus.Instruments.Publish(Topics.Flight.GearCount,       (double)snap.NewtonianGearCount);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.Mode,            (double)snap.FlightMode);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.Gear,            (double)(snap.NewtonianGear + 1));
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.GearCount,       (double)snap.NewtonianGearCount);
             double gearCeil = snap.Propulsion?.SpeedCeilingMps ?? 0.0;
-            DataBus.Instruments.Publish(Topics.Flight.GearCeilingMs,   gearCeil);
-            DataBus.Instruments.Publish(Topics.Flight.MaxGear,
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.GearCeilingMs,   gearCeil);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.MaxGear,
                 snap.LkmMaxGear == int.MaxValue ? -1.0 : (double)(snap.LkmMaxGear + 1));
-            DataBus.Instruments.Publish(Topics.Flight.HarmonicIndex,   (double)(snap.SlipstreamHarmonicIndex + 1));
-            DataBus.Instruments.Publish(Topics.Flight.HarmonicCount,   (double)snap.SlipstreamHarmonicCount);
-            DataBus.Instruments.Publish(Topics.Flight.LkmZone,         (double)snap.LkmZone);
-            DataBus.Instruments.Publish(Topics.Flight.LkmCompliance,   snap.LkmComplianceTimer);
-            DataBus.Instruments.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);
-            DataBus.Instruments.Publish(Topics.Flight.RelativeSpeedMs,  snap.RelativeSpeedMs);
-            DataBus.Instruments.Publish(Topics.Flight.ForwardSpeedMs,   snap.ForwardSpeedMs);
-            DataBus.Instruments.Publish(Topics.Flight.AccelerationMs2,  snap.AccelerationMs2);
-            DataBus.Instruments.Publish(Topics.Ship.WarnLevel,         0.0);  // stub — connected to real systems in future brief
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.HarmonicIndex,   (double)(snap.SlipstreamHarmonicIndex + 1));
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.HarmonicCount,   (double)snap.SlipstreamHarmonicCount);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.LkmZone,         (double)snap.LkmZone);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.LkmCompliance,   snap.LkmComplianceTimer);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.XStopActive,     snap.XStopActive ? 1.0 : 0.0);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.FlightAssistActive, snap.FlightAssistOn ? 1.0 : 0.0);
+            _flightAssistTelemetryTimer -= _lastDt;
+            if (_flightAssistTelemetryTimer <= 0.0)
+            {
+                _flightAssistTelemetryTimer = FlightAssistTelemetryIntervalSeconds;
+                DataBus.ScalarTelemetry.Publish(Topics.Flight.FlightAssistForceN, _lastFlightAssistForceN);
+                DataBus.ScalarTelemetry.Publish(
+                    Topics.Flight.FlightAssistAccelerationMs2,
+                    _lastFlightAssistAccelerationMps2);
+            }
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.RelativeSpeedMs,  snap.RelativeSpeedMs);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.ForwardSpeedMs,   snap.ForwardSpeedMs);
+            DataBus.ScalarTelemetry.Publish(Topics.Flight.AccelerationMs2,  snap.AccelerationMs2);
+            DataBus.ScalarTelemetry.Publish(Topics.Ship.WarnLevel,         0.0);  // stub — connected to real systems in future brief
         }
 
         if (_ship != null && snap != null)
@@ -2294,14 +2476,14 @@ public sealed class SpaceSimulation : Simulation
         }
         else
         {
-            DataBus.Instruments.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
+            DataBus.ScalarTelemetry.Publish($"Ship.{Topics.LandingSupport.PadTargeted}", 0.0);
         }
 
         WriteStationProximityDiagnosticIfRequested();
 
         if (t >= _nextMessageAt)
         {
-            DataBus.System.Publish(Topics.System.All, new($"T+{t:F0}s - all systems nominal"));
+            DataBus.SystemMessages.Publish(Topics.System.All, new($"T+{t:F0}s - all systems nominal"));
             _nextMessageAt += 8.0;
         }
     }
@@ -2395,7 +2577,7 @@ public sealed class SpaceSimulation : Simulation
             "====================================\n\n";
 
         System.IO.File.AppendAllText(path, text);
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage($"Station proximity diagnostic written: {path}", SystemMessagePriority.Info));
     }
 }

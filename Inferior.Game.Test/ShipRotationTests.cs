@@ -238,7 +238,7 @@ public sealed class ShipRotationTests(ITestOutputHelper output)
         simulation.DebugTickPhysics(PlayerInput.Zero, 0.0);
 
         Assert.Equal(
-            AsteriskHullDefinitionFactory.HullId,
+            CosmoHullDefinitionFactory.HullId,
             simulation.ShipState!.HullTypeId);
         Assert.Equal(
             angularVelocity,

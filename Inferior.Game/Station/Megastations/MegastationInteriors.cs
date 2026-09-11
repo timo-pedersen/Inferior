@@ -1,0 +1,2583 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+
+namespace Inferior.Game.StationGen.Megastations;
+
+public readonly record struct MegastationGridRange(int Start, int End)
+{
+    public int Count => End - Start;
+    public bool Contains(int value) => value >= Start && value < End;
+}
+
+public sealed record MegastationInteriorVolume(
+    MegastationGridRange X,
+    MegastationGridRange Y,
+    MegastationGridRange Z,
+    Vector3 Minimum,
+    Vector3 Maximum)
+{
+    public Vector3 Size => Maximum - Minimum;
+    public bool ContainsCell(int x, int y, int z)
+        => X.Contains(x) && Y.Contains(y) && Z.Contains(z);
+}
+
+public readonly record struct MegastationProtectedVoidCell(
+    MegacellCoord Cell,
+    MegacellVoidKind Kind);
+
+public enum MegastationEntranceType
+{
+    Standard,
+    Grand,
+}
+
+public sealed record MegastationInteriorDiagnostics(
+    int AlgorithmVersion,
+    int InteriorCount,
+    GridDirection PortalDirection,
+    float PortalClearWidth,
+    float PortalClearHeight,
+    float ThroatLength,
+    Vector3 MainFlightClearSize,
+    int ProtectedVoidCellCount,
+    int RemovedStructuralCellCount,
+    int ThroatBoundaryFaceCount,
+    int InteriorBoundaryFaceCount,
+    int InteriorStructuralVertexCount,
+    int InteriorStructuralTriangleCount,
+    int PortalVisibleVertexCount,
+    int PortalVisibleTriangleCount,
+    int PortalCasterVertexCount,
+    int PortalCasterTriangleCount,
+    long PlanningMilliseconds,
+    long MeshBuildMilliseconds,
+    string Signature,
+    int PortalGuidanceElementCount = 0,
+    int ThroatGuidanceElementCount = 0,
+    int InteriorLandmarkElementCount = 0,
+    int GuidanceGlowCount = 0,
+    int GuidanceVisibleVertexCount = 0,
+    int GuidanceVisibleTriangleCount = 0,
+    int ThroatLinerElementCount = 0,
+    int ThroatRibElementCount = 0,
+    int ThroatMarkingElementCount = 0,
+    int ThroatCasterElementCount = 0,
+    float EntranceProjectionLength = 0f,
+    float EntranceLocalObstructionProjection = 0f,
+    float EntranceLocalSkylineHeight = 0f,
+    float EntranceProjectionHeightFraction = 0f,
+    string EntrancePaletteIdentity = "",
+    int EntrancePrecinctReservationCount = 0,
+    int ThroatTubeWallElementCount = 0,
+    int ThroatCrownElementCount = 0,
+    int ThroatFixtureElementCount = 0,
+    int ApproachBeamCount = 0,
+    int ApproachFixtureElementCount = 0,
+    float ApproachBeamLength = 0f,
+    float ApproachBeamHalfAngleDegrees = 0f,
+    int ApproachBeamVertexCount = 0,
+    int ApproachBeamTriangleCount = 0,
+    Vector3 EntrancePortalUp = default,
+    Vector3 EntrancePortalRight = default,
+    MegastationEntranceType EntranceType = MegastationEntranceType.Standard,
+    float BayClearWidth = 0f,
+    float EntranceWidthFraction = 0f,
+    float LargeUprightVerticalClearance = 0f,
+    float LargeRolledVerticalClearance = 0f,
+    float CrownOuterWidth = 0f,
+    float CrownOuterHeight = 0f,
+    float EntranceClearanceMargin = 0f,
+    int EntranceAssemblyRemovedCellCount = 0,
+    int ArtificialLightAlgorithmVersion = 0,
+    int ArtificialLightSourceCount = 0,
+    float ArtificialLightMinimumRange = 0f,
+    float ArtificialLightMaximumRange = 0f,
+    float ArtificialIndirectStrength = 0f,
+    float ArtificialIndirectRangeScale = 0f,
+    string ArtificialLightSignature = "",
+    int LandingDistrictPadCount = 0,
+    int LandingDistrictStandardPadCount = 0,
+    int LandingDistrictLargePadCount = 0,
+    int LandingDistrictServiceBuildingCount = 0,
+    int LandingDistrictLightCount = 0,
+    int LandingDistrictLoadingAreaCount = 0,
+    int LandingDistrictContainerCount = 0,
+    int LandingDistrictKeepClearZoneCount = 0,
+    int LandingDistrictVisibleVertexCount = 0,
+    int LandingDistrictVisibleTriangleCount = 0,
+    int LandingDistrictShadowVertexCount = 0,
+    int LandingDistrictShadowTriangleCount = 0,
+    string LandingDistrictSignature = "",
+    int ArtificialOccluderCount = 0,
+    long ArtificialLightReceiverSampleCount = 0,
+    long ArtificialLightVisibilityTestCount = 0,
+    long ArtificialLightBlockedVisibilityTestCount = 0,
+    double ArtificialLightBakeMilliseconds = 0d,
+    int LandingDistrictApronReceiverVertexCount = 0,
+    int LandingDistrictApronReceiverTriangleCount = 0,
+    float LandingDistrictApronReceiverMaximumSpacing = 0f,
+    int LandingDistrictSiteCount = 0,
+    int LandingDistrictSmallSiteCount = 0,
+    int LandingDistrictMediumSiteCount = 0,
+    int LandingDistrictLargeSiteCount = 0,
+    int LandingDistrictPadCapacityDeficit = 0,
+    int LandingDistrictLargePadCapacityDeficit = 0,
+    string LandingDistrictSiteSummary = "",
+    int LandingDistrictStructuralEnvelopeRejectCount = 0,
+    int LandingDistrictStructuralComponentRejectCount = 0,
+    string LandingDistrictStructuralRejectionSummary = "",
+    int BayHabitationAlgorithmVersion = 0,
+    int BayHabitationActiveWallCount = 0,
+    int BayHabitationBlankWallCount = 0,
+    int BayHabitationRegionCount = 0,
+    int BayHabitationWindowGroupCount = 0,
+    int BayHabitationWindowCount = 0,
+    int BayHabitationLitWindowCount = 0,
+    int BayHabitationDimWindowCount = 0,
+    int BayHabitationDarkWindowCount = 0,
+    int BayHabitationMeshVertexCount = 0,
+    int BayHabitationMeshTriangleCount = 0,
+    string BayHabitationWallSummary = "",
+    string BayHabitationSignature = "",
+    int BayFacilityAlgorithmVersion = 0,
+    int BayFacilityEnhancedRegionCount = 0,
+    int BayFacilityPlainRegionCount = 0,
+    int BayFacilityRecessedCount = 0,
+    int BayFacilityGalleryCount = 0,
+    int BayFacilityEmbeddedCount = 0,
+    int BayFacilityServiceApertureCount = 0,
+    int BayFacilitySecondaryFormCount = 0,
+    int BayFacilityStructuralPartCount = 0,
+    int BayFacilityRailingPartCount = 0,
+    int BayFacilityOccluderPartCount = 0,
+    int BayFacilityCutoutCount = 0,
+    int BayFacilityWindowCount = 0,
+    int BayFacilityBalconyCount = 0,
+    float BayFacilityMaximumProjection = 0f,
+    int BayFacilityMeshVertexCount = 0,
+    int BayFacilityMeshTriangleCount = 0,
+    int BayFacilityShadowVertexCount = 0,
+    int BayFacilityShadowTriangleCount = 0,
+    int BayFacilityReservationCount = 0,
+    int BayFacilityReservationRejectCount = 0,
+    int BayFacilityCutoutValidationRejectCount = 0,
+    int BayFacilityArtificialLightCount = 0,
+    int BayFacilityDeepRecessCount = 0,
+    int BayFacilityOpenGalleryCount = 0,
+    int BayFacilityMultiStoreyGalleryCount = 0,
+    int BayFacilityGalleryStoreyCount = 0,
+    long BayFacilityPlanningMilliseconds = 0,
+    string BayFacilitySignature = "",
+    int MegaShelfAlgorithmVersion = 0,
+    int MegaShelfCandidateCount = 0,
+    int MegaShelfCount = 0,
+    int MegaShelfSupportRejectCount = 0,
+    int MegaShelfStructuralRejectCount = 0,
+    int MegaShelfArrivalExclusionRejectCount = 0,
+    int MegaShelfOverlapRejectCount = 0,
+    int MegaShelfVerticalSeparationRejectCount = 0,
+    int MegaShelfOperatingClearanceRejectCount = 0,
+    int MegaShelfLandingDowngradeCount = 0,
+    int MegaShelfFullSpanFlightClearanceRejectCount = 0,
+    int MegaShelfCompositionRejectCount = 0,
+    int MegaShelfCantileverCandidateCount = 0,
+    int MegaShelfCornerCandidateCount = 0,
+    int MegaShelfFullSpanCandidateCount = 0,
+    int MegaShelfCornerViableCandidateCount = 0,
+    int MegaShelfFullSpanViableCandidateCount = 0,
+    int MegaShelfCantileverAcceptedCount = 0,
+    int MegaShelfCornerAcceptedCount = 0,
+    int MegaShelfFullSpanAcceptedCount = 0,
+    int MegaShelfLowCandidateCount = 0,
+    int MegaShelfMidCandidateCount = 0,
+    int MegaShelfHighCandidateCount = 0,
+    int MegaShelfLowAcceptedCount = 0,
+    int MegaShelfMidAcceptedCount = 0,
+    int MegaShelfHighAcceptedCount = 0,
+    float MegaShelfMinimumWidth = 0f,
+    float MegaShelfMaximumWidth = 0f,
+    float MegaShelfMinimumProjection = 0f,
+    float MegaShelfMaximumProjection = 0f,
+    float MegaShelfMinimumThickness = 0f,
+    float MegaShelfMaximumThickness = 0f,
+    int MegaShelfVisibleTriangleCount = 0,
+    int MegaShelfCasterTriangleCount = 0,
+    int MegaShelfMarkerCount = 0,
+    int MegaShelfCornerMarkerCount = 0,
+    int MegaShelfLowerEdgeMarkerCount = 0,
+    int MegaShelfTrussCount = 0,
+    int MegaShelfBoxTrussCount = 0,
+    int MegaShelfTriangularTrussCount = 0,
+    int MegaShelfTrussVisibleTriangleCount = 0,
+    int MegaShelfTrussCasterTriangleCount = 0,
+    MegastationShelfMacroLayout MegaShelfMacroLayout = MegastationShelfMacroLayout.None,
+    int MegaShelfBookcaseCount = 0,
+    int MegaShelfBookcaseShelfCount = 0,
+    int MegaShelfBookcaseInsufficientHeightRejectCount = 0,
+    int MegaShelfBookcaseArrivalRejectCount = 0,
+    int MegaShelfBookcaseWallContinuityRejectCount = 0,
+    int MegaShelfBookcaseStructuralRejectCount = 0,
+    int MegaShelfBookcaseSymmetryRejectCount = 0,
+    string MegaShelfMacroSummary = "",
+    string MegaShelfSummary = "",
+    string MegaShelfSignature = "",
+    int LandingDistrictLandingSurfaceCount = 1,
+    int LandingDistrictShelfSiteCount = 0,
+    string LandingDistrictLandingSurfaceSummary = "",
+    int LandingDistrictLandingCapableShelfCount = 0,
+    int LandingDistrictOccupiedShelfCount = 0,
+    int LandingDistrictFreestandingShelfSiteCount = 0,
+    int LandingDistrictWallIntegratedShelfSiteCount = 0,
+    int LandingDistrictDeliberatelyEmptyShelfCount = 0,
+    string LandingDistrictShelfUtilizationSummary = "",
+    int MegaShelfObstacleBeaconCount = 0,
+    int MegaShelfFloodFixtureCount = 0,
+    int MegaShelfStaticWorkLightCount = 0,
+    string MegaShelfLightingSignature = "",
+    int BayStructuralTrussAlgorithmVersion = 0,
+    int BayStructuralTrussWallFieldCount = 0,
+    int BayStructuralTrussCeilingFieldCount = 0,
+    int BayStructuralTrussWallCount = 0,
+    int BayStructuralTrussCeilingCount = 0,
+    int BayStructuralTrussHardConflictRejectCount = 0,
+    int BayStructuralTrussOperationalRejectCount = 0,
+    int BayStructuralTrussSupportRejectCount = 0,
+    int BayStructuralTrussSoftWindowOverlapCount = 0,
+    int BayStructuralTrussVisibleTriangleCount = 0,
+    int BayStructuralTrussCasterTriangleCount = 0,
+    long BayStructuralTrussPlanningMilliseconds = 0,
+    string BayStructuralTrussSummary = "",
+    string BayStructuralTrussSignature = "",
+    int BayUtilityAlgorithmVersion = 0,
+    int BayUtilityActiveWallCount = 0,
+    int BayUtilityNetworkCount = 0,
+    int BayUtilityTrunkCount = 0,
+    int BayUtilityBranchCount = 0,
+    int BayUtilityJunctionBoxCount = 0,
+    int BayUtilityServiceBoxCount = 0,
+    int BayUtilityCableCount = 0,
+    int BayUtilityClampCount = 0,
+    float BayUtilityTotalRunLength = 0f,
+    float BayUtilityMinimumTrunkLength = 0f,
+    float BayUtilityMedianTrunkLength = 0f,
+    float BayUtilityMaximumTrunkLength = 0f,
+    int BayUtilityHardConflictRejectCount = 0,
+    int BayUtilityWindowConflictScore = 0,
+    int BayUtilityVisibleVertexCount = 0,
+    int BayUtilityVisibleTriangleCount = 0,
+    int BayUtilityMajorCasterTriangleCount = 0,
+    long BayUtilityPlanningMilliseconds = 0,
+    string BayUtilityWallSummary = "",
+    string BayUtilitySignature = "",
+    int BaySecondaryUtilityAlgorithmVersion = 0,
+    int BaySecondaryUtilityActiveWallCount = 0,
+    int BaySecondaryUtilityInstallationCount = 0,
+    int BaySecondaryUtilityPipeCount = 0,
+    int BaySecondaryUtilityPipeSupportCount = 0,
+    int BaySecondaryUtilityLouverBankCount = 0,
+    int BaySecondaryUtilityProjectingDuctCount = 0,
+    int BaySecondaryUtilityHatchCount = 0,
+    int BaySecondaryUtilityLadderCount = 0,
+    float BaySecondaryUtilityTotalPipeLength = 0f,
+    int BaySecondaryUtilityHardConflictRejectCount = 0,
+    int BaySecondaryUtilityWindowConflictScore = 0,
+    int BaySecondaryUtilityVisibleTriangleCount = 0,
+    int BaySecondaryUtilityMajorCasterTriangleCount = 0,
+    long BaySecondaryUtilityPlanningMilliseconds = 0,
+    string BaySecondaryUtilityWallSummary = "",
+    string BaySecondaryUtilitySignature = "");
+
+public sealed record MegastationInteriorPlan(
+    string Identity,
+    int Seed,
+    GridDirection PortalDirection,
+    Vector3 PortalCentre,
+    Vector3 OutwardNormal,
+    Vector3 PortalRight,
+    Vector3 PortalUp,
+    Vector3 InteriorDownDirection,
+    MegastationEntranceType EntranceType,
+    float ThroatWallThickness,
+    Vector2 PortalClearSize,
+    MegastationInteriorVolume ThroatVolume,
+    MegastationInteriorVolume MainFlightVolume,
+    MegastationInteriorVolume CavityEnvelope,
+    MegastationEntrancePrecinct EntrancePrecinct,
+    IReadOnlyList<MegastationProtectedVoidCell> ProtectedCells,
+    MegastationInteriorDiagnostics Diagnostics,
+    IReadOnlyList<MegastationInteriorStructuralSolid>? AddedStructuralSolids = null,
+    IReadOnlyList<MegastationLandingSurface>? AdditionalLandingSurfaces = null,
+    IReadOnlyList<MegastationMegaShelfMarker>? AddedStructuralMarkers = null,
+    IReadOnlyList<MegastationMegaShelfTruss>? AddedStructuralTrusses = null,
+    MegastationShelfLightingPlan? ShelfLighting = null,
+    MegastationBayStructuralTrussPlan? BayStructuralTrusses = null,
+    MegastationBayUtilityPlan? BayUtilities = null,
+    MegastationBaySecondaryUtilityPlan? BaySecondaryUtilities = null)
+{
+    public MegastationInteriorMacroExclusionVolume ArrivalManeuverExclusion
+        => MegastationInteriorMacroExclusionVolume.CreateArrival(this);
+}
+
+public enum MegastationInteriorMacroExclusionRole
+{
+    EntranceArrivalManeuver,
+}
+
+public sealed record MegastationInteriorMacroExclusionVolume(
+    string Identity,
+    MegastationInteriorMacroExclusionRole Role,
+    Vector3 Centre,
+    Vector3 Size,
+    Vector3 Right,
+    Vector3 Up,
+    Vector3 Forward,
+    Vector3 SupportedShipEnvelope)
+{
+    private const float LateralManeuverMargin = 54f;
+    private const float VerticalManeuverMargin = 42f;
+    private const float CrownMargin = 24f;
+
+    public static MegastationInteriorMacroExclusionVolume CreateArrival(
+        MegastationInteriorPlan interior)
+    {
+        Vector3 outward = Vector3.Normalize(interior.OutwardNormal);
+        Vector3 right = Vector3.Normalize(interior.PortalRight);
+        Vector3 up = Vector3.Normalize(interior.PortalUp);
+        Vector3 supported = new(
+            SupportedShipEnvelopeStandards.LargeWidth,
+            SupportedShipEnvelopeStandards.LargeHeight,
+            SupportedShipEnvelopeStandards.LargeLength);
+        Vector3 flightSize = interior.MainFlightVolume.Size;
+        float cavityDepth = MathF.Abs(outward.X) * flightSize.X
+            + MathF.Abs(outward.Y) * flightSize.Y
+            + MathF.Abs(outward.Z) * flightSize.Z;
+        float inwardBayDistance = MathF.Max(
+            supported.Z * 4f,
+            cavityDepth * .62f);
+        float length = interior.EntrancePrecinct.ProjectionLength
+            + interior.Diagnostics.ThroatLength
+            + inwardBayDistance;
+        float width = MathF.Max(
+            interior.EntrancePrecinct.CrownOuterWidth + CrownMargin,
+            supported.X + LateralManeuverMargin * 2f);
+        float height = MathF.Max(
+            interior.EntrancePrecinct.CrownOuterHeight + CrownMargin,
+            MathF.Max(supported.Y, supported.X) + VerticalManeuverMargin * 2f);
+        Vector3 centre = interior.EntrancePrecinct.OuterMouthCentre
+            - outward * (length * .5f);
+        return new(
+            "interior-exclusion:entrance-arrival",
+            MegastationInteriorMacroExclusionRole.EntranceArrivalManeuver,
+            centre,
+            new(width, height, length),
+            right,
+            up,
+            -outward,
+            supported);
+    }
+
+    public bool IntersectsOrientedBox(
+        Vector3 centre,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Vector3 size,
+        float margin = 0f)
+    {
+        Vector3 delta = centre - Centre;
+        Vector3[] firstAxes = [Right, Up, Forward];
+        Vector3[] secondAxes = [right, up, forward];
+        Vector3 firstHalf = Size * .5f + new Vector3(margin);
+        Vector3 secondHalf = size * .5f;
+        for (int pass = 0; pass < 2; pass++)
+        for (int axisIndex = 0; axisIndex < 3; axisIndex++)
+        {
+            Vector3 axis = pass == 0 ? firstAxes[axisIndex] : secondAxes[axisIndex];
+            float firstRadius = ProjectionRadius(firstAxes, firstHalf, axis);
+            float secondRadius = ProjectionRadius(secondAxes, secondHalf, axis);
+            if (MathF.Abs(Vector3.Dot(delta, axis)) >= firstRadius + secondRadius)
+                return false;
+        }
+        for (int first = 0; first < 3; first++)
+        for (int second = 0; second < 3; second++)
+        {
+            Vector3 axis = Vector3.Cross(firstAxes[first], secondAxes[second]);
+            float lengthSquared = axis.LengthSquared();
+            if (lengthSquared < 1e-8f)
+                continue;
+            axis /= MathF.Sqrt(lengthSquared);
+            float firstRadius = ProjectionRadius(firstAxes, firstHalf, axis);
+            float secondRadius = ProjectionRadius(secondAxes, secondHalf, axis);
+            if (MathF.Abs(Vector3.Dot(delta, axis)) >= firstRadius + secondRadius)
+                return false;
+        }
+        return true;
+    }
+
+    private static float ProjectionRadius(
+        IReadOnlyList<Vector3> axes,
+        Vector3 halfSize,
+        Vector3 projectionAxis)
+        => MathF.Abs(Vector3.Dot(axes[0], projectionAxis)) * halfSize.X
+            + MathF.Abs(Vector3.Dot(axes[1], projectionAxis)) * halfSize.Y
+            + MathF.Abs(Vector3.Dot(axes[2], projectionAxis)) * halfSize.Z;
+}
+
+public sealed record MegastationInteriorMeshBuildResult(
+    StationModuleMesh Mesh,
+    MegastationInteriorDiagnostics Diagnostics,
+    MegastationLandingDistrictDiagnostics? LandingDistrictDiagnostics = null,
+    MegastationBayHabitationDiagnostics? BayHabitationDiagnostics = null,
+    MegastationBayFacilityDiagnostics? BayFacilityDiagnostics = null,
+    MegastationBayUtilityDiagnostics? BayUtilityDiagnostics = null,
+    MegastationBaySecondaryUtilityDiagnostics? BaySecondaryUtilityDiagnostics = null);
+
+public enum MegastationInteriorGuidanceKind
+{
+    PortalEdge,
+    PortalCorner,
+    PortalCrown,
+    ThroatBand,
+    InteriorLandmark,
+    ThroatLiner,
+    ThroatBeam,
+    ThroatRib,
+    ThroatTransition,
+    ThroatMarking,
+    ApproachFixture,
+}
+
+public enum MegastationApproachBeamVertical
+{
+    Upper,
+    Lower,
+}
+
+public sealed record MegastationApproachGuidanceBeam(
+    string Identity,
+    MegastationApproachBeamVertical Vertical,
+    int HorizontalSign,
+    Vector3 Source,
+    Vector3 Axis,
+    Vector3 RadialRight,
+    Vector3 RadialUp,
+    Color Colour,
+    float Length,
+    float HalfAngleDegrees);
+
+public sealed record MegastationInteriorGuidanceElement(
+    string Identity,
+    MegastationInteriorGuidanceKind Kind,
+    Matrix Frame,
+    Vector3 Size,
+    Color Colour,
+    float Illumination,
+    SystemMaterialFamilyId MaterialFamily,
+    bool CastsShadow)
+{
+    public Vector3 Centre => Frame.Translation;
+}
+
+public sealed record MegastationInteriorGuidanceMarker(
+    string Identity,
+    MegastationInteriorGuidanceKind Kind,
+    Vector3 Position,
+    Color Colour,
+    float Intensity,
+    Vector3? SurfaceNormal = null,
+    float? GlowSizePixels = null,
+    float? GlowFadeStartMeters = null,
+    float? GlowFadeEndMeters = null);
+
+public sealed record MegastationEntrancePalette(
+    string Identity,
+    Color Guidance,
+    Color Highlight,
+    Color StructuralAccent,
+    Color OuterStructure,
+    Color InnerStructure,
+    Color CrownStructure);
+
+public sealed record MegastationEntrancePrecinct(
+    Vector3 Minimum,
+    Vector3 Maximum,
+    Vector3 AssemblyMinimum,
+    Vector3 AssemblyMaximum,
+    Vector3 OuterMouthCentre,
+    float CrownOuterWidth,
+    float CrownOuterHeight,
+    float ClearanceMargin,
+    float LocalObstructionProjection,
+    float ProjectionLength,
+    float LocalSkylineHeight,
+    float ProjectionHeightFraction)
+{
+    public bool Intersects(Vector3 minimum, Vector3 maximum)
+        => minimum.X < Maximum.X && maximum.X > Minimum.X
+            && minimum.Y < Maximum.Y && maximum.Y > Minimum.Y
+            && minimum.Z < Maximum.Z && maximum.Z > Minimum.Z;
+
+    public bool Contains(Vector3 point)
+        => point.X >= Minimum.X && point.X <= Maximum.X
+            && point.Y >= Minimum.Y && point.Y <= Maximum.Y
+            && point.Z >= Minimum.Z && point.Z <= Maximum.Z;
+
+    public bool AssemblyIntersects(Vector3 minimum, Vector3 maximum)
+        => minimum.X < AssemblyMaximum.X && maximum.X > AssemblyMinimum.X
+            && minimum.Y < AssemblyMaximum.Y && maximum.Y > AssemblyMinimum.Y
+            && minimum.Z < AssemblyMaximum.Z && maximum.Z > AssemblyMinimum.Z;
+}
+
+public sealed record MegastationInteriorPresentationPlan(
+    int PortalGuidanceSeed,
+    int ThroatGuidanceSeed,
+    int InteriorLandmarkSeed,
+    int ThroatLinerSeed,
+    int ThroatRibsSeed,
+    int ThroatMarkingsSeed,
+    int ThroatFixturesSeed,
+    int ApproachGuidanceSeed,
+    MegastationEntrancePalette Palette,
+    MegastationEntrancePrecinct Precinct,
+    IReadOnlyList<MegastationInteriorGuidanceElement> Elements,
+    IReadOnlyList<MegastationInteriorGuidanceMarker> Markers,
+    IReadOnlyList<MegastationApproachGuidanceBeam> ApproachBeams)
+{
+    public int PortalElementCount => Elements.Count(element => element.Kind is
+        MegastationInteriorGuidanceKind.PortalEdge
+        or MegastationInteriorGuidanceKind.PortalCorner
+        or MegastationInteriorGuidanceKind.PortalCrown);
+    public int ThroatElementCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ThroatBand);
+    public int InteriorLandmarkCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.InteriorLandmark);
+    public int ThroatLinerCount => Elements.Count(element => element.Kind is
+        MegastationInteriorGuidanceKind.ThroatLiner
+        or MegastationInteriorGuidanceKind.ThroatBeam);
+    public int ThroatRibCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ThroatRib);
+    public int ThroatTubeWallCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ThroatLiner);
+    public int ThroatCrownCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ThroatTransition
+        && element.Identity.StartsWith("entrance/crown/", StringComparison.Ordinal));
+    public int ThroatFixtureCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ThroatBand
+        && element.Identity.StartsWith("throat/fixture:", StringComparison.Ordinal));
+    public int ApproachFixtureElementCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ApproachFixture);
+    public int ThroatMarkingCount => Elements.Count(element =>
+        element.Kind == MegastationInteriorGuidanceKind.ThroatMarking);
+    public int ThroatCasterCount => Elements.Count(element => element.CastsShadow);
+}
+
+public static class MegastationInteriorPlanner
+{
+    private const int AlgorithmVersion = 1;
+    private const float LargeEnvelopeWidth = 36f;
+    private const float LargeEnvelopeHeight = 20f;
+    private const float GrandSelectionProbability = .32f;
+
+    public static MegastationInteriorPlan PlanAndApply(
+        StructuralOccupancy occupancy,
+        int rootSeed,
+        CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        SliceGrid grid = occupancy.Grid;
+        int siteSeed = MegastationSeed.Derive(rootSeed, "interior site");
+        GridDirection portalDirection = ChoosePortalDirection(grid, siteSeed);
+        GridAxis entranceAxis = Direction.PrimaryAxis(portalDirection);
+        GridAxis upAxis = entranceAxis == GridAxis.Y ? GridAxis.Z : GridAxis.Y;
+        GridAxis widthAxis = Enum.GetValues<GridAxis>().Single(axis => axis != entranceAxis && axis != upAxis);
+
+        MegastationGridRange cavityEntrance = CentredRange(
+            grid, entranceAxis, grid.CoreRange(entranceAxis), 700f, shellCells: 3);
+        MegastationGridRange cavityWidth = CentredRange(
+            grid, widthAxis, grid.CoreRange(widthAxis), 620f, shellCells: 2);
+        MegastationGridRange cavityHeight = CentredRange(
+            grid, upAxis, grid.CoreRange(upAxis), 360f, shellCells: 2);
+        MegastationGridRange flightEntrance = CentredSubrange(
+            grid, entranceAxis, cavityEntrance, 520f);
+        MegastationGridRange flightWidth = CentredSubrange(
+            grid, widthAxis, cavityWidth, 440f);
+        MegastationGridRange flightHeight = CentredSubrange(
+            grid, upAxis, cavityHeight, 240f);
+        MegastationGridRange standardThroatWidth = CentredSubrange(
+            grid, widthAxis, flightWidth, 160f);
+        MegastationGridRange standardThroatHeight = CentredSubrange(
+            grid, upAxis, flightHeight, 110f);
+        int morphologySeed = MegastationSeed.Derive(rootSeed, "entrance morphology:v1");
+        float bayClearWidth = Span(grid, widthAxis, flightWidth);
+        float requestedGrandWidthFraction = MathHelper.Lerp(
+            .70f,
+            .95f,
+            Sample(morphologySeed, "grand width fraction"));
+        float requestedGrandHeight = MathHelper.Lerp(
+            40f,
+            46f,
+            Sample(morphologySeed, "grand clear height"));
+
+        // H1's authoritative void remains grid-aligned. The tube wall absorbs the
+        // coarse final slice increment so Grand's rendered clear height can still
+        // follow the documented Large envelope instead of a particular ship mesh.
+        MegastationGridRange grandThroatHeight = CentredSubrange(
+            grid,
+            upAxis,
+            flightHeight,
+            requestedGrandHeight + 32f);
+        float grandStructuralHeight = Span(grid, upAxis, grandThroatHeight);
+        float baseGrandWallThickness = MegastationInteriorPresentationPlanner.ComputeWallThickness(
+            siteSeed,
+            grandStructuralHeight,
+            grandStructuralHeight);
+        float grandWallThickness = MathF.Max(
+            baseGrandWallThickness,
+            (grandStructuralHeight - requestedGrandHeight) * .5f);
+        MegastationGridRange grandThroatWidth = CentredSubrange(
+            grid,
+            widthAxis,
+            flightWidth,
+            bayClearWidth * requestedGrandWidthFraction + grandWallThickness * 2f);
+        float grandStructuralWidth = Span(grid, widthAxis, grandThroatWidth);
+        float grandClearWidth = grandStructuralWidth - grandWallThickness * 2f;
+        float grandClearHeight = grandStructuralHeight - grandWallThickness * 2f;
+        float grandWidthFraction = grandClearWidth / bayClearWidth;
+        float standardStructuralWidth = Span(grid, widthAxis, standardThroatWidth);
+        bool grandEligible = grandClearWidth >= standardStructuralWidth * 1.75f
+            && grandWidthFraction >= .68f
+            && grandWidthFraction <= .98f
+            && grandClearHeight >= 40f
+            && grandClearHeight <= 46.01f
+            && grandWallThickness <= 48f
+            && grandClearHeight > LargeEnvelopeWidth;
+
+        // Selection has its own semantic domain: presentation palette, recessed
+        // lights, and approach-beam revisions cannot switch entrance morphology.
+        bool selectGrand = grandEligible
+            && Sample(morphologySeed, "grand selection") < GrandSelectionProbability;
+        MegastationEntranceType entranceType = selectGrand
+            ? MegastationEntranceType.Grand
+            : MegastationEntranceType.Standard;
+        MegastationGridRange throatWidth = selectGrand
+            ? grandThroatWidth
+            : standardThroatWidth;
+        MegastationGridRange throatHeight = selectGrand
+            ? grandThroatHeight
+            : standardThroatHeight;
+        float standardWallThickness = MegastationInteriorPresentationPlanner.ComputeWallThickness(
+            siteSeed,
+            Span(grid, widthAxis, standardThroatWidth),
+            Span(grid, upAxis, standardThroatHeight));
+        float throatWallThickness = selectGrand
+            ? grandWallThickness
+            : standardWallThickness;
+
+        int shapeSeed = MegastationSeed.Derive(rootSeed, "cavity shape");
+        int removed = 0;
+        var protectedCells = new Dictionary<MegacellCoord, MegacellVoidKind>();
+        for (int entrance = cavityEntrance.Start; entrance < cavityEntrance.End; entrance++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int ordinal = entrance - cavityEntrance.Start;
+            int third = Math.Max(1, cavityEntrance.Count / 3);
+            int widthInsetLow = ordinal < third ? 1 : 0;
+            int widthInsetHigh = ordinal >= cavityEntrance.Count - third ? 1 : 0;
+            int heightInsetLow = ((shapeSeed & 1) == 0 && ordinal >= third && ordinal < 2 * third) ? 1 : 0;
+            int heightInsetHigh = ((shapeSeed & 1) != 0 && ordinal >= third && ordinal < 2 * third) ? 1 : 0;
+            int widthStart = Math.Min(cavityWidth.Start + widthInsetLow, flightWidth.Start);
+            int widthEnd = Math.Max(cavityWidth.End - widthInsetHigh, flightWidth.End);
+            int heightStart = Math.Min(cavityHeight.Start + heightInsetLow, flightHeight.Start);
+            int heightEnd = Math.Max(cavityHeight.End - heightInsetHigh, flightHeight.End);
+            for (int width = widthStart; width < widthEnd; width++)
+            for (int height = heightStart; height < heightEnd; height++)
+            {
+                (int x, int y, int z) = Coordinates(
+                    entranceAxis, entrance, widthAxis, width, upAxis, height);
+                if (occupancy.ProtectEmpty(x, y, z, MegacellVoidKind.InteriorFlightVolume))
+                    removed++;
+                protectedCells[new MegacellCoord(x, y, z)] = MegacellVoidKind.InteriorFlightVolume;
+            }
+        }
+
+        MegastationGridRange throatEntrance = Direction.Sign(portalDirection) > 0
+            ? new(cavityEntrance.End, grid.Count(entranceAxis))
+            : new(0, cavityEntrance.Start);
+        for (int entrance = throatEntrance.Start; entrance < throatEntrance.End; entrance++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            for (int width = throatWidth.Start; width < throatWidth.End; width++)
+            for (int height = throatHeight.Start; height < throatHeight.End; height++)
+            {
+                (int x, int y, int z) = Coordinates(
+                    entranceAxis, entrance, widthAxis, width, upAxis, height);
+                if (occupancy.ProtectEmpty(x, y, z, MegacellVoidKind.EntranceThroat))
+                    removed++;
+                protectedCells.TryAdd(new MegacellCoord(x, y, z), MegacellVoidKind.EntranceThroat);
+            }
+        }
+
+        MegastationInteriorVolume cavityVolume = Volume(
+            grid, entranceAxis, cavityEntrance, widthAxis, cavityWidth, upAxis, cavityHeight);
+        MegastationInteriorVolume flightVolume = Volume(
+            grid, entranceAxis, flightEntrance, widthAxis, flightWidth, upAxis, flightHeight);
+        MegastationInteriorVolume throatVolume = Volume(
+            grid, entranceAxis, throatEntrance, widthAxis, throatWidth, upAxis, throatHeight);
+        Vector3 normal = AxisVector(entranceAxis) * Direction.Sign(portalDirection);
+        Vector3 up = AxisVector(upAxis);
+        Vector3 right = Vector3.Normalize(Vector3.Cross(up, normal));
+        if (Vector3.Dot(right, AxisVector(widthAxis)) < 0f) right = -right;
+        float portalPlane = Direction.Sign(portalDirection) > 0
+            ? grid.GetCellMaximum(entranceAxis, grid.CoreRange(entranceAxis).End.Value - 1)
+            : grid.GetCellMinimum(entranceAxis, grid.CoreRange(entranceAxis).Start.Value);
+        Vector3 portalCentre = AxisVector(entranceAxis) * portalPlane
+            + AxisVector(widthAxis) * Centre(grid, widthAxis, throatWidth)
+            + AxisVector(upAxis) * Centre(grid, upAxis, throatHeight);
+        float structuralThroatWidth = Span(grid, widthAxis, throatWidth);
+        float structuralThroatHeight = Span(grid, upAxis, throatHeight);
+        float clearWidth = structuralThroatWidth;
+        float clearHeight = structuralThroatHeight;
+        if (selectGrand)
+        {
+            clearWidth -= throatWallThickness * 2f;
+            clearHeight -= throatWallThickness * 2f;
+        }
+        Vector2 portalClear = new(clearWidth, clearHeight);
+        float throatLength = MathF.Abs(
+            Direction.Sign(portalDirection) > 0
+                ? portalPlane - cavityVolume.Maximum.Component(entranceAxis)
+                : cavityVolume.Minimum.Component(entranceAxis) - portalPlane);
+
+        MegastationEntrancePrecinct entrancePrecinct =
+            MegastationInteriorPresentationPlanner.BuildEntrancePrecinct(
+                siteSeed,
+                portalCentre,
+                normal,
+                right,
+                up,
+                throatVolume,
+                throatWallThickness,
+                occupancy);
+        int assemblyRemoved = ProtectEntranceAssembly(
+            occupancy,
+            entrancePrecinct,
+            protectedCells,
+            cancellationToken);
+        removed += assemblyRemoved;
+
+        stopwatch.Stop();
+        var diagnostics = new MegastationInteriorDiagnostics(
+            AlgorithmVersion,
+            1,
+            portalDirection,
+            portalClear.X,
+            portalClear.Y,
+            throatLength,
+            flightVolume.Size,
+            occupancy.ProtectedVoidCellCount,
+            removed,
+            0, 0, 0, 0, 0, 0, 0, 0,
+            stopwatch.ElapsedMilliseconds,
+            0,
+            string.Empty,
+            EntranceType: entranceType,
+            BayClearWidth: bayClearWidth,
+            EntranceWidthFraction: portalClear.X / bayClearWidth,
+            LargeUprightVerticalClearance: portalClear.Y - LargeEnvelopeHeight,
+            LargeRolledVerticalClearance: portalClear.Y - LargeEnvelopeWidth,
+            CrownOuterWidth: entrancePrecinct.CrownOuterWidth,
+            CrownOuterHeight: entrancePrecinct.CrownOuterHeight,
+            EntranceClearanceMargin: entrancePrecinct.ClearanceMargin,
+            EntranceAssemblyRemovedCellCount: assemblyRemoved);
+        var plan = new MegastationInteriorPlan(
+            entranceType == MegastationEntranceType.Standard
+                ? $"interior:v{AlgorithmVersion}:{Direction.Id(portalDirection)}"
+                : $"interior:v{AlgorithmVersion}:{Direction.Id(portalDirection)}:grand",
+            siteSeed,
+            portalDirection,
+            portalCentre,
+            normal,
+            right,
+            up,
+            -up,
+            entranceType,
+            throatWallThickness,
+            portalClear,
+            throatVolume,
+            flightVolume,
+            cavityVolume,
+            entrancePrecinct,
+            protectedCells
+                .OrderBy(pair => pair.Key.X)
+                .ThenBy(pair => pair.Key.Y)
+                .ThenBy(pair => pair.Key.Z)
+                .Select(pair => new MegastationProtectedVoidCell(pair.Key, pair.Value))
+                .ToArray(),
+            diagnostics);
+        return plan with
+        {
+            Diagnostics = diagnostics with { Signature = MegastationInteriorSignatureBuilder.Compute(plan) },
+        };
+    }
+
+    private static GridDirection ChoosePortalDirection(SliceGrid grid, int seed)
+    {
+        return Enum.GetValues<GridDirection>()
+            .Select(direction =>
+            {
+                GridAxis axis = Direction.PrimaryAxis(direction);
+                GridAxis[] cross = Enum.GetValues<GridAxis>().Where(other => other != axis).ToArray();
+                float depth = CoreSpan(grid, axis);
+                float aperture = MathF.Min(CoreSpan(grid, cross[0]), CoreSpan(grid, cross[1]));
+                int tie = MegastationSeed.Derive(seed, Direction.Id(direction));
+                return (direction, score: depth * aperture, tie: unchecked((uint)tie));
+            })
+            .OrderByDescending(candidate => candidate.score)
+            .ThenBy(candidate => candidate.tie)
+            .First().direction;
+    }
+
+    private static float CoreSpan(SliceGrid grid, GridAxis axis)
+    {
+        Range range = grid.CoreRange(axis);
+        return grid.GetCellMaximum(axis, range.End.Value - 1)
+            - grid.GetCellMinimum(axis, range.Start.Value);
+    }
+
+    private static MegastationGridRange CentredRange(
+        SliceGrid grid, GridAxis axis, Range allowed, float targetMetres, int shellCells)
+    {
+        int startLimit = allowed.Start.Value + shellCells;
+        int endLimit = allowed.End.Value - shellCells;
+        if (endLimit - startLimit < 3)
+            throw new InvalidOperationException($"Megastation {axis} core cannot preserve an H1 structural shell.");
+        return GrowCentred(grid, axis, new(startLimit, endLimit), targetMetres);
+    }
+
+    private static MegastationGridRange CentredSubrange(
+        SliceGrid grid, GridAxis axis, MegastationGridRange allowed, float targetMetres)
+        => GrowCentred(grid, axis, allowed, targetMetres);
+
+    private static MegastationGridRange GrowCentred(
+        SliceGrid grid, GridAxis axis, MegastationGridRange allowed, float targetMetres)
+    {
+        int centre = (allowed.Start + allowed.End - 1) / 2;
+        int start = centre;
+        int end = centre + 1;
+        while (Span(grid, axis, new(start, end)) < targetMetres
+               && (start > allowed.Start || end < allowed.End))
+        {
+            int lowCount = centre - start;
+            int highCount = end - centre - 1;
+            if (start > allowed.Start && (end >= allowed.End || lowCount <= highCount)) start--;
+            else end++;
+        }
+        return new(start, end);
+    }
+
+    private static float Span(SliceGrid grid, GridAxis axis, MegastationGridRange range)
+        => grid.GetCellMaximum(axis, range.End - 1) - grid.GetCellMinimum(axis, range.Start);
+
+    private static float Centre(SliceGrid grid, GridAxis axis, MegastationGridRange range)
+        => (grid.GetCellMinimum(axis, range.Start) + grid.GetCellMaximum(axis, range.End - 1)) * .5f;
+
+    private static float Sample(int seed, string semanticIdentity)
+        => unchecked((uint)MegastationSeed.Derive(seed, semanticIdentity))
+            / (float)uint.MaxValue;
+
+    private static int ProtectEntranceAssembly(
+        StructuralOccupancy occupancy,
+        MegastationEntrancePrecinct precinct,
+        Dictionary<MegacellCoord, MegacellVoidKind> protectedCells,
+        CancellationToken cancellationToken)
+    {
+        SliceGrid grid = occupancy.Grid;
+        int removed = 0;
+        for (int x = 0; x < grid.XCount; x++)
+        for (int y = 0; y < grid.YCount; y++)
+        for (int z = 0; z < grid.ZCount; z++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Vector3 minimum = new(
+                grid.GetCellMinimum(GridAxis.X, x),
+                grid.GetCellMinimum(GridAxis.Y, y),
+                grid.GetCellMinimum(GridAxis.Z, z));
+            Vector3 maximum = new(
+                grid.GetCellMaximum(GridAxis.X, x),
+                grid.GetCellMaximum(GridAxis.Y, y),
+                grid.GetCellMaximum(GridAxis.Z, z));
+            if (!precinct.Intersects(minimum, maximum))
+                continue;
+            if (occupancy.ProtectEmpty(x, y, z, MegacellVoidKind.EntranceThroat))
+                removed++;
+            protectedCells.TryAdd(
+                new MegacellCoord(x, y, z),
+                MegacellVoidKind.EntranceThroat);
+        }
+        return removed;
+    }
+
+    private static MegastationInteriorVolume Volume(
+        SliceGrid grid,
+        GridAxis a, MegastationGridRange ar,
+        GridAxis b, MegastationGridRange br,
+        GridAxis c, MegastationGridRange cr)
+    {
+        MegastationGridRange[] ranges = new MegastationGridRange[3];
+        ranges[(int)a] = ar;
+        ranges[(int)b] = br;
+        ranges[(int)c] = cr;
+        var min = new Vector3(
+            grid.GetCellMinimum(GridAxis.X, ranges[0].Start),
+            grid.GetCellMinimum(GridAxis.Y, ranges[1].Start),
+            grid.GetCellMinimum(GridAxis.Z, ranges[2].Start));
+        var max = new Vector3(
+            grid.GetCellMaximum(GridAxis.X, ranges[0].End - 1),
+            grid.GetCellMaximum(GridAxis.Y, ranges[1].End - 1),
+            grid.GetCellMaximum(GridAxis.Z, ranges[2].End - 1));
+        return new(ranges[0], ranges[1], ranges[2], min, max);
+    }
+
+    private static (int x, int y, int z) Coordinates(
+        GridAxis a, int av, GridAxis b, int bv, GridAxis c, int cv)
+    {
+        int[] values = new int[3];
+        values[(int)a] = av;
+        values[(int)b] = bv;
+        values[(int)c] = cv;
+        return (values[0], values[1], values[2]);
+    }
+
+    private static Vector3 AxisVector(GridAxis axis) => axis switch
+    {
+        GridAxis.X => Vector3.UnitX,
+        GridAxis.Y => Vector3.UnitY,
+        _ => Vector3.UnitZ,
+    };
+
+    private static float Component(this Vector3 value, GridAxis axis) => axis switch
+    {
+        GridAxis.X => value.X,
+        GridAxis.Y => value.Y,
+        _ => value.Z,
+    };
+}
+
+public static class MegastationInteriorPresentationPlanner
+{
+    private const float EntranceClearanceMargin = 6f;
+    private const float ApproachPlateDepth = MegastationApproachFixtures.PlateDepth;
+    private const float ApproachHousingDepth = MegastationApproachFixtures.HousingDepth;
+    private const float ApproachBarrelDepth = MegastationApproachFixtures.BarrelDepth;
+    private const float ApproachEmitterDepth = MegastationApproachFixtures.EmitterDepth;
+    private const float ApproachSourceClearance = MegastationApproachFixtures.SourceClearance;
+
+    public static Color ApproachUpColour => MegastationApproachFixtures.UpColour;
+    public static Color ApproachDownColour => MegastationApproachFixtures.DownColour;
+
+    public static float ComputeWallThickness(
+        int interiorSeed,
+        float structuralVoidWidth,
+        float structuralVoidHeight)
+    {
+        var linerRng = new Random(MegastationSeed.Derive(interiorSeed, "throat-liner"));
+        return MathHelper.Clamp(
+            MathF.Min(structuralVoidWidth, structuralVoidHeight)
+                * (.085f + (float)linerRng.NextDouble() * .015f),
+            10f,
+            16f);
+    }
+
+    private static readonly (string Id, Color Main, Color Highlight, Color Accent)[] Palettes =
+    [
+        ("amber", new Color(255, 166, 38), new Color(255, 224, 142), new Color(122, 83, 34)),
+        ("cyan", new Color(55, 218, 255), new Color(180, 246, 255), new Color(40, 101, 118)),
+        ("red-orange", new Color(255, 78, 38), new Color(255, 190, 145), new Color(126, 49, 36)),
+        ("green", new Color(80, 244, 126), new Color(196, 255, 211), new Color(42, 112, 65)),
+        ("violet", new Color(176, 88, 255), new Color(230, 196, 255), new Color(82, 52, 118)),
+        ("blue-white", new Color(112, 174, 255), new Color(224, 240, 255), new Color(55, 78, 122)),
+        ("magenta", new Color(255, 72, 205), new Color(255, 194, 238), new Color(122, 45, 101)),
+    ];
+
+    public static MegastationInteriorPresentationPlan Plan(
+        MegastationInteriorPlan interior,
+        MegastationSystemMaterialAssignment? materialAssignment = null)
+    {
+        int portalSeed = MegastationSeed.Derive(interior.Seed, "portal-guidance");
+        int throatSeed = MegastationSeed.Derive(interior.Seed, "throat-guidance");
+        int landmarkSeed = MegastationSeed.Derive(interior.Seed, "interior-landmarks");
+        int linerSeed = MegastationSeed.Derive(interior.Seed, "throat-liner");
+        int ribsSeed = MegastationSeed.Derive(interior.Seed, "throat-ribs");
+        int markingsSeed = MegastationSeed.Derive(interior.Seed, "throat-markings");
+        int fixturesSeed = MegastationSeed.Derive(interior.Seed, "throat-fixtures");
+        int approachSeed = MegastationSeed.Derive(
+            interior.Seed,
+            "approach-guidance-beams:v1");
+        var selectedPalette = Palettes[PositiveMod(
+            MegastationSeed.Derive(interior.Seed, "entrance-guidance-palette:v1"),
+            Palettes.Length)];
+        Color dominant = materialAssignment?.Palette.DominantTint ?? new Color(92, 96, 101);
+        Color secondary = materialAssignment?.Palette.SecondaryTint ?? new Color(108, 111, 114);
+        var palette = new MegastationEntrancePalette(
+            selectedPalette.Id,
+            selectedPalette.Main,
+            selectedPalette.Highlight,
+            selectedPalette.Accent,
+            ReadableStructure(dominant, 76),
+            ReadableStructure(secondary, 88),
+            ReadableStructure(Color.Lerp(dominant, secondary, .35f), 96));
+        MegastationEntrancePrecinct precinct = interior.EntrancePrecinct;
+        var elements = new List<MegastationInteriorGuidanceElement>();
+        var markers = new List<MegastationInteriorGuidanceMarker>();
+        var approachBeams = new List<MegastationApproachGuidanceBeam>(4);
+        float halfWidth = interior.PortalClearSize.X * .5f;
+        float halfHeight = interior.PortalClearSize.Y * .5f;
+        float strip = MathHelper.Clamp(MathF.Min(halfWidth, halfHeight) * .075f, 3.5f, 6f);
+        float slabDepth = MathHelper.Clamp(strip * .55f, 2f, 3.5f);
+        Color landmarkColour = new(78, 188, 236);
+        Matrix Frame(Vector3 centre) => CreateFrame(
+            interior.PortalRight, interior.PortalUp, interior.OutwardNormal, centre);
+
+        AddConstructedThroat(interior, precinct, palette,
+            linerSeed, ribsSeed, markingsSeed, fixturesSeed, approachSeed,
+            elements, markers, approachBeams);
+
+        Vector3 cavityCentre = (interior.CavityEnvelope.Minimum + interior.CavityEnvelope.Maximum) * .5f;
+        float cavityDepth = MathF.Abs(Vector3.Dot(
+            interior.CavityEnvelope.Size,
+            interior.OutwardNormal));
+        Vector3 farWall = cavityCentre - interior.OutwardNormal * (cavityDepth * .5f - 1.2f);
+        float landmarkWidth = interior.MainFlightVolume.Size.ComponentAlong(interior.PortalRight) * .62f;
+        float landmarkHeight = interior.MainFlightVolume.Size.ComponentAlong(interior.PortalUp) * .46f;
+        for (int vertical = -1; vertical <= 1; vertical += 2)
+        {
+            Vector3 centre = farWall + interior.PortalUp * vertical * landmarkHeight * .42f;
+            elements.Add(new(
+                $"interior/far-wall/horizontal:{vertical}",
+                MegastationInteriorGuidanceKind.InteriorLandmark,
+                Frame(centre),
+                new(landmarkWidth, strip * .8f, slabDepth),
+                landmarkColour,
+                .66f,
+                SystemMaterialFamilyId.CleanTechnicalAlloy,
+                false));
+            markers.Add(new(
+                $"interior/far-wall/marker:{vertical}",
+                MegastationInteriorGuidanceKind.InteriorLandmark,
+                centre + interior.OutwardNormal * slabDepth,
+                landmarkColour,
+                .58f));
+        }
+        elements.Add(new(
+            "interior/far-wall/vertical",
+            MegastationInteriorGuidanceKind.InteriorLandmark,
+            Frame(farWall + interior.PortalRight * landmarkWidth * .28f),
+            new(strip * .8f, landmarkHeight, slabDepth),
+            landmarkColour,
+            .66f,
+            SystemMaterialFamilyId.CleanTechnicalAlloy,
+            false));
+        markers.Add(new(
+            "interior/far-wall/marker:centre",
+            MegastationInteriorGuidanceKind.InteriorLandmark,
+            farWall + interior.OutwardNormal * slabDepth,
+            landmarkColour,
+            .62f));
+
+        return new(portalSeed, throatSeed, landmarkSeed,
+            linerSeed, ribsSeed, markingsSeed, fixturesSeed, approachSeed,
+            palette, precinct, elements, markers, approachBeams);
+    }
+
+    public static MegastationEntrancePrecinct BuildEntrancePrecinct(
+        int interiorSeed,
+        Vector3 portalCentre,
+        Vector3 outwardNormal,
+        Vector3 portalRight,
+        Vector3 portalUp,
+        MegastationInteriorVolume throatVolume,
+        float wallThickness,
+        StructuralOccupancy? occupancy)
+    {
+        const float approachLength = 90f;
+        const float minimumProjection = 55f;
+        float structuralVoidWidth = throatVolume.Size.ComponentAlong(portalRight);
+        float structuralVoidHeight = throatVolume.Size.ComponentAlong(portalUp);
+        float clearWidth = structuralVoidWidth - wallThickness * 2f;
+        float clearHeight = structuralVoidHeight - wallThickness * 2f;
+        float crownMember = MathHelper.Clamp(
+            MathF.Min(clearWidth, clearHeight) * .17f,
+            20f,
+            30f);
+        float crownDepth = MathHelper.Clamp(crownMember * 1.35f, 28f, 42f);
+        float crownOuterWidth = structuralVoidWidth + crownMember * 2f;
+        float crownOuterHeight = structuralVoidHeight + crownMember * 2f;
+        float protectedHalfWidth = crownOuterWidth * .5f + EntranceClearanceMargin;
+        float protectedHalfHeight = crownOuterHeight * .5f + EntranceClearanceMargin;
+        float portalProjection = Vector3.Dot(portalCentre, outwardNormal);
+        float obstructionProjection = portalProjection;
+
+        if (occupancy != null)
+        {
+            SliceGrid grid = occupancy.Grid;
+            for (int x = 0; x < grid.XCount; x++)
+            for (int y = 0; y < grid.YCount; y++)
+            for (int z = 0; z < grid.ZCount; z++)
+            {
+                if (!occupancy.IsOccupied(x, y, z)) continue;
+                Vector3 minimum = new(
+                    grid.GetCellMinimum(GridAxis.X, x),
+                    grid.GetCellMinimum(GridAxis.Y, y),
+                    grid.GetCellMinimum(GridAxis.Z, z));
+                Vector3 maximum = new(
+                    grid.GetCellMaximum(GridAxis.X, x),
+                    grid.GetCellMaximum(GridAxis.Y, y),
+                    grid.GetCellMaximum(GridAxis.Z, z));
+                Vector3 centre = (minimum + maximum) * .5f;
+                Vector3 half = (maximum - minimum) * .5f;
+                float lateralRight = MathF.Abs(Vector3.Dot(
+                    centre - portalCentre, portalRight));
+                float lateralUp = MathF.Abs(Vector3.Dot(
+                    centre - portalCentre, portalUp));
+                float cellRight = half.ComponentAlong(portalRight);
+                float cellUp = half.ComponentAlong(portalUp);
+                if (lateralRight - cellRight > protectedHalfWidth
+                    || lateralUp - cellUp > protectedHalfHeight)
+                    continue;
+                float outwardExtent = Vector3.Dot(centre, outwardNormal)
+                    + half.ComponentAlong(outwardNormal);
+                if (outwardExtent >= portalProjection)
+                    obstructionProjection = MathF.Max(obstructionProjection, outwardExtent);
+            }
+        }
+
+        float skylineHeight = MathF.Max(0f, obstructionProjection - portalProjection);
+        float projectionHeightFraction = MathHelper.Lerp(.25f, .75f,
+            Sample(interiorSeed, "entrance-projection-height:v1"));
+        float projectionLength = MathF.Max(
+            minimumProjection,
+            skylineHeight * projectionHeightFraction);
+        Vector3 mouth = portalCentre + outwardNormal * projectionLength;
+        float corridorStart = -24f;
+        // Clear through every local obstruction in front of the crown, even when
+        // the accepted partial skyline embedding leaves the mouth below that peak.
+        // This keeps the approach fixtures and the first visible beam segment out
+        // of surviving structural mass without changing entrance elevation.
+        float corridorEnd = MathF.Max(
+            projectionLength + approachLength,
+            skylineHeight + EntranceClearanceMargin);
+        float corridorLength = corridorEnd - corridorStart;
+        Vector3 corridorCentre = portalCentre
+            + outwardNormal * ((corridorStart + corridorEnd) * .5f);
+        Vector3 boundsHalf = Abs(portalRight) * protectedHalfWidth
+            + Abs(portalUp) * protectedHalfHeight
+            + Abs(outwardNormal) * (corridorLength * .5f);
+
+        // The crown is the lateral authority. Axially, include the complete crown and
+        // its four fixed approach fixtures, plus the same restrained safety margin.
+        const float approachFixtureDepth = ApproachPlateDepth + ApproachHousingDepth
+            + ApproachBarrelDepth + ApproachEmitterDepth + ApproachSourceClearance;
+        float assemblyStart = projectionLength - crownDepth * .15f - EntranceClearanceMargin;
+        float assemblyEnd = projectionLength + crownDepth * .85f
+            + approachFixtureDepth + EntranceClearanceMargin;
+        float assemblyLength = assemblyEnd - assemblyStart;
+        Vector3 assemblyCentre = portalCentre
+            + outwardNormal * ((assemblyStart + assemblyEnd) * .5f);
+        Vector3 assemblyHalf = Abs(portalRight) * protectedHalfWidth
+            + Abs(portalUp) * protectedHalfHeight
+            + Abs(outwardNormal) * (assemblyLength * .5f);
+        return new(
+            corridorCentre - boundsHalf,
+            corridorCentre + boundsHalf,
+            assemblyCentre - assemblyHalf,
+            assemblyCentre + assemblyHalf,
+            mouth,
+            crownOuterWidth,
+            crownOuterHeight,
+            EntranceClearanceMargin,
+            obstructionProjection,
+            projectionLength,
+            skylineHeight,
+            projectionHeightFraction);
+    }
+
+    private static int PositiveMod(int value, int modulus)
+    {
+        int result = value % modulus;
+        return result < 0 ? result + modulus : result;
+    }
+
+    private static float Sample(int seed, string semanticIdentity)
+        => unchecked((uint)MegastationSeed.Derive(seed, semanticIdentity))
+            / (float)uint.MaxValue;
+
+    private static Vector3 Abs(Vector3 value)
+        => new(MathF.Abs(value.X), MathF.Abs(value.Y), MathF.Abs(value.Z));
+
+    private static Color ReadableStructure(Color colour, byte minimumLuminance)
+    {
+        byte current = Math.Max(colour.R, Math.Max(colour.G, colour.B));
+        if (current >= minimumLuminance) return colour;
+        float amount = (minimumLuminance - current) / (255f - current);
+        return Color.Lerp(colour, Color.White, amount);
+    }
+
+    private static void AddConstructedThroat(
+        MegastationInteriorPlan interior,
+        MegastationEntrancePrecinct precinct,
+        MegastationEntrancePalette palette,
+        int linerSeed,
+        int ribsSeed,
+        int markingsSeed,
+        int fixturesSeed,
+        int approachSeed,
+        List<MegastationInteriorGuidanceElement> elements,
+        List<MegastationInteriorGuidanceMarker> markers,
+        List<MegastationApproachGuidanceBeam> approachBeams)
+    {
+        var ribRng = new Random(ribsSeed);
+        var fixtureRng = new Random(fixturesSeed);
+        Vector3 right = interior.PortalRight;
+        Vector3 up = interior.PortalUp;
+        Vector3 outward = interior.OutwardNormal;
+        float structuralVoidWidth = interior.ThroatVolume.Size.ComponentAlong(right);
+        float structuralVoidHeight = interior.ThroatVolume.Size.ComponentAlong(up);
+        float internalLength = interior.Diagnostics.ThroatLength;
+        float length = internalLength + precinct.ProjectionLength;
+        float wallThickness = interior.ThroatWallThickness;
+        float width = structuralVoidWidth - wallThickness * 2f;
+        float height = structuralVoidHeight - wallThickness * 2f;
+        Debug.Assert(width > 0f && height > 0f);
+        float halfWidth = width * .5f;
+        float halfHeight = height * .5f;
+        float outerWidth = width + wallThickness * 2f;
+        float outerHeight = height + wallThickness * 2f;
+        Vector3 innerEnd = interior.PortalCentre - outward * internalLength;
+        Vector3 outerEnd = precinct.OuterMouthCentre;
+        _ = markingsSeed;
+
+        // The accepted light rhythm remains, but each station is a shallow recess in
+        // the four continuous tube walls rather than a frame defining the tunnel.
+        float nominalSpacing = 46f + (float)ribRng.NextDouble() * 10f;
+        int fixtureCount = Math.Max(3, (int)MathF.Floor(length / nominalSpacing));
+        float fixtureWidth = MathHelper.Clamp(
+            3.6f + (float)fixtureRng.NextDouble() * 1.4f,
+            3.6f,
+            5f);
+        float recessDepth = MathHelper.Clamp(wallThickness * .16f, 1.6f, 2.4f);
+        float backingThickness = MathHelper.Clamp(wallThickness * .07f, .7f, 1.1f);
+        float remainingWallThickness = wallThickness - recessDepth - backingThickness;
+        Debug.Assert(remainingWallThickness > 0f);
+        float wellWallThickness = MathHelper.Clamp(recessDepth * .22f, .35f, .55f);
+        float cornerClearance = MathHelper.Clamp(
+            MathF.Min(width, height) * .075f,
+            6f,
+            10f);
+        var recesses = new List<(float Start, float End, int Index)>();
+        for (int fixture = 1; fixture <= fixtureCount; fixture++)
+        {
+            float centre = length * fixture / (fixtureCount + 1f);
+            recesses.Add((centre - fixtureWidth * .5f, centre + fixtureWidth * .5f, fixture));
+        }
+
+        void Add(
+            string identity,
+            MegastationInteriorGuidanceKind kind,
+            Matrix frame,
+            Vector3 size,
+            Color colour,
+            SystemMaterialFamilyId family,
+            bool castsShadow,
+            float illumination = 0f)
+            => elements.Add(new(identity, kind, frame, size, colour, illumination, family, castsShadow));
+
+        // Split each wall only where a closed recess replaces its inner face. The
+        // structural wall and luminous recess backs together cover the entire axial
+        // length; neither end receives a closing face across the flight opening.
+        float segmentStart = 0f;
+        int segmentIndex = 0;
+        foreach ((float recessStart, float recessEnd, _) in recesses)
+        {
+            AddTubeWallSegment(segmentStart, recessStart, segmentIndex++);
+            segmentStart = recessEnd;
+        }
+        AddTubeWallSegment(segmentStart, length, segmentIndex);
+
+        foreach ((float recessStart, float recessEnd, int fixtureIndex) in recesses)
+        {
+            float axial = (recessStart + recessEnd) * .5f;
+            Vector3 station = innerEnd + outward * axial;
+            float sideSpan = height - cornerClearance * 2f;
+            float horizontalSpan = width - cornerClearance * 2f;
+            AddVerticalWell(fixtureIndex, "left", station, -1, sideSpan);
+            AddVerticalWell(fixtureIndex, "right", station, 1, sideSpan);
+            AddHorizontalWell(fixtureIndex, "ceiling", station, 1, horizontalSpan);
+            AddHorizontalWell(fixtureIndex, "floor", station, -1, horizontalSpan);
+
+            // Structural closures retain opaque tube coverage around each deliberately
+            // finite fixture. The luminous pieces stop before the corners, so adjacent
+            // wall fixtures never share or overlap a plane.
+            foreach (int side in new[] { -1, 1 })
+            foreach (int vertical in new[] { -1, 1 })
+            {
+                Add($"throat/recess:{fixtureIndex}/side-cap:{side}:{vertical}",
+                    MegastationInteriorGuidanceKind.ThroatLiner,
+                    CreateFrame(right, up, outward,
+                        station
+                        + right * side * (halfWidth + wallThickness * .5f)
+                        + up * vertical * (halfHeight - cornerClearance * .5f)),
+                    new(wallThickness, cornerClearance, fixtureWidth), palette.InnerStructure,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+                Add($"throat/recess:{fixtureIndex}/horizontal-cap:{side}:{vertical}",
+                    MegastationInteriorGuidanceKind.ThroatLiner,
+                    CreateFrame(right, up, outward,
+                        station
+                        + right * side * (halfWidth + wallThickness * .5f - cornerClearance * .5f)
+                        + up * vertical * (halfHeight + wallThickness * .5f)),
+                    new(wallThickness + cornerClearance, wallThickness, fixtureWidth),
+                    palette.OuterStructure,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            }
+        }
+
+        AddCrown();
+        return;
+
+        void AddVerticalWell(
+            int fixtureIndex,
+            string sideName,
+            Vector3 station,
+            int side,
+            float transverseSpan)
+        {
+            Vector3 radial = right * side;
+            Vector3 opening = station + radial * halfWidth;
+            Color outerBounce = Color.Lerp(palette.InnerStructure, palette.Guidance, .24f);
+            Color deepBounce = Color.Lerp(palette.InnerStructure, palette.Guidance, .48f);
+            float outerWellDepth = recessDepth * .38f;
+            float deepWellDepth = recessDepth - outerWellDepth;
+            Add($"throat/fixture:{fixtureIndex}/{sideName}",
+                MegastationInteriorGuidanceKind.ThroatBand,
+                CreateFrame(right, up, outward,
+                    opening + radial * (recessDepth + backingThickness * .5f)),
+                new(backingThickness, transverseSpan, fixtureWidth), palette.Guidance,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+            Add($"throat/recess:{fixtureIndex}/{sideName}/seal",
+                MegastationInteriorGuidanceKind.ThroatLiner,
+                CreateFrame(right, up, outward,
+                    opening + radial * (recessDepth + backingThickness
+                        + remainingWallThickness * .5f)),
+                new(remainingWallThickness, transverseSpan, fixtureWidth),
+                palette.OuterStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            foreach (int axialSide in new[] { -1, 1 })
+            {
+                Vector3 edge = outward * axialSide
+                    * (fixtureWidth - wellWallThickness) * .5f;
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/axial:{axialSide}/outer",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth * .5f) + edge),
+                    new(outerWellDepth, transverseSpan, wellWallThickness), outerBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .14f);
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/axial:{axialSide}/deep",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth + deepWellDepth * .5f) + edge),
+                    new(deepWellDepth, transverseSpan, wellWallThickness), deepBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .32f);
+            }
+            foreach (int transverseSide in new[] { -1, 1 })
+            {
+                Vector3 edge = up * transverseSide
+                    * (transverseSpan - wellWallThickness) * .5f;
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/transverse:{transverseSide}/outer",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth * .5f) + edge),
+                    new(outerWellDepth, wellWallThickness,
+                        fixtureWidth - wellWallThickness * 2f), outerBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .14f);
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/transverse:{transverseSide}/deep",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth + deepWellDepth * .5f) + edge),
+                    new(deepWellDepth, wellWallThickness,
+                        fixtureWidth - wellWallThickness * 2f), deepBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .32f);
+            }
+            AddWellHalos(fixtureIndex, sideName, opening, up, transverseSpan, -radial);
+        }
+
+        void AddHorizontalWell(
+            int fixtureIndex,
+            string sideName,
+            Vector3 station,
+            int side,
+            float transverseSpan)
+        {
+            Vector3 radial = up * side;
+            Vector3 opening = station + radial * halfHeight;
+            Color outerBounce = Color.Lerp(palette.InnerStructure, palette.Guidance, .24f);
+            Color deepBounce = Color.Lerp(palette.InnerStructure, palette.Guidance, .48f);
+            float outerWellDepth = recessDepth * .38f;
+            float deepWellDepth = recessDepth - outerWellDepth;
+            Add($"throat/fixture:{fixtureIndex}/{sideName}",
+                MegastationInteriorGuidanceKind.ThroatBand,
+                CreateFrame(right, up, outward,
+                    opening + radial * (recessDepth + backingThickness * .5f)),
+                new(transverseSpan, backingThickness, fixtureWidth), palette.Guidance,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+            Add($"throat/recess:{fixtureIndex}/{sideName}/seal",
+                MegastationInteriorGuidanceKind.ThroatLiner,
+                CreateFrame(right, up, outward,
+                    opening + radial * (recessDepth + backingThickness
+                        + remainingWallThickness * .5f)),
+                new(transverseSpan, remainingWallThickness, fixtureWidth),
+                palette.OuterStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            foreach (int axialSide in new[] { -1, 1 })
+            {
+                Vector3 edge = outward * axialSide
+                    * (fixtureWidth - wellWallThickness) * .5f;
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/axial:{axialSide}/outer",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth * .5f) + edge),
+                    new(transverseSpan, outerWellDepth, wellWallThickness), outerBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .14f);
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/axial:{axialSide}/deep",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth + deepWellDepth * .5f) + edge),
+                    new(transverseSpan, deepWellDepth, wellWallThickness), deepBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .32f);
+            }
+            foreach (int transverseSide in new[] { -1, 1 })
+            {
+                Vector3 edge = right * transverseSide
+                    * (transverseSpan - wellWallThickness) * .5f;
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/transverse:{transverseSide}/outer",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth * .5f) + edge),
+                    new(wellWallThickness, outerWellDepth,
+                        fixtureWidth - wellWallThickness * 2f), outerBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .14f);
+                Add($"throat/recess:{fixtureIndex}/{sideName}/well/transverse:{transverseSide}/deep",
+                    MegastationInteriorGuidanceKind.ThroatMarking,
+                    CreateFrame(right, up, outward,
+                        opening + radial * (outerWellDepth + deepWellDepth * .5f) + edge),
+                    new(wellWallThickness, deepWellDepth,
+                        fixtureWidth - wellWallThickness * 2f), deepBounce,
+                    SystemMaterialFamilyId.HeavyIndustrialPlate, false, .32f);
+            }
+            AddWellHalos(fixtureIndex, sideName, opening, right, transverseSpan, -radial);
+        }
+
+        void AddWellHalos(
+            int fixtureIndex,
+            string sideName,
+            Vector3 opening,
+            Vector3 transverseAxis,
+            float transverseSpan,
+            Vector3 inwardNormal)
+        {
+            int sampleCount = transverseSpan >= 80f ? 3 : transverseSpan >= 40f ? 2 : 1;
+            for (int sample = 0; sample < sampleCount; sample++)
+            {
+                float unit = sampleCount == 1 ? 0f : sample / (sampleCount - 1f) - .5f;
+                Vector3 position = opening
+                    + transverseAxis * (unit * transverseSpan * .68f)
+                    + inwardNormal * .15f;
+                markers.Add(new(
+                    $"throat/recess:{fixtureIndex}/{sideName}/halo:{sample}",
+                    MegastationInteriorGuidanceKind.ThroatBand,
+                    position,
+                    palette.Guidance,
+                    1f,
+                    inwardNormal,
+                    90f,
+                    220f,
+                    1_500f));
+            }
+        }
+
+        void AddTubeWallSegment(float start, float end, int index)
+        {
+            float segmentLength = end - start;
+            if (segmentLength <= .01f) return;
+            Vector3 centre = innerEnd + outward * ((start + end) * .5f);
+            Add($"throat/tube/segment:{index}/left", MegastationInteriorGuidanceKind.ThroatLiner,
+                CreateFrame(right, up, outward, centre - right * (halfWidth + wallThickness * .5f)),
+                new(wallThickness, height, segmentLength), palette.InnerStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            Add($"throat/tube/segment:{index}/right", MegastationInteriorGuidanceKind.ThroatLiner,
+                CreateFrame(right, up, outward, centre + right * (halfWidth + wallThickness * .5f)),
+                new(wallThickness, height, segmentLength), palette.InnerStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            Add($"throat/tube/segment:{index}/ceiling", MegastationInteriorGuidanceKind.ThroatLiner,
+                CreateFrame(right, up, outward, centre + up * (halfHeight + wallThickness * .5f)),
+                new(outerWidth, wallThickness, segmentLength), palette.OuterStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            Add($"throat/tube/segment:{index}/floor", MegastationInteriorGuidanceKind.ThroatLiner,
+                CreateFrame(right, up, outward, centre - up * (halfHeight + wallThickness * .5f)),
+                new(outerWidth, wallThickness, segmentLength), palette.OuterStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+        }
+
+        void AddCrown()
+        {
+            float member = (precinct.CrownOuterWidth - outerWidth) * .5f;
+            float depth = MathHelper.Clamp(member * 1.35f, 28f, 42f);
+            float crownOuterWidth = precinct.CrownOuterWidth;
+            float crownOuterHeight = precinct.CrownOuterHeight;
+            Vector3 centre = outerEnd + outward * (depth * .35f);
+            Add("entrance/crown/left", MegastationInteriorGuidanceKind.ThroatTransition,
+                CreateFrame(right, up, outward, centre - right * (outerWidth * .5f + member * .5f)),
+                new(member, crownOuterHeight, depth), palette.CrownStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            Add("entrance/crown/right", MegastationInteriorGuidanceKind.ThroatTransition,
+                CreateFrame(right, up, outward, centre + right * (outerWidth * .5f + member * .5f)),
+                new(member, crownOuterHeight, depth), palette.CrownStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            Add("entrance/crown/top", MegastationInteriorGuidanceKind.ThroatTransition,
+                CreateFrame(right, up, outward, centre + up * (outerHeight * .5f + member * .5f)),
+                new(outerWidth, member, depth), palette.CrownStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+            Add("entrance/crown/bottom", MegastationInteriorGuidanceKind.ThroatTransition,
+                CreateFrame(right, up, outward, centre - up * (outerHeight * .5f + member * .5f)),
+                new(outerWidth, member, depth), palette.CrownStructure,
+                SystemMaterialFamilyId.HeavyIndustrialPlate, true);
+
+            // One shallow, deliberately recessed luminous inner edge. These four pieces
+            // stop before the corners and cannot overlap one another or the crown face.
+            float lightDepth = 1f;
+            float lightWidth = MathHelper.Clamp(member * .18f, 4f, 6f);
+            float lightAxial = depth * .51f;
+            float sideSpan = outerHeight - lightWidth * 2f;
+            float topSpan = outerWidth - lightWidth * 2f;
+            Vector3 lightCentre = centre + outward * lightAxial;
+            Add("entrance/crown/guidance/left", MegastationInteriorGuidanceKind.ThroatBand,
+                CreateFrame(right, up, outward, lightCentre - right * (outerWidth * .5f + lightDepth * .5f)),
+                new(lightDepth, sideSpan, 1.2f), palette.Highlight,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+            Add("entrance/crown/guidance/right", MegastationInteriorGuidanceKind.ThroatBand,
+                CreateFrame(right, up, outward, lightCentre + right * (outerWidth * .5f + lightDepth * .5f)),
+                new(lightDepth, sideSpan, 1.2f), palette.Highlight,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+            Add("entrance/crown/guidance/top", MegastationInteriorGuidanceKind.ThroatBand,
+                CreateFrame(right, up, outward, lightCentre + up * (outerHeight * .5f + lightDepth * .5f)),
+                new(topSpan, lightDepth, 1.2f), palette.Highlight,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+            Add("entrance/crown/guidance/bottom", MegastationInteriorGuidanceKind.ThroatBand,
+                CreateFrame(right, up, outward, lightCentre - up * (outerHeight * .5f + lightDepth * .5f)),
+                new(topSpan, lightDepth, 1.2f), palette.Highlight,
+                SystemMaterialFamilyId.CleanTechnicalAlloy, false, .94f);
+
+            AddApproachGuidanceFixtures();
+
+            void AddApproachGuidanceFixtures()
+            {
+                float beamLength = MathHelper.Lerp(
+                    1_400f,
+                    1_600f,
+                    Sample(approachSeed, "length"));
+                float halfAngle = MathHelper.Lerp(
+                    .7f,
+                    1.2f,
+                    Sample(approachSeed, "half-angle"));
+                float plateSpan = MathHelper.Clamp(member * .52f, 11f, 15f);
+                Vector3 crownFront = centre + outward * (depth * .5f);
+                float cornerRight = outerWidth * .5f + member * .5f;
+                float cornerUp = outerHeight * .5f + member * .5f;
+
+                foreach (int horizontal in new[] { -1, 1 })
+                foreach (int vertical in new[] { -1, 1 })
+                {
+                    Vector3 mountingPoint = crownFront
+                        + right * horizontal * cornerRight
+                        + up * vertical * cornerUp;
+                    MegastationApproachFixture fixture = MegastationApproachFixtures.Create(
+                        "entrance/approach", horizontal, vertical, mountingPoint, right, up, outward,
+                        plateSpan, palette.CrownStructure, palette.StructuralAccent, palette.OuterStructure,
+                        beamLength, halfAngle);
+                    elements.AddRange(fixture.Elements);
+                    approachBeams.Add(fixture.Beam);
+                    markers.Add(fixture.Marker);
+                }
+            }
+        }
+    }
+
+    private static Matrix CreateFrame(Vector3 x, Vector3 y, Vector3 z, Vector3 centre)
+    {
+        Vector3 handedZ = Vector3.Normalize(Vector3.Cross(x, y));
+        Debug.Assert(MathF.Abs(Vector3.Dot(handedZ, z)) > .999f);
+        return new(
+            x.X, x.Y, x.Z, 0f,
+            y.X, y.Y, y.Z, 0f,
+            handedZ.X, handedZ.Y, handedZ.Z, 0f,
+            centre.X, centre.Y, centre.Z, 1f);
+    }
+
+    private static float ComponentAlong(this Vector3 size, Vector3 axis)
+        => MathF.Abs(size.X * axis.X) + MathF.Abs(size.Y * axis.Y) + MathF.Abs(size.Z * axis.Z);
+}
+
+public static class MegastationApproachBeamMeshBuilder
+{
+    private const int RadialFinCount = 6;
+
+    private static readonly float[] LongitudinalFractions =
+        [0f, .08f, .24f, .48f, .72f, 1f];
+
+    private static readonly float[] CentreAlpha =
+        [.09f, .08f, .064f, .043f, .021f, 0f];
+
+    public static VertexPositionColor[] Build(
+        MegastationInteriorPresentationPlan presentation)
+        => Build(presentation.ApproachBeams);
+
+    public static VertexPositionColor[] Build(IReadOnlyList<MegastationApproachGuidanceBeam> beams)
+    {
+        var vertices = new List<VertexPositionColor>(
+            beams.Count
+            * RadialFinCount
+            * (LongitudinalFractions.Length - 1)
+            * 12);
+        foreach (MegastationApproachGuidanceBeam beam in beams)
+            EmitBeam(beam, vertices);
+        return vertices.ToArray();
+    }
+
+    public static int VertexCount(MegastationInteriorPresentationPlan presentation)
+        => presentation.ApproachBeams.Count
+            * RadialFinCount
+            * (LongitudinalFractions.Length - 1)
+            * 12;
+
+    private static void EmitBeam(
+        MegastationApproachGuidanceBeam beam,
+        List<VertexPositionColor> vertices)
+    {
+        Vector3 axis = Vector3.Normalize(beam.Axis);
+        Vector3 radialRight = Vector3.Normalize(beam.RadialRight);
+        Vector3 radialUp = Vector3.Normalize(beam.RadialUp);
+        float tangent = MathF.Tan(MathHelper.ToRadians(beam.HalfAngleDegrees));
+        const float sourceRadius = 1.25f;
+
+        for (int fin = 0; fin < RadialFinCount; fin++)
+        {
+            float angle = MathF.PI * fin / RadialFinCount;
+            Vector3 radial = Vector3.Normalize(
+                radialRight * MathF.Cos(angle) + radialUp * MathF.Sin(angle));
+            for (int segment = 0; segment < LongitudinalFractions.Length - 1; segment++)
+            {
+                CrossSection a = Section(segment);
+                CrossSection b = Section(segment + 1);
+                AddTriangle(vertices, a.Left, a.Centre, b.Centre,
+                    a.EdgeColour, a.CentreColour, b.CentreColour);
+                AddTriangle(vertices, a.Left, b.Centre, b.Left,
+                    a.EdgeColour, b.CentreColour, b.EdgeColour);
+                AddTriangle(vertices, a.Centre, a.Right, b.Right,
+                    a.CentreColour, a.EdgeColour, b.EdgeColour);
+                AddTriangle(vertices, a.Centre, b.Right, b.Centre,
+                    a.CentreColour, b.EdgeColour, b.CentreColour);
+            }
+
+            CrossSection Section(int index)
+            {
+                float distance = beam.Length * LongitudinalFractions[index];
+                float radius = sourceRadius + distance * tangent;
+                Vector3 centre = beam.Source + axis * distance;
+                return new(
+                    centre - radial * radius,
+                    centre,
+                    centre + radial * radius,
+                    WithAlpha(beam.Colour, 0f),
+                    WithAlpha(beam.Colour, CentreAlpha[index]));
+            }
+        }
+    }
+
+    private static void AddTriangle(
+        List<VertexPositionColor> vertices,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Color colourA,
+        Color colourB,
+        Color colourC)
+    {
+        vertices.Add(new(a, colourA));
+        vertices.Add(new(b, colourB));
+        vertices.Add(new(c, colourC));
+    }
+
+    private static Color WithAlpha(Color colour, float alpha)
+        => new(colour.R, colour.G, colour.B,
+            (byte)MathF.Round(255f * MathHelper.Clamp(alpha, 0f, 1f)));
+
+    private readonly record struct CrossSection(
+        Vector3 Left,
+        Vector3 Centre,
+        Vector3 Right,
+        Color EdgeColour,
+        Color CentreColour);
+}
+
+public static class MegastationInteriorMeshBuilder
+{
+    public static MegastationInteriorMeshBuildResult Build(
+        MegastationInteriorPlan plan,
+        MegastationSystemMaterialAssignment? materials,
+        MegastationInteriorPresentationPlan? presentation = null,
+        MegastationLandingDistrictPlan? landingDistrict = null,
+        MegastationBayHabitationPlan? bayHabitation = null,
+        MegastationBayFacilityPlan? bayFacilities = null,
+        MegastationArtificialLightingPlan? artificialLighting = null,
+        MegastationArtificialOcclusion? artificialOcclusion = null,
+        CancellationToken cancellationToken = default)
+    {
+        presentation ??= MegastationInteriorPresentationPlanner.Plan(plan);
+        var stopwatch = Stopwatch.StartNew();
+        var mesh = new StationModuleMesh();
+        Color dominant = materials?.Palette.DominantTint ?? new Color(74, 78, 82);
+        Color secondary = materials?.Palette.SecondaryTint ?? new Color(96, 101, 106);
+        Color accent = materials?.Palette.AccentTint ?? new Color(132, 144, 150);
+        float width = plan.PortalClearSize.X;
+        float height = plan.PortalClearSize.Y;
+        float bar = MathHelper.Clamp(MathF.Min(width, height) * .12f, 10f, 18f);
+        float depth = MathHelper.Clamp(bar * 1.4f, 16f, 26f);
+        Vector3 boxDepthAxis = Vector3.Normalize(Vector3.Cross(
+            plan.PortalRight,
+            plan.PortalUp));
+        Debug.Assert(MathF.Abs(Vector3.Dot(boxDepthAxis, plan.OutwardNormal)) > .999f);
+        Matrix Frame(Vector3 centre) => new(
+            plan.PortalRight.X, plan.PortalRight.Y, plan.PortalRight.Z, 0f,
+            plan.PortalUp.X, plan.PortalUp.Y, plan.PortalUp.Z, 0f,
+            boxDepthAxis.X, boxDepthAxis.Y, boxDepthAxis.Z, 0f,
+            centre.X, centre.Y, centre.Z, 1f);
+
+        mesh.CurrentDecorClass = DecorClass.MegastationInteriorMajor;
+        SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+        Vector3 frameCentre = plan.PortalCentre + plan.OutwardNormal * (depth * .15f);
+        AddBox(mesh, Frame(frameCentre + plan.PortalRight * (width + bar) * .5f),
+            new(bar, height + bar * 2f, depth), dominant);
+        AddBox(mesh, Frame(frameCentre - plan.PortalRight * (width + bar) * .5f),
+            new(bar, height + bar * 2f, depth), dominant);
+        AddBox(mesh, Frame(frameCentre + plan.PortalUp * (height + bar) * .5f),
+            new(width, bar, depth), secondary);
+        AddBox(mesh, Frame(frameCentre - plan.PortalUp * (height + bar) * .5f),
+            new(width, bar, depth), secondary);
+
+        float buttressWidth = bar * 1.6f;
+        float buttressHeight = height * .42f;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Vector3 baseCentre = frameCentre
+                + plan.PortalRight * side * (width * .5f + bar * 1.35f)
+                - plan.PortalUp * (height * .5f - buttressHeight * .5f)
+                - plan.OutwardNormal * depth * .25f;
+            AddBox(mesh, Frame(baseCentre), new(buttressWidth, buttressHeight, depth * 1.45f), dominant);
+        }
+
+        SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+        float innerDepth = depth * .55f;
+        Vector3 innerCentre = plan.PortalCentre - plan.OutwardNormal * (depth * .55f);
+        AddBox(mesh, Frame(innerCentre + plan.PortalRight * width * .42f),
+            new(bar * .32f, height, innerDepth), accent);
+        AddBox(mesh, Frame(innerCentre - plan.PortalRight * width * .42f),
+            new(bar * .32f, height, innerDepth), accent);
+
+        mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+        int illuminatedFaceStart = mesh.FaceCount;
+        float marker = MathHelper.Clamp(bar * .16f, 1.8f, 3.5f);
+        for (int side = -1; side <= 1; side += 2)
+        for (int row = -2; row <= 2; row++)
+        {
+            Vector3 markerCentre = plan.PortalCentre
+                + plan.PortalRight * side * (width * .5f + bar * .12f)
+                + plan.PortalUp * row * (height * .18f)
+                + plan.OutwardNormal * (depth * .55f);
+            AddBox(mesh, Frame(markerCentre), new(marker, marker * 2.2f, marker), Color.Lerp(accent, Color.White, .35f));
+        }
+        int illuminatedFaceCount = mesh.FaceCount - illuminatedFaceStart;
+        var illuminationRanges = new List<(int Start, int Count, float Illumination)>
+        {
+            (illuminatedFaceStart, illuminatedFaceCount, .82f),
+        };
+        var shelfReceiverFaces = new List<int>();
+        var bayTrussReceiverFaces = new List<int>();
+        MegastationBayUtilityMeshResult? utilityMesh = null;
+        MegastationBaySecondaryUtilityMeshResult? secondaryUtilityMesh = null;
+
+        foreach (MegastationInteriorGuidanceElement element in presentation.Elements
+                     .OrderBy(element => element.MaterialFamily)
+                     .ThenByDescending(element => element.CastsShadow)
+                     .ThenBy(element => element.Identity, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetMaterial(mesh, element.MaterialFamily);
+            mesh.CurrentDecorClass = element.CastsShadow
+                ? DecorClass.MegastationInteriorMajor
+                : DecorClass.MegastationInteriorMinor;
+            int start = mesh.FaceCount;
+            AddBox(mesh, element.Frame, element.Size, element.Colour);
+            illuminationRanges.Add((start, mesh.FaceCount - start, element.Illumination));
+        }
+        foreach (MegastationInteriorStructuralSolid solid in
+                 plan.AddedStructuralSolids ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SystemMaterialBinding binding = materials?.DefaultStructuralBinding
+                ?? new(SystemMaterialFamilyId.DullStructuralMetal, new Color(86, 96, 104));
+            SetMaterial(mesh, binding.FamilyId);
+            mesh.CurrentDecorClass = solid.CastsStellarShadow
+                ? DecorClass.MegastationInteriorMajor
+                : DecorClass.MegastationInteriorMinor;
+            Matrix frame = new(
+                solid.Right.X, solid.Right.Y, solid.Right.Z, 0f,
+                solid.Up.X, solid.Up.Y, solid.Up.Z, 0f,
+                solid.Forward.X, solid.Forward.Y, solid.Forward.Z, 0f,
+                solid.Centre.X, solid.Centre.Y, solid.Centre.Z, 1f);
+            Color structuralColour = materials is null
+                ? binding.Tint
+                : ProceduralMaterialCpuGenerator.Blend(binding.Tint, secondary, .18f);
+            if (solid.Role == MegastationInteriorStructuralRole.MegaShelf)
+            {
+                MegastationMegaShelfFaceColours colours =
+                    MegastationMegaShelfPlanner.FaceColours(binding.Tint, secondary);
+                int firstShelfFace = mesh.FaceCount;
+                AddMegaShelfBody(mesh, solid, colours);
+                for (int face = firstShelfFace; face < mesh.FaceCount; face++)
+                    shelfReceiverFaces.Add(face);
+            }
+            else
+            {
+                AddBox(mesh, frame, solid.Size, structuralColour);
+            }
+        }
+        foreach (MegastationMegaShelfTruss truss in plan.AddedStructuralTrusses ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+            mesh.CurrentDecorClass = truss.CastsStellarShadow
+                ? DecorClass.MegastationInteriorMajor
+                : DecorClass.MegastationInteriorMinor;
+            Color trussColour = ProceduralMaterialCpuGenerator.Blend(
+                dominant, secondary, .55f);
+            StructuralTrussFactory.Append(mesh, truss.Spec, trussColour);
+        }
+        if (plan.BayStructuralTrusses is { } bayTrusses)
+        {
+            SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+            foreach (MegastationBayStructuralTruss truss in bayTrusses.Trusses)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Color trussColour = ProceduralMaterialCpuGenerator.Blend(
+                    dominant, secondary, truss.ColourBlend);
+                mesh.CurrentDecorClass = truss.CastsStellarShadow
+                    ? DecorClass.MegastationInteriorMajor
+                    : DecorClass.MegastationInteriorMinor;
+                int firstFace = mesh.FaceCount;
+                StructuralTrussFactory.Append(mesh, truss.Spec, trussColour);
+                for (int face = firstFace; face < mesh.FaceCount; face++)
+                    bayTrussReceiverFaces.Add(face);
+            }
+            foreach (MegastationBayStructuralTrussAttachment attachment in bayTrusses.Attachments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Color trussColour = ProceduralMaterialCpuGenerator.Blend(
+                    dominant, secondary, attachment.ColourBlend);
+                mesh.CurrentDecorClass = attachment.CastsStellarShadow
+                    ? DecorClass.MegastationInteriorMajor
+                    : DecorClass.MegastationInteriorMinor;
+                Matrix frame = new(
+                    attachment.Right.X, attachment.Right.Y, attachment.Right.Z, 0f,
+                    attachment.Up.X, attachment.Up.Y, attachment.Up.Z, 0f,
+                    attachment.Forward.X, attachment.Forward.Y, attachment.Forward.Z, 0f,
+                    attachment.Centre.X, attachment.Centre.Y, attachment.Centre.Z, 1f);
+                int firstFace = mesh.FaceCount;
+                AddBox(mesh, frame, attachment.Size, trussColour);
+                for (int face = firstFace; face < mesh.FaceCount; face++)
+                    bayTrussReceiverFaces.Add(face);
+            }
+        }
+        if (plan.BayUtilities is { } bayUtilities)
+        {
+            utilityMesh = MegastationBayUtilityMeshBuilder.Append(
+                mesh, bayUtilities, MegastationBayHabitationPlanner.CreateWalls(plan), materials);
+            bayTrussReceiverFaces.AddRange(utilityMesh.ReceiverFaces);
+        }
+        if (plan.BaySecondaryUtilities is { } baySecondaryUtilities)
+        {
+            secondaryUtilityMesh = MegastationBaySecondaryUtilityMeshBuilder.Append(
+                mesh, baySecondaryUtilities,
+                MegastationBayHabitationPlanner.CreateWalls(plan), materials);
+            bayTrussReceiverFaces.AddRange(secondaryUtilityMesh.ReceiverFaces);
+        }
+        foreach (MegastationMegaShelfMarker shelfMarker in plan.AddedStructuralMarkers ?? [])
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            SetMaterial(mesh, SystemMaterialFamilyId.CleanTechnicalAlloy);
+            mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+            Matrix frame = new(
+                shelfMarker.Right.X, shelfMarker.Right.Y, shelfMarker.Right.Z, 0f,
+                shelfMarker.Up.X, shelfMarker.Up.Y, shelfMarker.Up.Z, 0f,
+                shelfMarker.Forward.X, shelfMarker.Forward.Y, shelfMarker.Forward.Z, 0f,
+                shelfMarker.Centre.X, shelfMarker.Centre.Y, shelfMarker.Centre.Z, 1f);
+            int start = mesh.FaceCount;
+            AddBox(mesh, frame, shelfMarker.Size, shelfMarker.Colour);
+            illuminationRanges.Add((start, mesh.FaceCount - start, shelfMarker.Illumination));
+        }
+        if (plan.ShelfLighting is { } shelfLighting)
+        {
+            mesh.CurrentDecorClass = DecorClass.MegastationInteriorMinor;
+            SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+            foreach (MegastationShelfObstacleBeacon beacon in shelfLighting.Beacons)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Vector3 housingCentre = beacon.Position - beacon.Up * .16f;
+                Matrix frame = new(
+                    beacon.Right.X, beacon.Right.Y, beacon.Right.Z, 0f,
+                    beacon.Up.X, beacon.Up.Y, beacon.Up.Z, 0f,
+                    beacon.Forward.X, beacon.Forward.Y, beacon.Forward.Z, 0f,
+                    housingCentre.X, housingCentre.Y, housingCentre.Z, 1f);
+                AddBox(mesh, frame, new(.72f, .36f, .72f), new Color(62, 66, 69));
+                int lensStart = mesh.FaceCount;
+                Matrix lensFrame = frame;
+                lensFrame.Translation = beacon.Position + beacon.Up * .22f;
+                AddBox(mesh, lensFrame, new(.42f, .30f, .42f),
+                    MegastationShelfLightingPlanner.BeaconGlassOffColour);
+                illuminationRanges.Add((lensStart, mesh.FaceCount - lensStart, .18f));
+            }
+            foreach (MegastationShelfFloodFixture flood in shelfLighting.FloodFixtures)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Matrix fixtureFrame = new(
+                    flood.Right.X, flood.Right.Y, flood.Right.Z, 0f,
+                    flood.Up.X, flood.Up.Y, flood.Up.Z, 0f,
+                    flood.Direction.X, flood.Direction.Y, flood.Direction.Z, 0f,
+                    flood.Centre.X, flood.Centre.Y, flood.Centre.Z, 1f);
+                AddBox(mesh, fixtureFrame, new(1.65f, .86f, 1.05f), new Color(54, 58, 61));
+                int lensStart = mesh.FaceCount;
+                Matrix lensFrame = fixtureFrame;
+                Vector3 lensCentre = flood.Centre + flood.Direction * .57f;
+                lensFrame.Translation = lensCentre;
+                AddBox(mesh, lensFrame, new(1.34f, .60f, .16f), flood.Colour);
+                illuminationRanges.Add((lensStart, mesh.FaceCount - lensStart, .90f));
+
+                Vector3 bracketCentre = (flood.MountPoint + flood.Centre) * .5f;
+                Vector3 bracketAxis = flood.Centre - flood.MountPoint;
+                float bracketLength = bracketAxis.Length();
+                if (bracketLength > .05f)
+                {
+                    bracketAxis /= bracketLength;
+                    Vector3 bracketRight = Vector3.Cross(flood.Right, bracketAxis);
+                    if (bracketRight.LengthSquared() < 1e-5f) bracketRight = flood.Up;
+                    bracketRight.Normalize();
+                    Vector3 bracketUp = Vector3.Normalize(Vector3.Cross(bracketAxis, bracketRight));
+                    Matrix bracketFrame = new(
+                        bracketRight.X, bracketRight.Y, bracketRight.Z, 0f,
+                        bracketUp.X, bracketUp.Y, bracketUp.Z, 0f,
+                        bracketAxis.X, bracketAxis.Y, bracketAxis.Z, 0f,
+                        bracketCentre.X, bracketCentre.Y, bracketCentre.Z, 1f);
+                    AddBox(mesh, bracketFrame, new(.22f, .22f, bracketLength),
+                        new Color(67, 70, 72));
+                }
+            }
+        }
+        int portalCasterVertexCount = CountCasterVertices(mesh);
+        int portalCasterIndexCount = CountCasterIndices(mesh);
+        MegastationLandingDistrictMeshResult? landingMesh = landingDistrict is null
+            ? null
+            : MegastationLandingDistrictMeshBuilder.Append(
+                mesh, landingDistrict, materials, cancellationToken);
+        MegastationBayFacilityMeshResult? facilityMesh = bayFacilities is null
+            ? null
+            : MegastationBayFacilityMeshBuilder.Append(
+                mesh, bayFacilities, materials, cancellationToken);
+        MegastationBayHabitationMeshResult? habitationMesh = bayHabitation is null
+            ? null
+            : MegastationBayHabitationMeshBuilder.Append(
+                mesh, bayHabitation, bayFacilities, cancellationToken);
+        mesh.ApplyIlluminationFlags();
+        foreach ((int start, int count, float illumination) in illuminationRanges)
+        for (int face = start; face < start + count; face++)
+            mesh.SetFaceIllumination(face, illumination);
+        if (habitationMesh is { } wallMesh)
+        foreach ((int face, float illumination) in wallMesh.IlluminationFaces)
+            mesh.SetFaceIllumination(face, illumination);
+        if (facilityMesh is { } facilityWindows)
+        foreach ((int face, float illumination) in facilityWindows.IlluminationFaces)
+            mesh.SetFaceIllumination(face, illumination);
+        if (shelfReceiverFaces.Count > 0 && artificialLighting is not null)
+        {
+            void ApplyShelfLighting()
+            {
+                foreach (int face in shelfReceiverFaces)
+                {
+                    Vector3 normal = mesh.LocalFaceNormal(face);
+                    Vector3[] samples = mesh.GetFaceVertexPositions(face)
+                        .Select(position => MegastationArtificialLighting.Evaluate(
+                            position, normal, artificialLighting.Lights, artificialOcclusion))
+                        .ToArray();
+                    mesh.SetFaceArtificialLight(face, samples);
+                }
+            }
+            if (artificialOcclusion is null)
+                ApplyShelfLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyShelfLighting);
+        }
+        if (bayTrussReceiverFaces.Count > 0 && artificialLighting is not null)
+        {
+            void ApplyBayTrussLighting()
+            {
+                foreach (int face in bayTrussReceiverFaces)
+                {
+                    Vector3 normal = mesh.LocalFaceNormal(face);
+                    Vector3[] samples = mesh.GetFaceVertexPositions(face)
+                        .Select(position => MegastationArtificialLighting.Evaluate(
+                            position, normal, artificialLighting.Lights, artificialOcclusion))
+                        .ToArray();
+                    mesh.SetFaceArtificialLight(face, samples);
+                }
+            }
+            if (artificialOcclusion is null)
+                ApplyBayTrussLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyBayTrussLighting);
+        }
+        if (landingMesh is { } districtMesh)
+        {
+            void ApplyLandingLighting() => MegastationLandingDistrictMeshBuilder.ApplyLighting(
+                mesh, districtMesh,
+                artificialLighting?.Lights ?? landingDistrict!.ArtificialLights,
+                artificialOcclusion);
+            if (artificialOcclusion is null)
+                ApplyLandingLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyLandingLighting);
+        }
+        if (facilityMesh is { } wallFacilityMesh)
+        {
+            void ApplyFacilityLighting() => MegastationBayFacilityMeshBuilder.ApplyLighting(
+                mesh, wallFacilityMesh,
+                artificialLighting?.Lights ?? landingDistrict?.ArtificialLights ?? [],
+                artificialOcclusion);
+            if (artificialOcclusion is null)
+                ApplyFacilityLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyFacilityLighting);
+        }
+        stopwatch.Stop();
+
+        var diagnostics = plan.Diagnostics with
+        {
+            PortalVisibleVertexCount = mesh.VertexCount,
+            PortalVisibleTriangleCount = mesh.IndexCount / 3,
+            PortalCasterVertexCount = portalCasterVertexCount,
+            PortalCasterTriangleCount = portalCasterIndexCount / 3,
+            MeshBuildMilliseconds = stopwatch.ElapsedMilliseconds,
+            PortalGuidanceElementCount = presentation.PortalElementCount,
+            ThroatGuidanceElementCount = presentation.ThroatElementCount,
+            InteriorLandmarkElementCount = presentation.InteriorLandmarkCount,
+            GuidanceGlowCount = presentation.Markers.Count,
+            GuidanceVisibleVertexCount = presentation.Elements.Count * 24,
+            GuidanceVisibleTriangleCount = presentation.Elements.Count * 12,
+            ThroatLinerElementCount = presentation.ThroatLinerCount,
+            ThroatRibElementCount = presentation.ThroatRibCount,
+            ThroatMarkingElementCount = presentation.ThroatMarkingCount,
+            ThroatCasterElementCount = presentation.ThroatCasterCount,
+            ThroatTubeWallElementCount = presentation.ThroatTubeWallCount,
+            ThroatCrownElementCount = presentation.ThroatCrownCount,
+            ThroatFixtureElementCount = presentation.ThroatFixtureCount,
+            ApproachBeamCount = presentation.ApproachBeams.Count,
+            ApproachFixtureElementCount = presentation.ApproachFixtureElementCount,
+            ApproachBeamLength = presentation.ApproachBeams.FirstOrDefault()?.Length ?? 0f,
+            ApproachBeamHalfAngleDegrees =
+                presentation.ApproachBeams.FirstOrDefault()?.HalfAngleDegrees ?? 0f,
+            ApproachBeamVertexCount = MegastationApproachBeamMeshBuilder.VertexCount(
+                presentation),
+            ApproachBeamTriangleCount = MegastationApproachBeamMeshBuilder.VertexCount(
+                presentation) / 3,
+            EntrancePortalUp = plan.PortalUp,
+            EntrancePortalRight = plan.PortalRight,
+            EntranceProjectionLength = presentation.Precinct.ProjectionLength,
+            EntranceLocalObstructionProjection = presentation.Precinct.LocalObstructionProjection,
+            EntranceLocalSkylineHeight = presentation.Precinct.LocalSkylineHeight,
+            EntranceProjectionHeightFraction = presentation.Precinct.ProjectionHeightFraction,
+            EntrancePaletteIdentity = presentation.Palette.Identity,
+            LandingDistrictPadCount = landingMesh?.Diagnostics.PadCount ?? 0,
+            LandingDistrictStandardPadCount = landingMesh?.Diagnostics.StandardPadCount ?? 0,
+            LandingDistrictLargePadCount = landingMesh?.Diagnostics.LargePadCount ?? 0,
+            LandingDistrictServiceBuildingCount =
+                landingMesh?.Diagnostics.ServiceBuildingCount ?? 0,
+            LandingDistrictLightCount = landingMesh?.Diagnostics.ArtificialLightCount ?? 0,
+            LandingDistrictLoadingAreaCount = landingMesh?.Diagnostics.LoadingAreaCount ?? 0,
+            LandingDistrictContainerCount = landingMesh?.Diagnostics.ContainerCount ?? 0,
+            LandingDistrictKeepClearZoneCount = landingMesh?.Diagnostics.KeepClearZoneCount ?? 0,
+            LandingDistrictVisibleVertexCount = landingMesh?.Diagnostics.VisibleVertexCount ?? 0,
+            LandingDistrictVisibleTriangleCount = landingMesh?.Diagnostics.VisibleTriangleCount ?? 0,
+            LandingDistrictShadowVertexCount = landingMesh?.Diagnostics.ShadowVertexCount ?? 0,
+            LandingDistrictShadowTriangleCount = landingMesh?.Diagnostics.ShadowTriangleCount ?? 0,
+            LandingDistrictApronReceiverVertexCount =
+                landingMesh?.Diagnostics.ApronReceiverVertexCount ?? 0,
+            LandingDistrictApronReceiverTriangleCount =
+                landingMesh?.Diagnostics.ApronReceiverTriangleCount ?? 0,
+            LandingDistrictApronReceiverMaximumSpacing =
+                landingMesh?.Diagnostics.ApronReceiverMaximumSpacing ?? 0f,
+            LandingDistrictSiteCount = landingMesh?.Diagnostics.SiteCount ?? 0,
+            LandingDistrictSmallSiteCount = landingMesh?.Diagnostics.SmallSiteCount ?? 0,
+            LandingDistrictMediumSiteCount = landingMesh?.Diagnostics.MediumSiteCount ?? 0,
+            LandingDistrictLargeSiteCount = landingMesh?.Diagnostics.LargeSiteCount ?? 0,
+            LandingDistrictPadCapacityDeficit =
+                landingMesh?.Diagnostics.PadCapacityDeficit ?? 0,
+            LandingDistrictLargePadCapacityDeficit =
+                landingMesh?.Diagnostics.LargePadCapacityDeficit ?? 0,
+            LandingDistrictSiteSummary = landingMesh?.Diagnostics.SiteSummary ?? string.Empty,
+            LandingDistrictStructuralEnvelopeRejectCount =
+                landingMesh?.Diagnostics.StructuralEnvelopeRejectCount ?? 0,
+            LandingDistrictStructuralComponentRejectCount =
+                landingMesh?.Diagnostics.StructuralComponentRejectCount ?? 0,
+            LandingDistrictStructuralRejectionSummary =
+                landingMesh?.Diagnostics.StructuralRejectionSummary ?? string.Empty,
+            LandingDistrictLandingSurfaceCount =
+                landingMesh?.Diagnostics.LandingSurfaceCount ?? 0,
+            LandingDistrictShelfSiteCount =
+                landingMesh?.Diagnostics.ShelfLandingSiteCount ?? 0,
+            LandingDistrictLandingSurfaceSummary =
+                landingMesh?.Diagnostics.LandingSurfaceSummary ?? string.Empty,
+            LandingDistrictLandingCapableShelfCount =
+                landingMesh?.Diagnostics.LandingCapableShelfCount ?? 0,
+            LandingDistrictOccupiedShelfCount =
+                landingMesh?.Diagnostics.OccupiedShelfCount ?? 0,
+            LandingDistrictFreestandingShelfSiteCount =
+                landingMesh?.Diagnostics.FreestandingShelfSiteCount ?? 0,
+            LandingDistrictWallIntegratedShelfSiteCount =
+                landingMesh?.Diagnostics.WallIntegratedShelfSiteCount ?? 0,
+            LandingDistrictDeliberatelyEmptyShelfCount =
+                landingMesh?.Diagnostics.DeliberatelyEmptyShelfCount ?? 0,
+            LandingDistrictShelfUtilizationSummary =
+                landingMesh?.Diagnostics.ShelfUtilizationSummary ?? string.Empty,
+            LandingDistrictSignature = landingMesh?.Diagnostics.Signature ?? string.Empty,
+            BayHabitationAlgorithmVersion =
+                habitationMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BayHabitationActiveWallCount =
+                habitationMesh?.Diagnostics.ActiveWallCount ?? 0,
+            BayHabitationBlankWallCount =
+                habitationMesh?.Diagnostics.BlankWallCount ?? 0,
+            BayHabitationRegionCount = habitationMesh?.Diagnostics.RegionCount ?? 0,
+            BayHabitationWindowGroupCount =
+                habitationMesh?.Diagnostics.WindowGroupCount ?? 0,
+            BayHabitationWindowCount = habitationMesh?.Diagnostics.WindowCount ?? 0,
+            BayHabitationLitWindowCount =
+                habitationMesh?.Diagnostics.LitWindowCount ?? 0,
+            BayHabitationDimWindowCount =
+                habitationMesh?.Diagnostics.DimWindowCount ?? 0,
+            BayHabitationDarkWindowCount =
+                habitationMesh?.Diagnostics.DarkWindowCount ?? 0,
+            BayHabitationMeshVertexCount =
+                habitationMesh?.Diagnostics.MeshVertexCount ?? 0,
+            BayHabitationMeshTriangleCount =
+                habitationMesh?.Diagnostics.MeshTriangleCount ?? 0,
+            BayHabitationWallSummary =
+                habitationMesh?.Diagnostics.WallSummary ?? string.Empty,
+            BayHabitationSignature =
+                habitationMesh?.Diagnostics.Signature ?? string.Empty,
+            BayFacilityAlgorithmVersion = facilityMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BayFacilityEnhancedRegionCount =
+                facilityMesh?.Diagnostics.EnhancedRegionCount ?? 0,
+            BayFacilityPlainRegionCount = facilityMesh?.Diagnostics.PlainRegionCount ?? 0,
+            BayFacilityRecessedCount = facilityMesh?.Diagnostics.RecessedFacilityCount ?? 0,
+            BayFacilityGalleryCount = facilityMesh?.Diagnostics.ProjectingGalleryCount ?? 0,
+            BayFacilityEmbeddedCount = facilityMesh?.Diagnostics.EmbeddedBlockCount ?? 0,
+            BayFacilityServiceApertureCount =
+                facilityMesh?.Diagnostics.ServiceApertureCount ?? 0,
+            BayFacilitySecondaryFormCount = facilityMesh?.Diagnostics.SecondaryFormCount ?? 0,
+            BayFacilityStructuralPartCount = facilityMesh?.Diagnostics.StructuralPartCount ?? 0,
+            BayFacilityRailingPartCount = facilityMesh?.Diagnostics.RailingPartCount ?? 0,
+            BayFacilityOccluderPartCount =
+                facilityMesh?.Diagnostics.ArtificialShadowPartCount ?? 0,
+            BayFacilityCutoutCount = facilityMesh?.Diagnostics.CutoutCount ?? 0,
+            BayFacilityWindowCount = facilityMesh?.Diagnostics.FacilityWindowCount ?? 0,
+            BayFacilityBalconyCount = facilityMesh?.Diagnostics.BalconyCount ?? 0,
+            BayFacilityMaximumProjection = facilityMesh?.Diagnostics.MaximumProjection ?? 0f,
+            BayFacilityMeshVertexCount = facilityMesh?.Diagnostics.MeshVertexCount ?? 0,
+            BayFacilityMeshTriangleCount = facilityMesh?.Diagnostics.MeshTriangleCount ?? 0,
+            BayFacilityShadowVertexCount = facilityMesh?.Diagnostics.ShadowVertexCount ?? 0,
+            BayFacilityShadowTriangleCount = facilityMesh?.Diagnostics.ShadowTriangleCount ?? 0,
+            BayFacilityReservationCount = bayFacilities?.Reservations.Count ?? 0,
+            BayFacilityReservationRejectCount =
+                facilityMesh?.Diagnostics.ReservationRejectCount ?? 0,
+            BayFacilityCutoutValidationRejectCount =
+                facilityMesh?.Diagnostics.CutoutValidationRejectCount ?? 0,
+            BayFacilityArtificialLightCount =
+                facilityMesh?.Diagnostics.ArtificialLightCount ?? 0,
+            BayFacilityDeepRecessCount = facilityMesh?.Diagnostics.DeepRecessCount ?? 0,
+            BayFacilityOpenGalleryCount = facilityMesh?.Diagnostics.OpenGalleryCount ?? 0,
+            BayFacilityMultiStoreyGalleryCount =
+                facilityMesh?.Diagnostics.MultiStoreyGalleryCount ?? 0,
+            BayFacilityGalleryStoreyCount =
+                facilityMesh?.Diagnostics.GalleryStoreyCount ?? 0,
+            BayFacilityPlanningMilliseconds =
+                facilityMesh?.Diagnostics.PlanningMilliseconds ?? 0,
+            BayFacilitySignature = facilityMesh?.Diagnostics.Signature ?? string.Empty,
+            BayUtilityAlgorithmVersion = utilityMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BayUtilityActiveWallCount = utilityMesh?.Diagnostics.ActiveWallCount ?? 0,
+            BayUtilityNetworkCount = utilityMesh?.Diagnostics.NetworkCount ?? 0,
+            BayUtilityTrunkCount = utilityMesh?.Diagnostics.TrunkCount ?? 0,
+            BayUtilityBranchCount = utilityMesh?.Diagnostics.BranchCount ?? 0,
+            BayUtilityJunctionBoxCount = utilityMesh?.Diagnostics.JunctionBoxCount ?? 0,
+            BayUtilityServiceBoxCount = utilityMesh?.Diagnostics.ServiceBoxCount ?? 0,
+            BayUtilityCableCount = utilityMesh?.Diagnostics.CableCount ?? 0,
+            BayUtilityClampCount = utilityMesh?.Diagnostics.ClampCount ?? 0,
+            BayUtilityTotalRunLength = utilityMesh?.Diagnostics.TotalRunLength ?? 0f,
+            BayUtilityMinimumTrunkLength = utilityMesh?.Diagnostics.MinimumTrunkLength ?? 0f,
+            BayUtilityMedianTrunkLength = utilityMesh?.Diagnostics.MedianTrunkLength ?? 0f,
+            BayUtilityMaximumTrunkLength = utilityMesh?.Diagnostics.MaximumTrunkLength ?? 0f,
+            BayUtilityHardConflictRejectCount =
+                utilityMesh?.Diagnostics.HardConflictRejectCount ?? 0,
+            BayUtilityWindowConflictScore = utilityMesh?.Diagnostics.WindowConflictScore ?? 0,
+            BayUtilityVisibleVertexCount = utilityMesh?.Diagnostics.VisibleVertexCount ?? 0,
+            BayUtilityVisibleTriangleCount = utilityMesh?.Diagnostics.VisibleTriangleCount ?? 0,
+            BayUtilityMajorCasterTriangleCount =
+                utilityMesh?.Diagnostics.MajorCasterTriangleCount ?? 0,
+            BayUtilityPlanningMilliseconds = utilityMesh?.Diagnostics.PlanningMilliseconds ?? 0,
+            BayUtilityWallSummary = utilityMesh?.Diagnostics.WallSummary ?? string.Empty,
+            BayUtilitySignature = utilityMesh?.Diagnostics.Signature ?? string.Empty,
+            BaySecondaryUtilityAlgorithmVersion =
+                secondaryUtilityMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BaySecondaryUtilityActiveWallCount =
+                secondaryUtilityMesh?.Diagnostics.ActiveWallCount ?? 0,
+            BaySecondaryUtilityInstallationCount =
+                secondaryUtilityMesh?.Diagnostics.InstallationCount ?? 0,
+            BaySecondaryUtilityPipeCount = secondaryUtilityMesh?.Diagnostics.PipeCount ?? 0,
+            BaySecondaryUtilityPipeSupportCount =
+                secondaryUtilityMesh?.Diagnostics.PipeSupportCount ?? 0,
+            BaySecondaryUtilityLouverBankCount =
+                secondaryUtilityMesh?.Diagnostics.LouverBankCount ?? 0,
+            BaySecondaryUtilityProjectingDuctCount =
+                secondaryUtilityMesh?.Diagnostics.ProjectingDuctCount ?? 0,
+            BaySecondaryUtilityHatchCount = secondaryUtilityMesh?.Diagnostics.HatchCount ?? 0,
+            BaySecondaryUtilityLadderCount = secondaryUtilityMesh?.Diagnostics.LadderCount ?? 0,
+            BaySecondaryUtilityTotalPipeLength =
+                secondaryUtilityMesh?.Diagnostics.TotalPipeLength ?? 0f,
+            BaySecondaryUtilityHardConflictRejectCount =
+                secondaryUtilityMesh?.Diagnostics.HardConflictRejectCount ?? 0,
+            BaySecondaryUtilityWindowConflictScore =
+                secondaryUtilityMesh?.Diagnostics.WindowConflictScore ?? 0,
+            BaySecondaryUtilityVisibleTriangleCount =
+                secondaryUtilityMesh?.Diagnostics.VisibleTriangleCount ?? 0,
+            BaySecondaryUtilityMajorCasterTriangleCount =
+                secondaryUtilityMesh?.Diagnostics.MajorCasterTriangleCount ?? 0,
+            BaySecondaryUtilityPlanningMilliseconds =
+                secondaryUtilityMesh?.Diagnostics.PlanningMilliseconds ?? 0,
+            BaySecondaryUtilityWallSummary =
+                secondaryUtilityMesh?.Diagnostics.WallSummary ?? string.Empty,
+            BaySecondaryUtilitySignature =
+                secondaryUtilityMesh?.Diagnostics.Signature ?? string.Empty,
+        };
+        return new(mesh, diagnostics, landingMesh?.Diagnostics, habitationMesh?.Diagnostics,
+            facilityMesh?.Diagnostics, utilityMesh?.Diagnostics,
+            secondaryUtilityMesh?.Diagnostics);
+    }
+
+    private static void SetMaterial(StationModuleMesh mesh, SystemMaterialFamilyId family)
+    {
+        mesh.CurrentMaterialFamily = family;
+        mesh.CurrentUvScaleMeters = SystemMaterialRecipes.Get(family).TileSizeMeters;
+    }
+
+    private static void AddBox(StationModuleMesh mesh, Matrix frame, Vector3 size, Color colour)
+        => mesh.AddOrientedBox(frame, size, colour);
+
+    internal static void AddMegaShelfBody(
+        StationModuleMesh mesh,
+        MegastationInteriorStructuralSolid solid,
+        MegastationMegaShelfFaceColours colours)
+    {
+        if (solid.ExposedCornerClip > 0f && solid.ExposedCornerRightSign != 0)
+        {
+            AddClippedMegaShelfBody(mesh, solid, colours);
+            return;
+        }
+        float halfWidth = solid.Size.X * .5f;
+        float halfHeight = solid.Size.Y * .5f;
+        float halfDepth = solid.Size.Z * .5f;
+
+        AddTessellatedShelfTop(mesh, solid, colours.Top, halfHeight);
+        mesh.AddQuad(solid.Centre - solid.Up * halfHeight,
+            -solid.Up, solid.Forward, solid.Size.X, solid.Size.Z, colours.Underside);
+        mesh.AddQuad(solid.Centre + solid.Forward * halfDepth,
+            solid.Forward, solid.Up, solid.Size.X, solid.Size.Y, colours.Side);
+        mesh.AddQuad(solid.Centre - solid.Forward * halfDepth,
+            -solid.Forward, solid.Up, solid.Size.X, solid.Size.Y, colours.Side);
+        mesh.AddQuad(solid.Centre + solid.Right * halfWidth,
+            solid.Right, solid.Up, solid.Size.Z, solid.Size.Y, colours.Side);
+        mesh.AddQuad(solid.Centre - solid.Right * halfWidth,
+            -solid.Right, solid.Up, solid.Size.Z, solid.Size.Y, colours.Side);
+    }
+
+    private static void AddTessellatedShelfTop(
+        StationModuleMesh mesh,
+        MegastationInteriorStructuralSolid solid,
+        Color colour,
+        float halfHeight)
+    {
+        const float TargetSpacing = 18f;
+        int across = Math.Max(1, (int)MathF.Ceiling(solid.Size.X / TargetSpacing));
+        int deep = Math.Max(1, (int)MathF.Ceiling(solid.Size.Z / TargetSpacing));
+        float width = solid.Size.X / across;
+        float depth = solid.Size.Z / deep;
+        for (int x = 0; x < across; x++)
+        for (int z = 0; z < deep; z++)
+        {
+            Vector3 centre = solid.Centre + solid.Up * halfHeight
+                + solid.Right * (-solid.Size.X * .5f + width * (x + .5f))
+                + solid.Forward * (-solid.Size.Z * .5f + depth * (z + .5f));
+            mesh.AddQuad(centre, solid.Up, solid.Forward, width, depth, colour);
+        }
+    }
+
+    private static void AddClippedMegaShelfBody(
+        StationModuleMesh mesh,
+        MegastationInteriorStructuralSolid solid,
+        MegastationMegaShelfFaceColours colours)
+    {
+        float x = solid.Size.X * .5f;
+        float z = solid.Size.Z * .5f;
+        float clip = MathHelper.Clamp(solid.ExposedCornerClip, 0f,
+            MathF.Min(solid.Size.X, solid.Size.Z) * .45f);
+        Vector2[] outline = solid.ExposedCornerRightSign > 0
+            ? [new(-x, -z), new(-x, z), new(x - clip, z), new(x, z - clip), new(x, -z)]
+            : [new(-x, -z), new(-x, z - clip), new(-x + clip, z), new(x, z), new(x, -z)];
+        float halfHeight = solid.Size.Y * .5f;
+        Vector3 Point(Vector2 p, float y) => solid.Centre
+            + solid.Right * p.X + solid.Up * y + solid.Forward * p.Y;
+
+        Vector3 topOrigin = Point(outline[0], halfHeight);
+        Vector3 bottomOrigin = Point(outline[0], -halfHeight);
+        for (int index = 1; index < outline.Length - 1; index++)
+        {
+            AddTriangleFacing(mesh, topOrigin,
+                Point(outline[index], halfHeight), Point(outline[index + 1], halfHeight),
+                solid.Up, colours.Top);
+            AddTriangleFacing(mesh, bottomOrigin,
+                Point(outline[index + 1], -halfHeight), Point(outline[index], -halfHeight),
+                -solid.Up, colours.Underside);
+        }
+        for (int index = 0; index < outline.Length; index++)
+        {
+            int next = (index + 1) % outline.Length;
+            Vector3 a = Point(outline[index], -halfHeight);
+            Vector3 b = Point(outline[next], -halfHeight);
+            Vector3 c = Point(outline[next], halfHeight);
+            Vector3 d = Point(outline[index], halfHeight);
+            Vector3 outward = Vector3.Normalize(Vector3.Cross(b - a, solid.Up));
+            AddQuadFacing(mesh, a, b, c, d, outward, colours.Side);
+        }
+    }
+
+    private static void AddTriangleFacing(
+        StationModuleMesh mesh,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 expectedNormal,
+        Color colour)
+    {
+        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
+            mesh.AddTriangle(a, c, b, colour);
+        else
+            mesh.AddTriangle(a, b, c, colour);
+    }
+
+    private static void AddQuadFacing(
+        StationModuleMesh mesh,
+        Vector3 a,
+        Vector3 b,
+        Vector3 c,
+        Vector3 d,
+        Vector3 expectedNormal,
+        Color colour)
+    {
+        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
+            mesh.AddQuad(a, d, c, b, colour);
+        else
+            mesh.AddQuad(a, b, c, d, colour);
+    }
+
+    private static int CountCasterVertices(StationModuleMesh mesh)
+        => mesh.DecorClassRanges
+            .Where(range => range.decorClass == DecorClass.MegastationInteriorMajor)
+            .Sum(range => range.indexCount / 6 * 4);
+
+    private static int CountCasterIndices(StationModuleMesh mesh)
+        => mesh.DecorClassRanges
+            .Where(range => range.decorClass == DecorClass.MegastationInteriorMajor)
+            .Sum(range => range.indexCount);
+}
+
+public static class MegastationInteriorSignatureBuilder
+{
+    public static string Compute(MegastationInteriorPlan plan)
+    {
+        var text = new StringBuilder()
+            .Append(plan.Diagnostics.AlgorithmVersion).Append('|')
+            .Append(plan.Identity).Append('|').Append(plan.Seed).Append('|')
+            .Append((int)plan.PortalDirection).Append('|')
+            .Append(plan.PortalCentre).Append('|').Append(plan.PortalClearSize).Append('|')
+            .Append(plan.ThroatVolume).Append('|')
+            .Append(plan.MainFlightVolume).Append('|')
+            .Append(plan.CavityEnvelope).Append('|')
+            .Append(plan.EntrancePrecinct.Minimum).Append('|')
+            .Append(plan.EntrancePrecinct.Maximum).Append('|')
+            .Append(plan.EntrancePrecinct.AssemblyMinimum).Append('|')
+            .Append(plan.EntrancePrecinct.AssemblyMaximum).Append('|')
+            .Append(plan.EntrancePrecinct.CrownOuterWidth).Append('|')
+            .Append(plan.EntrancePrecinct.CrownOuterHeight).Append('|')
+            .Append(plan.EntrancePrecinct.ClearanceMargin);
+        foreach (MegastationProtectedVoidCell cell in plan.ProtectedCells)
+            text.Append('|').Append(cell.Cell.X).Append(',').Append(cell.Cell.Y).Append(',')
+                .Append(cell.Cell.Z).Append(':').Append((int)cell.Kind);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.ToString())));
+    }
+}
+
+public static class MegastationInteriorDebug
+{
+    public static VertexPositionColor[]? BuildLines(
+        MegastationInteriorPlan plan,
+        BoundaryTopology topology,
+        SliceGrid grid)
+    {
+#if DEBUG
+        var lines = new List<VertexPositionColor>();
+        AddVolume(lines, plan.ThroatVolume, new Color(255, 176, 44));
+        AddVolume(lines, plan.MainFlightVolume, new Color(64, 235, 112));
+        MegastationInteriorMacroExclusionVolume arrival = plan.ArrivalManeuverExclusion;
+        AddOrientedBox(lines, arrival.Centre, arrival.Right, arrival.Up, arrival.Forward,
+            arrival.Size, new Color(70, 150, 255));
+        AddPortal(lines, plan, new Color(40, 220, 255));
+        foreach (BoundaryFace face in topology.Faces.Where(face =>
+                     face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary))
+        {
+            Vector3[] corners = face.Vertices
+                .Select(vertex => BoundaryTopologyBuilder.Position(grid, vertex))
+                .ToArray();
+            for (int edge = 0; edge < 4; edge++)
+                AddLine(lines, corners[edge], corners[(edge + 1) % 4], new Color(220, 72, 235));
+        }
+        foreach (MegastationInteriorStructuralSolid solid in plan.AddedStructuralSolids ?? [])
+            AddOrientedBox(lines, solid.Centre, solid.Right, solid.Up, solid.Forward,
+                solid.Size, new Color(255, 214, 56));
+        foreach (MegastationLandingSurface surface in plan.AdditionalLandingSurfaces ?? [])
+            AddSurface(lines, surface, new Color(40, 240, 255));
+        return lines.ToArray();
+#else
+        return null;
+#endif
+    }
+
+#if DEBUG
+    private static void AddSurface(
+        List<VertexPositionColor> lines,
+        MegastationLandingSurface surface,
+        Color colour)
+    {
+        Vector3 r = surface.Right * (surface.UsableSize.X * .5f);
+        Vector3 f = surface.Forward * (surface.UsableSize.Y * .5f);
+        Vector3[] corners =
+        [
+            surface.Centre - r - f,
+            surface.Centre + r - f,
+            surface.Centre + r + f,
+            surface.Centre - r + f,
+        ];
+        for (int i = 0; i < corners.Length; i++)
+            AddLine(lines, corners[i], corners[(i + 1) % corners.Length], colour);
+    }
+
+    private static void AddOrientedBox(
+        List<VertexPositionColor> lines,
+        Vector3 centre,
+        Vector3 right,
+        Vector3 up,
+        Vector3 forward,
+        Vector3 size,
+        Color colour)
+    {
+        Vector3 r = right * (size.X * .5f);
+        Vector3 u = up * (size.Y * .5f);
+        Vector3 f = forward * (size.Z * .5f);
+        Vector3[] corners =
+        [
+            centre-r-u-f, centre+r-u-f, centre+r+u-f, centre-r+u-f,
+            centre-r-u+f, centre+r-u+f, centre+r+u+f, centre-r+u+f,
+        ];
+        int[] edges = [0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7];
+        for (int i = 0; i < edges.Length; i += 2)
+            AddLine(lines, corners[edges[i]], corners[edges[i + 1]], colour);
+    }
+
+    private static void AddPortal(
+        List<VertexPositionColor> lines,
+        MegastationInteriorPlan plan,
+        Color colour)
+    {
+        float halfWidth = plan.PortalClearSize.X * .5f;
+        float halfHeight = plan.PortalClearSize.Y * .5f;
+        Vector3[] corners =
+        [
+            plan.PortalCentre - plan.PortalRight * halfWidth - plan.PortalUp * halfHeight,
+            plan.PortalCentre + plan.PortalRight * halfWidth - plan.PortalUp * halfHeight,
+            plan.PortalCentre + plan.PortalRight * halfWidth + plan.PortalUp * halfHeight,
+            plan.PortalCentre - plan.PortalRight * halfWidth + plan.PortalUp * halfHeight,
+        ];
+        for (int edge = 0; edge < 4; edge++)
+            AddLine(lines, corners[edge], corners[(edge + 1) % 4], colour);
+    }
+
+    private static void AddVolume(
+        List<VertexPositionColor> lines,
+        MegastationInteriorVolume volume,
+        Color colour)
+    {
+        Vector3 min = volume.Minimum;
+        Vector3 max = volume.Maximum;
+        Vector3[] corners =
+        [
+            new(min.X, min.Y, min.Z), new(max.X, min.Y, min.Z),
+            new(max.X, max.Y, min.Z), new(min.X, max.Y, min.Z),
+            new(min.X, min.Y, max.Z), new(max.X, min.Y, max.Z),
+            new(max.X, max.Y, max.Z), new(min.X, max.Y, max.Z),
+        ];
+        int[] edges =
+        [
+            0, 1, 1, 2, 2, 3, 3, 0,
+            4, 5, 5, 6, 6, 7, 7, 4,
+            0, 4, 1, 5, 2, 6, 3, 7,
+        ];
+        for (int edge = 0; edge < edges.Length; edge += 2)
+            AddLine(lines, corners[edges[edge]], corners[edges[edge + 1]], colour);
+    }
+
+    private static void AddLine(
+        List<VertexPositionColor> lines,
+        Vector3 a,
+        Vector3 b,
+        Color colour)
+    {
+        lines.Add(new(a, colour));
+        lines.Add(new(b, colour));
+    }
+#endif
+}

@@ -323,14 +323,15 @@ deferred — see **Future extensions**.
 # Implemented modules
 
 - Aries: one top-facing C2 mount with the Aries civilian canopy cockpit.
+- Cosmo: one centred top-facing C1 mount with the compact Cosmo C1 sport cockpit.
 - Asterisk: one starboard-facing C2 mount with a compact side command blister.
-  Its camera looks primarily forward and 30 degrees outward toward starboard.
+  Its camera looks primarily forward and 20 degrees outward toward starboard.
 - Beren: one downward-facing forward C2 mount with a fully underslung command pod.
   Its camera looks forward and 10 degrees down.
 - Antega: one upward-facing, keyed C5 mount on the dorsal centreline far aft, allowing
   only `Deg0`, with the broad armoured Antega civilian bridge. Its camera sits inside
   the forward glazing and looks 5 degrees down.
-- All four modules own their external geometry, camera child pose, dark backing, and
+- All five modules own their external geometry, camera child pose, dark backing, and
   independent canopy/internal light elements.
 - Own-ship geometry remains hidden in first-person. No cockpit interior is rendered.
 - The projected ship-forward reticle consumes the resolved camera pose and requires

@@ -48,8 +48,8 @@ public sealed class GyroComponent : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {CrystalType} {CrystalQuality} crystal, {AddedTorqueFactor:F2}× torque factor"));
     }
 
@@ -78,12 +78,14 @@ public sealed class GyroComponent : ShipComponent
             $"{Name}.{Topics.Gyro.TorqueFactor}",
             () => Status == ComponentStatus.Running ? AddedTorqueFactor : 0.0,
             safeRange:  new RangeValue(1.0, 2.0),
-            totalRange: new RangeValue(0.0, 2.0)));
+            totalRange: new RangeValue(0.0, 2.0),
+            quantity: PhysicalQuantity.Dimensionless));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.Gyro.Damage}",
             () => Damage,
             safeRange:  new RangeValue(0, 0.2),
-            totalRange: new RangeValue(0, 1.0)));
+            totalRange: new RangeValue(0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
     }
 }

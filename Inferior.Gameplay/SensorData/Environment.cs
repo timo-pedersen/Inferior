@@ -74,8 +74,16 @@ public static class Environment
     public static DVec3  MagneticFieldVector   => World.MagneticFieldAt(ShipPosition);
     public static double MagneticFieldStrength => MagneticFieldVector.Length;
 
-    /// <summary>Radiation flux in W/m² from all stellar sources.</summary>
+    /// <summary>Ionising-radiation flux in W/m². Separate from stellar heat irradiance.</summary>
     public static double RadiationFlux => World.RadiationAt(ShipPosition);
+
+    /// <summary>
+    /// Incoming bolometric stellar heat irradiance at the ship in W/m². This is the
+    /// black-surface reference flux normal to the incoming rays, before occlusion,
+    /// atmospheric attenuation, ship orientation, projected area, or absorptivity.
+    /// </summary>
+    public static double SolarHeatIrradiance
+        => StellarHeatIrradiance(NearestStar, ShipPosition);
 
     /// <summary>
     /// External pressure at ship hull (Pa). ~0 in open space; significant inside atmospheres.
@@ -86,7 +94,7 @@ public static class Environment
     /// <summary>
     /// External temperature at ship hull (K). Approaches CMB (~2.7 K) in deep space;
     /// rises steeply near stellar photospheres and inside atmospheres.
-    /// Driven by spectral class and distance as a rough proxy.
+    /// Driven by the actual generated stellar temperature, radius, and distance.
     /// </summary>
     public static double ExternalTemperature
     {
@@ -95,7 +103,7 @@ public static class Environment
             double dist  = DistanceToNearestStar;
             double starR = NearestStar.Radius;
             if (dist <= 0.0 || starR <= 0.0) return 2.7;
-            double surfT = StellarSurfaceTemperatureK(NearestStar.Class);
+            double surfT = NearestStar.SurfaceTemperatureKelvin;
             // Stefan-Boltzmann equilibrium: T ∝ T_star × sqrt(R_star / 2d)
             return Math.Max(2.7, surfT * Math.Sqrt(starR / dist * 0.5));
         }
@@ -222,7 +230,7 @@ public static class Environment
     public static void GetSolarVisibleSpectrum(Span<double> output)
     {
         if (output.Length < SpectrumBins) return;
-        double T     = StellarSurfaceTemperatureK(NearestStar.Class);
+        double T     = NearestStar.SurfaceTemperatureKelvin;
         double scale = SolarInvSqScale();
         double max   = 0;
         for (int i = 0; i < SpectrumBins; i++)
@@ -235,26 +243,46 @@ public static class Environment
             for (int i = 0; i < SpectrumBins; i++) output[i] /= max;
     }
 
-    /// <summary>Total integrated solar heat flux at ship position (W/m² integrated across all bins).</summary>
-    public static double GetSolarHeat()
+    /// <summary>
+    /// Bolometric heat irradiance from one star at an observer position, in W/m².
+    /// Uses the star's actual generated temperature and radius. At or below the modeled
+    /// photosphere, distance is clamped to radius because the exterior inverse-square model
+    /// is not meaningful inside a star.
+    /// </summary>
+    public static double StellarHeatIrradiance(CelestialBody star, DVec3 observerPosition)
     {
-        double T = StellarSurfaceTemperatureK(NearestStar.Class);
-        double s = SolarInvSqScale();
-        double total = 0;
-        for (int i = 0; i < SpectrumBins; i++)
-            total += Planck(SpectrumWavelengthsNm[i] * 1e-9, T) * _spectrumBandwidthNm[i];
-        return total * s;
+        ArgumentNullException.ThrowIfNull(star);
+        const double stefanBoltzmann = 5.670374419e-8; // W m^-2 K^-4
+        double radius = star.Radius;
+        double temperature = star.SurfaceTemperatureKelvin;
+        if (!double.IsFinite(radius) || !double.IsFinite(temperature)
+            || radius <= 0.0 || temperature <= 0.0)
+        {
+            return 0.0;
+        }
+
+        double distance = (star.Position - observerPosition).Length;
+        if (!double.IsFinite(distance))
+            return 0.0;
+        distance = Math.Max(distance, radius);
+
+        double radiusRatio = radius / distance;
+        return stefanBoltzmann * Math.Pow(temperature, 4.0) * radiusRatio * radiusRatio;
     }
+
+    /// <summary>Compatibility method for the older function-shaped API.</summary>
+    public static double GetSolarHeat() => SolarHeatIrradiance;
 
     /// <summary>UV component (bins 0-2, 150-350 nm) of solar flux at ship position.</summary>
     public static double GetSolarUV()
     {
-        double T = StellarSurfaceTemperatureK(NearestStar.Class);
+        double T = NearestStar.SurfaceTemperatureKelvin;
         double s = SolarInvSqScale();
         double total = 0;
         for (int i = 0; i < 3; i++)
-            total += Planck(SpectrumWavelengthsNm[i] * 1e-9, T) * _spectrumBandwidthNm[i];
-        return total * s;
+            total += Planck(SpectrumWavelengthsNm[i] * 1e-9, T)
+                   * (_spectrumBandwidthNm[i] * 1e-9);
+        return Math.PI * total * s;
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -273,17 +301,4 @@ public static class Environment
         return C1 / (lambdaM * lambdaM * lambdaM * lambdaM * lambdaM * (Math.Exp(exp) - 1.0));
     }
 
-    internal static double StellarSurfaceTemperatureK(SpectralClass sc) => sc switch
-    {
-        SpectralClass.O           =>  40_000.0,
-        SpectralClass.B           =>  20_000.0,
-        SpectralClass.A           =>   8_500.0,
-        SpectralClass.F           =>   6_800.0,
-        SpectralClass.G           =>   5_778.0,
-        SpectralClass.K           =>   4_500.0,
-        SpectralClass.M           =>   3_000.0,
-        SpectralClass.WhiteDwarf  =>  25_000.0,
-        SpectralClass.NeutronStar => 1_000_000.0,
-        _                         =>   5_778.0,
-    };
 }

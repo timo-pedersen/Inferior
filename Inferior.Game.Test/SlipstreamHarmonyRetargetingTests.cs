@@ -144,7 +144,7 @@ public sealed class SlipstreamHarmonyRetargetingTests
         var (sim, _) = CreateSlipstreamSim();
         double published = -1;
         void Handler(double v) => published = v;
-        DataBus.Instruments.Subscribe(Topics.Flight.HarmonicIndex, Handler);
+        DataBus.ScalarTelemetry.Subscribe(Topics.Flight.HarmonicIndex, Handler);
         try
         {
             sim.DebugTickPhysics(GearEvent(1, 1), Dt);
@@ -157,7 +157,7 @@ public sealed class SlipstreamHarmonyRetargetingTests
         }
         finally
         {
-            DataBus.Instruments.Unsubscribe(Topics.Flight.HarmonicIndex, Handler);
+            DataBus.ScalarTelemetry.Unsubscribe(Topics.Flight.HarmonicIndex, Handler);
         }
     }
 

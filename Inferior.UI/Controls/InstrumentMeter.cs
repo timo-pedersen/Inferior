@@ -6,7 +6,7 @@ namespace Inferior.UI.Controls;
 
 /// <summary>
 /// Horizontal bar meter for a single instrument value.
-/// Set Topic to auto-subscribe to DataBus.Instruments — no manual wiring needed.
+/// Set Topic to auto-subscribe to DataBus.ScalarTelemetry — no manual wiring needed.
 /// SetValue() is still available for one-off updates or custom handlers.
 ///
 /// Layout (example 200×46):
@@ -39,7 +39,7 @@ public sealed class InstrumentMeter : Control
     private Action<double>? _topicHandler;
 
     /// <summary>
-    /// When set, the meter subscribes to DataBus.Instruments for this topic and
+    /// When set, the meter subscribes to DataBus.ScalarTelemetry for this topic and
     /// updates automatically each frame. Changing Topic unsubscribes the old one.
     /// Leave empty to drive the meter manually via SetValue().
     /// </summary>
@@ -50,12 +50,12 @@ public sealed class InstrumentMeter : Control
         {
             if (_topic == value) return;
             if (_topicHandler != null && _topic.Length > 0)
-                DataBus.Instruments.Unsubscribe(_topic, _topicHandler);
+                DataBus.ScalarTelemetry.Unsubscribe(_topic, _topicHandler);
             _topic = value;
             if (_topic.Length > 0)
             {
                 _topicHandler = SetValue;
-                DataBus.Instruments.Subscribe(_topic, _topicHandler);
+                DataBus.ScalarTelemetry.Subscribe(_topic, _topicHandler);
             }
             else
             {

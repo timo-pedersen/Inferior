@@ -13,11 +13,16 @@ public static partial class StationDecorator
         PlacedModule owner)
     {
         if (!face.IsExposed) return;
+        // Brief P1 Fix B: docking-bay previously fell to the 0f default (D-Greeble measured
+        // this directly — a bay never got a single chimney across 4 sampled stations).
+        // Modest, not industrial-level — a bay is a logistics/docking structure, plausibly
+        // venting life-support/power equipment near its walls, not a refinery stack farm.
         float prob = mod.Definition.Category switch
         {
-            "industrial" => 0.75f,
-            "core"       => 0.35f,
-            _            => 0f,
+            "industrial"  => 0.75f,
+            "core"        => 0.35f,
+            "docking-bay" => 0.20f,
+            _             => 0f,
         };
         if (rng.NextDouble() > prob) return;
 
@@ -125,23 +130,30 @@ public static partial class StationDecorator
         _                            => false,
     };
 
+    // Brief Z3 Fix B: guaranteed (default false, unchanged behaviour) mirrors GenerateWindows'
+    // F1 Fix 4 bypass — scoped to CommsArray only (its "equipment cabinets at mast bases"
+    // content), never Machinery/ServiceCore's own greeble calls, which keep today's
+    // category-probability behaviour exactly.
     private static void GenerateGreebles(PlacedModule mod, FaceInfo face,
         System.Random rng, StationModuleMesh mesh, FaceOccupancy occupancy,
-        List<PlacedGreebleInfo> placements)
+        List<PlacedGreebleInfo> placements, bool guaranteed = false)
     {
         if (!face.IsExposed) return;
         if (face.Width * face.Height < 12f) return;
 
-        float prob = mod.Definition.Category switch
+        if (!guaranteed)
         {
-            "industrial" or "core" => 0.90f,
-            "cargo"      or "fuel" => 0.70f,
-            "science"              => 0.75f,
-            "connector"            => 0.55f,
-            "hab"                  => 0.60f,
-            _                      => 0.20f,
-        };
-        if (rng.NextDouble() > prob) return;
+            float prob = mod.Definition.Category switch
+            {
+                "industrial" or "core" => 0.90f,
+                "cargo"      or "fuel" => 0.70f,
+                "science"              => 0.75f,
+                "connector"            => 0.55f,
+                "hab"                  => 0.60f,
+                _                      => 0.20f,
+            };
+            if (rng.NextDouble() > prob) return;
+        }
 
         int count    = rng.Next(2, 7);
         int attempts = count * 5;
@@ -181,14 +193,9 @@ public static partial class StationDecorator
             case GreebleType.JunctionBox:
             {
                 float boxH = 0.30f + (float)rng.NextDouble() * 0.15f;
-                var t = FaceLocalTransform(face,
-                    LocalPointAbs(face, cu, cv, boxH * 0.5f));
-                mesh.AddOrientedBox(t, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
-                mesh.AddQuad(
-                    LocalPointAbs(face, cu - hw, cv - 0.02f, boxH + 0.005f),
-                    LocalPointAbs(face, cu + hw, cv - 0.02f, boxH + 0.005f),
-                    LocalPointAbs(face, cu + hw, cv + 0.02f, boxH + 0.005f),
-                    LocalPointAbs(face, cu - hw, cv + 0.02f, boxH + 0.005f), darkCol);
+                StationIndustrialPrimitives.EmitJunctionBox(mesh,
+                    IndustrialFrame(face, cu, cv), hw * 2f, hh * 2f, boxH,
+                    greebleCol, darkCol);
                 break;
             }
 
@@ -199,28 +206,20 @@ public static partial class StationDecorator
                 float topW  = hw * 0.6f;
                 float topHH = hh * 0.5f;
 
-                var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, baseH * 0.5f));
-                mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, baseH), greebleCol);
-
                 float topOffset = cu + ((float)rng.NextDouble() - 0.5f) * hw * 0.4f;
-                var tt = FaceLocalTransform(face,
-                    LocalPointAbs(face, topOffset, cv, baseH + topH * 0.5f));
-                mesh.AddOrientedBox(tt, new Vector3(topW * 2, topHH * 2, topH), detailCol);
+                StationIndustrialPrimitives.EmitEquipmentHousing(mesh,
+                    IndustrialFrame(face, cu, cv), hw * 2f, hh * 2f, baseH, topH,
+                    topW * 2f, topHH * 2f, topOffset - cu, greebleCol, detailCol);
                 break;
             }
 
             case GreebleType.ConduitEntry:
             {
                 float boxH = 0.35f;
-                var bt = FaceLocalTransform(face, LocalPointAbs(face, cu, cv, boxH * 0.5f));
-                mesh.AddOrientedBox(bt, new Vector3(hw * 2, hh * 2, boxH), greebleCol);
-
                 float pipeLen = hw * 1.4f;
-                // stubStart is the exposed far end; stubEnd sits at the equipment box
-                // (same point as its own centre) and is covered by it.
-                Vector3 stubStart = LocalPointAbs(face, cu - pipeLen, cv, boxH * 0.5f);
-                Vector3 stubEnd   = LocalPointAbs(face, cu,           cv, boxH * 0.5f);
-                mesh.AddPrismPipe(stubStart, stubEnd, 0.08f, 6, detailCol, capStart: true);
+                StationIndustrialPrimitives.EmitConduitEntry(mesh,
+                    IndustrialFrame(face, cu, cv), hw * 2f, hh * 2f, boxH,
+                    pipeLen, 0.08f, greebleCol, detailCol);
                 break;
             }
 

@@ -22,6 +22,9 @@ namespace Inferior.Gameplay.Components;
 /// </summary>
 public sealed class EngineComponent : ShipComponent
 {
+    protected override IReadOnlyList<string> DeviceCommandTopics =>
+        [$"{Name}.Throttle.Set", $"{Name}.DownThrust.Set"];
+
     // Configuration
     public double MaxPower            { get; init; }   // watts
     public double MaxDownThrust       { get; init; }   // newtons
@@ -85,8 +88,8 @@ public sealed class EngineComponent : ShipComponent
 
     protected override void OnInitializationComplete()
     {
-        PublishSensorRanges();
-        DataBus.System.Publish(Topics.System.All,
+        PublishTelemetryInfo();
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new($"{Name}: online — {MaxPower / 1e6:F0} MW, {MaxThrust / 1e3:F0} kN max thrust"));
     }
 
@@ -106,32 +109,36 @@ public sealed class EngineComponent : ShipComponent
             $"{Name}.{Topics.Engine.Throttle}",
             () => Throttle,
             safeRange:  new RangeValue(-1.0, 1.0),
-            totalRange: new RangeValue(-1.0, 1.0)));
+            totalRange: new RangeValue(-1.0, 1.0),
+            quantity: PhysicalQuantity.Dimensionless));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.Engine.Thrust}",
             () => CurrentThrust,
             safeRange:  new RangeValue(0, MaxThrust * 0.9),
-            totalRange: new RangeValue(0, MaxThrust)));
+            totalRange: new RangeValue(0, MaxThrust),
+            quantity: PhysicalQuantity.Force));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.Temperature",
             () => ThermalNode?.Temperature ?? 0.0,
             safeRange:  new RangeValue(0, safeTempK),
-            totalRange: new RangeValue(0, maxTempK)));
+            totalRange: new RangeValue(0, maxTempK),
+            quantity: PhysicalQuantity.Temperature));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.Engine.Damage}",
             () => Damage,
             safeRange:  new RangeValue(0, 0.2),
-            totalRange: new RangeValue(0, 1.0)));
+            totalRange: new RangeValue(0, 1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
     }
 
     private void RegisterCommands()
     {
-        CommandBus.Subscribe($"{Name}.Throttle.Set",
+        RegisterCommand($"{Name}.Throttle.Set",
             cmd => Throttle = Math.Clamp(cmd.Value, -1.0, 1.0));
-        CommandBus.Subscribe($"{Name}.DownThrust.Set",
+        RegisterCommand($"{Name}.DownThrust.Set",
             cmd => DownThrustFraction = Math.Clamp(cmd.Value, 0.0, 1.0));
     }
 }

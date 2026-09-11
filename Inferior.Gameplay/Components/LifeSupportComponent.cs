@@ -46,18 +46,21 @@ public sealed class LifeSupportComponent : ShipComponent
             $"{Name}.{Topics.LifeSupport.Pressure}",
             () => InternalPressure,
             safeRange:  new RangeValue(70_000, 120_000),
-            totalRange: new RangeValue(0, 200_000)));
+            totalRange: new RangeValue(0, 200_000),
+            quantity: PhysicalQuantity.Pressure));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.LifeSupport.Temperature}",
             () => InternalTemperature,
             safeRange:  new RangeValue(290, 303),
-            totalRange: new RangeValue(250, 350)));
+            totalRange: new RangeValue(250, 350),
+            quantity: PhysicalQuantity.Temperature));
 
         _sensors.Add(new ComponentSensor(
             $"{Name}.{Topics.LifeSupport.Oxygen}",
             () => OxygenFraction,
             safeRange:  new RangeValue(0.18, 0.25),
-            totalRange: new RangeValue(0.0,  1.0)));
+            totalRange: new RangeValue(0.0,  1.0),
+            quantity: PhysicalQuantity.NormalizedRatio));
     }
 }

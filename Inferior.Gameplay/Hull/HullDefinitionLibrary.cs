@@ -18,6 +18,7 @@ public static class HullDefinitionLibrary
     static HullDefinitionLibrary()
     {
         Register(AriesHullDefinitionFactory.Create());
+        Register(CosmoHullDefinitionFactory.Create());
         Register(AsteriskHullDefinitionFactory.Create());
         Register(BerenHullDefinitionFactory.Create());
         Register(AntegaHullDefinitionFactory.Create());

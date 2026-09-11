@@ -1,4 +1,5 @@
 using Inferior.Core.DataBus;
+using Inferior.Core.Simulation;
 using SensorEnv = Inferior.Gameplay.SensorData.Environment;
 
 namespace Inferior.Gameplay.Sensors;
@@ -10,7 +11,7 @@ namespace Inferior.Gameplay.Sensors;
 /// Command topic prefix: the name passed to the constructor (e.g. "SolarSpectrumSensor").
 /// A second command while scanning is ignored.
 ///
-/// Published topic: "{name}.Data" on DataBus.Spectra — double[] of
+/// Published topic: "{name}.Data" on DataBus.SpectrumTelemetry — double[] of
 /// <see cref="Environment.SpectrumBins"/> normalised values (0-1 per bin).
 ///
 /// Allocation strategy: one double[] is allocated per scan (result copy).
@@ -28,6 +29,35 @@ public sealed class SolarSpectrumSensor
     {
         _name = name;
         CommandBus.Subscribe(name, _ => StartScan());
+
+        string dataTopic = $"{name}.{Topics.SolarSpectrum.Data}";
+        DataBus.PublishTelemetryInfo(new TelemetryInfo
+        {
+            Topic = dataTopic,
+            DeviceId = name,
+            ValueKind = TelemetryValueKind.Spectrum,
+            Quantity = PhysicalQuantity.NormalizedRatio,
+            OperatingRange = new RangeValue(0.0, 1.0),
+            SuggestedDisplayRange = new RangeValue(0.0, 1.0),
+            Publication = new PublicationInfo(PublicationMode.OnCommand),
+            TopicPolicy = TopicPolicy.LatestState,
+        });
+        DataBus.DeviceInfo.Publish(name, new DeviceInfo
+        {
+            DeviceId = name,
+            PublishedTopics = [dataTopic],
+            CommandTopics = [$"{name}.Scan"],
+            Power = new PowerProfile(
+                IdleWatts: 0.0,
+                ActiveWatts: 0.0,
+                ActivationDurationSeconds: ScanDurationSeconds),
+        });
+        DataBus.DeviceState.Publish(name, new DeviceState(
+            name,
+            DeviceOperationalStatus.Running,
+            Damage: 0.0,
+            Efficiency: 1.0,
+            SimulationTime: GameClock.SimTime));
     }
 
     private void StartScan()
@@ -45,7 +75,7 @@ public sealed class SolarSpectrumSensor
 
         _scanCountdown = -1.0;
         SensorEnv.GetSolarVisibleSpectrum(_workBuffer.AsSpan());
-        DataBus.Spectra.Publish($"{_name}.{Topics.SolarSpectrum.Data}", (double[])_workBuffer.Clone());
-        DataBus.System.Publish(Topics.System.All, new("Solar spectrum scan complete"));
+        DataBus.SpectrumTelemetry.Publish($"{_name}.{Topics.SolarSpectrum.Data}", (double[])_workBuffer.Clone());
+        DataBus.SystemMessages.Publish(Topics.System.All, new("Solar spectrum scan complete"));
     }
 }

@@ -5,7 +5,7 @@ namespace Inferior.Gameplay.Sensors;
 
 /// <summary>
 /// Passive atmospheric-pressure sensor. Reads the hull external pressure each tick
-/// and publishes it to DataBus.Instruments — but only while actually inside an atmosphere.
+/// and publishes it to DataBus.ScalarTelemetry — but only while actually inside an atmosphere.
 ///
 /// Out-of-atmosphere behaviour: the threshold suppresses all posts when pressure ≈ 0 Pa
 /// (open space), keeping the DataBus free of noise on the vast majority of ticks.
@@ -25,6 +25,7 @@ public sealed class AtmosphericPressureSensor
         {
             TopicPrefix          = name,
             ValueName            = Topics.AtmosphericPressure.Value,
+            Quantity             = PhysicalQuantity.Pressure,
             MaxValue             = 1_000_000.0,  // Pa — up to ~10 atm (corrosive worlds)
             Seed                 = (double)HashCode.Combine(name),
             NoiseWhite           = 0.003,         // ±0.3%

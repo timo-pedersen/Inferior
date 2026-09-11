@@ -18,6 +18,7 @@ namespace Inferior.Gameplay.Components.Power;
 /// </summary>
 public sealed class PowerPriorityManager : ShipComponent
 {
+    public override bool CanSetPower => false;
     private readonly record struct Entry(
         string          Name,
         Func<double>    DemandWatts,
@@ -63,7 +64,7 @@ public sealed class PowerPriorityManager : ShipComponent
             entry.Deliver(delivered);
 
             if (delivered < demanded * 0.95)
-                DataBus.System.Publish(Topics.System.All,
+                DataBus.SystemMessages.Publish(Topics.System.All,
                     new($"[POWER] {entry.Name} starved — {delivered / 1e6:F2} / {demanded / 1e6:F2} MW", SystemMessagePriority.Warning));
         }
     }

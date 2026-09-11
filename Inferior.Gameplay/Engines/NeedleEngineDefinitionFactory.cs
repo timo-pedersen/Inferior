@@ -161,7 +161,7 @@ public static class NeedleEngineDefinitionFactory
             "Needle",
             new DVec3(1.35, 1.55, 6.20),
             dryMassKg: 1_650.0,
-            maximumForwardThrustN: 187_800.0,
+            maximumForwardThrustN: 939_000.0,
             reverseThrustFraction: 1.0,
             lateralThrustFraction: 0.50,
             liftThrustFraction: 0.75,

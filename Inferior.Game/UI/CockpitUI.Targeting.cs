@@ -1,5 +1,7 @@
 using Inferior.Core;
+using Inferior.Core.DataBus;
 using Inferior.Core.Math;
+using Inferior.Galaxy;
 using Inferior.Game;
 using Inferior.Rendering;
 using Inferior.UI;
@@ -147,11 +149,43 @@ public sealed partial class CockpitUI
         }
     }
 
-    public void DrawTargetingHud(SpriteBatch sb, Camera3D camera, Matrix currentView,
-        DVec3 padWorldPos, double padDistance)
+    public void DrawTargetingHud(
+        SpriteBatch sb,
+        Camera3D camera,
+        Matrix currentView,
+        DVec3 padWorldPos,
+        double padDistance,
+        bool markersVisible,
+        string currentStarName,
+        IReadOnlyList<(OrbitalBody body, DVec3 pos)> bodyPositions,
+        IReadOnlyList<(Galaxy.Station station, DVec3 pos)> stationPositions)
     {
+        if (!markersVisible) return;
+
         var vp       = Matrix.Multiply(currentView, camera.ProjectionMatrix);
         var viewport = _gd.Viewport;
+        var tc       = _ui?.Theme;
+        Color objectColor = tc?.TargetShip ?? new Color(220, 60, 60);
+        Color navColor    = tc?.TargetNav  ?? new Color(255, 200, 50);
+        Color hypColor    = tc?.TargetHyp  ?? new Color(80, 160, 255);
+
+        DrawNamedDiamondMarker(sb, camera, vp, viewport,
+            DVec3.Zero,
+            _targeting.HasHyperspaceTarget ? hypColor : new Color(120, 130, 150),
+            currentStarName,
+            9f,
+            true);
+
+        foreach (var (body, pos) in bodyPositions)
+        {
+            Color color = body.BodyType == BodyType.Moon
+                ? new Color(120, 145, 170)
+                : new Color(100, 200, 160);
+            DrawNamedDiamondMarker(sb, camera, vp, viewport, pos, color, body.Name, 8f, true);
+        }
+
+        foreach (var (station, pos) in stationPositions)
+            DrawNamedDiamondMarker(sb, camera, vp, viewport, pos, new Color(200, 180, 80), station.Name, 8f, true);
 
         // Station / body contacts
         foreach (var contact in _targeting.AllContacts)
@@ -160,26 +194,41 @@ public sealed partial class CockpitUI
             if (screen == null) continue;
 
             bool  isTarget = _targeting.CurrentRadarTarget?.Id == contact.Id;
+            if (contact.Type == ContactType.Station && !isTarget)
+                continue;
+
             float dist     = contact.EffectiveShipDistanceMeters;
             float size     = MathHelper.Clamp(3e6f / dist, 8f, 44f);
             float arm      = size * 0.40f;
 
             Color bracketColor = isTarget
-                ? new Color(0, 220, 220)
+                ? objectColor
                 : new Color(100, 100, 100);
 
-            DrawBracket(sb, screen.Value, size, arm, 2, bracketColor);
+            if (contact.Type == ContactType.Station)
+                DrawDiamond(sb, screen.Value, MathHelper.Clamp(size * 0.55f, 7f, 24f), 2, bracketColor);
+            else
+                DrawBracket(sb, screen.Value, size, arm, 2, bracketColor);
 
-            if (isTarget)
+            if (isTarget || contact.Type == ContactType.Station)
             {
                 string distStr = dist < 1000f
                     ? $"{dist:F0} m"
                     : $"{dist / 1000f:F1} km";
                 Vector2 labelPos = screen.Value + new Vector2(-40f, size + 6f);
-                FontHelper.Draw(sb, _font, contact.DisplayName, labelPos,                        new Color(0, 220, 220));
-                FontHelper.Draw(sb, _font, distStr,             labelPos + new Vector2(0f, 18f), new Color(0, 180, 180));
+                FontHelper.Draw(sb, _font, contact.DisplayName, labelPos, bracketColor);
+                if (isTarget)
+                    FontHelper.Draw(sb, _font, distStr, labelPos + new Vector2(0f, 18f), bracketColor * 0.8f);
             }
         }
+
+        if (_targeting.HasNavTarget)
+            DrawNamedDiamondMarker(sb, camera, vp, viewport,
+                _targeting.NavTargetPosition,
+                navColor,
+                _targeting.NavTargetName,
+                12f,
+                true);
 
         // Pad target bracket (green, slightly smaller than station brackets)
         if (_targeting.HasPadTarget && padDistance > 0.1)
@@ -228,5 +277,48 @@ public sealed partial class CockpitUI
         // Bottom-right
         sb.Draw(_pixel, new Rectangle(cx + s - al, cy + s - t,  al, t),  color);
         sb.Draw(_pixel, new Rectangle(cx + s - t,  cy + s - al, t,  al), color);
+    }
+
+    private void DrawNamedDiamondMarker(
+        SpriteBatch sb,
+        Camera3D camera,
+        Matrix viewProjection,
+        Viewport viewport,
+        DVec3 worldPos,
+        Color color,
+        string label,
+        float radius,
+        bool drawName)
+    {
+        DVec3 relPos = worldPos - camera.UniversePosition;
+        var rel3 = new Vector3((float)relPos.X, (float)relPos.Y, (float)relPos.Z);
+        Vector2? screen = TargetingSystem.ProjectToScreen(rel3, viewProjection, viewport);
+        if (screen == null) return;
+
+        DrawDiamond(sb, screen.Value, radius, 2, color);
+        if (!drawName || string.IsNullOrWhiteSpace(label)) return;
+        FontHelper.Draw(sb, _font, label, screen.Value + new Vector2(radius + 6f, -8f), color);
+    }
+
+    private void DrawDiamond(SpriteBatch sb, Vector2 centre, float radius, int thickness, Color color)
+    {
+        var top = centre + new Vector2(0f, -radius);
+        var right = centre + new Vector2(radius, 0f);
+        var bottom = centre + new Vector2(0f, radius);
+        var left = centre + new Vector2(-radius, 0f);
+        DrawLine2D(sb, top, right, thickness, color);
+        DrawLine2D(sb, right, bottom, thickness, color);
+        DrawLine2D(sb, bottom, left, thickness, color);
+        DrawLine2D(sb, left, top, thickness, color);
+    }
+
+    private void DrawLine2D(SpriteBatch sb, Vector2 a, Vector2 b, int thickness, Color color)
+    {
+        Vector2 delta = b - a;
+        float length = delta.Length();
+        if (length <= 0.001f) return;
+        float angle = MathF.Atan2(delta.Y, delta.X);
+        sb.Draw(_pixel, a, null, color, angle, Vector2.Zero,
+            new Vector2(length, thickness), SpriteEffects.None, 0f);
     }
 }

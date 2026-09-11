@@ -7,12 +7,12 @@ namespace Inferior.Game.Test;
 public sealed class CockpitLightDebugInputTests
 {
     [Fact]
-    public void Read_MapsPlainF1AndControlF1ToCanopyLights()
+    public void Read_MapsControlF1ToCanopyLights()
     {
         var released = new KeyboardState();
 
         Assert.Equal(
-            CockpitLightDebugAction.ToggleCanopy,
+            CockpitLightDebugAction.None,
             CockpitLightDebugInput.Read(new KeyboardState(Keys.F1), released));
         Assert.Equal(
             CockpitLightDebugAction.ToggleCanopy,

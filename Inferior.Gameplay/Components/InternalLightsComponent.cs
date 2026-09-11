@@ -20,7 +20,7 @@ public sealed class InternalLightsComponent : ShipComponent
     public void SetEmergencyMode(bool active)
     {
         EmergencyMode = active;
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new(active ? $"{Name}: emergency lighting" : $"{Name}: normal lighting"));
     }
 

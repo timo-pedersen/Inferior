@@ -16,7 +16,7 @@ public static class AsteriskHullDefinitionFactory
     private static readonly Quaternion CockpitMountOrientation =
         Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -MathHelper.PiOver2);
     private static readonly Quaternion CockpitCameraOrientation =
-        Quaternion.CreateFromYawPitchRoll(MathHelper.ToRadians(-30.0f), 0.0f, 0.0f);
+        Quaternion.CreateFromYawPitchRoll(MathHelper.ToRadians(-20.0f), 0.0f, 0.0f);
 
     public static HullDefinition Create() => new()
     {

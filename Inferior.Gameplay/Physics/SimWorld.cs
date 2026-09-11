@@ -53,6 +53,7 @@ public class SimWorld
         Position       = DVec3.Zero,
         Radius         = 6.957e8,   // solar radius, m
         Mass           = 1.989e30,  // solar mass, kg
+        SurfaceTemperatureKelvin = 5_778.0,
         RotationPeriod = 2.192e6,   // ~25.4 days (sun)
         AxialTilt      = 0.1309,    // ~7.5°
     };

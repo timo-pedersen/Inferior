@@ -8,7 +8,7 @@ namespace Inferior.UI.Controls.Cockpit;
 /// Smoothed filled-area graph for displaying a solar (or other) spectrum.
 /// Data points are Catmull-Rom interpolated to a 128-point curve at SetSpectrum time.
 ///
-/// Set Topic to auto-subscribe to DataBus.Spectra; leave empty to drive via SetSpectrum().
+/// Set Topic to auto-subscribe to DataBus.SpectrumTelemetry; leave empty to drive via SetSpectrum().
 ///
 /// Intended aspect ratio: 1:5 height:width (caller sets Bounds accordingly).
 ///
@@ -35,12 +35,12 @@ public sealed class SpectrumGraph : Control
         {
             if (_topic == value) return;
             if (_topicHandler != null && _topic.Length > 0)
-                DataBus.Spectra.Unsubscribe(_topic, _topicHandler);
+                DataBus.SpectrumTelemetry.Unsubscribe(_topic, _topicHandler);
             _topic = value;
             if (_topic.Length > 0)
             {
                 _topicHandler = SetSpectrum;
-                DataBus.Spectra.Subscribe(_topic, _topicHandler);
+                DataBus.SpectrumTelemetry.Subscribe(_topic, _topicHandler);
             }
             else _topicHandler = null;
         }

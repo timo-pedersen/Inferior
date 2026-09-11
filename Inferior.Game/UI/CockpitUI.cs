@@ -29,7 +29,6 @@ public sealed partial class CockpitUI : IDisposable
     private readonly TargetingSystem        _targeting;
     private readonly HudAlertDisplay        _hudAlert;
     private readonly Func<DVec3, DVec3>     _galaxyToEcliptic;
-    private readonly Action<bool>           _onShieldToggle;
     private readonly Action                 _onShipCycle;
 
     // ── DataBus UI ────────────────────────────────────────────────────────────
@@ -48,6 +47,8 @@ public sealed partial class CockpitUI : IDisposable
     private RadarDisplay?    _radarDisplay;
     private EdgePanelHost?   _rightPanel;
     private EdgePanelHost?   _leftPanel;
+    private EdgePanelHost?   _topPanel;
+    private EngineeringPanel? _engineeringPanel;
     private CockpitRail?     _cockpitRail;
     // Disposed as a batch in Dispose — see BusSubscription<T>
     private readonly List<IDisposable> _subscriptions = new();
@@ -86,7 +87,6 @@ public sealed partial class CockpitUI : IDisposable
         TargetingSystem targeting,
         HudAlertDisplay hudAlert,
         Func<DVec3, DVec3> galaxyToEcliptic,
-        Action<bool> onShieldToggle,
         Action onShipCycle)
     {
         _gd               = gd;
@@ -95,7 +95,6 @@ public sealed partial class CockpitUI : IDisposable
         _targeting        = targeting;
         _hudAlert         = hudAlert;
         _galaxyToEcliptic = galaxyToEcliptic;
-        _onShieldToggle   = onShieldToggle;
         _onShipCycle      = onShipCycle;
 
         // ── DataBus UI setup ──────────────────────────────────────────────────
@@ -245,6 +244,26 @@ public sealed partial class CockpitUI : IDisposable
         _ui.Add(_rightPanel);
         _ui.Add(_leftPanel);
 
+        // Top engineering panel: bus-driven live power topology and thermal values.
+        _engineeringPanel = new EngineeringPanel();
+        _topPanel = new EdgePanelHost(PanelEdge.Top)
+        {
+            PanelSize = Math.Max(160, Math.Min(560, sidePanelH - 40)),
+            HandleSize = 28,
+            HandleLength = 96,
+            CornerMargin = 8,
+            Bounds = new Rectangle(0, 0, _gd.Viewport.Width, _gd.Viewport.Height),
+        };
+        _topPanel.AddTab("ENGINEER", _engineeringPanel);
+        _topPanel.StateChanged += (isOpen, activeTab) =>
+        {
+            if (isOpen && activeTab == 0)
+                _engineeringPanel?.Activate();
+            else
+                _engineeringPanel?.Deactivate();
+        };
+        _ui.Add(_topPanel);
+
         // ── CockpitRail: 4 tabs (RADAR, DIR BALL, ???, LOG) ──────────────────
         _console = new SystemConsole
         {
@@ -267,9 +286,10 @@ public sealed partial class CockpitUI : IDisposable
             FontScale = 0.72f,
         };
         _shieldToggleButton.SetState(false, false);
-        _shieldToggleButton.Toggled += (_, on) => _onShieldToggle(on);
+        _shieldToggleButton.Toggled += (_, on) =>
+            CommandBus.Send("Shield.Power.Set", on ? 1.0 : 0.0);
 
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             $"Shield.{Topics.Shield.Capacitor}", fill =>
         {
             if (_shieldToggleButton == null) return;
@@ -347,28 +367,35 @@ public sealed partial class CockpitUI : IDisposable
         _ui.Add(_cockpitRail);
 
         // Meters subscribe themselves via Topic — only non-meter handlers need wiring here
-        _subscriptions.Add(new BusSubscription<SystemMessage>(DataBus.System, Topics.System.All, msg =>
-        {
-            _console?.AddMessage(msg);
-            _hudAlert.AddMessage(msg);
-        }));
+        // A newly constructed console can recover the bounded system-message history.
+        // HUD alerts subscribe live-only so old warnings are not announced again.
+        _subscriptions.Add(new BusSubscription<SystemMessage>(
+            DataBus.SystemMessages,
+            Topics.System.All,
+            msg => _console?.AddMessage(msg),
+            ReplayMode.History));
+        _subscriptions.Add(new BusSubscription<SystemMessage>(
+            DataBus.SystemMessages,
+            Topics.System.All,
+            _hudAlert.AddMessage,
+            ReplayMode.None));
 
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.Altitude,      v => _pcAlt   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.VerticalSpeed, v => _pcVs    = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Latitude,      v => _pcLat   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Longitude,     v => _pcLon   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Heading,       v => _pcHdg   = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Latitude,      v => _pcLat   = v * (180.0 / Math.PI)));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Longitude,     v => _pcLon   = v * (180.0 / Math.PI)));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Heading,       v => _pcHdg   = v * (180.0 / Math.PI)));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.GroundSpeed,   v => _pcGs    = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
             Topics.PlanetCoord.Temperature,   v => _pcTemp  = v));
-        _subscriptions.Add(new BusSubscription<double>(DataBus.Instruments,
-            Topics.PlanetCoord.Pressure,      v => _pcPress = v));
+        _subscriptions.Add(new BusSubscription<double>(DataBus.ScalarTelemetry,
+            Topics.PlanetCoord.Pressure,      v => _pcPress = v / 100_000.0));
 
         _subscriptions.Add(new BusSubscription<RadarContact>(DataBus.Radar, Topics.Radar.All, c =>
         {
@@ -383,7 +410,7 @@ public sealed partial class CockpitUI : IDisposable
 
         _stopLed = new LedIndicator(
             Topics.Flight.XStopActive,
-            DataBus.Instruments,
+            DataBus.ScalarTelemetry,
             _gd,
             _font)
         {
@@ -398,30 +425,19 @@ public sealed partial class CockpitUI : IDisposable
         };
 
         _warnLed = new LedIndicator(
-            Topics.Ship.WarnLevel,
-            DataBus.Instruments,
+            Topics.Flight.FlightAssistActive,
+            DataBus.ScalarTelemetry,
             _gd,
             _font)
         {
-            LabelText         = "WARN",
+            LabelText         = "ASST",
             LabelAnchor       = LabelAnchor.Bottom,
             LabelFontScale    = 0.8f,
             Shape             = LedShape.Round,
             LampSize          = 28,
-            MainColor         = new Color(200, 50, 50),
+            MainColor         = new Color(40, 180, 75),
             OnRangeMin        = 0.5,
             OnRangeMax        = double.PositiveInfinity,
-            ColorRanges       = new List<LedColorRange>
-            {
-                new(0.5, 1.5, new Color( 40, 110,  55)),
-                new(1.5, 2.5, new Color(220, 175,   0)),
-                new(2.5, 3.5, new Color(210,  45,  45)),
-                new(3.5, double.PositiveInfinity, new Color(210, 45, 45)),
-            },
-            BlinkRangeMin     = 3.5,
-            BlinkRangeMax     = double.PositiveInfinity,
-            MinBlinkFrequency = 2.0,
-            MaxBlinkFrequency = 2.0,
         };
 
         if (_cockpitRail != null)
@@ -437,6 +453,7 @@ public sealed partial class CockpitUI : IDisposable
     {
         if (_rightPanel != null) _rightPanel.UiModeActive = active;
         if (_leftPanel  != null) _leftPanel.UiModeActive  = active;
+        if (_topPanel   != null) _topPanel.UiModeActive   = active;
         // CockpitRail is always interactable — peek strip tabs and toggle work in all modes.
     }
 
@@ -446,6 +463,11 @@ public sealed partial class CockpitUI : IDisposable
         var sideBounds = new Rectangle(0, 0, width, height - wingH);
         if (_rightPanel  != null) _rightPanel.Bounds  = sideBounds;
         if (_leftPanel   != null) _leftPanel.Bounds   = sideBounds;
+        if (_topPanel != null)
+        {
+            _topPanel.Bounds = new Rectangle(0, 0, width, height);
+            _topPanel.PanelSize = Math.Max(160, Math.Min(560, sideBounds.Height - 40));
+        }
         if (_cockpitRail != null) _cockpitRail.Bounds = new Rectangle(0, 0, width, height);
     }
 
@@ -453,13 +475,15 @@ public sealed partial class CockpitUI : IDisposable
     {
         var (rightTab, rightOpen) = _rightPanel?.CaptureState() ?? (-1, false);
         var (leftTab,  leftOpen)  = _leftPanel?.CaptureState()  ?? (-1, false);
-        return new CockpitLayout(rightTab, rightOpen, leftTab, leftOpen);
+        var (topTab,   topOpen)   = _topPanel?.CaptureState()   ?? (-1, false);
+        return new CockpitLayout(rightTab, rightOpen, leftTab, leftOpen, topTab, topOpen);
     }
 
     public void ApplyLayout(CockpitLayout layout)
     {
         _rightPanel?.ApplyState(layout.RightActiveTab, layout.RightOpen);
         _leftPanel?.ApplyState(layout.LeftActiveTab,  layout.LeftOpen);
+        _topPanel?.ApplyState(layout.TopActiveTab, layout.TopOpen);
     }
 
     public void Dispose()
@@ -473,6 +497,10 @@ public sealed partial class CockpitUI : IDisposable
         if (_shieldCapacitorMeter    != null) _shieldCapacitorMeter.Topic    = "";
         if (_atmPressureMeter        != null) _atmPressureMeter.Topic        = "";
         if (_spectrumGraph           != null) _spectrumGraph.Topic           = "";
+
+        _dockingInstrument?.Dispose();
+        _drivePanel?.Dispose();
+        _engineeringPanel?.Dispose();
 
         foreach (var sub in _subscriptions) sub.Dispose();
         _subscriptions.Clear();

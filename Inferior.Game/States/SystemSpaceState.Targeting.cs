@@ -86,7 +86,7 @@ public sealed partial class SystemSpaceState
     {
         if (!_targeting.HasPadTarget)
         {
-            DataBus.Instruments.Publish(Topics.Docking.PadTargeted, 0.0);
+            DataBus.ScalarTelemetry.Publish(Topics.Docking.PadTargeted, 0.0);
             _padWorldPos  = DVec3.Zero;
             _padDistance  = 0.0;
             _padDirection = DVec3.Zero;
@@ -133,12 +133,10 @@ public sealed partial class SystemSpaceState
         _simulation.SetPadTarget(padData);
 
         // Publish to Instruments bus so Step 3 docking instrument can subscribe
-        DataBus.Instruments.Publish(Topics.Docking.PadTargeted,   1.0);
-        DataBus.Instruments.Publish(Topics.Docking.PadDistance,   _padDistance);
-        DataBus.Instruments.Publish(Topics.Docking.PadDirectionX, _padDirection.X);
-        DataBus.Instruments.Publish(Topics.Docking.PadDirectionY, _padDirection.Y);
-        DataBus.Instruments.Publish(Topics.Docking.PadDirectionZ, _padDirection.Z);
-        DataBus.Instruments.Publish(Topics.Docking.PadSizeClass,  pad.PadSize == Galaxy.PadSize.Large ? 1.0 : 0.0);
+        DataBus.ScalarTelemetry.Publish(Topics.Docking.PadTargeted,   1.0);
+        DataBus.ScalarTelemetry.Publish(Topics.Docking.PadDistance,   _padDistance);
+        DataBus.VectorTelemetry.Publish(Topics.Docking.PadDirection, _padDirection);
+        DataBus.ScalarTelemetry.Publish(Topics.Docking.PadSizeClass,  pad.PadSize == Galaxy.PadSize.Large ? 1.0 : 0.0);
     }
 
     private void RequestStationProximityDiagnostic()
@@ -253,7 +251,7 @@ public sealed partial class SystemSpaceState
 
         System.IO.File.AppendAllText(path, text);
 
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage($"Coherent station proximity diagnostic written: {path}", SystemMessagePriority.Info));
     }
 }
