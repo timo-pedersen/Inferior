@@ -47,19 +47,8 @@ public sealed class SemanticHullGpuMesh : IDisposable
             if (vertices.Length == 0 || indices.Length == 0)
                 continue;
 
-            var vb = new VertexBuffer(
-                graphicsDevice,
-                VertexPositionNormalColorTexture.VertexDeclaration,
-                vertices.Length,
-                BufferUsage.WriteOnly);
-            vb.SetData(vertices);
-
-            var ib = new IndexBuffer(
-                graphicsDevice,
-                IndexElementSize.ThirtyTwoBits,
-                indices.Length,
-                BufferUsage.WriteOnly);
-            ib.SetData(indices);
+            (VertexBuffer vb, IndexBuffer ib) = GpuBufferFactory.Create(
+                graphicsDevice, vertices, indices);
 
             parts.Add(new SemanticHullGpuMeshPart
             {

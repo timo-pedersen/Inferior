@@ -74,7 +74,7 @@ public static class SemanticHullMeshBuilder
                 positions[i] = position;
             }
 
-            var normal = ToVector3(face.OutwardNormal.Normalized());
+            var normal = face.OutwardNormal.Normalized().ToVector3();
             SemanticHullRenderGroup group = GroupFor(face.Role);
             PartBuilder part = GetPartBuilder(builders, group);
             int startIndex = part.Indices.Count;
@@ -93,9 +93,9 @@ public static class SemanticHullMeshBuilder
                     throw new InvalidOperationException($"Semantic hull face '{face.Id}' winding disagrees with its semantic normal.");
 
                 int baseVertex = part.Vertices.Count;
-                part.Vertices.Add(new SemanticHullRenderVertex(ToVector3(a), normal, Color.White, ProjectUv(a, tangent, bitangent)));
-                part.Vertices.Add(new SemanticHullRenderVertex(ToVector3(b), normal, Color.White, ProjectUv(b, tangent, bitangent)));
-                part.Vertices.Add(new SemanticHullRenderVertex(ToVector3(c), normal, Color.White, ProjectUv(c, tangent, bitangent)));
+                part.Vertices.Add(new SemanticHullRenderVertex(a.ToVector3(), normal, Color.White, ProjectUv(a, tangent, bitangent)));
+                part.Vertices.Add(new SemanticHullRenderVertex(b.ToVector3(), normal, Color.White, ProjectUv(b, tangent, bitangent)));
+                part.Vertices.Add(new SemanticHullRenderVertex(c.ToVector3(), normal, Color.White, ProjectUv(c, tangent, bitangent)));
 
                 // Semantic polygons are authored CCW when viewed from outside. The shared
                 // lit renderer uses CullCounterClockwise, so indices are emitted clockwise
@@ -123,8 +123,8 @@ public static class SemanticHullMeshBuilder
         };
     }
 
-    private static Vector3 ToVector3(DVec3 value)
-        => new((float)value.X, (float)value.Y, (float)value.Z);
+    // A1 inventory finding: this used to be a private duplicate of DVec3.ToVector3() -
+    // removed in favour of calling that directly at each site above.
 
     private static PartBuilder GetPartBuilder(Dictionary<SemanticHullRenderGroup, PartBuilder> builders, SemanticHullRenderGroup group)
     {
@@ -170,11 +170,11 @@ public static class SemanticHullMeshBuilder
 
     private static (Vector3 tangent, Vector3 bitangent) BuildUvBasis(IReadOnlyList<DVec3> positions, Vector3 normal, string faceId)
     {
-        Vector3 origin = ToVector3(positions[0]);
+        Vector3 origin = positions[0].ToVector3();
         Vector3 tangent = Vector3.Zero;
         for (int i = 1; i < positions.Count; i++)
         {
-            Vector3 edge = ToVector3(positions[i]) - origin;
+            Vector3 edge = positions[i].ToVector3() - origin;
             edge -= normal * Vector3.Dot(edge, normal);
             if (edge.LengthSquared() > 1e-10f)
             {
@@ -192,7 +192,7 @@ public static class SemanticHullMeshBuilder
 
     private static Vector2 ProjectUv(DVec3 position, Vector3 tangent, Vector3 bitangent)
     {
-        var p = ToVector3(position);
+        var p = position.ToVector3();
         return new Vector2(
             Vector3.Dot(p, tangent) / MetresPerUvUnit,
             Vector3.Dot(p, bitangent) / MetresPerUvUnit);

@@ -53,9 +53,14 @@ public static class EngineMeshBuilder
         return new EngineCpuMesh(Array.AsReadOnly(parts.ToArray()));
     }
 
+    // A1 inventory finding: this used to fuse the DVec3->Vector3 narrowing and the
+    // mirroredAcrossHullX sign flip into one set of (float) casts - now delegates the
+    // conversion to the shared DVec3.ToVector3() and applies the mirror as its own explicit
+    // step. Kept public here (rather than folded away) since ShipMeshRenderer and tests
+    // call this exact overload for the mirrored case.
     public static Vector3 ToVector3(Inferior.Core.Math.DVec3 value, bool mirroredAcrossHullX)
-        => new(
-            (float)(mirroredAcrossHullX ? -value.X : value.X),
-            (float)value.Y,
-            (float)value.Z);
+    {
+        Vector3 v = value.ToVector3();
+        return mirroredAcrossHullX ? new Vector3(-v.X, v.Y, v.Z) : v;
+    }
 }

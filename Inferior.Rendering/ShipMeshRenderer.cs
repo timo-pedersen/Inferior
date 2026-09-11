@@ -63,12 +63,7 @@ public sealed class ShipMeshRenderer : IDisposable
         _meshRenderer = meshRenderer;
         _engineExhaustGlowEffect =
             engineExhaustGlowEffect ?? throw new ArgumentNullException(nameof(engineExhaustGlowEffect));
-        _debugLineEffect = new BasicEffect(gd)
-        {
-            VertexColorEnabled = true,
-            LightingEnabled = false,
-            TextureEnabled = false,
-        };
+        _debugLineEffect = BasicEffectPresets.UnlitVertexColour(gd);
     }
 
     // currentView is the already-rolled view matrix. currentProjection is the active

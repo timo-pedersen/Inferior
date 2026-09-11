@@ -107,12 +107,7 @@ public sealed class ObjectDesignerGame : Game
         Effect exhaust = Content.Load<Effect>("Effects/EngineExhaustGlow");
         _meshRenderer = new MeshRenderer(GraphicsDevice, lit);
         _shipRenderer = new ShipMeshRenderer(GraphicsDevice, _meshRenderer, exhaust);
-        _lineEffect = new BasicEffect(GraphicsDevice)
-        {
-            VertexColorEnabled = true,
-            LightingEnabled = false,
-            TextureEnabled = false,
-        };
+        _lineEffect = BasicEffectPresets.UnlitVertexColour(GraphicsDevice);
 
         string assetPath = AssetPathResolver.ResolveAssetPath(BerenHullDefinitionFactory.AssetPath);
         _session = ObjectDesignerSession.Load(assetPath);

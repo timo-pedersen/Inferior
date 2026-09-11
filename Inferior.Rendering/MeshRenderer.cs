@@ -87,15 +87,8 @@ public sealed class MeshRenderer : IDisposable
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
-        fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        SetCoreParameters(fx, world, view, projection, materialColor, sunDirection, sunColour,
+            ambient, texture ?? _whiteTexture, vertexIlluminationScale);
         fx.Parameters["ModuleToStationLocal"].SetValue(moduleToStationLocal ?? Matrix.Identity);
         SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
@@ -120,15 +113,8 @@ public sealed class MeshRenderer : IDisposable
 
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLit"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
-        fx.Parameters["Texture"].SetValue(texture ?? _whiteTexture);
-        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        SetCoreParameters(fx, world, view, projection, materialColor, sunDirection, sunColour,
+            ambient, texture ?? _whiteTexture, vertexIlluminationScale);
         fx.Parameters["ModuleToStationLocal"].SetValue(moduleToStationLocal ?? Matrix.Identity);
         SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
@@ -175,15 +161,8 @@ public sealed class MeshRenderer : IDisposable
     {
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
-        fx.Parameters["Texture"].SetValue(texture);
-        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        SetCoreParameters(fx, world, view, projection, materialColor, sunDirection, sunColour,
+            ambient, texture, vertexIlluminationScale);
         SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess, materialMap ?? _neutralMaterialTexture, bumpStrength, eyePositionWorld ?? Vector3.Zero);
         SetShadowParameters(fx, shadowMap, moduleToStationLocal, stationLocalToLightView,
@@ -218,15 +197,8 @@ public sealed class MeshRenderer : IDisposable
 
         var fx = _litSurfaceEffect;
         fx.CurrentTechnique = fx.Techniques["DynamicLitShadowed"];
-        fx.Parameters["World"].SetValue(world);
-        fx.Parameters["View"].SetValue(view);
-        fx.Parameters["Projection"].SetValue(projection);
-        fx.Parameters["SunDirection"].SetValue(sunDirection);
-        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
-        fx.Parameters["Ambient"].SetValue(ambient);
-        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
-        fx.Parameters["Texture"].SetValue(texture);
-        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+        SetCoreParameters(fx, world, view, projection, materialColor, sunDirection, sunColour,
+            ambient, texture, vertexIlluminationScale);
         SetInteriorHazeParameters(fx, interiorHaze);
         SetSpecularParameters(fx, specularStrength, specularShininess,
             materialMap ?? _neutralMaterialTexture, bumpStrength,
@@ -301,6 +273,28 @@ public sealed class MeshRenderer : IDisposable
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
+
+    // A1 inventory finding: DrawDynamicLit/DrawDynamicLitRange/DrawDynamicLitShadowed/
+    // DrawDynamicLitShadowedRange each restated this same 9-parameter block. Deliberately
+    // excludes ModuleToStationLocal (set separately per caller — the non-shadowed variants
+    // default it to Identity, the shadowed variants set it via SetShadowParameters instead)
+    // and does not cover the BakedColorLit techniques, whose parameter set genuinely
+    // differs (DecorationBrightness instead of MaterialColor/VertexIlluminationScale).
+    private static void SetCoreParameters(
+        Effect fx, Matrix world, Matrix view, Matrix projection,
+        Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        Texture2D texture, float vertexIlluminationScale)
+    {
+        fx.Parameters["World"].SetValue(world);
+        fx.Parameters["View"].SetValue(view);
+        fx.Parameters["Projection"].SetValue(projection);
+        fx.Parameters["SunDirection"].SetValue(sunDirection);
+        fx.Parameters["SunColour"].SetValue(sunColour.ToVector3());
+        fx.Parameters["Ambient"].SetValue(ambient);
+        fx.Parameters["MaterialColor"].SetValue(materialColor.ToVector3());
+        fx.Parameters["Texture"].SetValue(texture);
+        fx.Parameters["VertexIlluminationScale"].SetValue(vertexIlluminationScale);
+    }
 
     private static void SetInteriorHazeParameters(
         Effect effect,

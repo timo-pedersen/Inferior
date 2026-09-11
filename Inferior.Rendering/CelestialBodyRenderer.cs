@@ -727,8 +727,6 @@ public sealed class CelestialBodyRenderer : IDisposable
 
         PlanetType type    = body.Planet!.Type;
         bool       gasMode = type == PlanetType.GasGiant || type == PlanetType.IceGiant;
-        Vector3    sunDir  = SceneLighting.SunDirection;
-        float      ambient = SceneLighting.Ambient;
 
         int vertCount  = (Rings + 1) * (Segments + 1);
         int indexCount = Rings * Segments * 6;
@@ -754,7 +752,9 @@ public sealed class CelestialBodyRenderer : IDisposable
 
                 Color baseColor = GetSphereVertexColor(lat, lon, type, gasMode);
 
-                float lightFactor = MathF.Max(Vector3.Dot(normal, sunDir), ambient);
+                // A1 inventory finding: this used to reimplement SceneLighting.LightFactor's
+                // formula inline instead of calling the shared method already in this assembly.
+                float lightFactor = SceneLighting.LightFactor(normal);
                 Color litColor    = new(
                     (byte)MathF.Min(baseColor.R * lightFactor, 255f),
                     (byte)MathF.Min(baseColor.G * lightFactor, 255f),

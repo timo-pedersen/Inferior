@@ -30,20 +30,9 @@ public sealed record EngineGpuMesh(IReadOnlyList<EngineGpuMeshPart> Parts) : IDi
                     Color.White,
                     Vector2.Zero))
                 .ToArray();
-            var vertexBuffer = new VertexBuffer(
-                graphicsDevice,
-                VertexPositionNormalColorTexture.VertexDeclaration,
-                vertices.Length,
-                BufferUsage.WriteOnly);
-            vertexBuffer.SetData(vertices);
-
             int[] indices = part.Indices.ToArray();
-            var indexBuffer = new IndexBuffer(
-                graphicsDevice,
-                IndexElementSize.ThirtyTwoBits,
-                indices.Length,
-                BufferUsage.WriteOnly);
-            indexBuffer.SetData(indices);
+            (VertexBuffer vertexBuffer, IndexBuffer indexBuffer) = GpuBufferFactory.Create(
+                graphicsDevice, vertices, indices);
             return new EngineGpuMeshPart(part.PartId, part.Material, vertexBuffer, indexBuffer);
         }).ToArray();
 

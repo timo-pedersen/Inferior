@@ -21,12 +21,7 @@ public sealed partial class SystemSpaceState
     private void InitializeShipPositionMarker()
     {
         _shipPositionMarkerEffect?.Dispose();
-        _shipPositionMarkerEffect = new BasicEffect(_gd)
-        {
-            VertexColorEnabled = true,
-            LightingEnabled = false,
-            TextureEnabled = false,
-        };
+        _shipPositionMarkerEffect = BasicEffectPresets.UnlitVertexColour(_gd);
         _shipPositionMarkerEnabled = false;
         _shipPositionMarkerObservedRelocationSequence =
             _frameShipSnap?.RelocationSequence ?? 0;

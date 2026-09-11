@@ -23,9 +23,9 @@
 
 ## 0. Status update — findings acted on (2026-09-11)
 
-Per Timo's instruction, five findings were acted on. Everything else in this document is
-still an open finding, not a task queue — nothing else was changed as a result of this
-inventory.
+Per Timo's instruction, eight findings were acted on (five, then three more low-risk
+clusters in a follow-up pass the same day). Everything else in this document is still an
+open finding, not a task queue — nothing else was changed as a result of this inventory.
 
 | Finding | Action taken | Result |
 |---|---|---|
@@ -34,13 +34,18 @@ inventory.
 | §2 UI text measurement — `FontHelper.Measure` bypassed at 8+ call sites | Fixed all of them: `TextBox.cs` (`MeasureWidth`, used on arbitrary player-typed substrings for cursor placement — the most plausible actual bypass exception source — plus 3 `"A"`-glyph sites), `TextBlock.cs` (2 sites), `SystemConsole.cs` (1 site), `LedIndicator.cs` (2 sites), `UIRenderer.cs` (2 sites, already-sanitised input so lower risk but now consistent). | Done. Solution-wide grep for `.MeasureString(` outside `FontHelper.cs`/tests now returns nothing. |
 | §3/§4 `MeshFactory.CreateBox`/`CreateQuad` dead ends — "perhaps replaced?" | Investigated via `git log --all --oneline --follow`; traced to the earliest "Phase 2" commit, predates station generation entirely. `StationGenerator.PrepareBoxHullMesh` (not `MeshFactory`) is the real, current box-hull builder. | Answered, not replaced — confirmed genuinely dead code, not superseded by something central. No removal action taken; still listed in §4. |
 | §5 `architecture-map-ai.md` drift | DataBus row corrected (8→11 channels); `## Inferior.Rendering` section completed (10→21 files, with dead-code/duplication notes); `Station/Megastations/` section added from scratch (was entirely absent — now ~49 files across Structural/Zoning/Flight-interior/Landing/Bolon subsections, explicitly flagged as name/class-derived locators, not individually deep-read). | Done for this pass. Timo noted he'll revisit for a fuller regeneration later — this was "get it in order now," not the wholesale regeneration the doc's own header describes. |
+| §2 CPU-mesh → GPU-buffer upload — `SemanticHullGpuMesh`/`CockpitGpuMesh`/`EngineGpuMesh` each hand-rolled the same buffer allocation | New `Inferior.Rendering/GpuBufferFactory.cs`: a small `Create(graphicsDevice, vertices, indices)` helper doing just the `VertexBuffer`/`IndexBuffer` allocate-and-`SetData` step. All three `Create` methods now call it; each type's own per-part mapping/record shape and `SemanticHullGpuMesh`'s empty-part skip stayed untouched (that skip is a real behavioural difference from Cockpit/Engine, not silently unified). | Done. |
+| §2 `BasicEffect` unlit/vertex-colour preset — 4 identical constructions | New `Inferior.Rendering/BasicEffectPresets.UnlitVertexColour(gd)`. Replaced at `GridHyperspaceSheetRenderer`, `SystemSpaceState.ShipPositionMarker`, `ShipMeshRenderer._debugLineEffect`, `ObjectDesignerGame._lineEffect`. `SystemSpaceState.cs`'s genuinely-different lit/no-vertex-colour preset left alone, as the inventory itself flagged. | Done. |
+| §2 `MeshRenderer` per-draw-call parameter blocks | New private `SetCoreParameters` helper for the 9-parameter block (`World`/`View`/`Projection`/`SunDirection`/`SunColour`/`Ambient`/`MaterialColor`/`Texture`/`VertexIlluminationScale`) shared by `DrawDynamicLit`/`DrawDynamicLitRange`/`DrawDynamicLitShadowed`/`DrawDynamicLitShadowedRange`. `ModuleToStationLocal` (set differently per variant) and the `BakedColorLit*` techniques (a genuinely different parameter set) were left alone. | Done. |
+| §2 Sun/ambient lighting factor — `CelestialBodyRenderer.BuildPlanetSphere` reimplemented `SceneLighting.LightFactor` inline | Replaced the inline `MathF.Max(Vector3.Dot(normal, sunDir), ambient)` with a call to `SceneLighting.LightFactor(normal)`; removed the now-unused local `sunDir`/`ambient` variables. | Done. |
+| §2 `DVec3` → `Vector3` narrowing — 3 independent implementations | `SemanticHullMeshBuilder`'s private duplicate `ToVector3(DVec3)` removed; all 7 call sites now call `DVec3.ToVector3()` directly. `EngineMeshBuilder.ToVector3(value, mirroredAcrossHullX)` kept (public API, 6 external call sites across `ShipMeshRenderer` and a test) but now internally delegates to `DVec3.ToVector3()` and applies the mirror sign-flip as an explicit separate step, per the inventory's own suggested fix, instead of fusing both into one set of casts. `CockpitMeshBuilder` was already on the canonical extension method — untouched. | Done. |
 
 **Not requested, not touched:** everything else in §1/§2 (basis-from-normal, the other four
-winding postures, UV-sphere duplication, GPU-upload duplication, `BasicEffect` preset
-duplication, `MeshRenderer` parameter-block repetition, `DVec3→Vector3` narrowing,
-`StationTextureRegistry.HashPalette`, the text-mirroring root-cause candidate) remains
-exactly as originally found. See §8 for the updated canonical-paths table reflecting only
-the five changes above.
+winding postures, UV-sphere duplication (`MeshFactory.CreateSphere` vs
+`CelestialBodyRenderer.BuildPlanetSphere` — considered and explicitly deferred, not chosen
+in the 2026-09-11 follow-up pass), `StationTextureRegistry.HashPalette`, the text-mirroring
+root-cause candidate) remains exactly as originally found. See §8 for the updated
+canonical-paths table.
 
 **Incidental consequence of the hash change:** because `NameHash` now produces different
 seeds, every megastation's generated layout reshuffled. Working through the resulting
@@ -72,13 +77,13 @@ to reserve its separation margin in the wall's own local frame. Documented in co
 | Basis/frame construction from a normal | 6 independent implementations | Divergent behaviour (different threshold constants, different validation) | Medium | `PlanarTextGeometry.DeriveFrame`'s pattern (explicit input contract + throw-on-reflection) as the model; needs a shared low-level `Frame.FromNormal` |
 | Triangle winding: trust vs. correct vs. validate | 5 independent postures across otherwise-similar "build mesh from triangles/quad" code. **Updated 2026-09-11:** `StationModuleMesh.AddQuad` moved from "trust" to a 6th posture, "validate-and-throw" — still not unified with the other five. | Divergent behaviour | Medium-high (touches hot generation paths) | `ChamferedBox.WindFace` (auto-correct + comment explaining why) as the model |
 | UV sphere tessellation | 2 (`MeshFactory.CreateSphere`, `CelestialBodyRenderer.BuildPlanetSphere`) | Pure duplication (same ring/segment math, different vertex format) | Low | `MeshFactory.CreateSphere`'s loop, parameterised on vertex-build delegate |
-| CPU-mesh → GPU-buffer upload | 3 near-identical (`SemanticHullGpuMesh`, `CockpitGpuMesh`, `EngineGpuMesh`) | Pure duplication | Low | Shared generic uploader |
-| `BasicEffect` unlit/vertex-colour preset | 4 independent constructions (identical property values) | Cosmetic duplication | Low | A `BasicEffectPresets.UnlitVertexColour(gd)` factory |
-| `MeshRenderer` per-draw-call parameter blocks | Repeated ~8-line `fx.Parameters[...].SetValue(...)` block across 6 `Draw*` overloads | Cosmetic duplication | Low | Private `SetCoreParameters` helper (partially already true for shadow/specular; core World/View/Projection/Sun block isn't factored) |
+| CPU-mesh → GPU-buffer upload | ~~3 near-identical~~ **Fixed 2026-09-11:** the allocate/`SetData` step now shared via `GpuBufferFactory.Create` | Pure duplication | Low | Shared generic uploader — **now `GpuBufferFactory`** |
+| `BasicEffect` unlit/vertex-colour preset | ~~4 independent constructions~~ **Fixed 2026-09-11:** all 4 now call `BasicEffectPresets.UnlitVertexColour(gd)` | Cosmetic duplication | Low | A `BasicEffectPresets.UnlitVertexColour(gd)` factory — **now exists** |
+| `MeshRenderer` per-draw-call parameter blocks | ~~Repeated ~8-line block across 6 `Draw*` overloads~~ **Fixed 2026-09-11:** the 4 `DynamicLit*` overloads' shared 9-parameter block now factored into `SetCoreParameters`; `BakedColorLit*` (a genuinely different parameter set) left alone | Cosmetic duplication | Low | Private `SetCoreParameters` helper — **now exists** |
 | Deterministic string/seed hashing | ~~2 independent hash functions~~ **Fixed 2026-09-11:** `NameHash` now delegates to `SeededRandom`. 1 `GetHashCode()`-chain (`StationTextureRegistry.HashPalette`) still open. | Divergent behaviour (different hash values for the same string) | Medium (touches save-compatible seeds) | `SeededRandom.StableStringHash`/`.Derive(string)` — **now the only station-generation hash** |
-| `DVec3` → `Vector3` narrowing (no scale) | 3+ independent one-liners (static method, extension method, inline cast) | Cosmetic duplication | Low | A single extension method, used everywhere |
+| `DVec3` → `Vector3` narrowing (no scale) | ~~3+ independent one-liners~~ **Fixed 2026-09-11:** `SemanticHullMeshBuilder`'s duplicate removed (calls `DVec3.ToVector3()` directly); `EngineMeshBuilder.ToVector3` kept as public API but now delegates to `DVec3.ToVector3()` with the mirror flip as a separate step | Cosmetic duplication | Low | A single extension method, used everywhere — **now the case, mirroring kept as an explicit add-on** |
 | UI text measurement | ~~`FontHelper.Measure` (sanitised) vs. 8+ raw `font.MeasureString()` call sites~~ **Fixed 2026-09-11:** all 8+ sites now go through `FontHelper.Measure` | Divergent behaviour (unsanitised path can throw/blank on unsupported glyphs) | Low-medium | `FontHelper.Measure`/`.Draw` |
-| Sun/ambient lighting factor | 2 (`SceneLighting.LightFactor`, inline copy in `CelestialBodyRenderer.BuildPlanetSphere`) | Pure duplication (identical formula) | Low | `SceneLighting.LightFactor` |
+| Sun/ambient lighting factor | ~~2 (`SceneLighting.LightFactor`, inline copy in `CelestialBodyRenderer.BuildPlanetSphere`)~~ **Fixed 2026-09-11:** `BuildPlanetSphere` now calls `SceneLighting.LightFactor` | Pure duplication (identical formula) | Low | `SceneLighting.LightFactor` |
 | Debug-only pixel text | 2 (`ShipMeshRenderer`'s baked 5×3 line-glyph debug labels, `BitmapFonts`/`PlanarTextGeometry`'s real font) | Cosmetic (debug-only, not player-visible) | Low, and arguably not worth merging | N/A — different purpose (line debug overlay vs. real mesh text) |
 
 ---
@@ -210,6 +215,17 @@ GPU vertex struct, allocate `VertexBuffer`/`IndexBuffer`, `SetData`, skip empty 
 the vertex-mapping lambda and the source/result record types differ. Straightforward to
 collapse into one generic helper parameterised on the CPU vertex → GPU vertex projection.
 
+**Update (2026-09-11):** Fixed the buffer-allocation half of the duplication specifically —
+new `GpuBufferFactory.Create(graphicsDevice, vertices, indices)` does just the
+`VertexBuffer`/`IndexBuffer` allocate-and-`SetData` step, called from all three `Create`
+methods. Left each type's own per-part vertex mapping and result-record shape alone (they
+genuinely differ: `SemanticHullGpuMesh` carries `RenderGroup`/`MaterialGroup`/
+`MaterialColour`/`FaceRanges` and skips empty parts; `Cockpit`/`EngineGpuMesh` carry
+`PartId`/`Material` and don't skip). A single fully-generic uploader parameterised on the
+CPU→GPU vertex projection (the inventory's original "canonical candidate") was judged not
+worth building for three call sites with this much per-type variation — the allocate/SetData
+step was the actual duplication, and it's now shared.
+
 ### `BasicEffect` unlit/vertex-colour preset
 
 Four independent `new BasicEffect(gd) { VertexColorEnabled = true, LightingEnabled = false,
@@ -223,6 +239,10 @@ celestial bodies — not a duplicate of the above, a genuinely different configu
 `BasicEffectPresets` static factory in `Inferior.Rendering` (used across `Game` and
 `ObjectDesigner`) would remove the first four.
 
+**Update (2026-09-11):** Fixed exactly as proposed — `BasicEffectPresets.UnlitVertexColour
+(gd)` now exists in `Inferior.Rendering` and all four sites call it. `SystemSpaceState.cs`'s
+distinct lit preset was left untouched, as flagged above.
+
 ### `MeshRenderer` per-draw-call parameter blocks
 
 Not a bug, just repetition worth flagging per the brief's own "repeated
@@ -234,6 +254,16 @@ parameter-setting code" prompt: `DrawDynamicLit`/`DrawDynamicLitRange` and
 factored into `SetShadowParameters`/`SetSpecularParameters`; the core block never was.
 Cosmetic, but four copies of the same nine `SetValue` calls is real drift surface (a tenth
 parameter added to one and not the others would be easy to miss).
+
+**Update (2026-09-11):** Factored the shared 9-parameter block (`World`/`View`/`Projection`/
+`SunDirection`/`SunColour`/`Ambient`/`MaterialColor`/`Texture`/`VertexIlluminationScale`) out
+of the 4 `DynamicLit*` overloads into a private `SetCoreParameters` helper, matching the
+existing `SetShadowParameters`/`SetSpecularParameters` pattern. `ModuleToStationLocal` stayed
+out of it deliberately — the non-shadowed variants default it to `Identity`, the shadowed
+variants already set it inside `SetShadowParameters`, so it's not actually common to all
+four. The separate `BakedColorLit*` techniques (`DecorationBrightness` instead of
+`MaterialColor`/`VertexIlluminationScale`) were left alone — a genuinely different parameter
+set, not the block this finding was about.
 
 ### Deterministic string/seed hashing
 
@@ -297,6 +327,15 @@ flip), and a `DVec3.ToVector3()` extension method used by `CockpitMeshBuilder` a
 `EngineMeshBuilder.ToVector3`'s mirroring behaviour is a different *concern* bolted onto the
 same conversion and would read more clearly split apart.
 
+**Update (2026-09-11):** `SemanticHullMeshBuilder`'s private `ToVector3(DVec3)` removed
+entirely; its 7 call sites now call `value.ToVector3()` directly. `EngineMeshBuilder.ToVector3
+(value, mirroredAcrossHullX)` was **not** removed — it's public and has 6 external call sites
+(`ShipMeshRenderer`, `AriesCoordinateConventionTests`), so folding it away would be an API
+change beyond this cleanup's scope. Instead, per the inventory's own suggested fix, its body
+now calls `value.ToVector3()` and applies the mirror sign-flip as its own explicit step,
+rather than fusing both into one set of `(float)` casts. `CockpitMeshBuilder` was already
+calling the canonical extension method directly — untouched.
+
 ### UI text measurement
 
 `Inferior.UI/FontHelper.cs` exists specifically to wrap `SpriteFont.MeasureString`/
@@ -334,6 +373,11 @@ shared helper that already exists in the same assembly. Trivial, low-risk fix (c
 existing method) but it's the kind of "two copies of a formula silently drift apart" case
 `CelestialBodyRenderer`'s *own* comments elsewhere (on `ProjScale`) explicitly warn about
 having happened before (Brief D-SunSize's tan(60°) vs tan(30°) bug).
+
+**Update (2026-09-11):** Fixed exactly as proposed — `BuildPlanetSphere` now calls
+`SceneLighting.LightFactor(normal)`; the local `sunDir`/`ambient` variables it used to read
+`SceneLighting.SunDirection`/`Ambient` into (purely to avoid repeated property access across
+~8,300 vertices) were removed as unused.
 
 ---
 
@@ -466,12 +510,13 @@ Not a profiling pass — only what was obvious in passing while reading for dupl
 | Orthonormal frame from one direction | *(none yet — 6 candidates in §2)* | Pick one input contract (arbitrary-reference-axis vs. authored-tangent vs. reading-direction) per use case; standardise the reference-axis threshold if that variant is kept. |
 | Triangle winding correction | `ChamferedBox.WindFace`'s auto-flip pattern | Decide once whether "trust caller" (`CockpitMeshBuilder`), "validate-and-throw" (`SemanticHullMeshBuilder`, and `AddQuad` as of 2026-09-11), or "auto-correct" (`GeometryBuilder`, `ChamferedBox`, `AddQuadProjected`) is the house style — right now all three exist for no documented reason. `AddQuad`'s gates are meant to move behind a debug flag eventually per Timo, not become the permanent production posture as-is. |
 | UV sphere mesh | `MeshFactory.CreateSphere`, generalised with a per-vertex delegate | `BuildPlanetSphere`'s checkerboard/lighting bake would need to become that delegate. |
-| CPU mesh → GPU buffers | A new shared generic uploader | Keep per-caller vertex struct differences (Semantic/Cockpit/Engine) as the delegate's output type, not baked into three copies of the allocate/SetData scaffolding. |
-| `BasicEffect` unlit/vertex-colour debug preset | New `BasicEffectPresets.UnlitVertexColour(gd)` in `Inferior.Rendering` | Don't fold in `SystemSpaceState.cs`'s *different* lit/no-vertex-colour preset by mistake — that one is genuinely distinct. |
+| CPU mesh → GPU buffers | ~~A new shared generic uploader~~ **Partially done 2026-09-11:** `GpuBufferFactory.Create` shares the allocate/SetData scaffolding; the per-caller vertex struct/record differences (Semantic/Cockpit/Engine) were judged genuine enough to leave as three separate mapping steps calling the one shared factory, rather than building a fully generic delegate-based uploader for three call sites. | Keep per-caller vertex struct differences (Semantic/Cockpit/Engine) as separate mapping code, not baked into three copies of the allocate/SetData scaffolding — the latter is now shared, the former deliberately isn't. |
+| `BasicEffect` unlit/vertex-colour debug preset | ~~New `BasicEffectPresets.UnlitVertexColour(gd)` in `Inferior.Rendering`~~ **Done 2026-09-11** — exists, all 4 sites use it. | Don't fold in `SystemSpaceState.cs`'s *different* lit/no-vertex-colour preset by mistake — that one is genuinely distinct. (Confirmed left alone.) |
 | Deterministic string hash / seed derivation | `SeededRandom.StableStringHash` / `.Derive(string)` | ~~`StationGenerator.NameHash` produces different values for the same input — migrating it is a determinism-affecting change..., needs an explicit compatibility decision~~ **Done 2026-09-11**, with Timo's explicit authorization: `NameHash` now delegates to `SeededRandom`. Existing generated station layouts reshuffled as an accepted consequence (procedural baselines are regenerated, not persisted). `StationTextureRegistry.HashPalette` was intentionally left untouched — still a separate, unresolved case. |
-| `DVec3` → `Vector3` narrowing (no scale) | The existing `DVec3.ToVector3()` extension method | Keep `EngineMeshBuilder`'s mirroring sign-flip as a separate, explicitly-named step, not fused into the conversion itself. |
+| `DVec3` → `Vector3` narrowing (no scale) | The existing `DVec3.ToVector3()` extension method | ~~Keep `EngineMeshBuilder`'s mirroring sign-flip as a separate, explicitly-named step, not fused into the conversion itself.~~ **Done 2026-09-11** — `SemanticHullMeshBuilder`'s duplicate removed; `EngineMeshBuilder.ToVector3` kept (public, external callers) but now delegates to `DVec3.ToVector3()` with the mirror flip separated out. |
 | UI text measurement | `FontHelper.Measure` | ~~`UIRenderer.MeasureText` and the raw `font.MeasureString()` call sites in `TextBlock`/`TextBox`/`SystemConsole`/`LedIndicator` all need to move over~~ **Done 2026-09-11** — all of them now go through `FontHelper.Measure`; a solution-wide grep for `.MeasureString(` outside `FontHelper.cs`/tests returns nothing. |
-| Ambient/sun lighting factor | `SceneLighting.LightFactor` | Trivial: replace the one inline copy in `BuildPlanetSphere`. |
+| `MeshRenderer` per-draw-call parameters | New private `SetCoreParameters` helper | ~~Cosmetic, but four copies of the same nine `SetValue` calls is real drift surface~~ **Done 2026-09-11** for the 4 `DynamicLit*` overloads; `BakedColorLit*`'s different parameter set deliberately left separate. |
+| Ambient/sun lighting factor | `SceneLighting.LightFactor` | ~~Trivial: replace the one inline copy in `BuildPlanetSphere`.~~ **Done 2026-09-11.** |
 
 ---
 

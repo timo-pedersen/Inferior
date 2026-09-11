@@ -27,12 +27,7 @@ public sealed class GridHyperspaceSheetRenderer : IHyperspaceSheetRenderer
     public GridHyperspaceSheetRenderer(GraphicsDevice gd)
     {
         _gd    = gd;
-        _effect = new BasicEffect(gd)
-        {
-            VertexColorEnabled = true,
-            LightingEnabled    = false,
-            TextureEnabled     = false,
-        };
+        _effect = BasicEffectPresets.UnlitVertexColour(gd);
     }
 
     public void Update(double dt, Camera3D camera, PlaneBasis basis)
