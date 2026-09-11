@@ -90,6 +90,9 @@ public sealed record MegastationPrototypeCpuResult(
     StructuralOccupancy RegularisedOccupancy,
     MegastationInteriorPlan InteriorPlan,
     MegastationMegaShelfPlan MegaShelfPlan,
+    MegastationBayStructuralTrussPlan BayStructuralTrussPlan,
+    MegastationBayUtilityPlan BayUtilityPlan,
+    MegastationBaySecondaryUtilityPlan BaySecondaryUtilityPlan,
     MegastationArtificialLightingPlan ArtificialLightingPlan,
     MegastationLandingDistrictPlan LandingDistrictPlan,
     MegastationBayHabitationPlan BayHabitationPlan,
@@ -313,6 +316,48 @@ public static class MegastationPrototypeGenerator
                 interiorPlan, landingDistrict, regularised.Occupancy, topology);
         MegastationBayHabitationPlan bayHabitation = bayWallComposition.Habitation;
         MegastationBayFacilityPlan bayFacilities = bayWallComposition.Facilities;
+        MegastationBayStructuralTrussPlan bayStructuralTrusses =
+            MegastationBayStructuralTrussPlanner.Plan(
+                interiorPlan, regularised.Occupancy, topology, landingDistrict,
+                bayFacilities, megaShelfPlan);
+        MegastationBayStructuralTrussDiagnostics bayTrussDiagnostics =
+            bayStructuralTrusses.Diagnostics;
+        interiorPlan = interiorPlan with
+        {
+            BayStructuralTrusses = bayStructuralTrusses,
+            Diagnostics = interiorPlan.Diagnostics with
+            {
+                BayStructuralTrussAlgorithmVersion = bayTrussDiagnostics.AlgorithmVersion,
+                BayStructuralTrussWallFieldCount = bayTrussDiagnostics.WallFieldCount,
+                BayStructuralTrussCeilingFieldCount = bayTrussDiagnostics.CeilingFieldCount,
+                BayStructuralTrussWallCount = bayTrussDiagnostics.WallTrussCount,
+                BayStructuralTrussCeilingCount = bayTrussDiagnostics.CeilingTrussCount,
+                BayStructuralTrussHardConflictRejectCount =
+                    bayTrussDiagnostics.HardConflictRejectCount,
+                BayStructuralTrussOperationalRejectCount =
+                    bayTrussDiagnostics.OperationalClearanceRejectCount,
+                BayStructuralTrussSupportRejectCount = bayTrussDiagnostics.SupportRejectCount,
+                BayStructuralTrussSoftWindowOverlapCount =
+                    bayTrussDiagnostics.SoftWindowOverlapCount,
+                BayStructuralTrussVisibleTriangleCount =
+                    bayTrussDiagnostics.VisibleTriangleCount,
+                BayStructuralTrussCasterTriangleCount =
+                    bayTrussDiagnostics.CasterTriangleCount,
+                BayStructuralTrussPlanningMilliseconds =
+                    bayTrussDiagnostics.PlanningMilliseconds,
+                BayStructuralTrussSummary = bayTrussDiagnostics.Summary,
+                BayStructuralTrussSignature = bayTrussDiagnostics.Signature,
+            },
+        };
+        MegastationBayUtilityPlan bayUtilities = MegastationBayUtilityPlanner.Plan(
+            interiorPlan, regularised.Occupancy, topology, landingDistrict,
+            bayFacilities, bayStructuralTrusses);
+        interiorPlan = interiorPlan with { BayUtilities = bayUtilities };
+        MegastationBaySecondaryUtilityPlan baySecondaryUtilities =
+            MegastationBaySecondaryUtilityPlanner.Plan(
+                interiorPlan, landingDistrict, bayFacilities, bayStructuralTrusses,
+                bayUtilities);
+        interiorPlan = interiorPlan with { BaySecondaryUtilities = baySecondaryUtilities };
         MegastationShelfLightingPlan shelfLighting =
             MegastationShelfLightingPlanner.Plan(interiorPlan, megaShelfPlan);
         MegastationArtificialLightingPlan artificialLighting =
@@ -365,6 +410,11 @@ public static class MegastationPrototypeGenerator
             bayHabitation = bayHabitation with { Diagnostics = habitationDiagnostics };
         if (interiorMesh.BayFacilityDiagnostics is { } facilityDiagnostics)
             bayFacilities = bayFacilities with { Diagnostics = facilityDiagnostics };
+        if (interiorMesh.BayUtilityDiagnostics is { } utilityDiagnostics)
+            bayUtilities = bayUtilities with { Diagnostics = utilityDiagnostics };
+        if (interiorMesh.BaySecondaryUtilityDiagnostics is { } secondaryUtilityDiagnostics)
+            baySecondaryUtilities = baySecondaryUtilities with
+                { Diagnostics = secondaryUtilityDiagnostics };
         VertexPositionColor[] approachBeamVertices =
             MegastationApproachBeamMeshBuilder.Build(interiorPresentation);
         int throatBoundaryFaces = topology.Faces.Count(face =>
@@ -621,6 +671,9 @@ public static class MegastationPrototypeGenerator
             regularised.Occupancy,
             interiorPlan,
             megaShelfPlan,
+            bayStructuralTrusses,
+            bayUtilities,
+            baySecondaryUtilities,
             artificialLighting,
             landingDistrict,
             bayHabitation,

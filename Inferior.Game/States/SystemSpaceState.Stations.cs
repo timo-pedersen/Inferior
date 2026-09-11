@@ -174,6 +174,51 @@ public sealed partial class SystemSpaceState
             $"floodFixtures:{d.MegaShelfFloodFixtureCount}," +
             $"staticSources:{d.MegaShelfStaticWorkLightCount}," +
             $"signature:{d.MegaShelfLightingSignature}; " +
+            $"bayStructuralTrusses=v{d.BayStructuralTrussAlgorithmVersion}," +
+            $"fields:{d.BayStructuralTrussWallFieldCount}wall/" +
+            $"{d.BayStructuralTrussCeilingFieldCount}ceiling," +
+            $"runs:{d.BayStructuralTrussWallCount}wall/" +
+            $"{d.BayStructuralTrussCeilingCount}ceiling," +
+            $"rejects:{d.BayStructuralTrussHardConflictRejectCount}hard/" +
+            $"{d.BayStructuralTrussOperationalRejectCount}operational/" +
+            $"{d.BayStructuralTrussSupportRejectCount}support," +
+            $"softWindowOverlaps:{d.BayStructuralTrussSoftWindowOverlapCount}," +
+            $"geometry:{d.BayStructuralTrussVisibleTriangleCount}t/" +
+            $"{d.BayStructuralTrussCasterTriangleCount}casterT," +
+            $"plan:{d.BayStructuralTrussPlanningMilliseconds}ms," +
+            $"layout:{d.BayStructuralTrussSummary}," +
+            $"signature:{d.BayStructuralTrussSignature}; " +
+            $"bayUtilities=v{d.BayUtilityAlgorithmVersion}," +
+            $"walls:{d.BayUtilityActiveWallCount},networks:{d.BayUtilityNetworkCount}," +
+            $"runs:{d.BayUtilityTrunkCount}trunk/{d.BayUtilityBranchCount}branch," +
+            $"nodes:{d.BayUtilityJunctionBoxCount}junction/{d.BayUtilityServiceBoxCount}service," +
+            $"cables:{d.BayUtilityCableCount},clamps:{d.BayUtilityClampCount}," +
+            $"length:{d.BayUtilityTotalRunLength:F1}m," +
+            $"trunks:{d.BayUtilityMinimumTrunkLength:F1}/" +
+            $"{d.BayUtilityMedianTrunkLength:F1}/{d.BayUtilityMaximumTrunkLength:F1}m," +
+            $"conflicts:{d.BayUtilityHardConflictRejectCount}hard/" +
+            $"{d.BayUtilityWindowConflictScore}windowScore," +
+            $"geometry:{d.BayUtilityVisibleVertexCount}v/{d.BayUtilityVisibleTriangleCount}t/" +
+            $"{d.BayUtilityMajorCasterTriangleCount}casterT," +
+            $"plan:{d.BayUtilityPlanningMilliseconds}ms," +
+            $"layout:{d.BayUtilityWallSummary},signature:{d.BayUtilitySignature}; " +
+            $"baySecondaryUtilities=v{d.BaySecondaryUtilityAlgorithmVersion}," +
+            $"walls:{d.BaySecondaryUtilityActiveWallCount}," +
+            $"installations:{d.BaySecondaryUtilityInstallationCount}," +
+            $"pipes:{d.BaySecondaryUtilityPipeCount}/" +
+            $"{d.BaySecondaryUtilityTotalPipeLength:F1}m," +
+            $"supports:{d.BaySecondaryUtilityPipeSupportCount}," +
+            $"vents:{d.BaySecondaryUtilityLouverBankCount}louver/" +
+            $"{d.BaySecondaryUtilityProjectingDuctCount}duct," +
+            $"access:{d.BaySecondaryUtilityHatchCount}hatch/" +
+            $"{d.BaySecondaryUtilityLadderCount}ladder," +
+            $"conflicts:{d.BaySecondaryUtilityHardConflictRejectCount}hard/" +
+            $"{d.BaySecondaryUtilityWindowConflictScore}windowScore," +
+            $"geometry:{d.BaySecondaryUtilityVisibleTriangleCount}t/" +
+            $"{d.BaySecondaryUtilityMajorCasterTriangleCount}casterT," +
+            $"plan:{d.BaySecondaryUtilityPlanningMilliseconds}ms," +
+            $"layout:{d.BaySecondaryUtilityWallSummary}," +
+            $"signature:{d.BaySecondaryUtilitySignature}; " +
             $"landingDistrict=sites:{d.LandingDistrictSiteCount}" +
             $"({d.LandingDistrictSmallSiteCount}S/{d.LandingDistrictMediumSiteCount}M/" +
             $"{d.LandingDistrictLargeSiteCount}L),pads:{d.LandingDistrictPadCount}," +
@@ -214,6 +259,8 @@ public sealed partial class SystemSpaceState
             $"regions:{d.BayFacilityEnhancedRegionCount}enhanced/{d.BayFacilityPlainRegionCount}plain," +
             $"archetypes:{d.BayFacilityRecessedCount}recessed/{d.BayFacilityGalleryCount}gallery/" +
             $"{d.BayFacilityEmbeddedCount}embedded/{d.BayFacilityServiceApertureCount}aperture," +
+            $"L3c:{d.BayFacilityDeepRecessCount}deep/{d.BayFacilityOpenGalleryCount}open/" +
+            $"{d.BayFacilityMultiStoreyGalleryCount}multi/{d.BayFacilityGalleryStoreyCount}storeys," +
             $"secondary:{d.BayFacilitySecondaryFormCount},parts:{d.BayFacilityStructuralPartCount}," +
             $"railings:{d.BayFacilityRailingPartCount},occluders:{d.BayFacilityOccluderPartCount}," +
             $"cutouts:{d.BayFacilityCutoutCount},facilityWindows:{d.BayFacilityWindowCount}," +
@@ -222,6 +269,7 @@ public sealed partial class SystemSpaceState
             $"rejects:{d.BayFacilityReservationRejectCount}reservation/" +
             $"{d.BayFacilityCutoutValidationRejectCount}cutout," +
             $"recessLights:{d.BayFacilityArtificialLightCount}," +
+            $"plan:{d.BayFacilityPlanningMilliseconds}ms," +
             $"projection:{d.BayFacilityMaximumProjection:F1}m," +
             $"mesh:{d.BayFacilityMeshVertexCount}v/{d.BayFacilityMeshTriangleCount}t," +
             $"shadow:{d.BayFacilityShadowVertexCount}v/{d.BayFacilityShadowTriangleCount}t," +

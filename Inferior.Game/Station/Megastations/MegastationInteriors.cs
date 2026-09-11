@@ -165,6 +165,11 @@ public sealed record MegastationInteriorDiagnostics(
     int BayFacilityReservationRejectCount = 0,
     int BayFacilityCutoutValidationRejectCount = 0,
     int BayFacilityArtificialLightCount = 0,
+    int BayFacilityDeepRecessCount = 0,
+    int BayFacilityOpenGalleryCount = 0,
+    int BayFacilityMultiStoreyGalleryCount = 0,
+    int BayFacilityGalleryStoreyCount = 0,
+    long BayFacilityPlanningMilliseconds = 0,
     string BayFacilitySignature = "",
     int MegaShelfAlgorithmVersion = 0,
     int MegaShelfCandidateCount = 0,
@@ -231,7 +236,59 @@ public sealed record MegastationInteriorDiagnostics(
     int MegaShelfObstacleBeaconCount = 0,
     int MegaShelfFloodFixtureCount = 0,
     int MegaShelfStaticWorkLightCount = 0,
-    string MegaShelfLightingSignature = "");
+    string MegaShelfLightingSignature = "",
+    int BayStructuralTrussAlgorithmVersion = 0,
+    int BayStructuralTrussWallFieldCount = 0,
+    int BayStructuralTrussCeilingFieldCount = 0,
+    int BayStructuralTrussWallCount = 0,
+    int BayStructuralTrussCeilingCount = 0,
+    int BayStructuralTrussHardConflictRejectCount = 0,
+    int BayStructuralTrussOperationalRejectCount = 0,
+    int BayStructuralTrussSupportRejectCount = 0,
+    int BayStructuralTrussSoftWindowOverlapCount = 0,
+    int BayStructuralTrussVisibleTriangleCount = 0,
+    int BayStructuralTrussCasterTriangleCount = 0,
+    long BayStructuralTrussPlanningMilliseconds = 0,
+    string BayStructuralTrussSummary = "",
+    string BayStructuralTrussSignature = "",
+    int BayUtilityAlgorithmVersion = 0,
+    int BayUtilityActiveWallCount = 0,
+    int BayUtilityNetworkCount = 0,
+    int BayUtilityTrunkCount = 0,
+    int BayUtilityBranchCount = 0,
+    int BayUtilityJunctionBoxCount = 0,
+    int BayUtilityServiceBoxCount = 0,
+    int BayUtilityCableCount = 0,
+    int BayUtilityClampCount = 0,
+    float BayUtilityTotalRunLength = 0f,
+    float BayUtilityMinimumTrunkLength = 0f,
+    float BayUtilityMedianTrunkLength = 0f,
+    float BayUtilityMaximumTrunkLength = 0f,
+    int BayUtilityHardConflictRejectCount = 0,
+    int BayUtilityWindowConflictScore = 0,
+    int BayUtilityVisibleVertexCount = 0,
+    int BayUtilityVisibleTriangleCount = 0,
+    int BayUtilityMajorCasterTriangleCount = 0,
+    long BayUtilityPlanningMilliseconds = 0,
+    string BayUtilityWallSummary = "",
+    string BayUtilitySignature = "",
+    int BaySecondaryUtilityAlgorithmVersion = 0,
+    int BaySecondaryUtilityActiveWallCount = 0,
+    int BaySecondaryUtilityInstallationCount = 0,
+    int BaySecondaryUtilityPipeCount = 0,
+    int BaySecondaryUtilityPipeSupportCount = 0,
+    int BaySecondaryUtilityLouverBankCount = 0,
+    int BaySecondaryUtilityProjectingDuctCount = 0,
+    int BaySecondaryUtilityHatchCount = 0,
+    int BaySecondaryUtilityLadderCount = 0,
+    float BaySecondaryUtilityTotalPipeLength = 0f,
+    int BaySecondaryUtilityHardConflictRejectCount = 0,
+    int BaySecondaryUtilityWindowConflictScore = 0,
+    int BaySecondaryUtilityVisibleTriangleCount = 0,
+    int BaySecondaryUtilityMajorCasterTriangleCount = 0,
+    long BaySecondaryUtilityPlanningMilliseconds = 0,
+    string BaySecondaryUtilityWallSummary = "",
+    string BaySecondaryUtilitySignature = "");
 
 public sealed record MegastationInteriorPlan(
     string Identity,
@@ -255,7 +312,10 @@ public sealed record MegastationInteriorPlan(
     IReadOnlyList<MegastationLandingSurface>? AdditionalLandingSurfaces = null,
     IReadOnlyList<MegastationMegaShelfMarker>? AddedStructuralMarkers = null,
     IReadOnlyList<MegastationMegaShelfTruss>? AddedStructuralTrusses = null,
-    MegastationShelfLightingPlan? ShelfLighting = null)
+    MegastationShelfLightingPlan? ShelfLighting = null,
+    MegastationBayStructuralTrussPlan? BayStructuralTrusses = null,
+    MegastationBayUtilityPlan? BayUtilities = null,
+    MegastationBaySecondaryUtilityPlan? BaySecondaryUtilities = null)
 {
     public MegastationInteriorMacroExclusionVolume ArrivalManeuverExclusion
         => MegastationInteriorMacroExclusionVolume.CreateArrival(this);
@@ -371,7 +431,9 @@ public sealed record MegastationInteriorMeshBuildResult(
     MegastationInteriorDiagnostics Diagnostics,
     MegastationLandingDistrictDiagnostics? LandingDistrictDiagnostics = null,
     MegastationBayHabitationDiagnostics? BayHabitationDiagnostics = null,
-    MegastationBayFacilityDiagnostics? BayFacilityDiagnostics = null);
+    MegastationBayFacilityDiagnostics? BayFacilityDiagnostics = null,
+    MegastationBayUtilityDiagnostics? BayUtilityDiagnostics = null,
+    MegastationBaySecondaryUtilityDiagnostics? BaySecondaryUtilityDiagnostics = null);
 
 public enum MegastationInteriorGuidanceKind
 {
@@ -1751,6 +1813,9 @@ public static class MegastationInteriorMeshBuilder
             (illuminatedFaceStart, illuminatedFaceCount, .82f),
         };
         var shelfReceiverFaces = new List<int>();
+        var bayTrussReceiverFaces = new List<int>();
+        MegastationBayUtilityMeshResult? utilityMesh = null;
+        MegastationBaySecondaryUtilityMeshResult? secondaryUtilityMesh = null;
 
         foreach (MegastationInteriorGuidanceElement element in presentation.Elements
                      .OrderBy(element => element.MaterialFamily)
@@ -1808,6 +1873,54 @@ public static class MegastationInteriorMeshBuilder
             Color trussColour = ProceduralMaterialCpuGenerator.Blend(
                 dominant, secondary, .55f);
             StructuralTrussFactory.Append(mesh, truss.Spec, trussColour);
+        }
+        if (plan.BayStructuralTrusses is { } bayTrusses)
+        {
+            SetMaterial(mesh, SystemMaterialFamilyId.HeavyIndustrialPlate);
+            foreach (MegastationBayStructuralTruss truss in bayTrusses.Trusses)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Color trussColour = ProceduralMaterialCpuGenerator.Blend(
+                    dominant, secondary, truss.ColourBlend);
+                mesh.CurrentDecorClass = truss.CastsStellarShadow
+                    ? DecorClass.MegastationInteriorMajor
+                    : DecorClass.MegastationInteriorMinor;
+                int firstFace = mesh.FaceCount;
+                StructuralTrussFactory.Append(mesh, truss.Spec, trussColour);
+                for (int face = firstFace; face < mesh.FaceCount; face++)
+                    bayTrussReceiverFaces.Add(face);
+            }
+            foreach (MegastationBayStructuralTrussAttachment attachment in bayTrusses.Attachments)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Color trussColour = ProceduralMaterialCpuGenerator.Blend(
+                    dominant, secondary, attachment.ColourBlend);
+                mesh.CurrentDecorClass = attachment.CastsStellarShadow
+                    ? DecorClass.MegastationInteriorMajor
+                    : DecorClass.MegastationInteriorMinor;
+                Matrix frame = new(
+                    attachment.Right.X, attachment.Right.Y, attachment.Right.Z, 0f,
+                    attachment.Up.X, attachment.Up.Y, attachment.Up.Z, 0f,
+                    attachment.Forward.X, attachment.Forward.Y, attachment.Forward.Z, 0f,
+                    attachment.Centre.X, attachment.Centre.Y, attachment.Centre.Z, 1f);
+                int firstFace = mesh.FaceCount;
+                AddBox(mesh, frame, attachment.Size, trussColour);
+                for (int face = firstFace; face < mesh.FaceCount; face++)
+                    bayTrussReceiverFaces.Add(face);
+            }
+        }
+        if (plan.BayUtilities is { } bayUtilities)
+        {
+            utilityMesh = MegastationBayUtilityMeshBuilder.Append(
+                mesh, bayUtilities, MegastationBayHabitationPlanner.CreateWalls(plan), materials);
+            bayTrussReceiverFaces.AddRange(utilityMesh.ReceiverFaces);
+        }
+        if (plan.BaySecondaryUtilities is { } baySecondaryUtilities)
+        {
+            secondaryUtilityMesh = MegastationBaySecondaryUtilityMeshBuilder.Append(
+                mesh, baySecondaryUtilities,
+                MegastationBayHabitationPlanner.CreateWalls(plan), materials);
+            bayTrussReceiverFaces.AddRange(secondaryUtilityMesh.ReceiverFaces);
         }
         foreach (MegastationMegaShelfMarker shelfMarker in plan.AddedStructuralMarkers ?? [])
         {
@@ -1922,6 +2035,25 @@ public static class MegastationInteriorMeshBuilder
                 ApplyShelfLighting();
             else
                 artificialOcclusion.MeasureBake(ApplyShelfLighting);
+        }
+        if (bayTrussReceiverFaces.Count > 0 && artificialLighting is not null)
+        {
+            void ApplyBayTrussLighting()
+            {
+                foreach (int face in bayTrussReceiverFaces)
+                {
+                    Vector3 normal = mesh.LocalFaceNormal(face);
+                    Vector3[] samples = mesh.GetFaceVertexPositions(face)
+                        .Select(position => MegastationArtificialLighting.Evaluate(
+                            position, normal, artificialLighting.Lights, artificialOcclusion))
+                        .ToArray();
+                    mesh.SetFaceArtificialLight(face, samples);
+                }
+            }
+            if (artificialOcclusion is null)
+                ApplyBayTrussLighting();
+            else
+                artificialOcclusion.MeasureBake(ApplyBayTrussLighting);
         }
         if (landingMesh is { } districtMesh)
         {
@@ -2089,10 +2221,73 @@ public static class MegastationInteriorMeshBuilder
                 facilityMesh?.Diagnostics.CutoutValidationRejectCount ?? 0,
             BayFacilityArtificialLightCount =
                 facilityMesh?.Diagnostics.ArtificialLightCount ?? 0,
+            BayFacilityDeepRecessCount = facilityMesh?.Diagnostics.DeepRecessCount ?? 0,
+            BayFacilityOpenGalleryCount = facilityMesh?.Diagnostics.OpenGalleryCount ?? 0,
+            BayFacilityMultiStoreyGalleryCount =
+                facilityMesh?.Diagnostics.MultiStoreyGalleryCount ?? 0,
+            BayFacilityGalleryStoreyCount =
+                facilityMesh?.Diagnostics.GalleryStoreyCount ?? 0,
+            BayFacilityPlanningMilliseconds =
+                facilityMesh?.Diagnostics.PlanningMilliseconds ?? 0,
             BayFacilitySignature = facilityMesh?.Diagnostics.Signature ?? string.Empty,
+            BayUtilityAlgorithmVersion = utilityMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BayUtilityActiveWallCount = utilityMesh?.Diagnostics.ActiveWallCount ?? 0,
+            BayUtilityNetworkCount = utilityMesh?.Diagnostics.NetworkCount ?? 0,
+            BayUtilityTrunkCount = utilityMesh?.Diagnostics.TrunkCount ?? 0,
+            BayUtilityBranchCount = utilityMesh?.Diagnostics.BranchCount ?? 0,
+            BayUtilityJunctionBoxCount = utilityMesh?.Diagnostics.JunctionBoxCount ?? 0,
+            BayUtilityServiceBoxCount = utilityMesh?.Diagnostics.ServiceBoxCount ?? 0,
+            BayUtilityCableCount = utilityMesh?.Diagnostics.CableCount ?? 0,
+            BayUtilityClampCount = utilityMesh?.Diagnostics.ClampCount ?? 0,
+            BayUtilityTotalRunLength = utilityMesh?.Diagnostics.TotalRunLength ?? 0f,
+            BayUtilityMinimumTrunkLength = utilityMesh?.Diagnostics.MinimumTrunkLength ?? 0f,
+            BayUtilityMedianTrunkLength = utilityMesh?.Diagnostics.MedianTrunkLength ?? 0f,
+            BayUtilityMaximumTrunkLength = utilityMesh?.Diagnostics.MaximumTrunkLength ?? 0f,
+            BayUtilityHardConflictRejectCount =
+                utilityMesh?.Diagnostics.HardConflictRejectCount ?? 0,
+            BayUtilityWindowConflictScore = utilityMesh?.Diagnostics.WindowConflictScore ?? 0,
+            BayUtilityVisibleVertexCount = utilityMesh?.Diagnostics.VisibleVertexCount ?? 0,
+            BayUtilityVisibleTriangleCount = utilityMesh?.Diagnostics.VisibleTriangleCount ?? 0,
+            BayUtilityMajorCasterTriangleCount =
+                utilityMesh?.Diagnostics.MajorCasterTriangleCount ?? 0,
+            BayUtilityPlanningMilliseconds = utilityMesh?.Diagnostics.PlanningMilliseconds ?? 0,
+            BayUtilityWallSummary = utilityMesh?.Diagnostics.WallSummary ?? string.Empty,
+            BayUtilitySignature = utilityMesh?.Diagnostics.Signature ?? string.Empty,
+            BaySecondaryUtilityAlgorithmVersion =
+                secondaryUtilityMesh?.Diagnostics.AlgorithmVersion ?? 0,
+            BaySecondaryUtilityActiveWallCount =
+                secondaryUtilityMesh?.Diagnostics.ActiveWallCount ?? 0,
+            BaySecondaryUtilityInstallationCount =
+                secondaryUtilityMesh?.Diagnostics.InstallationCount ?? 0,
+            BaySecondaryUtilityPipeCount = secondaryUtilityMesh?.Diagnostics.PipeCount ?? 0,
+            BaySecondaryUtilityPipeSupportCount =
+                secondaryUtilityMesh?.Diagnostics.PipeSupportCount ?? 0,
+            BaySecondaryUtilityLouverBankCount =
+                secondaryUtilityMesh?.Diagnostics.LouverBankCount ?? 0,
+            BaySecondaryUtilityProjectingDuctCount =
+                secondaryUtilityMesh?.Diagnostics.ProjectingDuctCount ?? 0,
+            BaySecondaryUtilityHatchCount = secondaryUtilityMesh?.Diagnostics.HatchCount ?? 0,
+            BaySecondaryUtilityLadderCount = secondaryUtilityMesh?.Diagnostics.LadderCount ?? 0,
+            BaySecondaryUtilityTotalPipeLength =
+                secondaryUtilityMesh?.Diagnostics.TotalPipeLength ?? 0f,
+            BaySecondaryUtilityHardConflictRejectCount =
+                secondaryUtilityMesh?.Diagnostics.HardConflictRejectCount ?? 0,
+            BaySecondaryUtilityWindowConflictScore =
+                secondaryUtilityMesh?.Diagnostics.WindowConflictScore ?? 0,
+            BaySecondaryUtilityVisibleTriangleCount =
+                secondaryUtilityMesh?.Diagnostics.VisibleTriangleCount ?? 0,
+            BaySecondaryUtilityMajorCasterTriangleCount =
+                secondaryUtilityMesh?.Diagnostics.MajorCasterTriangleCount ?? 0,
+            BaySecondaryUtilityPlanningMilliseconds =
+                secondaryUtilityMesh?.Diagnostics.PlanningMilliseconds ?? 0,
+            BaySecondaryUtilityWallSummary =
+                secondaryUtilityMesh?.Diagnostics.WallSummary ?? string.Empty,
+            BaySecondaryUtilitySignature =
+                secondaryUtilityMesh?.Diagnostics.Signature ?? string.Empty,
         };
         return new(mesh, diagnostics, landingMesh?.Diagnostics, habitationMesh?.Diagnostics,
-            facilityMesh?.Diagnostics);
+            facilityMesh?.Diagnostics, utilityMesh?.Diagnostics,
+            secondaryUtilityMesh?.Diagnostics);
     }
 
     private static void SetMaterial(StationModuleMesh mesh, SystemMaterialFamilyId family)

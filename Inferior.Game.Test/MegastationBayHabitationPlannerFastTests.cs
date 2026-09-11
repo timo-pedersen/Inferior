@@ -10,9 +10,9 @@ public sealed class MegastationBayHabitationPlannerFastTests
     public void MinimumBudgetProvidesCredibleFloorAndScalesWithUsableArea()
     {
         Assert.Equal(0, MegastationBayHabitationPlanner.MinimumRegionBudget(0f));
-        Assert.Equal(6, MegastationBayHabitationPlanner.MinimumRegionBudget(90_000f));
-        Assert.Equal(8, MegastationBayHabitationPlanner.MinimumRegionBudget(240_000f));
-        Assert.Equal(12, MegastationBayHabitationPlanner.MinimumRegionBudget(900_000f));
+        Assert.Equal(8, MegastationBayHabitationPlanner.MinimumRegionBudget(90_000f));
+        Assert.Equal(10, MegastationBayHabitationPlanner.MinimumRegionBudget(240_000f));
+        Assert.Equal(16, MegastationBayHabitationPlanner.MinimumRegionBudget(900_000f));
     }
 
     [Fact]

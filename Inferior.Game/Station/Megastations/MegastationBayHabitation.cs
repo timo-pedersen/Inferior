@@ -81,11 +81,11 @@ public sealed record MegastationBayHabitationPlan(
 
 public static class MegastationBayHabitationPlanner
 {
-    public const int AlgorithmVersion = 2;
+    public const int AlgorithmVersion = 3;
     private const float MinimumFloorClearance = 32f;
     private const float CeilingClearance = 18f;
     private const float HorizontalMargin = 14f;
-    private const float RegionSeparation = 16f;
+    private const float RegionSeparation = 10f;
 
     public static MegastationBayHabitationPlan Plan(
         MegastationInteriorPlan interior,
@@ -94,7 +94,7 @@ public static class MegastationBayHabitationPlanner
         BoundaryTopology? topology = null)
     {
         var stopwatch = Stopwatch.StartNew();
-        int seed = MegastationSeed.Derive(interior.Seed, "bay-wall-habitation:v2");
+        int seed = MegastationSeed.Derive(interior.Seed, "bay-wall-habitation:v3");
         MegastationBayWallSurface[] walls = CreateWalls(interior);
         var regions = new List<MegastationBayHabitationRegion>();
         var windows = new List<MegastationBayHabitationWindow>();
@@ -213,11 +213,11 @@ public static class MegastationBayHabitationPlanner
     private static int TargetRegionCount(MegastationBayWallSurface wall, int rootSeed)
     {
         int wallSeed = MegastationSeed.Derive(rootSeed, wall.Identity);
-        if (Unit(wallSeed, "presence") >= .88f)
+        if (Unit(wallSeed, "presence") >= .84f)
             return 0;
-        int areaCount = (int)(UsableArea(wall) / 35_000f);
+        int areaCount = (int)(UsableArea(wall) / 24_000f);
         int variation = Unit(wallSeed, "region-count") >= .5f ? 1 : 0;
-        return Math.Clamp(2 + areaCount + variation, 2, 6);
+        return Math.Clamp(3 + areaCount + variation, 3, 8);
     }
 
     private static float UsableArea(MegastationBayWallSurface wall)
@@ -227,7 +227,7 @@ public static class MegastationBayHabitationPlanner
     internal static int MinimumRegionBudget(float usableArea)
         => usableArea <= 0f
             ? 0
-            : Math.Clamp((int)MathF.Ceiling(usableArea / 30_000f), 6, 12);
+            : Math.Clamp((int)MathF.Ceiling(usableArea / 24_000f), 8, 16);
 
     internal static MegastationBayWallSurface[] CreateWalls(MegastationInteriorPlan interior)
     {
@@ -261,10 +261,11 @@ public static class MegastationBayHabitationPlanner
                 right * rMax + inward * dMid + up * uMid, dMax - dMin, true),
             Wall(MegastationBayWallKind.Rear, -inward,
                 right * rMid + inward * dMax + up * uMid, rMax - rMin, true),
-            // The entrance wall is deliberately represented but blank in L3a. Its exact
-            // portal/throat subtraction is authoritative and not approximated with windows.
+            // L3c permits habitation on authoritative entrance-wall surface beside the
+            // mouth. The topology/support and entrance structural reservations remain
+            // authoritative, so this does not approximate or cover the throat opening.
             Wall(MegastationBayWallKind.Entrance, inward,
-                right * rMid + inward * dMin + up * uMid, rMax - rMin, false),
+                right * rMid + inward * dMin + up * uMid, rMax - rMin, true),
         ];
     }
 
@@ -292,13 +293,13 @@ public static class MegastationBayHabitationPlanner
             return false;
         }
 
-        for (int attempt = 0; attempt < 24; attempt++)
+        for (int attempt = 0; attempt < 48; attempt++)
         {
             int candidateSeed = MegastationSeed.Derive(seed, $"candidate:{attempt}");
             float width = MathF.Min(availableWidth,
                 30f + Unit(candidateSeed, "width") * 42f);
             float height = MathF.Min(availableHeight,
-                8f + Unit(candidateSeed, "height") * 12f);
+                8f + Unit(candidateSeed, "height") * 14f);
             float x = Lerp(minX + width * .5f, maxX - width * .5f,
                 Unit(candidateSeed, "x"));
             float y = Lerp(minY + height * .5f, maxY - height * .5f,
@@ -321,8 +322,8 @@ public static class MegastationBayHabitationPlanner
                     1.5f, occupancy.Grid, topology, out _))
                 continue;
 
-            int groups = 1 + (Unit(candidateSeed, "groups") > .42f ? 1 : 0)
-                + (Unit(candidateSeed, "third-group") > .86f ? 1 : 0);
+            int groups = 2 + (Unit(candidateSeed, "groups") > .48f ? 1 : 0)
+                + (Unit(candidateSeed, "fourth-group") > .90f ? 1 : 0);
             float colourRoll = Unit(candidateSeed, "colour");
             Color dominant = colourRoll < .72f ? StationWindowVisuals.WarmWhite
                 : colourRoll < .92f ? StationWindowVisuals.NeutralWhite

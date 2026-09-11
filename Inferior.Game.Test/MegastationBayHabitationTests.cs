@@ -13,14 +13,13 @@ public sealed class MegastationBayHabitationTests
         new(() => MegastationPrototypeGenerator.GenerateCpu(Nova));
 
     [Fact]
-    public void KnownStationUsesSparseVerticalWallRegionsAndSharedHumanScaleWindows()
+    public void KnownStationUsesCoherentWallRegionsAndSharedHumanScaleWindows()
     {
         MegastationPrototypeCpuResult result = Result.Value;
         MegastationBayHabitationPlan plan = result.BayHabitationPlan;
 
         Assert.Equal(4, plan.Walls.Count);
-        Assert.InRange(plan.Diagnostics.ActiveWallCount, 1, 3);
-        Assert.True(plan.Diagnostics.BlankWallCount >= 1);
+        Assert.InRange(plan.Diagnostics.ActiveWallCount, 1, 4);
         Assert.Equal(plan.Windows.Count, plan.Diagnostics.WindowCount);
         HashSet<string> enhancedRegions = result.BayFacilityPlan.Facilities
             .Select(facility => facility.RegionIdentity).ToHashSet();
@@ -30,8 +29,6 @@ public sealed class MegastationBayHabitationTests
             !enhancedRegions.Contains(window.RegionIdentity));
         Assert.Equal(emittedBaseWindows * 4, plan.Diagnostics.MeshVertexCount);
         Assert.Equal(emittedBaseWindows * 2, plan.Diagnostics.MeshTriangleCount);
-        Assert.DoesNotContain(plan.Windows, window =>
-            Wall(plan, window.WallIdentity).Kind == MegastationBayWallKind.Entrance);
         foreach (MegastationBayHabitationWindow window in plan.Windows)
         {
             MegastationBayWallSurface wall = Wall(plan, window.WallIdentity);
@@ -100,7 +97,8 @@ public sealed class MegastationBayHabitationTests
         Assert.Equal(result.BayHabitationPlan.Regions, replanned.Habitation.Regions);
         Assert.Equal(result.BayHabitationPlan.Windows, replanned.Habitation.Windows);
         Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count
-            + result.BayFacilityPlan.ArtificialLights.Count,
+            + result.BayFacilityPlan.ArtificialLights.Count
+            + result.InteriorPlan.ShelfLighting!.ArtificialLights.Count,
             result.ArtificialLightingPlan.Lights.Count);
     }
 
@@ -163,13 +161,18 @@ public sealed class MegastationBayHabitationTests
         Assert.InRange(plan.Diagnostics.MaximumProjection, 0f, 6f);
         Assert.True(result.InteriorPlan.Diagnostics.ArtificialOccluderCount > casterParts);
         Assert.Equal(12 + result.LandingDistrictPlan.ArtificialLights.Count
-            + plan.ArtificialLights.Count,
+            + plan.ArtificialLights.Count
+            + result.InteriorPlan.ShelfLighting!.ArtificialLights.Count,
             result.ArtificialLightingPlan.Lights.Count);
-        Assert.Equal(plan.Diagnostics.CutoutCount, plan.ArtificialLights.Count);
+        Assert.True(plan.ArtificialLights.Count >= plan.Diagnostics.CutoutCount);
         Assert.Equal(plan.Diagnostics.ArtificialLightCount, plan.ArtificialLights.Count);
         Assert.Equal(habitation.Regions.Count, plan.Reservations.Count);
         Assert.All(habitation.Regions, region => Assert.Contains(plan.Reservations,
             reservation => reservation.RegionIdentity == region.Identity));
+        Assert.All(habitation.Regions, region => Assert.DoesNotContain(
+            result.LandingDistrictPlan.SiteReservations,
+            reservation => MegastationBayHabitationPlanner.ReservationOverlapsRegion(
+                region.WallIdentity, region.Centre, region.Size, reservation)));
         for (int first = 0; first < plan.Reservations.Count; first++)
         for (int second = first + 1; second < plan.Reservations.Count; second++)
             Assert.False(MegastationBayFacilityPlanner.ReservationsOverlap(
@@ -207,11 +210,16 @@ public sealed class MegastationBayHabitationTests
             });
             if (facility.Cutout is { } cutout)
             {
-                Assert.Equal(MegastationBayFacilityArchetype.RecessedFacility,
-                    facility.Archetype);
-                Assert.InRange(cutout.Depth, 1f, 5f);
+                Assert.Contains(facility.Archetype, new[]
+                {
+                    MegastationBayFacilityArchetype.RecessedFacility,
+                    MegastationBayFacilityArchetype.DeepRecess,
+                    MegastationBayFacilityArchetype.OpenGallery,
+                    MegastationBayFacilityArchetype.MultiStoreyGallery,
+                });
+                Assert.InRange(cutout.Depth, 3f, 12f);
                 Assert.InRange(cutout.Size.X, 10f, 100f);
-                Assert.InRange(cutout.Size.Y, 8f, 100f);
+                Assert.InRange(cutout.Size.Y, 3.2f, 100f);
                 Assert.NotEmpty(facility.Windows ?? []);
                 Assert.True(MegastationBayHabitationPlanner.TryFindSupportingFace(
                     facilityWall,
@@ -231,6 +239,22 @@ public sealed class MegastationBayHabitationTests
                 };
                 Assert.True(cutout.Depth <= result.RegularisedOccupancy.Grid
                     .GetCellSize(depthAxis, depthIndex) - .5f + .001f);
+                if (facility.Archetype == MegastationBayFacilityArchetype.OpenGallery)
+                {
+                    Assert.Equal(1, facility.StoreyCount);
+                    Assert.InRange(cutout.Size.Y, 3.2f, 4.2f);
+                }
+                if (facility.Archetype == MegastationBayFacilityArchetype.MultiStoreyGallery)
+                {
+                    Assert.InRange(facility.StoreyCount, 2, 5);
+                    Assert.InRange(cutout.Size.Y, 6.3f, 19f);
+                    Assert.Equal(facility.StoreyCount - 1,
+                        facility.Parts.Count(part =>
+                            part.Role == MegastationBayFacilityPartRole.GallerySlab));
+                }
+                Assert.Equal(Math.Max(1, facility.StoreyCount),
+                    facility.Parts.Count(part =>
+                        part.Role == MegastationBayFacilityPartRole.LightFixture));
             }
         }
         foreach (MegastationArtificialLight light in plan.ArtificialLights)
@@ -244,7 +268,7 @@ public sealed class MegastationBayHabitationTests
             Assert.InRange(recess, -cutout.Depth, 0f);
             Assert.True(IsFinite(light.Position));
             Assert.True(light.Forward.HasValue);
-            Assert.True(Vector3.Dot(light.Forward!.Value, -cutout.Normal) > .9999f);
+            Assert.True(Vector3.Dot(light.Forward!.Value, cutout.Normal) > .9999f);
         }
         for (int first = 0; first < plan.Facilities.Count; first++)
         for (int second = first + 1; second < plan.Facilities.Count; second++)
@@ -260,6 +284,10 @@ public sealed class MegastationBayHabitationTests
             $"{plan.Diagnostics.EligibleRegionCount}, plain={plan.Diagnostics.PlainRegionCount}; " +
             $"recessed={plan.Diagnostics.RecessedFacilityCount}, " +
             $"galleries={plan.Diagnostics.ProjectingGalleryCount}, " +
+            $"deep={plan.Diagnostics.DeepRecessCount}, " +
+            $"open={plan.Diagnostics.OpenGalleryCount}, " +
+            $"multi={plan.Diagnostics.MultiStoreyGalleryCount}/" +
+            $"{plan.Diagnostics.GalleryStoreyCount}storeys, " +
             $"embedded={plan.Diagnostics.EmbeddedBlockCount}, " +
             $"apertures={plan.Diagnostics.ServiceApertureCount}, " +
             $"secondary={plan.Diagnostics.SecondaryFormCount}; " +
@@ -271,6 +299,7 @@ public sealed class MegastationBayHabitationTests
             $"rejects={plan.Diagnostics.ReservationRejectCount} reservation/" +
             $"{plan.Diagnostics.CutoutValidationRejectCount} cutout, " +
             $"recessLights={plan.ArtificialLights.Count}; " +
+            $"plan={plan.Diagnostics.PlanningMilliseconds}ms; " +
             $"projection={plan.Diagnostics.MaximumProjection:F1}m; " +
             $"mesh={plan.Diagnostics.MeshVertexCount}v/{plan.Diagnostics.MeshTriangleCount}t, " +
             $"shadow={plan.Diagnostics.ShadowVertexCount}v/" +
@@ -390,7 +419,7 @@ public sealed class MegastationBayHabitationTests
     }
 
     [Fact]
-    public void RecessFacadesHaveHumanScaleRowsAndBalconyAccessArchitecture()
+    public void RecessFacadesHaveHumanScaleRowsAndGalleryAccessArchitecture()
     {
         MegastationBayFacility[] recessed = Result.Value.BayFacilityPlan.Facilities
             .Where(facility => facility.Cutout is not null).ToArray();
@@ -412,15 +441,17 @@ public sealed class MegastationBayHabitationTests
 
             MegastationBayFacilityPart[] balconies = facility.Parts.Where(part =>
                 part.Role == MegastationBayFacilityPartRole.GallerySlab).ToArray();
-            if (cutout.Size.Y >= 14f)
+            if (facility.StoreyCount > 0)
             {
-                Assert.InRange(balconies.Length, 1, 2);
-                Assert.Equal(balconies.Length, facility.Parts.Count(part =>
-                    part.Role == MegastationBayFacilityPartRole.PersonnelDoor));
+                Assert.InRange(facility.StoreyCount, 1, 5);
+                Assert.Equal(Math.Max(0, facility.StoreyCount - 1), balconies.Length);
+                Assert.InRange(facility.Parts.Count(part =>
+                    part.Role == MegastationBayFacilityPartRole.PersonnelDoor),
+                    1, facility.StoreyCount);
                 Assert.True(facility.Parts.Count(part =>
                     part.Role == MegastationBayFacilityPartRole.Railing) >=
-                    balconies.Length * 5);
-                foreach (int level in Enumerable.Range(0, balconies.Length))
+                    facility.StoreyCount * 5);
+                foreach (int level in Enumerable.Range(0, facility.StoreyCount))
                     Assert.Contains(windows, window => window.Identity.Contains(
                         $"/balcony:{level}/window:", StringComparison.Ordinal));
             }
@@ -447,7 +478,8 @@ public sealed class MegastationBayHabitationTests
             MegastationBayFacilityPlan facilities = composition.Facilities;
 
             Assert.NotEmpty(habitation.Regions);
-            Assert.NotEmpty(habitation.Windows);
+            Assert.True(habitation.Windows.Count
+                + facilities.Facilities.Sum(facility => facility.Windows?.Count ?? 0) > 0);
             Assert.Contains(facilities.Facilities, facility => facility.Cutout is not null);
             cutoutCount += facilities.Diagnostics.CutoutCount;
             lightCount += facilities.ArtificialLights.Count;

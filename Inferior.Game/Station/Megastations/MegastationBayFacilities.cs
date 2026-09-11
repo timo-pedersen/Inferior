@@ -12,6 +12,9 @@ public enum MegastationBayFacilityArchetype
     ProjectingGallery,
     EmbeddedBlock,
     ServiceAperture,
+    DeepRecess,
+    OpenGallery,
+    MultiStoreyGallery,
 }
 
 public enum MegastationBayFacilityPartRole
@@ -22,6 +25,7 @@ public enum MegastationBayFacilityPartRole
     ApertureBacking,
     PersonnelDoor,
     Railing,
+    LightFixture,
 }
 
 public enum MegastationBayFacilityColourRole
@@ -85,7 +89,8 @@ public sealed record MegastationBayFacility(
     bool HasSecondaryForm,
     IReadOnlyList<MegastationBayFacilityPart> Parts,
     MegastationBayWallCutout? Cutout = null,
-    IReadOnlyList<MegastationBayHabitationWindow>? Windows = null);
+    IReadOnlyList<MegastationBayHabitationWindow>? Windows = null,
+    int StoreyCount = 0);
 
 public sealed record MegastationBayFacilityDiagnostics(
     int AlgorithmVersion,
@@ -113,7 +118,11 @@ public sealed record MegastationBayFacilityDiagnostics(
     string Signature,
     int ReservationRejectCount = 0,
     int CutoutValidationRejectCount = 0,
-    int ArtificialLightCount = 0);
+    int ArtificialLightCount = 0,
+    int DeepRecessCount = 0,
+    int OpenGalleryCount = 0,
+    int MultiStoreyGalleryCount = 0,
+    int GalleryStoreyCount = 0);
 
 public sealed record MegastationBayFacilityPlan(
     IReadOnlyList<MegastationBayFacility> Facilities,
@@ -148,7 +157,7 @@ public static class MegastationBayWallCompositionPlanner
 
 public static class MegastationBayFacilityPlanner
 {
-    public const int AlgorithmVersion = 2;
+    public const int AlgorithmVersion = 3;
     private const float ReservationMargin = 2f;
 
     public static MegastationBayFacilityPlan Plan(
@@ -166,7 +175,7 @@ public static class MegastationBayFacilityPlanner
         var supportingFaces = new HashSet<BoundaryFaceKey>();
         int reservationRejects = 0;
         int cutoutValidationRejects = 0;
-        int rootSeed = MegastationSeed.Derive(interior.Seed, "bay-wall-facilities:v2");
+        int rootSeed = MegastationSeed.Derive(interior.Seed, "bay-wall-facilities:v3");
 
         // Allocate the strongest architecture first. This is a semantic priority,
         // not an emission-order accident: every later occupant sees its reservation.
@@ -176,7 +185,7 @@ public static class MegastationBayFacilityPlanner
                          "cutout-priority")))
         {
             int regionSeed = MegastationSeed.Derive(rootSeed, region.Identity);
-            MegastationBayFacility candidate = Build(region, regionSeed, forceRecess: true);
+            MegastationBayFacility candidate = Build(region, regionSeed, forceFeature: true);
             if (candidate.Cutout is null)
             {
                 cutoutValidationRejects++;
@@ -202,8 +211,8 @@ public static class MegastationBayFacilityPlanner
             if (Unit(seed, "presence") >= .58f)
                 continue;
             MegastationBayFacilityArchetype intendedArchetype = PickArchetype(seed);
-            MegastationBayFacility candidate = Build(region, seed, forceRecess: false);
-            if (intendedArchetype == MegastationBayFacilityArchetype.RecessedFacility
+            MegastationBayFacility candidate = Build(region, seed, forceFeature: false);
+            if (IsCutoutArchetype(intendedArchetype)
                 && occupancy is not null && topology is not null
                 && candidate.Cutout is null)
             {
@@ -255,7 +264,9 @@ public static class MegastationBayFacilityPlanner
             facilities.Count(item => item.Archetype ==
                 MegastationBayFacilityArchetype.RecessedFacility),
             facilities.Count(item => item.Archetype ==
-                MegastationBayFacilityArchetype.ProjectingGallery),
+                MegastationBayFacilityArchetype.ProjectingGallery
+                || item.Archetype == MegastationBayFacilityArchetype.OpenGallery
+                || item.Archetype == MegastationBayFacilityArchetype.MultiStoreyGallery),
             facilities.Count(item => item.Archetype ==
                 MegastationBayFacilityArchetype.EmbeddedBlock),
             facilities.Count(item => item.Archetype ==
@@ -276,20 +287,27 @@ public static class MegastationBayFacilityPlanner
             signature,
             reservationRejects,
             cutoutValidationRejects,
-            lights.Count);
+            lights.Count,
+            facilities.Count(item => item.Archetype == MegastationBayFacilityArchetype.DeepRecess),
+            facilities.Count(item => item.Archetype == MegastationBayFacilityArchetype.OpenGallery),
+            facilities.Count(item => item.Archetype == MegastationBayFacilityArchetype.MultiStoreyGallery),
+            facilities.Sum(item => item.StoreyCount));
         return new(facilities, retained, reservations, lights, diagnostics);
 
         MegastationBayFacility Build(
             MegastationBayHabitationRegion region,
             int seed,
-            bool forceRecess)
+            bool forceFeature)
         {
             MegastationBayWallSurface wall = habitation.Walls.Single(candidate =>
                 candidate.Identity == region.WallIdentity);
-            MegastationBayFacilityArchetype archetype = forceRecess
-                ? MegastationBayFacilityArchetype.RecessedFacility
+            MegastationBayFacilityArchetype archetype = forceFeature
+                ? region.Size.Y >= 11f
+                    ? MegastationBayFacilityArchetype.MultiStoreyGallery
+                    : MegastationBayFacilityArchetype.OpenGallery
                 : PickArchetype(seed);
             bool secondary = archetype is MegastationBayFacilityArchetype.RecessedFacility
+                    or MegastationBayFacilityArchetype.DeepRecess
                     or MegastationBayFacilityArchetype.EmbeddedBlock
                 && Unit(seed, "secondary") < .28f;
             return BuildFacility(wall, region, archetype, secondary, seed,
@@ -348,9 +366,9 @@ public static class MegastationBayFacilityPlanner
             facilities.Add(facility);
             retained.Add(facility.RegionIdentity);
             reservations.Add(Reservation(facility, wall));
-            if (facility.Cutout is { } cutout
-                && Unit(seed, "recess-light-presence") < .92f)
-                lights.Add(BuildRecessLight(cutout, seed));
+            if (facility.Cutout is not null
+                && Unit(seed, "recess-light-presence") < .96f)
+                lights.AddRange(BuildRecessLights(facility, seed));
         }
 
         bool landingBuildingsOverlap(
@@ -431,32 +449,56 @@ public static class MegastationBayFacilityPlanner
             buildingSize + new Vector2(ReservationMargin * 2f));
     }
 
-    private static MegastationArtificialLight BuildRecessLight(
-        MegastationBayWallCutout cutout,
+    private static IReadOnlyList<MegastationArtificialLight> BuildRecessLights(
+        MegastationBayFacility facility,
         int seed)
     {
-        float colourRoll = Unit(seed, "recess-light-colour");
-        Color colour = colourRoll < .72f ? new Color(255, 226, 185)
-            : colourRoll < .94f ? new Color(235, 238, 232)
-            : new Color(204, 225, 242);
-        float intensity = .52f + Unit(seed, "recess-light-intensity") * .28f;
-        float range = MathHelper.Clamp(
-            MathF.Max(cutout.Size.X, cutout.Size.Y) * .72f, 14f, 42f);
-        Vector3 position = cutout.Centre
-            - cutout.Normal * MathF.Min(cutout.Depth * .35f, 1.4f)
-            + cutout.Up * cutout.Size.Y * .22f;
-        return new($"{cutout.Identity}/architectural-light:v1", position,
-            colour, intensity, range, -cutout.Normal, -.2f);
+        MegastationBayWallCutout cutout = facility.Cutout!;
+        int count = facility.Archetype == MegastationBayFacilityArchetype.MultiStoreyGallery
+            ? Math.Clamp(facility.StoreyCount, 2, 5)
+            : 1;
+        float storeyHeight = cutout.Size.Y / Math.Max(1, facility.StoreyCount);
+        var result = new List<MegastationArtificialLight>(count);
+        for (int level = 0; level < count; level++)
+        {
+            int child = MegastationSeed.Derive(seed, $"recess-light:{level}");
+            float colourRoll = Unit(child, "colour");
+            Color colour = colourRoll < .48f ? new Color(255, 226, 185)
+                : colourRoll < .86f ? new Color(235, 238, 232)
+                : new Color(204, 225, 242);
+            float intensity = .60f + Unit(child, "intensity") * .28f;
+            float range = MathHelper.Clamp(
+                MathF.Max(cutout.Size.X * .42f, storeyHeight * 2.4f), 16f, 46f);
+            float y = facility.StoreyCount > 1
+                ? -cutout.Size.Y * .5f + (level + .68f) * storeyHeight
+                : cutout.Size.Y * .22f;
+            float x = count > 1 && level % 2 == 0 ? -cutout.Size.X * .20f
+                : count > 1 ? cutout.Size.X * .20f : 0f;
+            Vector3 position = cutout.Centre + cutout.Right * x + cutout.Up * y
+                - cutout.Normal * MathF.Max(.5f, cutout.Depth - .8f);
+            result.Add(new($"{cutout.Identity}/architectural-light:v2/{level}", position,
+                colour, intensity, range, cutout.Normal, -.10f));
+        }
+        return result;
     }
 
     private static MegastationBayFacilityArchetype PickArchetype(int seed)
     {
         float roll = Unit(seed, "primary-form");
-        return roll < .36f ? MegastationBayFacilityArchetype.RecessedFacility
-            : roll < .67f ? MegastationBayFacilityArchetype.ProjectingGallery
-            : roll < .91f ? MegastationBayFacilityArchetype.EmbeddedBlock
+        return roll < .08f ? MegastationBayFacilityArchetype.RecessedFacility
+            : roll < .27f ? MegastationBayFacilityArchetype.DeepRecess
+            : roll < .69f ? MegastationBayFacilityArchetype.OpenGallery
+            : roll < .75f ? MegastationBayFacilityArchetype.MultiStoreyGallery
+            : roll < .80f ? MegastationBayFacilityArchetype.ProjectingGallery
+            : roll < .94f ? MegastationBayFacilityArchetype.EmbeddedBlock
             : MegastationBayFacilityArchetype.ServiceAperture;
     }
+
+    private static bool IsCutoutArchetype(MegastationBayFacilityArchetype archetype)
+        => archetype is MegastationBayFacilityArchetype.RecessedFacility
+            or MegastationBayFacilityArchetype.DeepRecess
+            or MegastationBayFacilityArchetype.OpenGallery
+            or MegastationBayFacilityArchetype.MultiStoreyGallery;
 
     private static MegastationBayFacility BuildFacility(
         MegastationBayWallSurface wall,
@@ -471,6 +513,13 @@ public static class MegastationBayFacilityPlanner
         var windows = new List<MegastationBayHabitationWindow>();
         MegastationBayWallCutout? cutout = null;
         float maximumProjection = 0f;
+        int storeyCount = archetype switch
+        {
+            MegastationBayFacilityArchetype.OpenGallery => 1,
+            MegastationBayFacilityArchetype.MultiStoreyGallery => Math.Clamp(
+                Math.Min(5, (int)(region.Size.Y / 3.25f)), 2, 5),
+            _ => 0,
+        };
         float frameMargin = 1.5f + Unit(seed, "frame-margin") * 1.5f;
         float width = region.Size.X + frameMargin * 2f;
         float height = region.Size.Y + frameMargin * 2f;
@@ -481,10 +530,11 @@ public static class MegastationBayFacilityPlanner
             ? 2.8f + Unit(seed, "depth") * 1.8f
             : .65f + Unit(seed, "depth") * .55f;
 
-        if (archetype == MegastationBayFacilityArchetype.RecessedFacility
+        if (IsCutoutArchetype(archetype)
             && occupancy is not null && topology is not null)
         {
-            cutout = BuildCutout(wall, region, seed, occupancy, topology);
+            cutout = BuildCutout(wall, region, archetype, storeyCount,
+                seed, occupancy, topology);
             if (cutout is not null && Unit(seed, "cut-edge-frame") < .42f)
                 AddPerimeter(MegastationBayFacilityPartRole.ApertureFrame,
                     new(Vector3.Dot(cutout.Centre - wall.Centre, wall.Right),
@@ -493,15 +543,16 @@ public static class MegastationBayFacilityPlanner
                     SystemMaterialFamilyId.HeavyIndustrialPlate,
                     "cut-edge/frame");
         }
-        if (archetype == MegastationBayFacilityArchetype.RecessedFacility
+        if (IsCutoutArchetype(archetype)
             && cutout is null && occupancy is not null && topology is not null)
         {
             // A production recess is a structural cut or it is not a recess. Keep the
             // region useful without reintroducing the rejected picture-frame fallback.
             archetype = MegastationBayFacilityArchetype.ProjectingGallery;
             secondary = false;
+            storeyCount = 0;
         }
-        if (archetype == MegastationBayFacilityArchetype.RecessedFacility
+        if (IsCutoutArchetype(archetype)
             && cutout is null)
         {
             // Compatibility for plan-only fixtures without topology. Production always
@@ -594,82 +645,109 @@ public static class MegastationBayFacilityPlanner
             (minX + maxX) * .5f, (minY + maxY) * .5f, (minZ + maxZ) * .5f);
         Vector3 envelopeSize = new(maxX - minX, maxY - minY, maxZ - minZ);
         return new(
-            $"{region.Identity}/facility:v2", wall.Identity, region.Identity,
+            $"{region.Identity}/facility:v3", wall.Identity, region.Identity,
             archetype, wall.Right, wall.Up, wall.Normal,
             envelopeCentre, envelopeSize, maximumProjection, secondary, parts,
-            cutout, windows);
+            cutout, windows, storeyCount);
 
         void AddRecessArchitecture(MegastationBayWallCutout opening)
         {
             float localX = Vector3.Dot(opening.Centre - wall.Centre, wall.Right);
             float localY = Vector3.Dot(opening.Centre - wall.Centre, wall.Up);
-            int balconyCount = opening.Size.Y >= 14f
-                ? 1 + (Unit(seed, "balcony-count") > .72f ? 1 : 0)
-                : 0;
-            float[] balconyLevels = Enumerable.Range(0, balconyCount)
-                .Select(level => localY - opening.Size.Y * .5f
-                    + (level + 1f) * opening.Size.Y / (balconyCount + 1f))
-                .ToArray();
-            int rows = 1 + (int)(Unit(seed, "recess-window-rows") * 5f);
-            rows = Math.Clamp(rows, 1, 5);
-            int columns = Math.Clamp((int)(opening.Size.X / 3.4f), 4, 14);
-            float spacingX = MathF.Min(3.2f, (opening.Size.X - 4f) / Math.Max(1, columns - 1));
-            float spacingY = MathF.Min(3.4f, (opening.Size.Y - 4.5f) / Math.Max(1, rows));
-            float windowWidth = 1.35f;
-            float windowHeight = 1.15f;
-            float facadeZ = -opening.Depth + .045f;
-            for (int row = 0; row < rows; row++)
-            for (int column = 0; column < columns; column++)
+            if (archetype is MegastationBayFacilityArchetype.DeepRecess
+                or MegastationBayFacilityArchetype.RecessedFacility)
             {
-                int child = MegastationSeed.Derive(seed, $"recess-window:{row}:{column}");
-                if (Unit(child, "gap") < .08f)
-                    continue;
-                MegastationWindowState state = Unit(child, "state") < .18f
-                    ? MegastationWindowState.Dark
-                    : Unit(child, "state") < .36f
-                        ? MegastationWindowState.Dim
-                        : MegastationWindowState.Lit;
-                Color colour = state == MegastationWindowState.Dark
-                    ? new Color(18, 20, 21)
-                    : state == MegastationWindowState.Dim
-                        ? Color.Lerp(region.DominantColour, Color.Black, .42f)
-                        : region.DominantColour;
-                float illumination = state == MegastationWindowState.Lit ? .58f
-                    : state == MegastationWindowState.Dim ? .22f : .015f;
-                float x = localX + (column - (columns - 1) * .5f) * spacingX;
-                float y = localY + (row - (rows - 1) * .5f) * spacingY;
-                if (balconyLevels.Any(level =>
-                        MathF.Abs(y - (level + 1.45f)) < 1f))
-                    continue;
-                Vector3 centre = wall.Centre + wall.Right * x + wall.Up * y
-                    + wall.Normal * facadeZ;
-                windows.Add(new(
-                    $"{region.Identity}/recess/window:{row}:{column}",
-                    wall.Identity, region.Identity, MegastationBayWindowPattern.DoubleRow,
-                    centre, wall.Normal, wall.Up, windowWidth, windowHeight,
-                    state, colour, illumination));
+                PlanRearWindowRows(opening, localX, localY,
+                    Math.Clamp((int)(opening.Size.Y / 3.2f), 1, 5));
+                AddPart("recess/light-fixture", MegastationBayFacilityPartRole.LightFixture,
+                    new(localX, localY + opening.Size.Y * .28f, -opening.Depth + .10f),
+                    new(MathHelper.Clamp(opening.Size.X * .16f, 1.4f, 3.2f), .22f, .16f),
+                    SystemMaterialFamilyId.CleanTechnicalAlloy,
+                    MegastationBayFacilityColourRole.Accent, false);
+                return;
             }
 
-            for (int level = 0; level < balconyCount; level++)
+            int levels = Math.Max(1, storeyCount);
+            float storeyHeight = opening.Size.Y / levels;
+            for (int level = 0; level < levels; level++)
             {
-                float y = balconyLevels[level];
-                float width = opening.Size.X * (.68f + Unit(seed, $"balcony-width:{level}") * .26f);
-                float depth = MathF.Max(1.2f, opening.Depth - .45f);
-                float slab = .22f;
-                AddPart($"recess/balcony:{level}/slab",
-                    MegastationBayFacilityPartRole.GallerySlab,
-                    new(localX, y - slab * .5f, -opening.Depth + depth * .5f),
-                    new(width, slab, depth), SystemMaterialFamilyId.HeavyIndustrialPlate,
-                    MegastationBayFacilityColourRole.Secondary, true);
-                AddGalleryRails($"recess/balcony:{level}", localX, y, width,
-                    -opening.Depth + depth, depth,
-                    exposedEnds: width < opening.Size.X - 1.2f);
-                AddPart($"recess/balcony:{level}/door",
-                    MegastationBayFacilityPartRole.PersonnelDoor,
-                    new(localX, y + 1.2f, -opening.Depth + .10f),
-                    new(1.25f, 2.4f, .20f), SystemMaterialFamilyId.CleanTechnicalAlloy,
-                    MegastationBayFacilityColourRole.Dark, false);
-                PlanBalconyWindows(opening, level, localX, y, width);
+                float floorY = localY - opening.Size.Y * .5f + level * storeyHeight;
+                float width = opening.Size.X * (.78f
+                    + Unit(seed, $"gallery-width:{level}") * .18f);
+                float depth = MathF.Max(2.6f, opening.Depth - .22f);
+                if (level > 0)
+                {
+                    const float slab = .28f;
+                    AddPart($"recess/gallery:{level}/slab",
+                        MegastationBayFacilityPartRole.GallerySlab,
+                        new(localX, floorY - slab * .5f,
+                            -opening.Depth + depth * .5f),
+                        new(width, slab, depth),
+                        SystemMaterialFamilyId.HeavyIndustrialPlate,
+                        MegastationBayFacilityColourRole.Secondary, true);
+                }
+                AddGalleryRails($"recess/gallery:{level}", localX, floorY, width,
+                    0f, depth, exposedEnds: width < opening.Size.X - 1.2f);
+                if (Unit(seed, $"gallery-door:{level}") < .78f || level == 0)
+                    AddPart($"recess/gallery:{level}/door",
+                        MegastationBayFacilityPartRole.PersonnelDoor,
+                        new(localX, floorY + 1.2f, -opening.Depth + .10f),
+                        new(1.25f, 2.4f, .20f),
+                        SystemMaterialFamilyId.CleanTechnicalAlloy,
+                        MegastationBayFacilityColourRole.Dark, false);
+                AddPart($"recess/gallery:{level}/light-fixture",
+                    MegastationBayFacilityPartRole.LightFixture,
+                    new(localX + (level % 2 == 0 ? -width * .22f : width * .22f),
+                        floorY + MathF.Min(2.72f, storeyHeight - .35f),
+                        -opening.Depth + .10f),
+                    new(1.65f, .22f, .16f), SystemMaterialFamilyId.CleanTechnicalAlloy,
+                    MegastationBayFacilityColourRole.Accent, false);
+                PlanBalconyWindows(opening, level, localX, floorY, width);
+            }
+        }
+
+        void PlanRearWindowRows(
+            MegastationBayWallCutout opening,
+            float localX,
+            float localY,
+            int rows)
+        {
+            int columns = Math.Clamp((int)(opening.Size.X / 3.2f), 5, 18);
+            float spacingX = MathF.Min(3f,
+                (opening.Size.X - 3.5f) / Math.Max(1, columns - 1));
+            float spacingY = MathF.Min(3.25f,
+                (opening.Size.Y - 3.5f) / Math.Max(1, rows));
+            for (int row = 0; row < rows; row++)
+            {
+                int rowSeed = MegastationSeed.Derive(seed, $"recess-window-row:{row}");
+                MegastationWindowState rowState = Unit(rowSeed, "state") < .18f
+                    ? MegastationWindowState.Dim : MegastationWindowState.Lit;
+                int gapStride = Unit(rowSeed, "rhythm") < .35f ? 5 : 7;
+                int gapOffset = (int)(Unit(rowSeed, "offset") * gapStride);
+                for (int column = 0; column < columns; column++)
+                {
+                    if ((column + gapOffset) % gapStride == 0)
+                        continue;
+                    bool dark = Unit(rowSeed, $"dark:{column}") < .10f;
+                    MegastationWindowState state = dark
+                        ? MegastationWindowState.Dark : rowState;
+                    Color colour = state == MegastationWindowState.Dark
+                        ? new Color(18, 20, 21)
+                        : state == MegastationWindowState.Dim
+                            ? Color.Lerp(region.DominantColour, Color.Black, .42f)
+                            : region.DominantColour;
+                    float x = localX + (column - (columns - 1) * .5f) * spacingX;
+                    float y = localY + (row - (rows - 1) * .5f) * spacingY;
+                    windows.Add(new(
+                        $"{region.Identity}/recess/window:{row}:{column}",
+                        wall.Identity, region.Identity,
+                        MegastationBayWindowPattern.DoubleRow,
+                        wall.Centre + wall.Right * x + wall.Up * y
+                            + wall.Normal * (-opening.Depth + .045f),
+                        wall.Normal, wall.Up, 1.35f, 1.15f, state, colour,
+                        state == MegastationWindowState.Lit ? .58f
+                            : state == MegastationWindowState.Dim ? .22f : .015f));
+                }
             }
         }
 
@@ -683,16 +761,20 @@ public static class MegastationBayFacilityPlanner
             int columns = Math.Clamp((int)(balconyWidth / 4f), 4, 8);
             float spacing = MathF.Min(3.2f,
                 (balconyWidth - 3f) / Math.Max(1, columns - 1));
+            int levelSeed = MegastationSeed.Derive(seed, $"gallery-level:{level}");
+            MegastationWindowState levelState = Unit(levelSeed, "state") < .20f
+                ? MegastationWindowState.Dim : MegastationWindowState.Lit;
             for (int column = 0; column < columns; column++)
             {
                 if (column == columns / 2)
                     continue;
-                int child = MegastationSeed.Derive(seed,
-                    $"balcony-window:{level}:{column}");
-                MegastationWindowState state = Unit(child, "state") < .18f
-                    ? MegastationWindowState.Dark : MegastationWindowState.Lit;
+                MegastationWindowState state = Unit(levelSeed, $"dark:{column}") < .12f
+                    ? MegastationWindowState.Dark : levelState;
                 Color colour = state == MegastationWindowState.Dark
-                    ? new Color(18, 20, 21) : region.DominantColour;
+                    ? new Color(18, 20, 21)
+                    : state == MegastationWindowState.Dim
+                        ? Color.Lerp(region.DominantColour, Color.Black, .42f)
+                        : region.DominantColour;
                 windows.Add(new(
                     $"{region.Identity}/recess/balcony:{level}/window:{column}",
                     wall.Identity, region.Identity,
@@ -702,7 +784,8 @@ public static class MegastationBayFacilityPlanner
                         + wall.Up * (floorY + 1.45f)
                         + wall.Normal * (-opening.Depth + .045f),
                     wall.Normal, wall.Up, 1.35f, 1.15f, state, colour,
-                    state == MegastationWindowState.Lit ? .58f : .015f));
+                    state == MegastationWindowState.Lit ? .58f
+                        : state == MegastationWindowState.Dim ? .22f : .015f));
             }
         }
 
@@ -822,7 +905,7 @@ public static class MegastationBayFacilityPlanner
             MegastationBayFacilityColourRole colour,
             bool casts)
             => parts.Add(new(
-                $"{region.Identity}/facility:v2/{suffix}", role,
+                $"{region.Identity}/facility:v3/{suffix}", role,
                 SurfacePoint(localCentre.X, localCentre.Y, localCentre.Z),
                 size, material, colour, casts));
 
@@ -833,12 +916,22 @@ public static class MegastationBayFacilityPlanner
     private static MegastationBayWallCutout? BuildCutout(
         MegastationBayWallSurface wall,
         MegastationBayHabitationRegion region,
+        MegastationBayFacilityArchetype archetype,
+        int storeyCount,
         int seed,
         StructuralOccupancy occupancy,
         BoundaryTopology topology)
     {
         SliceGrid grid = occupancy.Grid;
-        Vector2 desiredSize = new(region.Size.X, MathF.Max(region.Size.Y, 10f));
+        float desiredHeight = archetype switch
+        {
+            MegastationBayFacilityArchetype.OpenGallery => MathHelper.Clamp(
+                region.Size.Y, 3.2f, 4.2f),
+            MegastationBayFacilityArchetype.MultiStoreyGallery => MathHelper.Clamp(
+                storeyCount * (3.15f + Unit(seed, "storey-height") * .45f), 6.3f, 19f),
+            _ => MathF.Max(region.Size.Y, 7f),
+        };
+        Vector2 desiredSize = new(region.Size.X, desiredHeight);
         if (!MegastationBayHabitationPlanner.TryFindSupportingFace(
                 wall, region.Centre, desiredSize, 2f, grid, topology,
                 out BoundaryFace? selectedFace)
@@ -862,8 +955,12 @@ public static class MegastationBayFacilityPlanner
         float maximumDepth = grid.GetCellSize(depthAxis, depthIndex) - .5f;
         if (maximumDepth < 1f)
             return null;
-        float depth = MathF.Min(1f + Unit(seed, "recess-depth") * 4f,
-            maximumDepth);
+        float requestedDepth = IsCutoutArchetype(archetype)
+            ? 4.5f + Unit(seed, "recess-depth") * 7.5f
+            : 1f + Unit(seed, "recess-depth") * 4f;
+        float depth = MathF.Min(requestedDepth, maximumDepth);
+        if (IsCutoutArchetype(archetype) && depth < 3f)
+            return null;
         Vector3 centre = wall.Centre + wall.Right * region.Centre.X
             + wall.Up * region.Centre.Y;
         return new(
@@ -884,6 +981,7 @@ public static class MegastationBayFacilityPlanner
         {
             text.Append('|').Append(facility.Identity).Append(':')
                 .Append(facility.Archetype).Append(':')
+                .Append(facility.StoreyCount).Append(':')
                 .Append(facility.MaximumProjection.ToString("R", CultureInfo.InvariantCulture));
             foreach (MegastationBayFacilityPart part in facility.Parts)
                 text.Append(':').Append(part.Identity).Append('@').Append(part.Centre)
@@ -961,7 +1059,11 @@ public static class MegastationBayFacilityMeshBuilder
                 facility.Up.X, facility.Up.Y, facility.Up.Z, 0f,
                 facility.Normal.X, facility.Normal.Y, facility.Normal.Z, 0f,
                 part.Centre.X, part.Centre.Y, part.Centre.Z, 1f);
+            int partFirstFace = mesh.FaceCount;
             mesh.AddOrientedBox(frame, part.Size, colour);
+            if (part.Role == MegastationBayFacilityPartRole.LightFixture)
+                for (int face = partFirstFace; face < mesh.FaceCount; face++)
+                    illumination.Add((face, .88f));
             if (part.CastsArtificialShadow)
                 shadowParts++;
         }
