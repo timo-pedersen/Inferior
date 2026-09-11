@@ -45,7 +45,7 @@ public sealed partial class SystemSpaceState
         _showZoneTypeDebug = !_showZoneTypeDebug;
 
         string legend = string.Join(", ", ZoneDebugPalette.Select(kv => $"{kv.Key}={ColourName(kv.Value)}"));
-        DataBus.System.Publish(Topics.System.All, new SystemMessage(
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
             _showZoneTypeDebug
                 ? $"Zone-type debug overlay ON (dimmed = blocked by a neighbour). Legend: {legend}"
                 : "Zone-type debug overlay OFF",
@@ -63,21 +63,20 @@ public sealed partial class SystemSpaceState
 
     private void DumpNovaAnchorageZoneContent()
     {
-        Galaxy.Station? novaAnchorage = null;
-        List<PlacedModule>? modules = null;
-        foreach (var (station, mods) in _stationGeometry)
-        {
-            if (station.Name != NovaAnchorageStationName) continue;
-            novaAnchorage = station;
-            modules = mods;
-            break;
-        }
+        // Only one station's geometry is resident at a time under the visual residency
+        // system — the dump only works while Nova Anchorage itself is the resident one.
+        Galaxy.Station? novaAnchorage = ResidentStationVisual?.Descriptor.Station.Name
+            == NovaAnchorageStationName
+                ? ResidentStationVisual!.Descriptor.Station
+                : null;
+        List<PlacedModule>? modules = novaAnchorage != null ? ResidentStationVisual!.Modules : null;
 
         if (novaAnchorage == null || modules == null)
         {
             System.Console.WriteLine(
                 $"[ZoneDebug] '{NovaAnchorageStationName}' not found in the current system — " +
-                "this dump only works while its home system is loaded.");
+                "this dump only works while its home system is loaded and it is the resident " +
+                "(nearest) station.");
             return;
         }
 

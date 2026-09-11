@@ -250,6 +250,9 @@ public sealed partial class SystemSpaceState
         _simulation.RequestStationRelocation(
             request.StationPersistenceId,
             request.SurfaceStandOffMeters);
+        RequestExplicitStationVisual(
+            request.StationPersistenceId,
+            "debug station cycle");
         return true;
     }
 

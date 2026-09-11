@@ -11,6 +11,14 @@ namespace Inferior.Game.StationGen;
 public static partial class StationDecorator
 {
     public static void Decorate(IReadOnlyList<PlacedModule> modules)
+        => Decorate(modules, includeStationWidePasses: true);
+
+    public static void DecorateSecondaryModules(IReadOnlyList<PlacedModule> modules)
+        => Decorate(modules, includeStationWidePasses: false);
+
+    private static void Decorate(
+        IReadOnlyList<PlacedModule> modules,
+        bool includeStationWidePasses)
     {
         foreach (var mod in modules)
         {
@@ -30,7 +38,7 @@ public static partial class StationDecorator
             var cableRng        = new System.Random(baseRng.Next());
 
             // Brief U1: a custom hull factory now returns two meshes — Hull (load-bearing,
-            // never AO'd, drawn DynamicLit like a box module's BuildHullMesh output) and
+            // never AO'd, drawn DynamicLit like a box module's prepared hull output) and
             // Deco (this module's mod.Mesh from here on, exactly like a box module's:
             // starts either empty or pre-seeded with the factory's own structural-but-
             // decoration content, and StationDecorator's passes build it up the same way
@@ -214,6 +222,11 @@ public static partial class StationDecorator
                 mod.GlassMesh = glassMesh;
         }
 
+        // Megastation secondary structures reuse only the module-local presentation
+        // pipeline. They must not grow station-global landmarks, arrays, dishes, or pads.
+        if (!includeStationWidePasses)
+            return;
+
         // Station-wide passes that need all modules to be decorated first.
         int stationSeed = modules.Count > 0 ? modules[0].Seed : 42;
         PlaceLandmarkAntenna(modules, new System.Random(stationSeed ^ 0x12345678));
@@ -237,6 +250,15 @@ public static partial class StationDecorator
     public static readonly DecorClass[] C4Classes =
         [DecorClass.Windows, DecorClass.Hatches];
 
+    // Native megastation presentation layers were introduced after the legacy C1-C4
+    // rollout. They still need an explicit place in the production caster set: merely
+    // setting DecorCastingPolicy to true is not enough because station residency passes
+    // the active rollout-stage classes to CPU preparation.
+    public static readonly DecorClass[] MegastationCasterClasses =
+        [DecorClass.MegastationInfrastructureMajor, DecorClass.MegastationMegaGreebleMajor,
+         DecorClass.MegastationFabricMajor, DecorClass.MegastationServiceChannelMajor,
+         DecorClass.MegastationInteriorMajor];
+
     // Docs/station-lighting-pipeline-spec.md §10 Phase C: the executable form of the
     // "documented casting policy." SystemSpaceState.Shadows.cs reads this to decide which
     // DecorClassRanges feed the per-module shadow-caster index buffer. Rollout is one
@@ -257,6 +279,16 @@ public static partial class StationDecorator
             [DecorClass.Lights]             = false, // lights/lenses, bay guidance lights, placards — tiny and/or emissive
             [DecorClass.Glass]              = false, // separate transparent mesh, per spec
             [DecorClass.LandingPadMarkings] = false, // flat; pad faces are kept clear anyway
+            [DecorClass.MegastationInfrastructureMinor] = false, // vents and small service detail
+            [DecorClass.MegastationInfrastructureMajor] = true,  // tanks and substantial housings
+            [DecorClass.MegastationMegaGreebleMinor] = false, // ribs, receivers and fine braces
+            [DecorClass.MegastationMegaGreebleMajor] = true,  // collector, dish and major supports
+            [DecorClass.MegastationFabricMinor] = false, // facade strips and minor surface breakup
+            [DecorClass.MegastationFabricMajor] = true,  // substantial background building masses
+            [DecorClass.MegastationServiceChannelMinor] = false, // floor and internal conduit runs
+            [DecorClass.MegastationServiceChannelMajor] = true,  // lips, terminals and bridges
+            [DecorClass.MegastationInteriorMinor] = false, // lights, markings, windows, rails and small guidance detail
+            [DecorClass.MegastationInteriorMajor] = true,  // substantial interior architecture, including future structural platforms
 
             // C1 — structural. Landed: gated via F8 overlay + Timo's in-engine screenshots.
             [DecorClass.Pipes]        = true,
@@ -298,7 +330,7 @@ public static partial class StationDecorator
     // Call after BakeLighting so lighting colours are already baked in.
     // Brief U1: AO's rule is the simple pre-factory form again — it runs on the decoration
     // mesh (mod.Mesh) only, starting at face 0, for both module kinds uniformly. Hull
-    // geometry (a box module's BuildHullMesh output, or a MeshFactory module's mod.HullMesh)
+    // geometry (a box module's prepared hull output, or a MeshFactory module's mod.HullMesh)
     // is never in mod.Mesh at all, so there's no range to exclude any more.
     public static void ApplyAmbientOcclusion(IReadOnlyList<PlacedModule> modules)
     {

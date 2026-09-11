@@ -3,18 +3,67 @@ using Microsoft.Xna.Framework.Graphics;
 using Inferior.Core.Math;
 using Inferior.Core.Random;
 using Inferior.Galaxy;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.Rendering;
 
 namespace Inferior.Game.StationGen;
 
-// Brief S2b-1: Generate()'s panel textures are now per-station-owned (see AssignTextures),
-// not the old shared static cache — PanelTextures is every distinct Texture2D this
-// generation pass created, for the caller to dispose when the station unloads
-// (SystemSpaceState's _stationPanelTextures, alongside _hullMeshes/_decoMeshes). Modules
-// is unchanged; PanelTextures is purely a disposal manifest, not something callers need
-// to index — every module's own PlacedModule.TextureInstance already points at the right
-// element.
-public sealed record StationGenerationResult(List<PlacedModule> Modules, IReadOnlyList<Texture2D> PanelTextures);
+// Uploaded panel textures are package-owned rather than globally cached. PanelTextures is
+// the disposal manifest installed into the resident StationVisualPackage; modules point
+// directly at the corresponding entries.
+public sealed record StationGenerationResult(
+    List<PlacedModule> Modules,
+    IReadOnlyList<Texture2D> PanelTextures,
+    MegastationPrototypeDiagnostics? MegastationDiagnostics = null);
+
+public sealed record StationMeshCpuData(
+    VertexPositionNormalColorTexture[] Vertices,
+    int[] Indices);
+
+public sealed record PreparedStationTexture(int Width, int Height, Color[] Pixels);
+
+public sealed record StationTextureAssignment(
+    PlacedModule Module,
+    int AlbedoTextureIndex,
+    int MaterialTextureIndex);
+
+public sealed record StationTexturePreparationDiagnostics(
+    int GeneratedTextureCount,
+    int GeneratedVariantPairCount,
+    int SelectedUniqueTextureCount,
+    int SelectedUniqueTexturePairCount,
+    int DiscardedTextureCount,
+    int UploadedAlbedoTextureCount,
+    int UploadedMaterialTextureCount,
+    int ModuleTextureBindingCount,
+    int SharedFallbackReferenceCount);
+
+internal sealed record StationTextureCompactionResult(
+    IReadOnlyList<PreparedStationTexture> Textures,
+    IReadOnlyList<StationTextureAssignment> Assignments,
+    StationTexturePreparationDiagnostics Diagnostics);
+
+public sealed record StationGenerationCpuResult(
+    List<PlacedModule> Modules,
+    IReadOnlyList<PreparedStationTexture> Textures,
+    IReadOnlyList<StationTextureAssignment> TextureAssignments,
+    IReadOnlyDictionary<PlacedModule, StationMeshCpuData> FlatDecorationMeshes,
+    IReadOnlyList<StationVisualUploadPlanItem> UploadPlan,
+    MegastationPrototypeDiagnostics? MegastationDiagnostics,
+    double GenerationMilliseconds,
+    StationTexturePreparationDiagnostics TextureDiagnostics,
+    bool UsesSharedMegastationFallbackTextures = false,
+    MegastationSemanticZoningResult? MegastationSemanticZoning = null,
+    MegastationWindowDiagnostics? MegastationWindowDiagnostics = null,
+    MegastationLightingDiagnostics? MegastationLightingDiagnostics = null,
+    MegastationAttachmentDiagnostics? MegastationAttachmentDiagnostics = null,
+    MegastationInfrastructureDiagnostics? MegastationInfrastructureDiagnostics = null,
+    MegastationMegaGreebleDiagnostics? MegastationMegaGreebleDiagnostics = null,
+    MegastationFabricDiagnostics? MegastationFabricDiagnostics = null,
+    MegastationServiceChannelDiagnostics? MegastationServiceChannelDiagnostics = null,
+    MegastationSystemMaterialDiagnostics? MegastationSystemMaterialDiagnostics = null,
+    MegastationInteriorPlan? MegastationInterior = null,
+    BolonMegastationDiagnostics? BolonMegastationDiagnostics = null);
 
 /// <summary>
 /// Procedural station builder. Grows a station by attaching modules port-to-port,
@@ -27,7 +76,7 @@ public sealed class StationGenerator
     private readonly List<PlacedModule> _placed = [];
 
     // Reserved approach corridor in front of a docking bay's door — kept separate from _placed
-    // so every pass that iterates _placed expecting real modules (AssignTextures, BakeLighting,
+    // so every pass that iterates _placed expecting real modules (PrepareTextures, BakeLighting,
     // ValidatePlacement, PopulateLandingPads) needs no changes. Only IntersectsAny checks it.
     private readonly List<(Vector3 min, Vector3 max)> _reservedVolumes = [];
 
@@ -47,34 +96,202 @@ public sealed class StationGenerator
     // used for its N.L bake, which is gone now that the sun term is computed per frame in
     // LitSurface.fx (Docs/station-lighting-pipeline-spec.md Phase A). Kept on the signature
     // rather than touching this public entry point's call site for a lighting-only brief.
-    public static StationGenerationResult Generate(Galaxy.Station station, GraphicsDevice gd,
-                                               double gameTime = 0.0)
+    public static StationGenerationResult Generate(
+                                               Galaxy.Station station, GraphicsDevice gd,
+                                               double gameTime = 0.0,
+                                               bool useMegastationPrototype = false)
     {
-        int seed = NameHash(station.Name);
-        var gen  = new StationGenerator(seed);
+        StationGenerationCpuResult prepared = PrepareCpu(station, useMegastationPrototype);
+        StationGenerationResult result = UploadPrepared(station, prepared, gd);
+        PopulateLandingPads(station, result.Modules);
+        return result;
+    }
 
+    public static StationGenerationCpuResult PrepareCpu(
+        Galaxy.Station station,
+        bool useMegastationPrototype = false,
+        CancellationToken cancellationToken = default,
+        IReadOnlySet<DecorClass>? enabledShadowCasterClasses = null,
+        SystemMaterialAssignmentContext? systemMaterials = null,
+        MegastationArchetype? megastationArchetype = null)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        enabledShadowCasterClasses ??= StationDecorator.DecorCastingPolicy
+            .Where(pair => pair.Value)
+            .Select(pair => pair.Key)
+            .ToHashSet();
+        if (useMegastationPrototype)
+        {
+            string identity = station.PersistenceId ?? station.Name;
+            MegastationArchetype resolvedArchetype =
+                megastationArchetype ?? station.MegastationArchetype;
+            if (resolvedArchetype != MegastationArchetype.Standard)
+                return PrepareBolonMegastation(
+                    identity,
+                    resolvedArchetype,
+                    stopwatch,
+                    enabledShadowCasterClasses,
+                    cancellationToken);
+            MegastationPrototypeCpuResult cpu = MegastationPrototypeGenerator.GenerateCpu(
+                identity,
+                stopwatch: stopwatch,
+                cancellationToken: cancellationToken,
+                systemMaterials: systemMaterials);
+            stopwatch.Start();
+            PlacedModule structure = MegastationPrototypeGenerator.CreatePlacedModule(cpu);
+            PlacedModule interior = MegastationPrototypeGenerator.CreateInteriorModule(cpu);
+            PlacedModule? megaGreeble = MegastationPrototypeGenerator.CreateMegaGreebleModule(cpu);
+            PlacedModule? fabric = MegastationPrototypeGenerator.CreateFabricModule(cpu);
+            PlacedModule? serviceChannels =
+                MegastationPrototypeGenerator.CreateServiceChannelModule(cpu);
+            List<PlacedModule> secondaryModules =
+                MegastationAttachmentPlanner.CreatePlacedModules(cpu.AttachmentPlan);
+            StationDecorator.DecorateSecondaryModules(secondaryModules);
+            BakeLighting(secondaryModules);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var megaFlatMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+            foreach (PlacedModule secondary in secondaryModules)
+            {
+                if (secondary.Mesh is not { IsEmpty: false } mesh)
+                    continue;
+                var (vertices, indices) = mesh.ToIntArrays();
+                megaFlatMeshes[secondary] = new StationMeshCpuData(vertices, indices);
+            }
+            StationDecorator.ApplyAmbientOcclusion(secondaryModules);
+
+            int megaSeed = NameHash(station.Name);
+            StationScale megaScale = station.Size switch
+            {
+                StationSize.Small => StationScale.Outpost,
+                StationSize.Medium => StationScale.Station,
+                StationSize.Large => StationScale.Port,
+                _ => StationScale.Outpost,
+            };
+            StationProfile megaProfile = StationProfile.Generate(megaSeed, megaScale);
+            TexturePalette megaPalette = TexturePalette.From(megaProfile);
+            var (generatedTextures, generatedAssignments) = PrepareTextures(
+                secondaryModules,
+                megaPalette,
+                megaProfile,
+                station,
+                cancellationToken,
+                includeNameFace: false);
+            StationTextureCompactionResult megaCompacted = CompactSelectedTextures(
+                generatedTextures,
+                generatedAssignments,
+                generatedVariantPairCount: generatedTextures.Count / 2);
+            List<PlacedModule> megaModules = [structure, interior];
+            if (fabric is not null) megaModules.Add(fabric);
+            if (megaGreeble is not null) megaModules.Add(megaGreeble);
+            if (serviceChannels is not null) megaModules.Add(serviceChannels);
+            megaModules.AddRange(secondaryModules);
+            IReadOnlyList<StationVisualUploadPlanItem> megaUploadPlan = BuildUploadPlan(
+                megaModules,
+                megaCompacted.Textures,
+                megaCompacted.Assignments,
+                megaFlatMeshes,
+                enabledShadowCasterClasses,
+                cancellationToken);
+            stopwatch.Stop();
+            MegastationSystemMaterialDiagnostics? materialDiagnostics =
+                cpu.MaterialAssignment is { } materialAssignment
+                    ? new(
+                        materialAssignment.Palette,
+                        TriangleCounts(structure.HullMaterialRanges),
+                        TriangleCounts(fabric?.DecorationMaterialRanges ?? []),
+                        structure.HullMaterialRanges.Count,
+                        fabric?.DecorationMaterialRanges.Count ?? 0)
+                    : null;
+            return new StationGenerationCpuResult(
+                megaModules,
+                megaCompacted.Textures,
+                megaCompacted.Assignments,
+                megaFlatMeshes,
+                megaUploadPlan,
+                cpu.Diagnostics,
+                stopwatch.Elapsed.TotalMilliseconds,
+                megaCompacted.Diagnostics with
+                {
+                    ModuleTextureBindingCount = megaCompacted.Diagnostics.ModuleTextureBindingCount
+                        + 2 * (2 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
+                            + (serviceChannels is null ? 0 : 1)),
+                    SharedFallbackReferenceCount =
+                        2 * (2 + (megaGreeble is null ? 0 : 1) + (fabric is null ? 0 : 1)
+                            + (serviceChannels is null ? 0 : 1)),
+                },
+                UsesSharedMegastationFallbackTextures: true,
+                MegastationSemanticZoning: cpu.SemanticZoning,
+                MegastationWindowDiagnostics: cpu.WindowPlan.Diagnostics,
+                MegastationLightingDiagnostics: cpu.LightPlan.Diagnostics,
+                MegastationAttachmentDiagnostics: cpu.AttachmentPlan.Diagnostics,
+                MegastationInfrastructureDiagnostics: cpu.InfrastructurePlan.Diagnostics,
+                MegastationMegaGreebleDiagnostics: cpu.MegaGreeblePlan.Diagnostics,
+                MegastationFabricDiagnostics: cpu.FabricPlan.Diagnostics,
+                MegastationServiceChannelDiagnostics: cpu.ServiceChannelPlan.Diagnostics,
+                MegastationSystemMaterialDiagnostics: materialDiagnostics,
+                MegastationInterior: cpu.InteriorPlan);
+        }
+
+        int seed = NameHash(station.Name);
+        var generator = new StationGenerator(seed);
         StationScale scale = station.Size switch
         {
-            StationSize.Small  => StationScale.Outpost,
+            StationSize.Small => StationScale.Outpost,
             StationSize.Medium => StationScale.Station,
-            StationSize.Large  => StationScale.Port,
-            _                  => StationScale.Outpost,
+            StationSize.Large => StationScale.Port,
+            _ => StationScale.Outpost,
         };
 
-        var modules = gen.Run(station);
+        var modules = generator.Run(station);
         ValidatePlacement(modules);
-        PopulateLandingPads(station, modules);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var profile = StationProfile.Generate(seed, scale);
         var palette = TexturePalette.From(profile);
-        var panelTextures = AssignTextures(modules, gd, palette, profile, station);
-
         StationDecorator.Decorate(modules);
         BakeLighting(modules);
-        // ApplyAmbientOcclusion intentionally NOT called here — the caller (SystemSpaceState)
-        // builds a flat GPU snapshot first, then calls it, then builds the graded snapshot,
-        // so both DetailLevel variants exist from one generation pass.
-        return new StationGenerationResult(modules, panelTextures);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var flatMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+        foreach (PlacedModule module in modules)
+        {
+            if (module.Mesh is not { IsEmpty: false } mesh)
+                continue;
+            var (vertices, indices) = mesh.ToIntArrays();
+            flatMeshes[module] = new StationMeshCpuData(vertices, indices);
+        }
+
+        StationDecorator.ApplyAmbientOcclusion(modules);
+        var (textures, assignments) = PrepareTextures(
+            modules,
+            palette,
+            profile,
+            station,
+            cancellationToken);
+        StationTextureCompactionResult compacted = CompactSelectedTextures(
+            textures,
+            assignments,
+            generatedVariantPairCount: modules.Count > 0
+                ? (textures.Count - 1) / 2
+                : 0);
+        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
+            modules,
+            compacted.Textures,
+            compacted.Assignments,
+            flatMeshes,
+            enabledShadowCasterClasses,
+            cancellationToken);
+        stopwatch.Stop();
+        return new StationGenerationCpuResult(
+            modules,
+            compacted.Textures,
+            compacted.Assignments,
+            flatMeshes,
+            uploadPlan,
+            null,
+            stopwatch.Elapsed.TotalMilliseconds,
+            compacted.Diagnostics);
     }
 
     // Brief B4 Fix 2: re-runs ONLY texture generation for an already-grown station — the
@@ -86,7 +303,12 @@ public sealed class StationGenerator
     // is exactly as correct as the values Generate() itself would produce, with no new state
     // to keep in sync. Caller (SystemSpaceState) owns disposal of the OLD texture list this
     // replaces and reassignment bookkeeping — this method only builds the new one and points
-    // every module at it, mirroring AssignTextures' own contract.
+    // every module at it.
+    // Mega-stations merge note: the old single-shot AssignTextures this called was replaced
+    // by the PrepareTextures/CompactSelectedTextures CPU-prep split (see PrepareCpu above) —
+    // rebuilt here on the compact pair so the live-tuning path keeps Brief B4's own scoping
+    // (texture resample only, no growth/decoration/mesh rebuild) instead of routing through
+    // the heavier UploadPrepared/BuildUploadPlan pipeline that a full (re)generation needs.
     public static IReadOnlyList<Texture2D> RegenerateTextures(
         Galaxy.Station station, List<PlacedModule> modules, GraphicsDevice gd)
     {
@@ -100,8 +322,468 @@ public sealed class StationGenerator
         };
         var profile = StationProfile.Generate(seed, scale);
         var palette = TexturePalette.From(profile);
-        return AssignTextures(modules, gd, palette, profile, station);
+        var (generatedTextures, generatedAssignments) = PrepareTextures(
+            modules, palette, profile, station, CancellationToken.None);
+        StationTextureCompactionResult compacted = CompactSelectedTextures(
+            generatedTextures,
+            generatedAssignments,
+            generatedVariantPairCount: modules.Count > 0
+                ? (generatedTextures.Count - 1) / 2
+                : 0);
+
+        var uploaded = new List<Texture2D>(compacted.Textures.Count);
+        try
+        {
+            foreach (PreparedStationTexture texture in compacted.Textures)
+            {
+                var gpu = new Texture2D(gd, texture.Width, texture.Height);
+                gpu.SetData(texture.Pixels);
+                uploaded.Add(gpu);
+            }
+            foreach (StationTextureAssignment assignment in compacted.Assignments)
+            {
+                assignment.Module.TextureInstance = uploaded[assignment.AlbedoTextureIndex];
+                assignment.Module.MaterialInstance = uploaded[assignment.MaterialTextureIndex];
+            }
+            return uploaded;
+        }
+        catch
+        {
+            foreach (Texture2D texture in uploaded)
+                texture.Dispose();
+            throw;
+        }
     }
+
+
+    private static StationGenerationCpuResult PrepareBolonMegastation(
+        string identity,
+        MegastationArchetype archetype,
+        System.Diagnostics.Stopwatch stopwatch,
+        IReadOnlySet<DecorClass> enabledShadowCasterClasses,
+        CancellationToken cancellationToken)
+    {
+        BolonMegastationCpuResult cpu = BolonMegastationGenerator.GenerateCpu(
+            identity,
+            archetype,
+            cancellationToken);
+        PlacedModule module = BolonMegastationGenerator.CreatePlacedModule(cpu);
+        List<PlacedModule> modules = [module];
+        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
+            modules,
+            [],
+            [],
+            new Dictionary<PlacedModule, StationMeshCpuData>(),
+            enabledShadowCasterClasses,
+            cancellationToken);
+        stopwatch.Stop();
+        return new StationGenerationCpuResult(
+            modules,
+            [],
+            [],
+            new Dictionary<PlacedModule, StationMeshCpuData>(),
+            uploadPlan,
+            null,
+            stopwatch.Elapsed.TotalMilliseconds,
+            new StationTexturePreparationDiagnostics(
+                GeneratedTextureCount: 0,
+                GeneratedVariantPairCount: 0,
+                SelectedUniqueTextureCount: 0,
+                SelectedUniqueTexturePairCount: 0,
+                DiscardedTextureCount: 0,
+                UploadedAlbedoTextureCount: 0,
+                UploadedMaterialTextureCount: 0,
+                ModuleTextureBindingCount: 2,
+                SharedFallbackReferenceCount: 2),
+            UsesSharedMegastationFallbackTextures: true,
+            BolonMegastationDiagnostics: cpu.Diagnostics);
+    }
+
+    internal static StationTextureCompactionResult CompactSelectedTextures(
+        IReadOnlyList<PreparedStationTexture> generatedTextures,
+        IReadOnlyList<StationTextureAssignment> assignments,
+        int generatedVariantPairCount = -1)
+    {
+        if (generatedVariantPairCount < -1)
+            throw new ArgumentOutOfRangeException(nameof(generatedVariantPairCount));
+        var remap = new Dictionary<int, int>();
+        var compactTextures = new List<PreparedStationTexture>();
+        var compactAssignments = new List<StationTextureAssignment>(assignments.Count);
+        var albedoIndices = new HashSet<int>();
+        var materialIndices = new HashSet<int>();
+        int selectedPairCount = assignments
+            .Select(assignment => (
+                assignment.AlbedoTextureIndex,
+                assignment.MaterialTextureIndex))
+            .Distinct()
+            .Count();
+
+        int Remap(int originalIndex)
+        {
+            if ((uint)originalIndex >= (uint)generatedTextures.Count)
+                throw new InvalidOperationException(
+                    $"Station texture assignment index {originalIndex} is outside " +
+                    $"the generated texture range 0..{generatedTextures.Count - 1}.");
+            if (remap.TryGetValue(originalIndex, out int existing))
+                return existing;
+            int compactIndex = compactTextures.Count;
+            remap.Add(originalIndex, compactIndex);
+            compactTextures.Add(generatedTextures[originalIndex]);
+            return compactIndex;
+        }
+
+        foreach (StationTextureAssignment assignment in assignments)
+        {
+            int albedo = Remap(assignment.AlbedoTextureIndex);
+            int material = Remap(assignment.MaterialTextureIndex);
+            albedoIndices.Add(albedo);
+            materialIndices.Add(material);
+            compactAssignments.Add(assignment with
+            {
+                AlbedoTextureIndex = albedo,
+                MaterialTextureIndex = material,
+            });
+        }
+
+        return new(
+            compactTextures,
+            compactAssignments,
+            new(
+                GeneratedTextureCount: generatedTextures.Count,
+                GeneratedVariantPairCount: generatedVariantPairCount >= 0
+                    ? generatedVariantPairCount
+                    : generatedTextures.Count / 2,
+                SelectedUniqueTextureCount: compactTextures.Count,
+                SelectedUniqueTexturePairCount: selectedPairCount,
+                DiscardedTextureCount: generatedTextures.Count - compactTextures.Count,
+                UploadedAlbedoTextureCount: albedoIndices.Count,
+                UploadedMaterialTextureCount: materialIndices.Count,
+                ModuleTextureBindingCount: assignments.Count * 2,
+                SharedFallbackReferenceCount: 0));
+    }
+
+    private static IReadOnlyList<StationVisualUploadPlanItem> BuildUploadPlan(
+        IReadOnlyList<PlacedModule> modules,
+        IReadOnlyList<PreparedStationTexture> textures,
+        IReadOnlyList<StationTextureAssignment> assignments,
+        IReadOnlyDictionary<PlacedModule, StationMeshCpuData> flatDecorationMeshes,
+        IReadOnlySet<DecorClass> enabledShadowCasterClasses,
+        CancellationToken cancellationToken)
+    {
+        var plan = new List<StationVisualUploadPlanItem>();
+        var albedoIndices = assignments.Select(a => a.AlbedoTextureIndex).ToHashSet();
+        var materialIndices = assignments.Select(a => a.MaterialTextureIndex).ToHashSet();
+
+        for (int i = 0; i < textures.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            PreparedStationTexture texture = textures[i];
+            StationVisualUploadResourceKind kind = materialIndices.Contains(i)
+                && !albedoIndices.Contains(i)
+                    ? StationVisualUploadResourceKind.MaterialTexture
+                    : StationVisualUploadResourceKind.PanelAlbedoTexture;
+            plan.Add(new(
+                kind,
+                $"texture[{i}]",
+                StationGpuByteAccounting.TextureBytes(
+                    texture.Width,
+                    texture.Height,
+                    bytesPerPixel: 4),
+                Texture: texture));
+        }
+
+        var hullMeshes = new Dictionary<PlacedModule, StationMeshCpuData>();
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StationMeshCpuData? mesh = module.Definition.MeshFactory == null
+                ? PrepareBoxHullMesh(module)
+                : module.HullMaterialRanges.Count > 0
+                    ? module.HullMesh?.PrepareMaterialGroups()?.Mesh
+                    : PrepareMesh(module.HullMesh);
+            if (mesh == null)
+                continue;
+            hullMeshes[module] = mesh;
+            plan.Add(MeshItem(
+                StationVisualUploadResourceKind.HullMesh,
+                module,
+                index,
+                mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StationMeshCpuData? mesh = module.DecorationMaterialRanges.Count > 0
+                ? module.Mesh?.PrepareMaterialGroups()?.Mesh
+                : PrepareMesh(module.Mesh);
+            if (mesh != null)
+                plan.Add(MeshItem(
+                    StationVisualUploadResourceKind.DecorationMesh,
+                    module,
+                    index,
+                    mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (flatDecorationMeshes.TryGetValue(module, out StationMeshCpuData? mesh))
+                plan.Add(MeshItem(
+                    StationVisualUploadResourceKind.FlatDecorationMesh,
+                    module,
+                    index,
+                    mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            StationMeshCpuData? mesh = PrepareMesh(module.GlassMesh);
+            if (mesh != null)
+                plan.Add(MeshItem(
+                    StationVisualUploadResourceKind.GlassMesh,
+                    module,
+                    index,
+                    mesh));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!hullMeshes.TryGetValue(module, out StationMeshCpuData? visibleMesh))
+                continue;
+            StationMeshCpuData mesh = PrepareMesh(module.HullShadowMesh) ?? visibleMesh;
+            (Vector3 Min, Vector3 Max)? bounds = module.Definition.MeshFactory == null
+                ? (-module.Definition.BoundingBox * 0.5f, module.Definition.BoundingBox * 0.5f)
+                : (module.HullShadowMesh ?? module.HullMesh)?.ComputeFaceRangeBounds(
+                    0, (module.HullShadowMesh ?? module.HullMesh)?.FaceCount ?? 0);
+            plan.Add(MeshItem(
+                StationVisualUploadResourceKind.ShadowHullMesh,
+                module,
+                index,
+                mesh,
+                bounds));
+        }
+
+        foreach ((PlacedModule module, int index) in modules.Select((module, index) => (module, index)))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (module.Mesh == null || enabledShadowCasterClasses.Count == 0)
+                continue;
+            var ranges = module.Mesh.DecorClassRanges
+                .Where(range => enabledShadowCasterClasses.Contains(range.decorClass))
+                .Select(range => (range.indexStart, range.indexCount))
+                .ToList();
+            StationMeshCpuData? mesh = module.Mesh.PrepareIndexRanges(ranges);
+            if (mesh == null)
+                continue;
+            plan.Add(MeshItem(
+                StationVisualUploadResourceKind.ShadowDecorationMesh,
+                module,
+                index,
+                mesh,
+                module.Mesh.ComputeIndexRangeBounds(ranges)));
+        }
+
+        return plan;
+
+        static StationVisualUploadPlanItem MeshItem(
+            StationVisualUploadResourceKind kind,
+            PlacedModule module,
+            int index,
+            StationMeshCpuData mesh,
+            (Vector3 Min, Vector3 Max)? bounds = null)
+            => new(
+                kind,
+                $"module[{index}]/{module.Definition.Id}",
+                StationGpuByteAccounting.VertexBufferBytes(
+                    mesh.Vertices.Length,
+                    VertexPositionNormalColorTexture.VertexDeclaration.VertexStride)
+                + StationGpuByteAccounting.IndexBufferBytes(
+                    mesh.Indices.Length,
+                    IndexElementSize.ThirtyTwoBits),
+                module,
+                Mesh: mesh,
+                Bounds: bounds,
+                DiagnosticPurpose: module.HasNativeMegastationInfrastructure
+                    ? kind switch
+                    {
+                        StationVisualUploadResourceKind.DecorationMesh =>
+                            StationVisualUploadDiagnosticPurpose.MegastationInfrastructureVisible,
+                        StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                            StationVisualUploadDiagnosticPurpose.MegastationInfrastructureShadow,
+                        _ => StationVisualUploadDiagnosticPurpose.None,
+                    }
+                    : module.HasNativeMegastationMegaGreeble
+                        ? kind switch
+                        {
+                            StationVisualUploadResourceKind.DecorationMesh =>
+                                StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleVisible,
+                            StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                                StationVisualUploadDiagnosticPurpose.MegastationMegaGreebleShadow,
+                            _ => StationVisualUploadDiagnosticPurpose.None,
+                        }
+                        : module.HasNativeMegastationFabric
+                            ? kind switch
+                            {
+                                StationVisualUploadResourceKind.DecorationMesh =>
+                                    StationVisualUploadDiagnosticPurpose.MegastationFabricVisible,
+                                StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                                    StationVisualUploadDiagnosticPurpose.MegastationFabricShadow,
+                                _ => StationVisualUploadDiagnosticPurpose.None,
+                            }
+                            : module.HasNativeMegastationServiceChannels
+                                ? kind switch
+                                {
+                                    StationVisualUploadResourceKind.DecorationMesh =>
+                                        StationVisualUploadDiagnosticPurpose.MegastationServiceChannelVisible,
+                                    StationVisualUploadResourceKind.ShadowDecorationMesh =>
+                                        StationVisualUploadDiagnosticPurpose.MegastationServiceChannelShadow,
+                                    _ => StationVisualUploadDiagnosticPurpose.None,
+                                }
+                                : StationVisualUploadDiagnosticPurpose.None);
+
+        static StationMeshCpuData? PrepareMesh(StationModuleMesh? mesh)
+        {
+            if (mesh is not { IsEmpty: false })
+                return null;
+            var (vertices, indices) = mesh.ToIntArrays();
+            return new StationMeshCpuData(vertices, indices);
+        }
+    }
+
+    private static IReadOnlyDictionary<SystemMaterialFamilyId, int> TriangleCounts(
+        IReadOnlyList<SystemMaterialDrawRange> ranges)
+        => Enum.GetValues<SystemMaterialFamilyId>().ToDictionary(
+            family => family,
+            family => ranges.Where(range => range.FamilyId == family)
+                .Sum(range => range.TriangleCount));
+
+    internal static StationMeshCpuData PrepareBoxHullMesh(PlacedModule module)
+    {
+        const float UvScale = 5.0f;
+        float chamferInset = module.ChamferDepth * 0.707f;
+        Vector3 h = module.Definition.BoundingBox * 0.5f;
+        float si = chamferInset;
+        var vertices = new VertexPositionNormalColorTexture[24];
+        var indices = new int[36];
+
+        static void AddFace(
+            VertexPositionNormalColorTexture[] vertices,
+            int[] indices,
+            int face,
+            Vector3 v0,
+            Vector3 v1,
+            Vector3 v2,
+            Vector3 v3,
+            Vector3 normal,
+            Vector3 uAxis,
+            Vector3 vAxis)
+        {
+            int vertexBase = face * 4;
+            vertices[vertexBase] = new(v0, normal, Color.White, Vector2.Zero);
+            vertices[vertexBase + 1] = new(v1, normal, Color.White, new Vector2(
+                Vector3.Dot(v1 - v0, uAxis) / UvScale,
+                Vector3.Dot(v1 - v0, vAxis) / UvScale));
+            vertices[vertexBase + 2] = new(v2, normal, Color.White, new Vector2(
+                Vector3.Dot(v2 - v0, uAxis) / UvScale,
+                Vector3.Dot(v2 - v0, vAxis) / UvScale));
+            vertices[vertexBase + 3] = new(v3, normal, Color.White, new Vector2(
+                Vector3.Dot(v3 - v0, uAxis) / UvScale,
+                Vector3.Dot(v3 - v0, vAxis) / UvScale));
+
+            int indexBase = face * 6;
+            indices[indexBase] = vertexBase;
+            indices[indexBase + 1] = vertexBase + 2;
+            indices[indexBase + 2] = vertexBase + 1;
+            indices[indexBase + 3] = vertexBase;
+            indices[indexBase + 4] = vertexBase + 3;
+            indices[indexBase + 5] = vertexBase + 2;
+        }
+
+        AddFace(vertices, indices, 0, new(-h.X+si,-h.Y+si,+h.Z), new(+h.X-si,-h.Y+si,+h.Z), new(+h.X-si,+h.Y-si,+h.Z), new(-h.X+si,+h.Y-si,+h.Z),  Vector3.UnitZ,  Vector3.UnitX,  Vector3.UnitY);
+        AddFace(vertices, indices, 1, new(+h.X-si,-h.Y+si,-h.Z), new(-h.X+si,-h.Y+si,-h.Z), new(-h.X+si,+h.Y-si,-h.Z), new(+h.X-si,+h.Y-si,-h.Z), -Vector3.UnitZ, -Vector3.UnitX,  Vector3.UnitY);
+        AddFace(vertices, indices, 2, new(-h.X,-h.Y+si,-h.Z+si), new(-h.X,-h.Y+si,+h.Z-si), new(-h.X,+h.Y-si,+h.Z-si), new(-h.X,+h.Y-si,-h.Z+si), -Vector3.UnitX,  Vector3.UnitZ,  Vector3.UnitY);
+        AddFace(vertices, indices, 3, new(+h.X,-h.Y+si,+h.Z-si), new(+h.X,-h.Y+si,-h.Z+si), new(+h.X,+h.Y-si,-h.Z+si), new(+h.X,+h.Y-si,+h.Z-si),  Vector3.UnitX, -Vector3.UnitZ,  Vector3.UnitY);
+        AddFace(vertices, indices, 4, new(-h.X+si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,+h.Z-si), new(+h.X-si,+h.Y,-h.Z+si), new(-h.X+si,+h.Y,-h.Z+si),  Vector3.UnitY,  Vector3.UnitX, -Vector3.UnitZ);
+        AddFace(vertices, indices, 5, new(-h.X+si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,-h.Z+si), new(+h.X-si,-h.Y,+h.Z-si), new(-h.X+si,-h.Y,+h.Z-si), -Vector3.UnitY,  Vector3.UnitX,  Vector3.UnitZ);
+        return new StationMeshCpuData(vertices, indices);
+    }
+
+    public static StationGenerationResult UploadPrepared(
+        Galaxy.Station station,
+        StationGenerationCpuResult prepared,
+        GraphicsDevice gd)
+    {
+        var uploaded = new List<Texture2D>(prepared.Textures.Count);
+        try
+        {
+            if (prepared.UsesSharedMegastationFallbackTextures)
+            {
+                Texture2D albedo = UploadFlat(Color.White);
+                Texture2D material = UploadFlat(new Color(128, 255, 0, 0));
+                HashSet<PlacedModule> assignedModules = prepared.TextureAssignments
+                    .Select(assignment => assignment.Module)
+                    .ToHashSet();
+                foreach (PlacedModule module in prepared.Modules.Where(
+                             module => !assignedModules.Contains(module)))
+                {
+                    module.TextureInstance = albedo;
+                    module.MaterialInstance = material;
+                }
+            }
+            foreach (PreparedStationTexture texture in prepared.Textures)
+            {
+                var gpu = new Texture2D(gd, texture.Width, texture.Height);
+                gpu.SetData(texture.Pixels);
+                uploaded.Add(gpu);
+            }
+
+            foreach (StationTextureAssignment assignment in prepared.TextureAssignments)
+            {
+                assignment.Module.TextureInstance = uploaded[assignment.AlbedoTextureIndex];
+                assignment.Module.MaterialInstance = uploaded[assignment.MaterialTextureIndex];
+            }
+
+            return new StationGenerationResult(
+                prepared.Modules,
+                uploaded,
+                prepared.MegastationDiagnostics);
+
+            Texture2D UploadFlat(Color color)
+            {
+                var texture = new Texture2D(gd, 1, 1);
+                try
+                {
+                    texture.SetData([color]);
+                    uploaded.Add(texture);
+                    return texture;
+                }
+                catch
+                {
+                    texture.Dispose();
+                    throw;
+                }
+            }
+        }
+        catch
+        {
+            foreach (Texture2D texture in uploaded)
+                texture.Dispose();
+            foreach (PlacedModule module in prepared.Modules)
+            {
+                module.TextureInstance = null;
+                module.MaterialInstance = null;
+            }
+            throw;
+        }
+    }
+
+    public static void ApplyPreparedLandingPads(
+        Galaxy.Station station,
+        List<PlacedModule> modules)
+        => PopulateLandingPads(station, modules);
 
     // Brief S2b-2 item 5: certain module categories get a fixed, economy-independent
     // look instead of the hosting station's own economy roll — riding on the SAME
@@ -139,106 +821,128 @@ public sealed class StationGenerator
     // Both textures of both pair elements go into `owned` for disposal — no separate
     // material dictionary, since SystemSpaceState's disposal loop doesn't care about the
     // albedo/material distinction, only that every Texture2D this pass created gets freed.
-    private static IReadOnlyList<Texture2D> AssignTextures(
+    private static (
+        IReadOnlyList<PreparedStationTexture> Textures,
+        IReadOnlyList<StationTextureAssignment> Assignments) PrepareTextures(
         List<PlacedModule> modules,
-        GraphicsDevice     gd,
-        TexturePalette     palette,
-        StationProfile     profile,
-        Galaxy.Station     station)
+        TexturePalette palette,
+        StationProfile profile,
+        Galaxy.Station station,
+        CancellationToken cancellationToken,
+        bool includeNameFace = true)
     {
-        var variantSets = new Dictionary<(SurfaceTexture surface, StationEconomy economy), (Texture2D Albedo, Texture2D Material)[]>();
-        var owned       = new List<Texture2D>();
+        var variantSets =
+            new Dictionary<(SurfaceTexture surface, StationEconomy economy), (int Albedo, int Material)[]>();
+        var prepared = new List<PreparedStationTexture>();
+        var assignments = new List<StationTextureAssignment>(modules.Count);
 
-        (Texture2D Albedo, Texture2D Material)[] VariantsFor(SurfaceTexture surface, StationEconomy economy, TexturePalette economyPalette, float colourSpread)
+        (int Albedo, int Material)[] VariantsFor(
+            SurfaceTexture surface,
+            StationEconomy economy,
+            TexturePalette economyPalette,
+            float colourSpread)
         {
             var key = (surface, economy);
-            if (variantSets.TryGetValue(key, out var existing)) return existing;
-            var set = StationTextureRegistry.GenerateVariantSet(gd, surface, economyPalette, station.PersistenceId!, colourSpread);
-            variantSets[key] = set;
-            foreach (var (albedo, material) in set)
+            if (variantSets.TryGetValue(key, out var existing))
+                return existing;
+
+            StationTextureRegistry.TexturePixels[] pixels =
+                StationTextureRegistry.GenerateVariantPixels(
+                    surface,
+                    economyPalette,
+                    station.PersistenceId ?? station.Name,
+                    colourSpread,
+                    cancellationToken: cancellationToken);
+            var set = new (int Albedo, int Material)[pixels.Length];
+            for (int i = 0; i < pixels.Length; i++)
             {
-                owned.Add(albedo);
-                owned.Add(material);
+                int albedo = prepared.Count;
+                prepared.Add(new PreparedStationTexture(512, 512, pixels[i].Albedo));
+                int material = prepared.Count;
+                prepared.Add(new PreparedStationTexture(512, 512, pixels[i].Material));
+                set[i] = (albedo, material);
             }
+            variantSets[key] = set;
             return set;
         }
 
-        foreach (var mod in modules)
+        foreach (PlacedModule module in modules)
         {
-            var surface = SurfaceFor(mod.Definition.Category);
-            var economy = EconomyForModule(mod.Definition.Category, profile.Economy);
-
-            // Age still comes from the real hosting station — wear is a property of the
-            // physical module, not of whichever colour family it's rendered in.
+            cancellationToken.ThrowIfCancellationRequested();
+            SurfaceTexture surface = SurfaceFor(module.Definition.Category);
+            StationEconomy economy = EconomyForModule(module.Definition.Category, profile.Economy);
             TexturePalette economyPalette = economy == profile.Economy
                 ? palette
                 : TexturePalette.From(new StationProfile
-                  {
-                      Economy = economy, Age = profile.Age, Wealth = profile.Wealth, Population = profile.Population,
-                  });
+                {
+                    Economy = economy,
+                    Age = profile.Age,
+                    Wealth = profile.Wealth,
+                    Population = profile.Population,
+                });
 
-            var variance = StationEconomyVariance.Profiles[economy];
+            StationVarianceProfile variance = StationEconomyVariance.Profiles[economy];
             var variants = VariantsFor(surface, economy, economyPalette, variance.ColourSpread);
-            var selected = variants[StationTextureRegistry.SelectVariantIndex(mod.Seed, variants.Length, variance.BaseShareRatio)];
-            mod.TextureInstance  = selected.Albedo;
-            mod.MaterialInstance = selected.Material;
+            var selected = variants[
+                StationTextureRegistry.SelectVariantIndex(
+                    module.Seed,
+                    variants.Length,
+                    variance.BaseShareRatio)];
+            assignments.Add(new StationTextureAssignment(
+                module,
+                selected.Albedo,
+                selected.Material));
         }
 
-        // Overlay the station name on the core module's face texture — a genuinely new
-        // per-station texture (reads the core's assigned variant, draws over a copy), not
-        // a member of any variant set, so it must be tracked here too or it leaks. Only
-        // the albedo changes — MaterialInstance (gloss) stays whatever the core's
-        // originally-assigned variant already set; the name overlay is a printed marking
-        // on the albedo, not a change to the physical material.
-        if (modules.Count > 0)
+        if (includeNameFace && modules.Count > 0)
         {
-            var nameTex = GenerateNameFaceTexture(gd, modules[0].TextureInstance, station.Name, palette);
-            modules[0].TextureInstance = nameTex;
-            owned.Add(nameTex);
+            StationTextureAssignment core = assignments[0];
+            Color[] namePixels = GenerateNameFacePixels(
+                prepared[core.AlbedoTextureIndex].Pixels,
+                station.Name,
+                palette);
+            int nameIndex = prepared.Count;
+            prepared.Add(new PreparedStationTexture(512, 512, namePixels));
+            assignments[0] = core with { AlbedoTextureIndex = nameIndex };
         }
 
-        return owned;
+        return (prepared, assignments);
     }
 
-    private static Texture2D GenerateNameFaceTexture(
-        GraphicsDevice gd,
-        Texture2D?     baseTex,
-        string         name,
+    private static Color[] GenerateNameFacePixels(
+        Color[] basePixels,
+        string name,
         TexturePalette palette)
     {
         const int Size = 512;
-        var pixels = new Color[Size * Size];
-
-        if (baseTex != null)
-            baseTex.GetData(pixels);
-        else
-            Array.Fill(pixels, palette.BaseColour);
-
-        // Render name in two font scales: large centred, with a backing bar.
-        int scale  = 4;
-        int textW  = TextPainter.MeasureText(name, scale);
-        int textH  = TextPainter.MeasureHeight(scale);
+        var pixels = basePixels.ToArray();
+        int scale = 4;
+        int textW = TextPainter.MeasureText(name, scale);
+        int textH = TextPainter.MeasureHeight(scale);
         int startX = Math.Clamp((Size - textW) / 2, 4, Size - textW - 4);
         int startY = (Size - textH) / 2;
-
-        // Dark backing strip
         Color barColor = TexturePalette.LerpColor(palette.BaseColour, Color.Black, 0.45f);
-        int pad = 8;
+        const int pad = 8;
         for (int y = startY - pad; y < startY + textH + pad; y++)
         for (int x = 0; x < Size; x++)
             if ((uint)y < Size)
-                pixels[y * Size + x] = TexturePalette.LerpColor(pixels[y * Size + x], barColor, 0.70f);
-
-        // Name text
-        TextPainter.DrawText(pixels, Size, Size, name, startX, startY, palette.TextColour, scale, alpha: 0.90f);
-
-        var tex = new Texture2D(gd, Size, Size);
-        tex.SetData(pixels);
-        return tex;
+                pixels[y * Size + x] =
+                    TexturePalette.LerpColor(pixels[y * Size + x], barColor, 0.70f);
+        TextPainter.DrawText(
+            pixels,
+            Size,
+            Size,
+            name,
+            startX,
+            startY,
+            palette.TextColour,
+            scale,
+            alpha: 0.90f);
+        return pixels;
     }
 
     // internal, not private: GenerateModulesForDiagnostics-based tests need this to group
-    // modules by surface the same way AssignTextures does.
+    // modules by surface the same way PrepareTextures does.
     internal static SurfaceTexture SurfaceFor(string category) => category switch
     {
         "hab" or "luxury"                    => SurfaceTexture.CleanPanel,
@@ -348,7 +1052,7 @@ public sealed class StationGenerator
 
     // Diagnostic-only, no GraphicsDevice: exposes the growth loop's real PlacedModule
     // list (with real per-module Seed values) so tests can inspect variant-index
-    // distribution (Brief S2b-1 gate diagnosis) without needing AssignTextures' actual
+    // distribution (Brief S2b-1 gate diagnosis) without needing PrepareTextures' actual
     // texture creation. Same GD-free split as FindDockingBay, one step further.
     internal static List<PlacedModule> GenerateModulesForDiagnostics(Galaxy.Station station)
     {

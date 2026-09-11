@@ -18,17 +18,18 @@ public sealed partial class SystemSpaceState
     // the normalized depth units LitSurface.fx's ShadowBiasDepth compares in.
     private const float StationShadowBiasMetres = 0.005f;
 
-    // Mega stations - TODO: Tune! <--- =======================================================
+    // Mega station resolution can be revisited when future greeble materially changes the
+    // shadow-frequency requirement. Current megastation shadows are visually accepted at 8K.
 
     // Per-station shadow-map resolution (Docs/station-lighting-pipeline-spec.md Brief E1
-    // Step 1). The map is fit per-station (FitStationShadowLight), so texel density is
-    // (map extent / resolution) — holding resolution constant across the catalogue and
-    // stepping up only for the mega class keeps near-dock density roughly uniform. Only
-    // one station's map is ever live at a time (SelectShadowedStation picks the nearest),
-    // so worst case GPU residency is the mega size, and only while actually near a mega.
+    // Step 1). The map remains fit per station. The Z2a investigation measured sustained
+    // GPU queue back-pressure while rebuilding Nova's 16384^2 target every frame. An 8192^2
+    // target removed the observed stutter and retained acceptable shadow quality in-engine.
+    // Fitting, update cadence, caster policy, shader, and bias remain unchanged.
     private const float StationShadowMegaBreakpointMetres = 1500f; 
     private const int StationShadowMapSizeStandard = 8192;
-    private const int StationShadowMapSizeMega = 16384;
+    // Retain mega classification/fitting for diagnostics and future independent tuning.
+    private const int StationShadowMapSizeMega = 8192;
 
     private enum StationShadowResolutionClass { Standard, Mega }
 
@@ -66,34 +67,54 @@ public sealed partial class SystemSpaceState
         _ => "Off (1x1)",
     };
 
-    // Penumbra width is texel-size x kernel radius (Brief E1 Step 2) — texel size varies
-    // by station resolution class (Step 1), so the same kernel reads as a tighter band on
-    // a mega station's 16384^2 map than on a standard 8192^2 one. World-space, not tap
-    // count, is what actually describes the visible penumbra.
+    // Penumbra width is texel-size x kernel radius (Brief E1 Step 2). World-space, not tap
+    // count, is what actually describes the visible penumbra; while both classes use
+    // 8192^2, a mega's larger fitted extent naturally produces a wider penumbra.
     private static float ShadowPenumbraWidthMetres(float mapWidthMetres, int resolution, ShadowKernelMode mode) =>
         (mapWidthMetres / resolution) * ShadowKernelRadiusFor(mode);
 
     private Effect? _shadowCasterEffect;
-    private RenderTarget2D? _stationShadowMap;
-    // Resolution of the currently-live _stationShadowMap. Only reallocated when a newly
-    // selected station's size class differs from this — same station, or a different
-    // station of the same class, reuses the existing target (never per-frame realloc).
-    private int _stationShadowMapResolution;
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _shadowCasterMeshes = [];
+    private RenderTarget2D? _stationShadowMap
+    {
+        get => ResidentStationVisual?.ShadowMap;
+        set
+        {
+            if (ResidentStationVisual != null)
+                ResidentStationVisual.ShadowMap = value;
+            else
+                value?.Dispose();
+        }
+    }
+    private int _stationShadowMapResolution
+    {
+        get => ResidentStationVisual?.ShadowMapResolution ?? 0;
+        set
+        {
+            if (ResidentStationVisual != null)
+                ResidentStationVisual.ShadowMapResolution = value;
+        }
+    }
+    private StationShadowContext? _stationShadowContext
+    {
+        get => ResidentStationVisual?.ShadowContext;
+        set
+        {
+            if (ResidentStationVisual != null)
+                ResidentStationVisual.ShadowContext = value;
+        }
+    }
+    // Resolution of the resident package's live map. It is allocated once for that
+    // package and disposed with the package; it is never reallocated per frame.
     // Decoration caster, separate from the hull caster above (Phase C) — one extra draw per
     // module's deco mesh, composed from whichever DecorClass ranges are enabled for
     // _casterStage. Absent for modules with nothing enabled. Rebuilt on stage change
     // (RebuildDecoCasterMeshesForStage) without touching the hull casters.
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoCasterMeshes = [];
     // Module-local caster AABBs (Phase C), used by FitStationShadowLight instead of
     // Definition.BoundingBox — computed once from the actual caster vertex data (not the
     // approximate envelope box) so the fit is exact for MeshFactory hulls too, and grows to
     // cover whichever decoration is currently casting. Hull bounds are set alongside the hull
-    // caster in BuildStationShadowCasterMeshes (stage-independent); deco bounds are set
+    // caster by the station upload plan (stage-independent); deco bounds are set
     // alongside the deco caster in BuildModuleDecoCasterMesh (rebuilt on stage change).
-    private readonly Dictionary<PlacedModule, (Vector3 min, Vector3 max)> _shadowCasterHullBounds = [];
-    private readonly Dictionary<PlacedModule, (Vector3 min, Vector3 max)> _shadowCasterDecoBounds = [];
-    private StationShadowContext? _stationShadowContext;
     private bool _showStationShadowOverlay;
     private bool _freezeStationShadowMap;
     private bool _stationShadowBinaryView;
@@ -108,7 +129,7 @@ public sealed partial class SystemSpaceState
     // landing there, so a not-yet-landed class can be gated (F8 overlay + screenshots)
     // before its bool flips to true for real. Default tracks whatever's currently landed in
     // DecorCastingPolicy, so normal play needs no keypress to see the production result.
-    private enum CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }
+    internal enum CasterStage { HullOnly, PlusC1, PlusC2, PlusC3, AllClasses }
     private CasterStage _casterStage = DefaultCasterStage();
 
     private static CasterStage DefaultCasterStage()
@@ -122,18 +143,27 @@ public sealed partial class SystemSpaceState
         return CasterStage.HullOnly;
     }
 
-    private static IEnumerable<DecorClass> ClassesForStage(CasterStage stage) => stage switch
+    internal static IEnumerable<DecorClass> ClassesForStage(CasterStage stage)
     {
-        CasterStage.HullOnly   => [],
-        CasterStage.PlusC1     => StationDecorator.C1Classes,
-        CasterStage.PlusC2     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes),
-        CasterStage.PlusC3     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
-                                                             .Concat(StationDecorator.C3Classes),
-        CasterStage.AllClasses => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
-                                                             .Concat(StationDecorator.C3Classes)
-                                                             .Concat(StationDecorator.C4Classes),
-        _ => [],
-    };
+        IEnumerable<DecorClass> legacy = stage switch
+        {
+            CasterStage.HullOnly   => [],
+            CasterStage.PlusC1     => StationDecorator.C1Classes,
+            CasterStage.PlusC2     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes),
+            CasterStage.PlusC3     => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
+                                                                 .Concat(StationDecorator.C3Classes),
+            CasterStage.AllClasses => StationDecorator.C1Classes.Concat(StationDecorator.C2Classes)
+                                                                 .Concat(StationDecorator.C3Classes)
+                                                                 .Concat(StationDecorator.C4Classes),
+            _ => [],
+        };
+        // HullOnly remains a true diagnostic exclusion. The normal production stage is
+        // AllClasses, where native megastation casters are explicitly appended instead of
+        // silently depending on the old ordinary-decoration rollout arrays.
+        return stage == CasterStage.AllClasses
+            ? legacy.Concat(StationDecorator.MegastationCasterClasses)
+            : legacy;
+    }
 
     private sealed record StationShadowContext(
         Galaxy.Station Station,
@@ -163,25 +193,7 @@ public sealed partial class SystemSpaceState
 
     private void DisposeStationShadows()
     {
-        foreach (var v in _shadowCasterMeshes.Values)
-        {
-            v.vb.Dispose();
-            v.ib.Dispose();
-        }
-        _shadowCasterMeshes.Clear();
-        foreach (var v in _decoCasterMeshes.Values)
-        {
-            v.vb.Dispose();
-            v.ib.Dispose();
-        }
-        _decoCasterMeshes.Clear();
-        _shadowCasterHullBounds.Clear();
-        _shadowCasterDecoBounds.Clear();
-        _stationShadowMap?.Dispose();
-        _stationShadowMap = null;
-        _stationShadowMapResolution = 0;
         _shadowCasterEffect = null;
-        _stationShadowContext = null;
     }
 
     // Pure decision logic, no GraphicsDevice — any MeshFactory module (docking-bay,
@@ -201,65 +213,19 @@ public sealed partial class SystemSpaceState
     internal static bool HasMeshFactoryHull(PlacedModule mod)
         => mod.Definition.MeshFactory != null && mod.HullMesh != null && !mod.HullMesh.IsEmpty;
 
-    private void BuildStationShadowCasterMeshes(IEnumerable<PlacedModule> modules)
-    {
-        var enabled = new HashSet<DecorClass>(ClassesForStage(_casterStage));
-        var moduleList = modules as IReadOnlyList<PlacedModule> ?? modules.ToList();
-
-        foreach (var mod in moduleList)
-        {
-            if (mod.Definition.MeshFactory == null)
-            {
-                _shadowCasterMeshes[mod] = BuildHullMesh(_gd, mod);
-                // BuildHullMesh's chamfered panel geometry recovers exactly
-                // Definition.BoundingBox's extents (every face-normal axis is reached
-                // un-inset by the opposite face's panel) — exact, not an approximation.
-                var h = mod.Definition.BoundingBox * 0.5f;
-                _shadowCasterHullBounds[mod] = (-h, h);
-            }
-            else if (HasMeshFactoryHull(mod))
-            {
-                // Generalized MeshFactory hull caster — docking-bay is one example of this,
-                // not a special case of it. Decoration appended separately (below) now
-                // casts too, per the enabled DecorClass set.
-                var hull = mod.HullMesh!.Build(_gd);
-                if (hull.HasValue)
-                    _shadowCasterMeshes[mod] = hull.Value;
-
-                // Real vertex bounds, not the definition's approximate envelope box — a
-                // MeshFactory hull's true extent doesn't always exactly match the nominal
-                // envelope used to size it (e.g. docking-bay's wall thickness/door frame).
-                var bounds = mod.HullMesh.ComputeFaceRangeBounds(0, mod.HullMesh.FaceCount);
-                if (bounds.HasValue)
-                    _shadowCasterHullBounds[mod] = bounds.Value;
-            }
-
-            BuildModuleDecoCasterMesh(mod, enabled);
-        }
-
-        // Safety net: a module with decoration casting but no hull caster produces floating
-        // shadows with nothing underneath them — exactly the bug this fix addresses. Warn
-        // loudly instead of silently missing it again for some future module shape.
-        foreach (var mod in moduleList)
-        {
-            if (_shadowCasterMeshes.ContainsKey(mod)) continue;
-            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
-                $"Station shadow: module '{mod.Definition.Id}' (category '{mod.Definition.Category}') " +
-                "has no hull shadow caster — its decoration may cast unattached shadows.",
-                SystemMessagePriority.NB));
-        }
-    }
-
     // Composes one caster index buffer for a module's decoration from the ranges of
     // whichever DecorClass values are in `enabled` (Phase C). Separate draw from the hull
     // caster above — see the field comment on _decoCasterMeshes. Also (re)computes the
     // module-local deco bounds used by FitStationShadowLight; cleared when nothing's enabled
     // so a stage rollback doesn't leave stale bounds behind.
-    private void BuildModuleDecoCasterMesh(PlacedModule mod, HashSet<DecorClass> enabled)
+    private void BuildModuleDecoCasterMesh(
+        StationVisualPackage visual,
+        PlacedModule mod,
+        HashSet<DecorClass> enabled)
     {
         if (mod.Mesh == null || enabled.Count == 0)
         {
-            _shadowCasterDecoBounds.Remove(mod);
+            visual.ShadowCasterDecoBounds.Remove(mod);
             return;
         }
 
@@ -272,38 +238,42 @@ public sealed partial class SystemSpaceState
         }
         if (ranges == null)
         {
-            _shadowCasterDecoBounds.Remove(mod);
+            visual.ShadowCasterDecoBounds.Remove(mod);
             return;
         }
 
         var built = mod.Mesh.BuildIndexRanges(_gd, ranges);
         if (built.HasValue)
-            _decoCasterMeshes[mod] = built.Value;
+            visual.DecoCasterMeshes[mod] = built.Value;
 
         var bounds = mod.Mesh.ComputeIndexRangeBounds(ranges);
         if (bounds.HasValue)
-            _shadowCasterDecoBounds[mod] = bounds.Value;
+            visual.ShadowCasterDecoBounds[mod] = bounds.Value;
         else
-            _shadowCasterDecoBounds.Remove(mod);
+            visual.ShadowCasterDecoBounds.Remove(mod);
     }
 
-    // Ctrl+F6 handler: rebuilds only the decoration casters for the new stage, across every
-    // station's geometry (cheap — a rare keypress, not a per-frame cost). Hull casters are
+    // Ctrl+F6 handler: rebuilds only the resident package's decoration casters for the new
+    // stage (cheap — a rare keypress, not a per-frame cost). Hull casters are
     // untouched, matching the brief's "hull shadows from Phase B unchanged."
     private void RebuildDecoCasterMeshesForStage()
     {
-        foreach (var v in _decoCasterMeshes.Values)
+        StationVisualPackage? visual = ResidentStationVisual;
+        if (visual == null)
+            return;
+
+        foreach (var v in visual.DecoCasterMeshes.Values)
         {
             v.vb.Dispose();
             v.ib.Dispose();
         }
-        _decoCasterMeshes.Clear();
+        visual.DecoCasterMeshes.Clear();
+        visual.ShadowCasterDecoBounds.Clear();
 
         var enabled = new HashSet<DecorClass>(ClassesForStage(_casterStage));
         if (enabled.Count == 0) return;
-        foreach (var modules in _stationGeometry.Values)
-            foreach (var mod in modules)
-                BuildModuleDecoCasterMesh(mod, enabled);
+        foreach (var mod in visual.Modules)
+            BuildModuleDecoCasterMesh(visual, mod, enabled);
     }
 
     private void UpdateStationShadowInput(KeyboardState keys)
@@ -391,6 +361,8 @@ public sealed partial class SystemSpaceState
     private void RenderStationShadowMap()
     {
         if (_shadowCasterEffect == null) return;
+        StationVisualPackage? visual = ResidentStationVisual;
+        if (visual == null) return;
         if (_freezeStationShadowMap && _stationShadowContext != null)
         {
             LogStationShadowFreeze(_stationShadowContext);
@@ -405,12 +377,12 @@ public sealed partial class SystemSpaceState
         }
 
         var (station, _) = target.Value;
-        if (!_stationGeometry.TryGetValue(station, out var modules)) return;
+        IReadOnlyList<PlacedModule> modules = visual.Modules;
 
         // One corner list feeds both the size-class decision and the light fit below — the
         // brief requires a single source of truth for station size, not a separately-derived
         // measure (e.g. Definition.BoundingBox) that could disagree with the fit.
-        var stationLocalCorners = CollectStationLocalCasterCorners(modules);
+        var stationLocalCorners = CollectStationLocalCasterCorners(visual);
         float stationExtentMetres = StationLongestAxisMetres(stationLocalCorners);
         var resolutionClass = ClassifyStationShadowResolution(stationExtentMetres);
         int requiredResolution = StationShadowResolutionFor(resolutionClass);
@@ -478,7 +450,7 @@ public sealed partial class SystemSpaceState
             Matrix moduleToLightView = mod.Transform * lightView;
             fx.Parameters["ModuleToLightView"].SetValue(moduleToLightView);
 
-            if (_shadowCasterMeshes.TryGetValue(mod, out var caster))
+            if (visual.ShadowCasterMeshes.TryGetValue(mod, out var caster))
             {
                 _gd.SetVertexBuffer(caster.vb);
                 _gd.Indices = caster.ib;
@@ -491,7 +463,7 @@ public sealed partial class SystemSpaceState
 
             // Phase C: decoration caster, a separate draw from the hull above (same
             // ModuleToLightView — deco ranges are recorded in the same module-local space).
-            if (_decoCasterMeshes.TryGetValue(mod, out var deco))
+            if (visual.DecoCasterMeshes.TryGetValue(mod, out var deco))
             {
                 _gd.SetVertexBuffer(deco.vb);
                 _gd.Indices = deco.ib;
@@ -524,22 +496,12 @@ public sealed partial class SystemSpaceState
 
     private (Galaxy.Station station, Core.Math.DVec3 pos)? SelectShadowedStation()
     {
-        (Galaxy.Station station, Core.Math.DVec3 pos)? best = null;
-        float bestRenderDistance = float.MaxValue;
-
-        foreach (var entry in _stationPositions)
-        {
-            Vector3 renderPos = _camera.ToRenderSpace(entry.pos);
-            float dist = renderPos.Length();
-            if (dist > 30_000f) continue;
-            if (dist < bestRenderDistance)
-            {
-                bestRenderDistance = dist;
-                best = entry;
-            }
-        }
-
-        return best;
+        return TryGetResidentStation(
+            out _,
+            out Galaxy.Station station,
+            out Core.Math.DVec3 position)
+            ? (station, position)
+            : null;
     }
 
     // Phase C: collects each module's actual enabled caster geometry
@@ -550,20 +512,20 @@ public sealed partial class SystemSpaceState
     // frame. Station-local (not light-view) so this same corner set can also answer "how
     // big is this station" (StationLongestAxisMetres) without a second, separately-derived
     // measure that could disagree with the fit.
-    private List<Vector3> CollectStationLocalCasterCorners(IReadOnlyList<PlacedModule> modules)
+    private static List<Vector3> CollectStationLocalCasterCorners(StationVisualPackage visual)
     {
+        IReadOnlyList<PlacedModule> modules = visual.Modules;
         var corners = new List<Vector3>(modules.Count * 8);
         foreach (var mod in modules)
         {
-            if (!_shadowCasterHullBounds.TryGetValue(mod, out var hullBounds)) continue;
-
-            Vector3 boundsMin = hullBounds.min;
-            Vector3 boundsMax = hullBounds.max;
-            if (_shadowCasterDecoBounds.TryGetValue(mod, out var decoBounds))
-            {
-                boundsMin = Vector3.Min(boundsMin, decoBounds.min);
-                boundsMax = Vector3.Max(boundsMax, decoBounds.max);
-            }
+            bool hasHull = visual.ShadowCasterHullBounds.TryGetValue(mod, out var hullBounds);
+            bool hasDeco = visual.ShadowCasterDecoBounds.TryGetValue(mod, out var decoBounds);
+            if (!TryCombineStationShadowCasterBounds(
+                    hasHull ? hullBounds : null,
+                    hasDeco ? decoBounds : null,
+                    out Vector3 boundsMin,
+                    out Vector3 boundsMax))
+                continue;
 
             for (int ix = 0; ix <= 1; ix++)
             for (int iy = 0; iy <= 1; iy++)
@@ -577,6 +539,35 @@ public sealed partial class SystemSpaceState
             }
         }
         return corners;
+    }
+
+    internal static bool TryCombineStationShadowCasterBounds(
+        (Vector3 min, Vector3 max)? hullBounds,
+        (Vector3 min, Vector3 max)? decorationBounds,
+        out Vector3 boundsMin,
+        out Vector3 boundsMax)
+    {
+        if (hullBounds is { } hull && decorationBounds is { } decoration)
+        {
+            boundsMin = Vector3.Min(hull.min, decoration.min);
+            boundsMax = Vector3.Max(hull.max, decoration.max);
+            return true;
+        }
+        if (hullBounds is { } hullOnly)
+        {
+            boundsMin = hullOnly.min;
+            boundsMax = hullOnly.max;
+            return true;
+        }
+        if (decorationBounds is { } decorationOnly)
+        {
+            boundsMin = decorationOnly.min;
+            boundsMax = decorationOnly.max;
+            return true;
+        }
+        boundsMin = default;
+        boundsMax = default;
+        return false;
     }
 
     // Step 1 resolution input: the union station-local AABB's largest dimension, from the
@@ -657,7 +648,10 @@ public sealed partial class SystemSpaceState
         float width = 1f / ctx.InvSize.X;
         float height = 1f / ctx.InvSize.Y;
         float texelMetres = width / ctx.Resolution;
-        string className = ctx.Resolution >= StationShadowMapSizeMega ? "Mega" : "Standard";
+        string className = ClassifyStationShadowResolution(ctx.StationExtentMetres)
+            == StationShadowResolutionClass.Mega
+                ? "Mega"
+                : "Standard";
         float penumbraMetres = ShadowPenumbraWidthMetres(width, ctx.Resolution, _shadowKernelMode);
         string message =
             $"[{label}] {ctx.Station.Name}: extent {ctx.StationExtentMetres:F1} m -> {className} class -> " +

@@ -57,6 +57,7 @@ public sealed class RenderedOutputTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Custom_surface_does_not_overpaint_adjacent_chrome()
     {
         RenderedFrame frame = UiRenderHarness.Render(300, 180, gd =>
@@ -78,6 +79,7 @@ public sealed class RenderedOutputTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Clipping_limits_child_and_empty_custom_clip_draws_nothing()
     {
         RenderedFrame frame = UiRenderHarness.Render(220, 160, gd =>
@@ -99,6 +101,7 @@ public sealed class RenderedOutputTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Nested_clipping_and_overflow_visible_match_pixel_output()
     {
         RenderedFrame frame = UiRenderHarness.Render(260, 180, gd =>
@@ -125,6 +128,7 @@ public sealed class RenderedOutputTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Z_order_custom_and_following_ordinary_sibling_are_visible()
     {
         RenderedFrame frame = UiRenderHarness.Render(180, 120, gd =>
@@ -148,6 +152,7 @@ public sealed class RenderedOutputTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Popup_overlay_draws_last_and_closing_restores_underlying_pixels()
     {
         RenderedFrame openFrame = UiRenderHarness.Render(260, 180, gd =>
@@ -180,6 +185,7 @@ public sealed class RenderedOutputTests
     }
 
     [Fact]
+    [Trait("Category", "Slow")]
     public void Render_target_and_graphics_state_are_restored_after_custom_content()
     {
         RenderedFrame frame = UiRenderHarness.Render(240, 160, gd =>

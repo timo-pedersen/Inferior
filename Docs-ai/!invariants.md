@@ -210,6 +210,9 @@ The depth-tier system and geometric detail system solve different problems.
 - `DetailLevel`/LOD is about geometric and rendering cost.
 - Do not couple them merely because distant objects often use less detail.
 - Preserve the current multi-pass depth architecture unless a task explicitly redesigns it from first principles.
+- Detailed station visuals are proximity-resident presentation data; at most one station's detailed CPU/GPU visual package may be resident.
+- Station identity, orbit, targeting, maps/radar, and distant-dot presentation must not depend on detailed station mesh residency.
+- The game/render thread owns station GPU resource creation and disposal; visual residency must not become an authority for station position or orbit.
 - The game's darkness, silhouettes, lit windows, sparse glow, piping/cabling, and procedural industrial detail are part of its visual identity; do not casually normalize them toward generic bright readability.
 
 Lighting-pipeline constraints (design agreed, implementation phased — see `Docs/station-lighting-pipeline-spec.md`):

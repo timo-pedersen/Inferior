@@ -58,6 +58,8 @@ float    DecorationBrightness;
 
 float3   MaterialColor = float3(1, 1, 1);   // DynamicLit only — flat per-draw tint
 
+float3   DebugFlatColor = float3(1, 1, 1);  // debug-only semantic surface override
+
 // Brief S1: single-source Blinn-Halfway specular, DynamicLit*/station-hulls only. No HLSL
 // initializers — same policy as the shadow parameters below (project policy since the
 // EclipseFactor incident); MeshRenderer.cs sets all three explicitly every DynamicLit*
@@ -79,6 +81,23 @@ float    SpecularShininess;
 // neutral MaterialMap is a flat 1x1 texture, so ddx/ddy of its sampled height is always
 // exactly zero no matter what BumpStrength is).
 float    BumpStrength;
+// Explicit per-draw opt-in. H1 structural vertices use alpha as an artificial
+// readability floor; every established DynamicLit caller leaves this at zero.
+float    VertexIlluminationScale;
+// Render-only coplanar presentation offset. H1b's constructed liner occupies the exact
+// protected-volume boundary without consuming physical clearance. Zero elsewhere.
+float    PresentationDepthBias;
+
+// H1h: bounded, presentation-only interior atmospheric perspective. The CPU activation
+// is zero outside an authoritative H1 bay; the station-local volume gate additionally
+// prevents a combined megastation hull draw from hazing exterior receiver pixels.
+float    InteriorHazeActivation;
+float3   InteriorHazeVolumeMinimum;
+float3   InteriorHazeVolumeMaximum;
+float3   InteriorHazeColour;
+float    InteriorHazeStartDistance;
+float    InteriorHazeInvDistanceRange;
+float    InteriorHazeMaximumBlend;
 
 float4x4 ModuleToStationLocal;
 float4x4 StationLocalToLightView;
@@ -145,6 +164,7 @@ struct VertexInput
     float4 Position : POSITION0;
     float3 Normal   : NORMAL0;
     float4 Color    : COLOR0;
+    float4 ArtificialLight : COLOR1;
     float2 TexCoord : TEXCOORD0;
 };
 
@@ -160,6 +180,7 @@ struct VertexOutput
     // the surface position in the same space EyePositionWorld is defined in. Interpolated,
     // so the PS re-derives V per-pixel rather than per-vertex (see SpecularHighlight).
     float3 RenderPos   : TEXCOORD4;
+    float3 ArtificialLight : TEXCOORD5;
 };
 
 VertexOutput VS(VertexInput input)
@@ -168,12 +189,14 @@ VertexOutput VS(VertexInput input)
     float4 worldPos = mul(input.Position, World);
     float4 viewPos  = mul(worldPos, View);
     o.Position    = mul(viewPos, Projection);
+    o.Position.z -= PresentationDepthBias * o.Position.w;
     o.WorldNormal = normalize(mul(input.Normal, (float3x3)World));
     o.Color       = input.Color;
     o.TexCoord    = input.TexCoord;
     o.StationPos  = mul(input.Position, ModuleToStationLocal).xyz;
     o.StationNorm = normalize(mul(input.Normal, (float3x3)ModuleToStationLocal));
     o.RenderPos   = worldPos.xyz;
+    o.ArtificialLight = input.ArtificialLight.rgb;
     return o;
 }
 
@@ -387,6 +410,25 @@ float3 PerturbNormalFromHeight(float3 baseNormal, float3 renderPos, float height
     return normalize(abs(det) * baseNormal - bumpStrength * surfGrad);
 }
 
+float3 ApplyInteriorHaze(float3 rgb, VertexOutput input)
+{
+    float3 aboveMinimum = step(InteriorHazeVolumeMinimum, input.StationPos);
+    float3 belowMaximum = step(input.StationPos, InteriorHazeVolumeMaximum);
+    float inVolume = aboveMinimum.x * aboveMinimum.y * aboveMinimum.z
+                   * belowMaximum.x * belowMaximum.y * belowMaximum.z;
+    float distanceMetres = length(input.RenderPos) * RenderScaleReciprocal;
+    float distanceFactor = saturate(
+        (distanceMetres - InteriorHazeStartDistance) * InteriorHazeInvDistanceRange);
+    distanceFactor = distanceFactor * distanceFactor * (3.0 - 2.0 * distanceFactor);
+    float blend = InteriorHazeActivation * inVolume
+                * InteriorHazeMaximumBlend * distanceFactor;
+    // Tint from the surface's own luminance rather than adding an absolute fog colour.
+    // Black therefore remains black: deep shadows cannot become self-luminous blue.
+    float luminance = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    float3 cooled = luminance * InteriorHazeColour;
+    return lerp(rgb, cooled, blend);
+}
+
 // Brief S1: single-source Blinn-Halfway specular. Per-pixel, not per-vertex — low-poly
 // hulls have few vertices, so a per-vertex specular would smear/wander across big flat
 // panels; re-normalizing the interpolated normal here matters more than for diffuse,
@@ -426,11 +468,17 @@ float4 PS_DynamicLit(VertexOutput input) : COLOR0
     float3 n = PerturbNormalFromHeight(normalize(input.WorldNormal), input.RenderPos, material.r, BumpStrength);
 
     float  nl  = saturate(dot(n, SunDirection));
-    float3 lit = Ambient + SunColour * nl * EclipseFactor;
+    float  artificialFloor = input.Color.a * VertexIlluminationScale;
+    // ArtificialLight is incident illumination, not baked surface colour. It is added
+    // beside ambient/stellar diffuse, then multiplied by albedo below. Established
+    // vertices carry black, so non-H1 rendering remains mathematically unchanged.
+    float3 lit = max(Ambient + SunColour * nl * EclipseFactor + input.ArtificialLight,
+                     artificialFloor.xxx);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
     rgb += SpecularHighlight(n, input.RenderPos, 1.0, gloss);
+    rgb = ApplyInteriorHaze(rgb, input);
     return float4(rgb, 1.0);
 }
 
@@ -454,12 +502,20 @@ float4 PS_DynamicLitShadowed(VertexOutput input) : COLOR0
     if (ShadowBinaryView > 0.5)
         return float4(shadow, shadow, shadow, 1.0);
 
-    float3 lit = Ambient + SunColour * nl * shadow * EclipseFactor;
+    float  artificialFloor = input.Color.a * VertexIlluminationScale;
+    float3 lit = max(Ambient + SunColour * nl * shadow * EclipseFactor + input.ArtificialLight,
+                     artificialFloor.xxx);
 
     float4 tex = tex2D(TextureSampler, input.TexCoord);
     float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
     rgb += SpecularHighlight(n, input.RenderPos, shadow, gloss);
+    rgb = ApplyInteriorHaze(rgb, input);
     return float4(rgb, 1.0);
+}
+
+float4 PS_DebugFlatColor(VertexOutput input) : COLOR0
+{
+    return float4(DebugFlatColor, 1.0);
 }
 
 technique BakedColorLit
@@ -495,5 +551,14 @@ technique DynamicLitShadowed
     {
         VertexShader = compile vs_3_0 VS();
         PixelShader  = compile ps_3_0 PS_DynamicLitShadowed();
+    }
+}
+
+technique DebugFlatColor
+{
+    pass P0
+    {
+        VertexShader = compile vs_3_0 VS();
+        PixelShader  = compile ps_3_0 PS_DebugFlatColor();
     }
 }

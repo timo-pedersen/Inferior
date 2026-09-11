@@ -104,7 +104,7 @@ public sealed partial class SystemSpaceState
         if (ctrlF8JustPressed)
         {
             _showStationBrightnessTuningPanel = !_showStationBrightnessTuningPanel;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
                 _showStationBrightnessTuningPanel
                     ? "Station brightness tuning panel ON — 1-5 select, Up/Down adjust (hold Shift for fine step), Left resets selected, Right resets all, P dumps source, J force-regenerates nearest station's textures (floor/compression/saturation now auto-regenerate shortly after you stop adjusting)."
                     : "Station brightness tuning panel OFF",
@@ -143,7 +143,7 @@ public sealed partial class SystemSpaceState
         {
             selected.Set(selected.Default);
             if (selected.RequiresRegeneration) MarkStationBrightnessGenerationDirty();
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
                 $"{selected.Label} reset to {selected.Default:F4}.", SystemMessagePriority.NB));
         }
 
@@ -155,7 +155,7 @@ public sealed partial class SystemSpaceState
             // one regen — versus checking whether any of the three generation-time params
             // actually moved from its already-default value).
             MarkStationBrightnessGenerationDirty();
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("All station brightness parameters reset to defaults.", SystemMessagePriority.NB));
         }
 
@@ -179,7 +179,7 @@ public sealed partial class SystemSpaceState
         foreach (var p in StationBrightnessTuningParams)
             System.Console.WriteLine($"    public const float {p.DumpConstName,-38} = {p.Get():F4}f;");
         System.Console.WriteLine("[StationBrightnessTuning] === end dump ===");
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage("Station brightness tuning values dumped to console.", SystemMessagePriority.NB));
     }
 
@@ -194,44 +194,34 @@ public sealed partial class SystemSpaceState
     // generation pass — see that method's own doc comment) and disposes the OLD texture list
     // only after every module has been repointed at the new one, so nothing samples a
     // disposed texture mid-swap.
+    // Mega-stations merge note: only one station's geometry is resident at a time under the
+    // visual residency system (StationVisualPackage), and the residency evaluation itself
+    // already keeps the nearest-to-camera station resident — so "nearest station with
+    // geometry loaded" is simply the resident one, not a separate scan.
     private void RegenerateNearestStationTextures()
     {
-        if (_stationGeometry.Count == 0)
+        if (ResidentStationVisual is not { } visual)
         {
-            DataBus.System.Publish(Topics.System.All,
-                new SystemMessage("No station nearby to regenerate.", SystemMessagePriority.NB));
-            return;
-        }
-
-        Galaxy.Station? nearest = null;
-        double nearestDistSq = double.MaxValue;
-        foreach (var (station, universePos) in _stationPositions)
-        {
-            if (!_stationGeometry.ContainsKey(station)) continue;
-            double distSq = (universePos - _camera.UniversePosition).LengthSquared;
-            if (distSq < nearestDistSq) { nearestDistSq = distSq; nearest = station; }
-        }
-        if (nearest == null)
-        {
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("No station nearby to regenerate.", SystemMessagePriority.NB));
             return;
         }
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var modules = _stationGeometry[nearest];
-        var oldTextures = _stationPanelTextures.TryGetValue(nearest, out var existing) ? existing : null;
+        Galaxy.Station nearest = visual.Descriptor.Station;
+        var modules = visual.Modules;
+        var oldTextures = visual.Textures.ToList();
 
         var newTextures = StationGenerator.RegenerateTextures(nearest, modules, _gd);
-        _stationPanelTextures[nearest] = newTextures;
 
-        if (oldTextures != null)
-            foreach (var tex in oldTextures) tex.Dispose();
+        foreach (var tex in oldTextures)
+            visual.RemoveAndDisposeTexture(tex);
+        visual.Textures.AddRange(newTextures);
 
         MeasureStationBrightnessLuminance(nearest, modules);
         sw.Stop();
 
-        DataBus.System.Publish(Topics.System.All, new SystemMessage(
+        DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
             $"Regenerated {nearest.Name}'s panel textures ({sw.ElapsedMilliseconds}ms).", SystemMessagePriority.NB));
     }
 

@@ -64,7 +64,7 @@ public sealed partial class SystemSpaceState
         if (ctrlF7JustPressed)
         {
             _showSunTuningPanel = !_showSunTuningPanel;
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
                 _showSunTuningPanel
                     ? "Sun tuning panel ON — 1-9/0 select, Up/Down adjust (hold Shift for fine step), Left resets selected, Right resets all, P dumps source."
                     : "Sun tuning panel OFF",
@@ -97,7 +97,7 @@ public sealed partial class SystemSpaceState
         if (leftJustPressed)
         {
             selected.Set(selected.Default);
-            DataBus.System.Publish(Topics.System.All, new SystemMessage(
+            DataBus.SystemMessages.Publish(Topics.System.All, new SystemMessage(
                 $"{selected.Label} reset to {selected.Default:F4}.", SystemMessagePriority.NB));
         }
 
@@ -105,7 +105,7 @@ public sealed partial class SystemSpaceState
         if (rightJustPressed)
         {
             SunTuning.ResetToDefaults();
-            DataBus.System.Publish(Topics.System.All,
+            DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("All sun tuning parameters reset to defaults.", SystemMessagePriority.NB));
         }
 
@@ -124,7 +124,7 @@ public sealed partial class SystemSpaceState
         foreach (var p in SunTuningParams)
             System.Console.WriteLine($"    public const float {p.DumpConstName,-32} = {p.Get():F4}f;");
         System.Console.WriteLine("[SunTuning] === end dump ===");
-        DataBus.System.Publish(Topics.System.All,
+        DataBus.SystemMessages.Publish(Topics.System.All,
             new SystemMessage("Sun tuning values dumped to console.", SystemMessagePriority.NB));
     }
 

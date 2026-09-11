@@ -548,38 +548,15 @@ public static class ShippingContainerFactory
         // Face width (Z direction) = FaceWidthAfterChamfer; lower = toward +Z (viewer side)
         float zOffset = -(FaceWidthAfterChamfer * 0.5f - textH * 1.5f);
         var originYPlus = new Vector3(-textW * 0.5f, HLy + raise, zOffset);
-        AddTextGeometry(mesh, text, originYPlus,
-            textRight: Vector3.UnitX, textUp: -Vector3.UnitZ, textNormal: Vector3.UnitY,
+        PlanarTextGeometry.Add(mesh, text, originYPlus,
+            surfaceNormal: Vector3.UnitY, readingDirection: Vector3.UnitX,
             pixelSize, textColor);
 
-        // Y- face: mirror image (text reads correctly from below)
+        // Y- face: opposite reading direction so the label reads correctly from below.
         var originYMinus = new Vector3(textW * 0.5f, -(HLy + raise), zOffset);
-        AddTextGeometry(mesh, text, originYMinus,
-            textRight: -Vector3.UnitX, textUp: -Vector3.UnitZ, textNormal: -Vector3.UnitY,
+        PlanarTextGeometry.Add(mesh, text, originYMinus,
+            surfaceNormal: -Vector3.UnitY, readingDirection: -Vector3.UnitX,
             pixelSize, textColor);
-    }
-
-    // internal: reused by StationDecorator for the docking-bay's door signage — same
-    // per-pixel bitmap-font geometry technique, no need for a second implementation.
-    internal static void AddTextGeometry(StationModuleMesh mesh,
-        string text, Vector3 origin, Vector3 textRight, Vector3 textUp, Vector3 textNormal,
-        float pixelSize, Color textColor)
-    {
-        float cx = 0f;
-        foreach (char ch in text.ToUpperInvariant())
-        {
-            if (!BitmapFonts.HasGlyph(ch)) { cx += (BitmapFonts.CharW + 1) * pixelSize; continue; }
-            for (int row = 0; row < BitmapFonts.CharH; row++)
-            for (int col = 0; col < BitmapFonts.CharW; col++)
-            {
-                if (!BitmapFonts.IsLit(ch, col, row)) continue;
-                float px = cx + (col + 0.5f) * pixelSize;
-                float py = (BitmapFonts.CharH - row - 0.5f) * pixelSize;
-                mesh.AddQuad(origin + textRight * px + textUp * py,
-                             textNormal, textUp, pixelSize * 0.88f, pixelSize * 0.88f, textColor);
-            }
-            cx += (BitmapFonts.CharW + 1) * pixelSize;
-        }
     }
 
     // ── Wear ─────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ using Inferior.Galaxy;
 using Inferior.Game.Input;
 using Inferior.Game.Hyperspace;
 using Inferior.Game.StationGen;
+using Inferior.Game.StationGen.Megastations;
 using Inferior.Game.UI;
 using Inferior.Gameplay;
 using Inferior.Gameplay.Cockpit;
@@ -99,31 +100,14 @@ public sealed partial class SystemSpaceState : GameState
     private readonly List<(OrbitalBody body, DVec3 pos)> _bodyPositions = [];
 
     // ── Station rendering ─────────────────────────────────────────────────────
-    // Per-station placed module list — generated once per system entry from name seed.
-    private readonly Dictionary<Galaxy.Station, List<PlacedModule>>                          _stationGeometry  = [];
-    // Brief S2b-1: per-station panel-texture variant sets, owned here (NOT the old
-    // shared static StationTextureRegistry cache) — disposed and rebuilt alongside
-    // _hullMeshes/_decoMeshes in OnEnter/OnExit, same lifecycle as _stationGeometry.
-    // Every PlacedModule.TextureInstance in _stationGeometry[station] points at one of
-    // these; this dictionary exists purely so the owner can dispose them, not to be
-    // indexed into directly.
-    private readonly Dictionary<Galaxy.Station, IReadOnlyList<Texture2D>>                    _stationPanelTextures = [];
+    // Lightweight positions remain available for every system station. Detailed
+    // modules/textures/buffers live in the zero-or-one package owned by
+    // SystemSpaceState.StationResidency.cs.
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
     // Shipping containers placed around each station — ordinary world objects (real
     // ShippingContainerFactory geometry, real rendering path); placement policy (near
     // stations, 3-6 per station) is for testing, the objects themselves are not.
     private readonly List<PlacedContainer> _containers = [];
-    // GPU-side decoration meshes built from PlacedModule.Mesh after generation.
-    // _decoMeshes carries the wear/ambient-occlusion-graded colours (DetailLevel.Full);
-    // _decoMeshesFlat is a second snapshot built before that pass ran (Medium/Minimal) —
-    // see the two Build() calls in OnEnter and DrawStations' DetailLevel gating.
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes     = [];
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshesFlat = [];
-    // GPU-side glass meshes built from PlacedModule.GlassMesh (windows, portholes).
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _glassMeshes = [];
-    // GPU-side hull meshes (VertexPositionNormalColorTexture) for real-time LitSurface.fx
-    // DynamicLit lighting (Docs/station-lighting-pipeline-spec.md Phase A).
-    private readonly Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _hullMeshes  = [];
 
     // ── Container rendering ───────────────────────────────────────────────────
     // Renderer shared with ship/hull draw calls. Each container owns its own
@@ -186,6 +170,11 @@ public sealed partial class SystemSpaceState : GameState
     private bool _uiMouseMode;
     private bool _debugCameraMode;
     private bool _semanticHullDebug;
+    private bool _megastationZoningDebug;
+    private bool _megastationInfrastructureDebug;
+    private bool _megastationInteriorDebug;
+    private MegastationInteriorHazeStrength _megastationInteriorHazeStrength =
+        MegastationInteriorHazeStrength.Subtle;
     private bool _engineModuleDebug;
     private readonly ChaseCameraState _chaseCamera = new();
     private bool _prevIsGameActive = true;
@@ -261,6 +250,7 @@ public sealed partial class SystemSpaceState : GameState
 
         SystemSpacePayload? initialStarterRelocationPayload = null;
         StationArrivalTarget? stationArrivalPayload = null;
+        string? explicitStationVisualIdentity = null;
 
         if (payload is SystemSpacePayload p)
         {
@@ -360,6 +350,7 @@ public sealed partial class SystemSpaceState : GameState
             if (queued != null)
             {
                 _expectedRelocationSequence = queued.Value.Sequence;
+                explicitStationVisualIdentity = queued.Value.Station?.PersistenceId;
 
                 // Calibration cube offset is computed once ever, from the first starter
                 // relocation's result (see Update()) — not re-armed on later starter entries
@@ -378,7 +369,10 @@ public sealed partial class SystemSpaceState : GameState
             int? expectedSeq = QueueStationArrivalRelocation(stationArrivalPayload.Value);
             _waitingForStationRelocationSnapshot = expectedSeq != null;
             if (expectedSeq != null)
+            {
                 _expectedRelocationSequence = expectedSeq.Value;
+                explicitStationVisualIdentity = stationArrivalPayload.Value.PersistenceId;
+            }
         }
 
         // BasicEffect — our shader
@@ -414,91 +408,15 @@ public sealed partial class SystemSpaceState : GameState
 
         StationTextureRegistry.Initialize(_gd);
 
-        // Brief S2b-1: the five loaded panel .png files (Gimp seed textures) and their
-        // SetTexture registration are removed here — Report S2a §5 confirmed they were
-        // unreachable (AssignTextures unconditionally assigns a procedural
-        // TextureInstance to every module, so the PNG-backed fallback could never fire).
-        // Panel textures are now generated per-station (StationGenerator.AssignTextures /
-        // StationTextureRegistry.GenerateVariantSet) below.
-
-        // Station module layouts — generated once from name-derived seed.
-        // StationGenerator.Generate also runs StationDecorator internally.
-        // Pre-set SunDirection now so BakeLighting uses the correct world-space direction.
-        // Draw() would set it per-frame, but Generate() runs in OnEnter before any Draw().
-        {
-            Vector3 srp = _camera.ToRenderSpace(DVec3.Zero);
-            Vector3 ld  = srp == Vector3.Zero ? -Vector3.UnitZ : Vector3.Normalize(-srp);
-            SceneLighting.SunDirection = -ld;
-            // Brief B1 Fix 2: pre-set here too, same reasoning as SunDirection above —
-            // BakeLighting (inside Generate(), below) needs the real per-system colour, not
-            // whatever the previous system left behind.
-            SceneLighting.SunColour = SceneLighting.SunColourForStar(_star.LightColor);
-        }
-        _stationGeometry.Clear();
-        foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        _decoMeshes.Clear();
-        _decoMeshesFlat.Clear();
-        _glassMeshes.Clear();
-        _hullMeshes.Clear();
-        // Brief S2b-1: dispose the previous entry's per-station panel-texture variant
-        // sets before regenerating — the CelestialBodyRenderer per-planet-buffer leak
-        // class (_current-state.md) this mirrors was exactly "rebuilt without disposing
-        // the old GPU resource first."
-        foreach (var textures in _stationPanelTextures.Values)
-            foreach (var tex in textures) tex.Dispose();
-        _stationPanelTextures.Clear();
-        foreach (var v in _shadowCasterMeshes.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        _shadowCasterMeshes.Clear();
-        foreach (var station in _system.Stations)
-        {
-            var result  = StationGenerator.Generate(station, _gd, _gameTimeSeconds);
-            var modules = result.Modules;
-            _stationGeometry[station] = modules;
-            _stationPanelTextures[station] = result.PanelTextures;
-
-            // Flat (ungraded) snapshot — captured before ambient occlusion darkens
-            // faces below — used for Medium/Minimal DetailLevel. Same generator,
-            // fewer steps, same principle already established for containers.
-            foreach (var mod in modules)
-            {
-                var flatGpu = mod.Mesh?.Build(_gd);
-                if (flatGpu.HasValue)
-                    _decoMeshesFlat[mod] = flatGpu.Value;
-            }
-
-            StationDecorator.ApplyAmbientOcclusion(modules);
-
-            foreach (var mod in modules)
-            {
-                var gpu = mod.Mesh?.Build(_gd);
-                if (gpu.HasValue)
-                    _decoMeshes[mod] = gpu.Value;
-
-                var glassGpu = mod.GlassMesh?.Build(_gd);
-                if (glassGpu.HasValue)
-                    _glassMeshes[mod] = glassGpu.Value;
-
-                // Brief U1: every module now has a separate hull — box modules build
-                // theirs procedurally (BuildHullMesh, from Definition/ChamferDepth alone);
-                // MeshFactory modules build theirs once in StationDecorator.Decorate and
-                // store it in mod.HullMesh (arbitrary geometry, can't be derived on the
-                // fly). Either way _hullMeshes ends up with an entry, and the hull-pass
-                // draw loop below never needs to know which kind it's looking at.
-                if (mod.Definition.MeshFactory == null)
-                    _hullMeshes[mod] = BuildHullMesh(_gd, mod);
-                else
-                {
-                    var hullGpu = mod.HullMesh?.Build(_gd);
-                    if (hullGpu.HasValue)
-                        _hullMeshes[mod] = hullGpu.Value;
-                }
-            }
-
-            BuildStationShadowCasterMeshes(modules);
-        }
+        // Keep only lightweight station descriptors at entry. Detailed procedural
+        // geometry and texture pixels are prepared after the residency state requests one.
+        ResetStationVisualResidency("state re-entry");
+        InitializeSystemMaterialLibrary();
+        BuildStationVisualCatalog();
+        if (explicitStationVisualIdentity != null)
+            RequestExplicitStationVisual(
+                explicitStationVisualIdentity,
+                stationArrivalPayload != null ? "station arrival" : "starter relocation");
         _stationPositions.Clear();
         foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
         _containers.Clear();
@@ -585,20 +503,8 @@ public sealed partial class SystemSpaceState : GameState
         _celestialBodies?.Dispose();
 
         _effect?.Dispose();
-        foreach (var v in _decoMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _decoMeshesFlat.Values) { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _glassMeshes.Values)    { v.vb.Dispose(); v.ib.Dispose(); }
-        foreach (var v in _hullMeshes.Values)     { v.vb.Dispose(); v.ib.Dispose(); }
-        _decoMeshes.Clear();
-        _decoMeshesFlat.Clear();
-        _glassMeshes.Clear();
-        _hullMeshes.Clear();
-        // Brief S2b-1: same disposal as OnEnter's rebuild — this is the "leaving
-        // SystemSpaceState entirely" seam, the other one the per-station variant sets
-        // must not survive past.
-        foreach (var textures in _stationPanelTextures.Values)
-            foreach (var tex in textures) tex.Dispose();
-        _stationPanelTextures.Clear();
+        ResetStationVisualResidency("state exit");
+        _systemMaterialLibrarySlot.Clear();
         foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
         _containers.Clear();
         _calibrationCubeVb?.Dispose();
@@ -749,7 +655,28 @@ public sealed partial class SystemSpaceState : GameState
                           && keys.IsKeyDown(Keys.F3)
                           && !_prevKeys.IsKeyDown(Keys.F3);
         bool f4JustPressed  = keys.IsKeyDown(Keys.F4)  && !_prevKeys.IsKeyDown(Keys.F4);
-        bool f5JustPressed  = keys.IsKeyDown(Keys.F5)  && !_prevKeys.IsKeyDown(Keys.F5);
+        bool ctrlShiftF5JustPressed = ctrlDown
+            && shiftDown
+            && keys.IsKeyDown(Keys.F5)
+            && !(prevCtrlDown
+                && (_prevKeys.IsKeyDown(Keys.LeftShift) || _prevKeys.IsKeyDown(Keys.RightShift))
+                && _prevKeys.IsKeyDown(Keys.F5));
+        bool ctrlF5JustPressed = ctrlDown
+            && !shiftDown
+            && keys.IsKeyDown(Keys.F5)
+            && !(prevCtrlDown && _prevKeys.IsKeyDown(Keys.F5));
+        bool shiftF5JustPressed = !ctrlDown && shiftDown
+            && keys.IsKeyDown(Keys.F5)
+            && !_prevKeys.IsKeyDown(Keys.F5);
+        bool altF5JustPressed = !ctrlDown && !shiftDown && altDown
+            && keys.IsKeyDown(Keys.F5)
+            && !((_prevKeys.IsKeyDown(Keys.LeftAlt) || _prevKeys.IsKeyDown(Keys.RightAlt))
+                && _prevKeys.IsKeyDown(Keys.F5));
+        bool f5JustPressed  = !ctrlDown
+            && !shiftDown
+            && !altDown
+            && keys.IsKeyDown(Keys.F5)
+            && !_prevKeys.IsKeyDown(Keys.F5);
         bool shipPositionMarkerToggledOn = false;
 
         if (tabJustPressed)
@@ -852,6 +779,47 @@ public sealed partial class SystemSpaceState : GameState
                 _shipPositionMarkerEnabled
                     ? "Ship simulation position marker enabled."
                     : "Ship simulation position marker disabled.",
+                SystemMessagePriority.Info));
+        }
+        if (ctrlShiftF5JustPressed)
+        {
+            _megastationInteriorDebug = !_megastationInteriorDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _megastationInteriorDebug
+                    ? "H1 interior debug enabled: portal cyan, throat amber, flight volume green, interior boundary magenta."
+                    : "H1 interior debug disabled.",
+                SystemMessagePriority.Info));
+        }
+        else if (ctrlF5JustPressed)
+        {
+            _megastationZoningDebug = !_megastationZoningDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _megastationZoningDebug
+                    ? "Megastation semantic zoning debug enabled."
+                    : "Megastation semantic zoning debug disabled.",
+                SystemMessagePriority.Info));
+        }
+        if (shiftF5JustPressed)
+        {
+            _megastationInfrastructureDebug = !_megastationInfrastructureDebug;
+            _hudAlert.AddMessage(new SystemMessage(
+                _megastationInfrastructureDebug
+                    ? "Megastation detail debug enabled: G2 and mega-greeble markers; Fabric archetypes; service-channel primary/secondary routes and junction nodes."
+                    : "Megastation detail debug disabled.",
+                SystemMessagePriority.Info));
+        }
+        if (altF5JustPressed)
+        {
+            _megastationInteriorHazeStrength =
+                (MegastationInteriorHazeStrength)(
+                    ((int)_megastationInteriorHazeStrength + 1)
+                    % Enum.GetValues<MegastationInteriorHazeStrength>().Length);
+            float activation = ProbeMegastationInteriorHazeActivation();
+            float maximumBlend = MegastationInteriorHaze.MaximumBlendFor(
+                _megastationInteriorHazeStrength);
+            _hudAlert.AddMessage(new SystemMessage(
+                $"H1 interior haze: {_megastationInteriorHazeStrength} "
+                + $"(max {maximumBlend:P0}, bay activation {activation:F2}).",
                 SystemMessagePriority.Info));
         }
         UpdateStationShadowInput(keys);
@@ -979,11 +947,17 @@ public sealed partial class SystemSpaceState : GameState
 
         // Rebuild station positions — resolve parent body position, apply ecliptic rotation
         _stationPositions.Clear();
+        _stationPositionByIdentity.Clear();
         foreach (var station in _system.Stations)
         {
             DVec3 eclipticPos = _system.GetStationPosition(station, _gameTimeSeconds);
-            _stationPositions.Add((station, EclipticToGalaxy(eclipticPos)));
+            DVec3 galaxyPosition = EclipticToGalaxy(eclipticPos);
+            _stationPositions.Add((station, galaxyPosition));
+            _stationPositionByIdentity[station.PersistenceId ?? station.Name] = galaxyPosition;
         }
+
+        UpdateStationVisualResidency(
+            _frameShipSnap?.Position ?? _camera.UniversePosition);
 
         // _camera.ProjectionMatrix is only a representative projection now — actual
         // rendering uses three independent per-pass projections built fresh in Draw()
@@ -1120,6 +1094,7 @@ public sealed partial class SystemSpaceState : GameState
         // cross-pass depth test needed. Correctness comes from the passes covering
         // strictly decreasing, non-overlapping-by-construction ranges, not from
         // depth comparison.
+        BeginMegastationGlowFrameDiagnostics();
         var passes = BuildActivePasses();
         for (int i = 0; i < passes.Count; i++)
         {
@@ -1132,6 +1107,7 @@ public sealed partial class SystemSpaceState : GameState
 
             pass.DrawCallback(pass.Level);
         }
+        CompleteMegastationGlowFrameDiagnostics();
 
         // DrawStationGlows now runs once per pass (see DrawFarPassContent/DrawMidPassContent/
         // DrawNearPassContent below), each filtered to that pass's own distance range and
@@ -1241,6 +1217,7 @@ public sealed partial class SystemSpaceState : GameState
             _celestialBodies.DrawPlanet(_camera, body, pos, level);
 
         DrawStations(level);
+        DrawMegastationApproachBeams(level);
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierFar, float.MaxValue);
     }
 
@@ -1271,6 +1248,7 @@ public sealed partial class SystemSpaceState : GameState
                 _frameShipSnap.Cockpit);
             WriteShipRenderDiagnostic(_frameShipSnap, diagnostic);
         }
+        DrawMegastationApproachBeams(level);
         DrawStationGlows(_frameSpriteBatch!, (float)MidTierNear, (float)MidTierFar);
     }
 
@@ -1283,6 +1261,7 @@ public sealed partial class SystemSpaceState : GameState
         DrawStations(level);
         DrawContainers(level);
         DrawCalibrationCube(level);
+        DrawMegastationApproachBeams(level);
         DrawStationGlows(_frameSpriteBatch!, 0f, (float)NearTierFar);
     }
 

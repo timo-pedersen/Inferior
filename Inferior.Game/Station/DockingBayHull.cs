@@ -49,7 +49,7 @@ internal static class DockingBayHull
 
         // ── 5 solid exterior walls (everything but the door face, -Z) — the load-bearing
         // hull, Brief U1: its own mesh, drawn DynamicLit, never AO'd, exactly like a box
-        // module's BuildHullMesh output. Same per-face inset math as BuildHullMesh: face
+        // module's prepared box-hull output. Same per-face inset math: face
         // panel inset by si on its two lateral axes so the chamfer strip along each edge
         // isn't hidden behind the panel.
 

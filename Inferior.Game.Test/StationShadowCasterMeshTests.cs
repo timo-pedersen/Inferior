@@ -16,12 +16,12 @@ public class StationShadowCasterMeshTests
             ChamferDepth = StationGenerator.ChamferDepthForSeed(seed),
         };
 
-    // Regression test: BuildStationShadowCasterMeshes used to special-case
+    // Regression test: station shadow preparation used to special-case
     // Category == "docking-bay" instead of the general "any MeshFactory module" condition,
     // so every other MeshFactory module (hab-block-octagonal, science-block-octagonal, ...)
     // silently got no hull caster while its decoration still composed — floating greeble
     // shadows with nothing underneath. HasMeshFactoryHull is the exact decision
-    // BuildStationShadowCasterMeshes uses to pick the hull caster; this exercises it
+    // the upload plan uses to pick the hull caster; this exercises it
     // directly against real octagonal modules, no GraphicsDevice required
     // (StationDecorator.Decorate is pure CPU-side geometry accumulation). Brief U1: reads
     // mod.HullMesh (a separate mesh) instead of a face range within mod.Mesh — same
@@ -63,5 +63,39 @@ public class StationShadowCasterMeshTests
 
         Assert.False(SystemSpaceState.HasMeshFactoryHull(box));
         Assert.Null(box.HullMesh);
+    }
+
+    [Fact]
+    public void ProductionCasterStageExplicitlyIncludesNativeMegastationMajorClasses()
+    {
+        DecorClass[] enabled = SystemSpaceState.ClassesForStage(
+            SystemSpaceState.CasterStage.AllClasses).ToArray();
+
+        Assert.Contains(DecorClass.MegastationInfrastructureMajor, enabled);
+        Assert.Contains(DecorClass.MegastationMegaGreebleMajor, enabled);
+        Assert.Contains(DecorClass.MegastationFabricMajor, enabled);
+        Assert.Contains(DecorClass.MegastationServiceChannelMajor, enabled);
+        Assert.Contains(DecorClass.MegastationInteriorMajor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationInfrastructureMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationMegaGreebleMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationFabricMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationServiceChannelMinor, enabled);
+        Assert.DoesNotContain(DecorClass.MegastationInteriorMinor, enabled);
+    }
+
+    [Fact]
+    public void HullLessPresentationCasterStillContributesShadowFitBounds()
+    {
+        var decoration = (min: new Vector3(-80f, -20f, 3f), max: new Vector3(90f, 25f, 70f));
+
+        bool included = SystemSpaceState.TryCombineStationShadowCasterBounds(
+            hullBounds: null,
+            decorationBounds: decoration,
+            out Vector3 min,
+            out Vector3 max);
+
+        Assert.True(included);
+        Assert.Equal(decoration.min, min);
+        Assert.Equal(decoration.max, max);
     }
 }
