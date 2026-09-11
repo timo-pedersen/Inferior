@@ -363,6 +363,48 @@ overlay) that don't have test coverage of their own.
 
 ---
 
+## A1 code-path inventory follow-through (2026-09-11)
+
+`Docs/architecture-inventory-A1.md` is a parallel-code-path inventory; ten of its findings
+were acted on the same day it was written, per Timo's explicit go-ahead (see the inventory's
+own §0 for the full list/rationale/what's still open). Worth carrying here since some of it
+changes generated output, not just code structure:
+
+- **Two deterministic-hash consolidations** — `StationGenerator.NameHash` and
+  `StationTextureRegistry.HashPalette` both now route through `SeededRandom` instead of a
+  hand-rolled/`GetHashCode()`-based hash. Each deliberately reshuffled generated output
+  (station layouts, texture-palette pixel noise respectively) — expected per
+  `!invariants.md` (procedural baselines are regenerated, not persisted), not a regression
+  if an old screenshot/seed no longer matches exactly.
+- `StationModuleMesh.AddQuad` gained winding/degeneracy validation, now gated behind
+  `Debug.Assert` (dev-builds-only, matches the rest of the codebase's dev-check convention
+  — compiles away entirely in Release).
+- `FontHelper.Measure` bypasses fixed across `Inferior.UI` (`TextBox`/`TextBlock`/
+  `SystemConsole`/`LedIndicator`/`UIRenderer`).
+- Small `Inferior.Rendering` duplication cleanups: new `GpuBufferFactory`,
+  `BasicEffectPresets`, `MeshRenderer.SetCoreParameters`, `SceneLighting.LightFactor` reuse
+  in `CelestialBodyRenderer`, `DVec3.ToVector3()` consolidation. UV-sphere tessellation
+  duplication (`MeshFactory.CreateSphere` vs. `CelestialBodyRenderer.BuildPlanetSphere`) was
+  considered and explicitly deferred — Timo doesn't want to touch planet sphere generation
+  before its planned overhaul.
+- Fixed a real, independent generator bug while establishing Timo's stated "≥3 total
+  landing sites per bay" floor: `MegastationLandingDistrictPlanner.Plan` previously produced
+  as few as 1-2 sites for some seeds; now guaranteed ≥3 (`MegastationLandingDistrict.cs`).
+- **Known, pre-existing, not-yet-fixed regression surfaced while verifying the above:**
+  `MegastationMegaShelfTests.LargeBayCanAcceptMoreThanTwoBayWideShelvesWithoutOverlap` — a
+  `WallIntegrated` shelf landing site's envelope can sit up to `SiteSeparation/2` (14 units)
+  outside its shelf surface's usable bounds, because that candidate frame is expressed in
+  the host wall's own local axes while `surface.Usable` is expressed in canonical station
+  axes. A first fix attempt (tightening the containment check) regressed six other tests and
+  was reverted. The real fix needs the `WallIntegrated` branch reworked to reserve its
+  separation margin in the wall's own local frame — not done; documented in code at
+  `MegastationLandingDistrict.cs` (`TryAddCandidate`).
+- Solution-wide: Fast suite 709/709, full Slow suite 927/928 (the one known failure above)
+  after every change in this pass. **Visually confirmed by Timo in-engine — no problems
+  observed.**
+
+---
+
 ## Document map
 
 | File | Where | Purpose |
