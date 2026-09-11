@@ -208,7 +208,7 @@ public sealed class StationModuleMesh
             "AddQuad's four vertices do not form a consistently-wound planar quad — " +
             "check v3's position/order relative to v0, v1, v2.");
 
-        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arb   = ArbitraryReferenceAxis.For(normal, 0.85f);
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
@@ -342,7 +342,7 @@ public sealed class StationModuleMesh
                                float width, float depth, Color color)
     {
         longAxis = Vector3.Normalize(longAxis);
-        Vector3 hint  = MathF.Abs(longAxis.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 hint  = ArbitraryReferenceAxis.For(longAxis, 0.9f);
         Vector3 right = Vector3.Normalize(Vector3.Cross(hint, longAxis));
         Vector3 up    = Vector3.Normalize(Vector3.Cross(longAxis, right));
 
@@ -369,7 +369,7 @@ public sealed class StationModuleMesh
         if (length < 0.01f) return;
         dir = Vector3.Normalize(dir);
 
-        Vector3 arb   = MathF.Abs(dir.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arb   = ArbitraryReferenceAxis.For(dir, 0.85f);
         Vector3 right = Vector3.Normalize(Vector3.Cross(dir, arb));
         Vector3 up    = Vector3.Normalize(Vector3.Cross(right, dir));
 
@@ -430,7 +430,7 @@ public sealed class StationModuleMesh
         Vector3 normal = Vector3.Cross(edge0, edge1);
         float   nLen   = normal.Length();
         if (nLen > 1e-6f) normal /= nLen;
-        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arb   = ArbitraryReferenceAxis.For(normal, 0.85f);
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
@@ -476,7 +476,7 @@ public sealed class StationModuleMesh
         Vector3 normal = Vector3.Cross(edge0, edge1);
         float   nLen   = normal.Length();
         if (nLen > 1e-6f) normal /= nLen;
-        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arb   = ArbitraryReferenceAxis.For(normal, 0.85f);
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 
@@ -501,7 +501,7 @@ public sealed class StationModuleMesh
         Vector3 normal = Vector3.Cross(edge0, edge1);
         float   nLen   = normal.Length();
         if (nLen > 1e-6f) normal /= nLen;
-        Vector3 arb   = MathF.Abs(normal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arb   = ArbitraryReferenceAxis.For(normal, 0.85f);
         Vector3 uAxis = Vector3.Normalize(Vector3.Cross(normal, arb));
         Vector3 vAxis = Vector3.Normalize(Vector3.Cross(normal, uAxis));
 

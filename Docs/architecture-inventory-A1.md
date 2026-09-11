@@ -21,11 +21,13 @@
 
 ---
 
-## 0. Status update — findings acted on (2026-09-11)
+## 0. Status update — findings acted on (2026-09-11 – 2026-09-12)
 
-Per Timo's instruction, ten findings were acted on (five, then three more low-risk clusters,
-then two final follow-ups — all the same day). Everything else in this document is still an
-open finding, not a task queue — nothing else was changed as a result of this inventory.
+Per Timo's instruction, eleven findings were acted on across two sessions (five, then three
+more low-risk clusters, then two final follow-ups, all on 2026-09-11; the basis-from-normal
+cluster on 2026-09-12 after in-engine confirmation of the earlier work). Everything else in
+this document is still an open finding, not a task queue — nothing else was changed as a
+result of this inventory.
 
 | Finding | Action taken | Result |
 |---|---|---|
@@ -40,14 +42,39 @@ open finding, not a task queue — nothing else was changed as a result of this 
 | §2 `MeshRenderer` per-draw-call parameter blocks | New private `SetCoreParameters` helper for the 9-parameter block (`World`/`View`/`Projection`/`SunDirection`/`SunColour`/`Ambient`/`MaterialColor`/`Texture`/`VertexIlluminationScale`) shared by `DrawDynamicLit`/`DrawDynamicLitRange`/`DrawDynamicLitShadowed`/`DrawDynamicLitShadowedRange`. `ModuleToStationLocal` (set differently per variant) and the `BakedColorLit*` techniques (a genuinely different parameter set) were left alone. | Done. |
 | §2 Sun/ambient lighting factor — `CelestialBodyRenderer.BuildPlanetSphere` reimplemented `SceneLighting.LightFactor` inline | Replaced the inline `MathF.Max(Vector3.Dot(normal, sunDir), ambient)` with a call to `SceneLighting.LightFactor(normal)`; removed the now-unused local `sunDir`/`ambient` variables. | Done. |
 | §2 `DVec3` → `Vector3` narrowing — 3 independent implementations | `SemanticHullMeshBuilder`'s private duplicate `ToVector3(DVec3)` removed; all 7 call sites now call `DVec3.ToVector3()` directly. `EngineMeshBuilder.ToVector3(value, mirroredAcrossHullX)` kept (public API, 6 external call sites across `ShipMeshRenderer` and a test) but now internally delegates to `DVec3.ToVector3()` and applies the mirror sign-flip as an explicit separate step, per the inventory's own suggested fix, instead of fusing both into one set of casts. `CockpitMeshBuilder` was already on the canonical extension method — untouched. | Done. |
+| §2 Basis/frame construction from a normal | Turned out much bigger than this inventory originally scoped it: not 6 implementations but **~20**, once `Inferior.Game`'s full text was actually searched (the inventory's own §9 flagged this gap — `Inferior.Game` wasn't read exhaustively the first time) — see the inventory's own new prose note below for the full accounting and why only the "arbitrary reference axis" one-liner was consolidated, not the full basis construction. New `Inferior.Rendering/ArbitraryReferenceAxis.For(direction, threshold)`; 17 production call sites now call it, each keeping its **own existing threshold** (0.85 / 0.9 / 0.99, unchanged) and its own downstream cross-product order/handedness (deliberately not touched — see below). 3 independent copies in test files left alone (verification code, not production). | Done, narrower in scope than the inventory's original framing but by design, not by half-measure — see below. Behaviour-preserving: Fast suite 709/709 with **zero** pinned-fixture changes needed (unlike the hash-consolidation work), confirming the refactor changed no generated output. |
 
-**Not requested, not touched:** everything else in §1/§2 (basis-from-normal, the other four
-winding postures, the text-mirroring root-cause candidate) remains exactly as originally
-found. UV-sphere duplication (`MeshFactory.CreateSphere` vs
+**Not requested, not touched:** everything else in §1/§2 (the higher-level basis-construction
+shape at each of those ~20 sites, the other four winding postures, the text-mirroring
+root-cause candidate — moot for containers specifically now that container text was removed,
+but the same `PlanarTextGeometry` call-site pattern is still live at other text placements)
+remains exactly as originally found. UV-sphere duplication (`MeshFactory.CreateSphere` vs
 `CelestialBodyRenderer.BuildPlanetSphere`) was considered and explicitly deferred — Timo
 doesn't want to touch planet sphere generation now, since planets are getting an overhaul
 eventually and this would just be code to throw away or rebase. See §8 for the updated
 canonical-paths table.
+
+**Why only the one-liner, not full basis unification (2026-09-12):** reading every one of
+the ~20 sites (`git grep` for the exact `MathF.Abs(x.Y) < threshold ? UnitY : UnitX` shape,
+not just the inventory's original small sample) showed the "arbitrary reference axis" pick
+really is the same operation everywhere — but what each site builds from it is **not**. Two
+concrete examples of a real, not cosmetic, difference: `StationModuleMesh.AddQuad`/
+`AddTriangle`/etc. compute `uAxis = Cross(normal, arb)` then `vAxis = Cross(normal, uAxis)`
+(both crosses take the normal first), while `StationModuleMesh.AddPrismPipe` computes
+`right = Cross(dir, arb)` then `up = Cross(right, dir)` (the second cross takes `dir`
+*second*) — working through the sign algebra, that's not the same basis with different
+names, `up` comes out the negation of what the first pattern's `vAxis` would be for the same
+inputs. Forcing every site through one shared 2-axis-basis function would have silently
+flipped handedness/orientation at some of them — geometry risk with no actual duplication
+benefit, since the real (safe, meaning-preserving) duplication was only ever the one-line
+reference-axis pick. The three different threshold constants (0.85/0.9/0.99) were
+deliberately **not** unified onto one value either, for the same reason stated when this
+cluster was first scoped: a different threshold can change which axis gets picked for a
+near-vertical input, which is a visual/behavioural decision belonging to Timo, not something
+to fold in silently while removing duplication. Still open, if Timo wants it: picking one
+canonical threshold, and/or introducing a validated 2-axis `Frame.FromNormal`-style
+primitive (the inventory's original suggestion) as the model for *new* code, without forcing
+every existing site to migrate onto it.
 
 **Incidental consequence of the hash change:** because `NameHash` now produces different
 seeds, every megastation's generated layout reshuffled. Working through the resulting
@@ -76,7 +103,7 @@ to reserve its separation margin in the wall's own local frame. Documented in co
 |---|---|---|---|---|
 | Text on 3D surfaces | 1 primitive (`PlanarTextGeometry`) + ~10 call sites that each choose their own `readingDirection`/`surfaceNormal` | Divergent behaviour (in caller inputs, not the primitive) | Low (primitive already consolidated) | `PlanarTextGeometry.Add`/`DeriveFrame` — already canonical |
 | Container mesh generation | 1 (`ShippingContainerFactory.GenerateVertices`) | — (already consolidated) | — | Already canonical |
-| Basis/frame construction from a normal | 6 independent implementations | Divergent behaviour (different threshold constants, different validation) | Medium | `PlanarTextGeometry.DeriveFrame`'s pattern (explicit input contract + throw-on-reflection) as the model; needs a shared low-level `Frame.FromNormal` |
+| Basis/frame construction from a normal | ~~6 independent implementations~~ **Corrected 2026-09-12:** actually ~20 once fully searched — see §0. **Partially fixed:** the shared "arbitrary reference axis" one-liner they all had in common is now `ArbitraryReferenceAxis.For`; the higher-level basis each site builds from it (which genuinely differs — see §0/§2) is untouched. | Divergent behaviour (different threshold constants, different validation) | Medium | `PlanarTextGeometry.DeriveFrame`'s pattern (explicit input contract + throw-on-reflection) as the model for *new* code; **not** a retrofit target for the ~20 existing sites, which build genuinely different basis shapes on top of the now-shared reference-axis pick |
 | Triangle winding: trust vs. correct vs. validate | 5 independent postures across otherwise-similar "build mesh from triangles/quad" code. **Updated 2026-09-11:** `StationModuleMesh.AddQuad` moved from "trust" to a 6th posture, "validate via `Debug.Assert`, dev-builds-only" — still not unified with the other five. | Divergent behaviour | Medium-high (touches hot generation paths) | `ChamferedBox.WindFace` (auto-correct + comment explaining why) as the model |
 | UV sphere tessellation | 2 (`MeshFactory.CreateSphere`, `CelestialBodyRenderer.BuildPlanetSphere`) | Pure duplication (same ring/segment math, different vertex format) | Low | `MeshFactory.CreateSphere`'s loop, parameterised on vertex-build delegate |
 | CPU-mesh → GPU-buffer upload | ~~3 near-identical~~ **Fixed 2026-09-11:** the allocate/`SetData` step now shared via `GpuBufferFactory.Create` | Pure duplication | Low | Shared generic uploader — **now `GpuBufferFactory`** |
@@ -167,6 +194,34 @@ None of these are provably wrong in isolation, and the two different threshold c
 textually-independent implementations of the same idea is exactly the drift risk the brief
 is asking about: a future fix to one (like the mirrored-text fix already applied to
 `PlanarTextGeometry`) has no mechanism to propagate to the other five.
+
+**Update (2026-09-12):** The "6 implementations" count above was itself stale/incomplete —
+this pass's own §9 had already flagged that `Inferior.Game` wasn't searched exhaustively for
+the first draft, and this cluster is exactly where that gap bit. Grepping the actual shape
+(`MathF.Abs(x.Y) < threshold ? UnitY : UnitX`) across the whole solution found **~20**
+production call sites, not 6 — #3 above (`StationDecorator.Tanks.cs`'s `GetPrismRings`) no
+longer exists by that name (likely moved/renamed during the mega-stations merge); the real
+current equivalent is `StationIndustrialPrimitives.PrismRings`. The other ~17 sites span
+`StationModuleMesh.cs` (6 of its own: `AddQuad`, `AddOrientedBox`, `AddPrismPipe`,
+`AddTriangle`, `AddTriangleGradient`, `AddQuadGradient`), `StationYagiAntenna.cs` (2),
+`StationDecorator.Antennas.cs` (2), `StructuralTrussFactory.cs` (1, a degenerate-input
+fallback path), `MegastationLandingDistrict.cs` (1), and the Bolon files
+`BolonMegastations.cs` (2) / `BolonMegastationSurfaces.cs` (1) — plus `SkyboxRenderer.cs`
+(#4 above). Three thresholds are in active use, not two: 0.85, **0.9**, and 0.99.
+
+Consolidated the genuinely-identical part only: the one-line "pick UnitY unless the
+direction is too close to vertical, then UnitX" switch is now
+`Inferior.Rendering/ArbitraryReferenceAxis.For(direction, threshold)`, called from all 17
+production sites (3 independent copies in test files — verification code computing an
+expected value independently of production — deliberately left alone). What each site
+builds from that reference axis is **not** the same operation everywhere and was
+deliberately left untouched: e.g. `AddQuad`'s `vAxis = Cross(normal, uAxis)` vs.
+`AddPrismPipe`'s `up = Cross(right, dir)` differ in which operand comes first, and are not
+interchangeable — forcing them through one shared 2-axis-basis function would have silently
+flipped orientation/handedness at some call sites. Each site also kept its own existing
+threshold (0.85/0.9/0.99) rather than being silently retuned onto one "canonical" value,
+since that changes which axis gets picked for a near-vertical input — a visual/behavioural
+decision, not pure refactoring. See §0 for the full rationale and what's still open.
 
 ### Triangle winding: trust vs. correct vs. validate
 
@@ -546,7 +601,7 @@ Not a profiling pass — only what was obvious in passing while reading for dupl
 | Universe position → render-space `Vector3` | `Camera3D.ToRenderSpace` | Never hardcode `1e-9`; always go through `Camera3D.RenderScale`/`ToRenderSpace` so origin-shift and scale can't drift apart. (Checked: no live violations found — every `1e-9` outside `Camera3D.cs` was an unrelated near-zero epsilon, confirmed by reading each site.) |
 | Text on a 3D surface | `PlanarTextGeometry.Add`/`DeriveFrame` | The primitive is safe; the caller-chosen `readingDirection`/`surfaceNormal` for each face is not automatically checked against "does this actually read correctly to a viewer" — that's still a per-call-site judgment call. |
 | Container geometry | `ShippingContainerFactory.GenerateVertices` | Already the only path; keep it that way — do not let a future megastation-scale container variant reimplement inline. |
-| Orthonormal frame from one direction | *(none yet — 6 candidates in §2)* | Pick one input contract (arbitrary-reference-axis vs. authored-tangent vs. reading-direction) per use case; standardise the reference-axis threshold if that variant is kept. |
+| Orthonormal frame from one direction | ~~*(none yet — 6 candidates in §2)*~~ **Partially done 2026-09-12:** the shared reference-axis pick is `ArbitraryReferenceAxis.For(direction, threshold)`, used at all 17 production arbitrary-reference-axis sites (real count ~20, not the original 6 — see §0/§2). The full 2-axis basis is still built independently per site — genuinely different cross-product order/handedness at some of them, not safely unifiable without a design decision. | Pick one input contract (arbitrary-reference-axis vs. authored-tangent vs. reading-direction) per use case; standardise the reference-axis threshold if that variant is kept — still an open decision, deliberately not made silently. `PlanarTextGeometry.DeriveFrame`'s throw-on-reflection discipline remains the model for *new* code in this space, not a retrofit target for the ~20 existing sites. |
 | Triangle winding correction | `ChamferedBox.WindFace`'s auto-flip pattern | Decide once whether "trust caller" (`CockpitMeshBuilder`), "validate-and-throw" (`SemanticHullMeshBuilder`), "validate via `Debug.Assert`, dev-only" (`AddQuad` as of 2026-09-11's follow-up), or "auto-correct" (`GeometryBuilder`, `ChamferedBox`, `AddQuadProjected`) is the house style — right now all four exist for no documented reason. `AddQuad`'s gates are now dev-builds-only per Timo's original intent — Release builds don't enforce them at all. |
 | UV sphere mesh | `MeshFactory.CreateSphere`, generalised with a per-vertex delegate | `BuildPlanetSphere`'s checkerboard/lighting bake would need to become that delegate. |
 | CPU mesh → GPU buffers | ~~A new shared generic uploader~~ **Partially done 2026-09-11:** `GpuBufferFactory.Create` shares the allocate/SetData scaffolding; the per-caller vertex struct/record differences (Semantic/Cockpit/Engine) were judged genuine enough to leave as three separate mapping steps calling the one shared factory, rather than building a fully generic delegate-based uploader for three call sites. | Keep per-caller vertex struct differences (Semantic/Cockpit/Engine) as separate mapping code, not baked into three copies of the allocate/SetData scaffolding — the latter is now shared, the former deliberately isn't. |

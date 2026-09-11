@@ -816,7 +816,7 @@ public static class BolonMegastationGenerator
 
     private static Vector3 PerpendicularWithRoll(Vector3 axis, Random rng)
     {
-        Vector3 reference = MathF.Abs(axis.Y) < .9f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 reference = ArbitraryReferenceAxis.For(axis, .9f);
         Vector3 tangent = Vector3.Normalize(Vector3.Cross(reference, axis));
         return Vector3.Transform(
             tangent,
@@ -881,7 +881,7 @@ public static class BolonMegastationGenerator
                 .ToArray();
             Vector3 normal = IcosahedronVertices[vertex];
             Vector3 tangent = Vector3.Normalize(Vector3.Cross(
-                MathF.Abs(normal.Y) < .9f ? Vector3.UnitY : Vector3.UnitX,
+                ArbitraryReferenceAxis.For(normal, .9f),
                 normal));
             Vector3 bitangent = Vector3.Normalize(Vector3.Cross(normal, tangent));
             AddFace(result, neighbours

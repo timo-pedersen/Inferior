@@ -1,3 +1,4 @@
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
@@ -76,7 +77,7 @@ internal static class StationYagiAntenna
         Vector3 antBase = mountPoint + faceNormal * p.MastHeight;
 
         // Orientation: same construction as AddParabolicDish — tilt + bearing from face normal
-        Vector3 arbitrary = MathF.Abs(faceNormal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arbitrary = ArbitraryReferenceAxis.For(faceNormal, 0.85f);
         Vector3 tiltAxis  = Vector3.Normalize(Vector3.Cross(faceNormal, arbitrary));
         tiltAxis = Vector3.Transform(tiltAxis,
             Quaternion.CreateFromAxisAngle(faceNormal, p.BearingDegrees * MathF.PI / 180f));
@@ -248,7 +249,7 @@ internal static class StationYagiAntenna
         Vector3 endCenter   = center + fwd * halfThick;
 
         // Replicate AddPrismPipe's tangent frame so ring vertices align seamlessly with the sides
-        Vector3 arb       = MathF.Abs(fwd.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arb       = ArbitraryReferenceAxis.For(fwd, 0.85f);
         Vector3 pipeRight = Vector3.Normalize(Vector3.Cross(fwd, arb));
         Vector3 pipeUp    = Vector3.Cross(pipeRight, fwd);
 

@@ -91,7 +91,7 @@ public sealed class SkyboxRenderer
                 float   alpha   = brightness * 0.30f;
                 Color   glowCol = SkyboxStarColor(star.SpectralClass, alpha);
 
-                Vector3 worldUp = MathF.Abs(dir.Y) < 0.99f ? Vector3.UnitY : Vector3.UnitX;
+                Vector3 worldUp = ArbitraryReferenceAxis.For(dir, 0.99f);
                 Vector3 tan     = Vector3.Normalize(Vector3.Cross(dir, worldUp));
                 Vector3 bitan   = Vector3.Cross(dir, tan);
 

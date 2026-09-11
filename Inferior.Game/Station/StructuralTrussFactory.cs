@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
@@ -130,7 +131,7 @@ public static class StructuralTrussFactory
             Vector3 right = Vector3.Cross(crossHint, longAxis);
             if (right.LengthSquared() < 1e-6f)
             {
-                crossHint = MathF.Abs(longAxis.Y) < .9f ? Vector3.UnitY : Vector3.UnitX;
+                crossHint = ArbitraryReferenceAxis.For(longAxis, .9f);
                 right = Vector3.Cross(crossHint, longAxis);
             }
             right.Normalize();

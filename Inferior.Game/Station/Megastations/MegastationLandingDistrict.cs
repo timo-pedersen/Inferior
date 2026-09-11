@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Inferior.Game.Containers;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen.Megastations;
@@ -2342,7 +2343,7 @@ public static class MegastationLandingDistrictMeshBuilder
 
         // These are exactly the axes AddQuad derived for the former monolithic top
         // quad. Keeping c7 as projection origin preserves both texture scale and phase.
-        Vector3 arbitrary = MathF.Abs(up.Y) < .85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arbitrary = ArbitraryReferenceAxis.For(up, .85f);
         Vector3 textureU = Vector3.Normalize(Vector3.Cross(up, arbitrary));
         Vector3 textureV = Vector3.Normalize(Vector3.Cross(up, textureU));
         for (int row = 0; row < rows; row++)

@@ -1,3 +1,4 @@
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 
 namespace Inferior.Game.StationGen;
@@ -178,7 +179,7 @@ internal static class StationIndustrialPrimitives
         Vector3 start, Vector3 end, float radius, int sides)
     {
         Vector3 direction = Vector3.Normalize(end - start);
-        Vector3 arbitrary = MathF.Abs(direction.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arbitrary = ArbitraryReferenceAxis.For(direction, 0.85f);
         Vector3 right = Vector3.Normalize(Vector3.Cross(direction, arbitrary));
         Vector3 up = Vector3.Normalize(Vector3.Cross(right, direction));
         var startRing = new Vector3[sides];

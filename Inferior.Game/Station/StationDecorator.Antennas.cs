@@ -327,7 +327,7 @@ public static partial class StationDecorator
         const float shellThick = 0.015f;
 
         // Build tilted dish axis
-        Vector3 arbitrary = MathF.Abs(faceNormal.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 arbitrary = ArbitraryReferenceAxis.For(faceNormal, 0.85f);
         Vector3 tiltAxis  = Vector3.Normalize(Vector3.Cross(faceNormal, arbitrary));
         tiltAxis  = Vector3.Transform(tiltAxis,
             Quaternion.CreateFromAxisAngle(faceNormal, bearingDegrees * MathF.PI / 180f));
@@ -340,7 +340,7 @@ public static partial class StationDecorator
         Vector3 dishBack   = mountPoint + faceNormal * armLength;
         Vector3 dishCenter = dishBack + dishAxis * maxDepth;
 
-        Vector3 dishArb   = MathF.Abs(dishAxis.Y) < 0.85f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 dishArb   = ArbitraryReferenceAxis.For(dishAxis, 0.85f);
         Vector3 dishRight = Vector3.Normalize(Vector3.Cross(dishAxis, dishArb));
         Vector3 dishUp    = Vector3.Normalize(Vector3.Cross(dishRight, dishAxis));
 

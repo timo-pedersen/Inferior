@@ -1086,7 +1086,7 @@ public static class BolonSurfacePresentationPlanner
     private static (Vector3 U, Vector3 V) RandomProjectionFrame(Random rng)
     {
         Vector3 u = RandomUnitVector(rng);
-        Vector3 helper = MathF.Abs(u.Y) < .9f ? Vector3.UnitY : Vector3.UnitX;
+        Vector3 helper = ArbitraryReferenceAxis.For(u, .9f);
         Vector3 v = Vector3.Normalize(Vector3.Cross(u, helper));
         return (u, v);
     }
