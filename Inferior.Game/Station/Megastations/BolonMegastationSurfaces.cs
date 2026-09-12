@@ -1233,6 +1233,97 @@ public static class BolonSurfaceMeshBuilder
         Vector3 ProjectionV,
         string Identity);
 
+    internal static StationModuleMesh BuildMacro(
+        BolonMegastationPlan structuralPlan,
+        BolonAmbassadorBayPlan ambassadorBay,
+        CancellationToken cancellationToken = default)
+    {
+        var mesh = new StationModuleMesh();
+        var omittedFaces = structuralPlan.Relationships
+            .Where(relationship => relationship.Mode
+                == BolonVesselRelationshipMode.DirectFaceJoin)
+            .SelectMany(relationship => new[]
+            {
+                (relationship.A, relationship.FaceA),
+                (relationship.B, relationship.FaceB),
+            })
+            .ToHashSet();
+        Color shell = structuralPlan.Archetype == MegastationArchetype.RedBolon
+            ? new Color(116, 48, 34)
+            : new Color(112, 82, 48);
+
+        foreach (BolonVesselPlan vessel in structuralPlan.Vessels)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (BolonAttachmentFace face in BolonMegastationGenerator.AttachmentFaces)
+            {
+                if (omittedFaces.Contains((vessel.Index, face.Index)))
+                    continue;
+                Vector3[] polygon = BolonMegastationGenerator
+                    .GetAttachmentFaceVertices(face.Index)
+                    .Select(point => vessel.Position + Vector3.Transform(
+                        point * vessel.Radius,
+                        vessel.Orientation))
+                    .ToArray();
+                Vector3 outward = Vector3.Transform(
+                    face.LocalNormal,
+                    vessel.Orientation);
+                if (vessel.Index == ambassadorBay.VesselIndex
+                    && face.Index == ambassadorBay.HostFaceIndex)
+                {
+                    EmitAmbassadorBulkhead(
+                        mesh,
+                        polygon,
+                        ambassadorBay.MouthCorners(),
+                        outward,
+                        shell);
+                    Vector3[] recess = ambassadorBay.MouthCorners()
+                        .Select(point => point - ambassadorBay.Outward * 8f)
+                        .ToArray();
+                    EmitMacroPolygon(mesh, recess, outward, new Color(8, 9, 11));
+                    continue;
+                }
+                EmitMacroPolygon(mesh, polygon, outward, shell);
+            }
+        }
+
+        foreach (BolonVesselRelationship relationship in structuralPlan.Relationships.Where(
+                     relationship => relationship.Mode
+                         == BolonVesselRelationshipMode.ShortConnector))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            BolonVesselPlan a = structuralPlan.Vessels[relationship.A];
+            BolonVesselPlan b = structuralPlan.Vessels[relationship.B];
+            Vector3 axis = Vector3.Normalize(b.Position - a.Position);
+            mesh.AddPrismPipe(
+                FaceWorldCenter(a, relationship.FaceA) - axis * 2f,
+                FaceWorldCenter(b, relationship.FaceB) + axis * 2f,
+                relationship.ConnectorRadius,
+                8,
+                ConnectorColour(structuralPlan.Archetype));
+        }
+        mesh.BaseFaceCount = mesh.FaceCount;
+        return mesh;
+    }
+
+    private static void EmitMacroPolygon(
+        StationModuleMesh mesh,
+        IReadOnlyList<Vector3> polygon,
+        Vector3 outward,
+        Color colour)
+    {
+        for (int index = 1; index < polygon.Count - 1; index++)
+        {
+            Vector3 a = polygon[0];
+            Vector3 b = polygon[index];
+            Vector3 c = polygon[index + 1];
+            if (Vector3.Dot(Vector3.Cross(b - a, c - a), outward) < 0f)
+                mesh.AddTriangle(a, c, b, colour);
+            else
+                mesh.AddTriangle(a, b, c, colour);
+        }
+    }
+
     public static BolonSurfaceMeshBuildResult Build(
         BolonMegastationPlan structuralPlan,
         BolonSurfacePresentationPlan surfacePlan,

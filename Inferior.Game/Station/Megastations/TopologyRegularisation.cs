@@ -130,10 +130,12 @@ public static class TopologyRegulariser
         RepairCandidate? best = null;
         foreach (var coord in RepairCandidatesFor(occupancy, contact))
         {
+            (int sealedCavityPenalty, int connectedComponents) =
+                ValidateCandidate(occupancy, coord);
             var candidate = new RepairCandidate(
                 coord,
-                CandidateSealedCavityPenalty(occupancy, coord),
-                CandidateConnectedComponents(occupancy, coord),
+                sealedCavityPenalty,
+                connectedComponents,
                 CellVolume(occupancy.Grid, coord),
                 ContinuityScore(occupancy, coord),
                 OwnerContinuityScore(occupancy, coord),
@@ -370,18 +372,14 @@ public static class TopologyRegulariser
     private static int ExteriorPreference(SliceGrid grid, MegacellCoord coord)
         => grid.ExteriorAxisCount(coord.X, coord.Y, coord.Z);
 
-    private static int CandidateSealedCavityPenalty(StructuralOccupancy occupancy, MegacellCoord coord)
+    private static (int SealedCavityPenalty, int ConnectedComponents) ValidateCandidate(
+        StructuralOccupancy occupancy,
+        MegacellCoord coord)
     {
         var test = occupancy.Clone();
         test.MarkTopologyRegularisation(coord.X, coord.Y, coord.Z, ChooseRepairRegionId(occupancy, coord));
-        return MegastationConnectivity.Validate(test).HasSealedCavity ? 1 : 0;
-    }
-
-    private static int CandidateConnectedComponents(StructuralOccupancy occupancy, MegacellCoord coord)
-    {
-        var test = occupancy.Clone();
-        test.MarkTopologyRegularisation(coord.X, coord.Y, coord.Z, ChooseRepairRegionId(occupancy, coord));
-        return MegastationConnectivity.Validate(test).ConnectedComponentsBeforeValidation;
+        MegastationConnectivityReport report = MegastationConnectivity.Validate(test);
+        return (report.HasSealedCavity ? 1 : 0, report.ConnectedComponentsBeforeValidation);
     }
 
     private static IEnumerable<MegacellCoord> AdjacentOccupied(StructuralOccupancy occupancy, MegacellCoord coord)

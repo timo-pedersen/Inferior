@@ -23,6 +23,43 @@ public readonly record struct MegastationSelection(
 /// </summary>
 public static class MegastationDevelopmentPolicy
 {
+    /// <summary>
+    /// Resolves the system-wide megastation category while enforcing the universe
+    /// invariant that a star system contains at most one megastation-class station.
+    /// Individual eligibility remains stable per station; when development settings
+    /// make several stations eligible, the lowest stable probability (then identity)
+    /// wins. A forced starter station has priority over every probabilistic candidate.
+    /// </summary>
+    public static IReadOnlyDictionary<Station, MegastationSelection> ResolveSystem(
+        IReadOnlyList<Station> stations,
+        Station? starterStation,
+        MegastationDevelopmentSelection selection)
+    {
+        var resolved = stations.ToDictionary(
+            station => station,
+            station => Resolve(station, starterStation, selection));
+        Station[] selected = stations
+            .Where(station => resolved[station].IsMegastation)
+            .ToArray();
+        if (selected.Length <= 1)
+            return resolved;
+
+        Station winner = starterStation != null
+            && selected.Contains(starterStation)
+                ? starterStation
+                : selected
+                    .OrderBy(station => StableProbability(
+                        station.PersistenceId ?? station.Name))
+                    .ThenBy(station => station.PersistenceId ?? station.Name,
+                        StringComparer.Ordinal)
+                    .First();
+
+        foreach (Station station in selected)
+            if (!ReferenceEquals(station, winner))
+                resolved[station] = new(false, resolved[station].Archetype);
+        return resolved;
+    }
+
     public static MegastationSelection Resolve(
         Station station,
         Station? starterStation,

@@ -127,8 +127,74 @@ public sealed record MegastationPrototypeCpuResult(
     MegastationMeshStats MeshStats,
     MegastationPrototypeDiagnostics Diagnostics);
 
+internal sealed record RectilinearMegastationMacroData(
+    string PersistenceId,
+    int RootSeed,
+    MegastationPrototypeSettings Settings,
+    SliceGrid Grid,
+    StructuralOccupancy Occupancy,
+    StructuralOccupancy MacroOccupancy,
+    MegastationInteriorPlan InteriorPlan,
+    IReadOnlyList<SurfacePatch> Patches,
+    MegastationUrbanStyle Style,
+    IReadOnlyList<UrbanGrowthResult> Faces,
+    IReadOnlyList<EdgeRegionPlan> Edges,
+    IReadOnlyList<CornerRegionPlan> Corners,
+    MegastationConnectivityReport Connectivity,
+    long RawMassingMilliseconds,
+    long EntranceCarveMilliseconds,
+    double GenerationMilliseconds);
+
+internal sealed record MegastationPrototypeMacroCpuResult(
+    RectilinearMegastationMacroData StructuralData,
+    BoundaryTopology BoundaryTopology,
+    StationModuleMesh Mesh,
+    long BoundaryTopologyBuildMilliseconds,
+    long MeshBuildMilliseconds,
+    double GenerationMilliseconds);
+
 public static class MegastationPrototypeGenerator
 {
+    internal static MegastationPrototypeMacroCpuResult GenerateMacroCpu(
+        string persistenceId,
+        MegastationPrototypeSettings? settings = null,
+        CancellationToken cancellationToken = default,
+        SystemMaterialAssignmentContext? systemMaterials = null)
+    {
+        settings ??= MegastationPrototypeSettings.Default;
+        var stopwatch = Stopwatch.StartNew();
+        RectilinearMegastationMacroData structural = PrepareMacroData(
+            persistenceId,
+            settings,
+            cancellationToken);
+        var topologyStopwatch = Stopwatch.StartNew();
+        BoundaryTopology topology = BoundaryTopologyBuilder.Build(
+            structural.MacroOccupancy,
+            settings);
+        topologyStopwatch.Stop();
+        cancellationToken.ThrowIfCancellationRequested();
+        var mesh = new StationModuleMesh();
+        var meshStopwatch = Stopwatch.StartNew();
+        MegastationSystemMaterialAssignment? materialAssignment = systemMaterials is { } context
+            ? MegastationSystemMaterialAssignment.Create(context, persistenceId)
+            : null;
+        MegastationPrototypeMeshBuilder.BuildMacro(
+            structural.MacroOccupancy,
+            topology,
+            mesh,
+            materialAssignment);
+        meshStopwatch.Stop();
+        cancellationToken.ThrowIfCancellationRequested();
+        stopwatch.Stop();
+        return new(
+            structural,
+            topology,
+            mesh,
+            topologyStopwatch.ElapsedMilliseconds,
+            meshStopwatch.ElapsedMilliseconds,
+            stopwatch.Elapsed.TotalMilliseconds);
+    }
+
     public static MegastationPrototypeResult Generate(Galaxy.Station station, GraphicsDevice gd, MegastationPrototypeSettings? settings = null)
     {
         settings ??= MegastationPrototypeSettings.Default;
@@ -164,48 +230,32 @@ public static class MegastationPrototypeGenerator
     {
         settings ??= MegastationPrototypeSettings.Default;
         stopwatch ??= Stopwatch.StartNew();
-        int rootSeed = MegastationSeed.Root(persistenceId, settings.SeedCompatibilityVersion);
-
-        var grid = SliceGrid.Create(settings, MegastationSeed.Derive(rootSeed, "slice-grid layout"));
-        cancellationToken.ThrowIfCancellationRequested();
-        var occupancy = new CuboidStructuralVolumeGenerator().Generate(grid);
-        ExteriorSpace.ClassifyExternallyAccessibleEmpty(occupancy);
-        var patches = SurfacePatchFinder.FindPatches(occupancy);
-        var style = MegastationUrbanStyle.Generate(rootSeed);
-        var corners = CornerRegionGenerator.PlanCorners(grid, settings, style, rootSeed);
-        CornerRegionGenerator.Apply(occupancy, corners);
-        cancellationToken.ThrowIfCancellationRequested();
-        var edges = EdgeRegionGenerator.PlanEdges(grid, settings, style, corners, rootSeed);
-        EdgeRegionGenerator.Apply(occupancy, edges);
-
-        var faceResults = new List<UrbanGrowthResult>(6);
-        foreach (var patch in patches.OrderBy(p => p.Id, StringComparer.Ordinal))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var faceSettings = MegastationFaceSettings.ForPatch(settings, style, grid, patch, rootSeed);
-            int faceSeed = patch.Direction == settings.UrbanPatchNormal
-                ? MegastationSeed.Derive(rootSeed, "district layout")
-                : MegastationSeed.Derive(rootSeed, $"district layout:{patch.Id}");
-            faceResults.Add(UrbanGrowth.Generate(occupancy, patch, faceSettings, faceSeed));
-        }
-
-        var validation = MegastationConnectivity.Validate(occupancy);
-        cancellationToken.ThrowIfCancellationRequested();
-        StructuralOccupancy hollowedOccupancy = occupancy.Clone();
-        MegastationInteriorPlan interiorPlan = MegastationInteriorPlanner.PlanAndApply(
-            hollowedOccupancy,
-            rootSeed,
+        RectilinearMegastationMacroData macro = PrepareMacroData(
+            persistenceId,
+            settings,
             cancellationToken);
-        ExteriorSpace.ClassifyExternallyAccessibleEmpty(hollowedOccupancy);
+        int rootSeed = macro.RootSeed;
+        SliceGrid grid = macro.Grid;
+        StructuralOccupancy occupancy = macro.Occupancy;
+        IReadOnlyList<SurfacePatch> patches = macro.Patches;
+        MegastationUrbanStyle style = macro.Style;
+        IReadOnlyList<CornerRegionPlan> corners = macro.Corners;
+        IReadOnlyList<EdgeRegionPlan> edges = macro.Edges;
+        IReadOnlyList<UrbanGrowthResult> faceResults = macro.Faces;
+        MegastationConnectivityReport validation = macro.Connectivity;
+        MegastationInteriorPlan interiorPlan = macro.InteriorPlan;
         var regularised = settings.EnableTopologyRegularisation
-            ? TopologyRegulariser.Regularise(hollowedOccupancy, settings)
+            ? TopologyRegulariser.Regularise(macro.MacroOccupancy, settings)
             : BuildDisabledRegularisationResult(
-                hollowedOccupancy,
+                macro.MacroOccupancy,
                 settings,
-                MegastationConnectivity.Validate(hollowedOccupancy));
+                MegastationConnectivity.Validate(macro.MacroOccupancy));
         var topologyStopwatch = Stopwatch.StartNew();
-        BoundaryTopology topology = BoundaryTopologyBuilder.Build(regularised.Occupancy, settings);
+        BoundaryTopology topology = BoundaryTopologyBuilder.Build(
+            regularised.Occupancy,
+            settings);
         topologyStopwatch.Stop();
+        cancellationToken.ThrowIfCancellationRequested();
         MegastationMegaShelfPlan megaShelfPlan = MegastationMegaShelfPlanner.Plan(
             interiorPlan,
             regularised.Occupancy,
@@ -709,6 +759,85 @@ public static class MegastationPrototypeGenerator
             diag);
     }
 
+    private static RectilinearMegastationMacroData PrepareMacroData(
+        string persistenceId,
+        MegastationPrototypeSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var stageStopwatch = Stopwatch.StartNew();
+        int rootSeed = MegastationSeed.Root(
+            persistenceId,
+            settings.SeedCompatibilityVersion);
+        SliceGrid grid = SliceGrid.Create(
+            settings,
+            MegastationSeed.Derive(rootSeed, "slice-grid layout"));
+        cancellationToken.ThrowIfCancellationRequested();
+
+        StructuralOccupancy occupancy =
+            new CuboidStructuralVolumeGenerator().Generate(grid);
+        ExteriorSpace.ClassifyExternallyAccessibleEmpty(occupancy);
+        IReadOnlyList<SurfacePatch> patches = SurfacePatchFinder.FindPatches(occupancy);
+        MegastationUrbanStyle style = MegastationUrbanStyle.Generate(rootSeed);
+        IReadOnlyList<CornerRegionPlan> corners = CornerRegionGenerator.PlanCorners(
+            grid, settings, style, rootSeed);
+        CornerRegionGenerator.Apply(occupancy, corners);
+        cancellationToken.ThrowIfCancellationRequested();
+        IReadOnlyList<EdgeRegionPlan> edges = EdgeRegionGenerator.PlanEdges(
+            grid, settings, style, corners, rootSeed);
+        EdgeRegionGenerator.Apply(occupancy, edges);
+
+        var faces = new List<UrbanGrowthResult>(6);
+        foreach (SurfacePatch patch in patches.OrderBy(
+                     patch => patch.Id,
+                     StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            MegastationPrototypeSettings faceSettings = MegastationFaceSettings.ForPatch(
+                settings, style, grid, patch, rootSeed);
+            int faceSeed = patch.Direction == settings.UrbanPatchNormal
+                ? MegastationSeed.Derive(rootSeed, "district layout")
+                : MegastationSeed.Derive(rootSeed, $"district layout:{patch.Id}");
+            faces.Add(UrbanGrowth.Generate(
+                occupancy, patch, faceSettings, faceSeed));
+        }
+
+        MegastationConnectivityReport validation =
+            MegastationConnectivity.Validate(occupancy);
+        stageStopwatch.Stop();
+        long rawMassingMilliseconds = stageStopwatch.ElapsedMilliseconds;
+        cancellationToken.ThrowIfCancellationRequested();
+        stageStopwatch.Restart();
+        StructuralOccupancy hollowedOccupancy = occupancy.Clone();
+        MegastationInteriorPlan interiorPlan = MegastationInteriorPlanner.PlanAndApply(
+            hollowedOccupancy,
+            rootSeed,
+            cancellationToken);
+        ExteriorSpace.ClassifyExternallyAccessibleEmpty(hollowedOccupancy);
+        stageStopwatch.Stop();
+        long entranceCarveMilliseconds = stageStopwatch.ElapsedMilliseconds;
+        cancellationToken.ThrowIfCancellationRequested();
+        stopwatch.Stop();
+
+        return new(
+            persistenceId,
+            rootSeed,
+            settings,
+            grid,
+            occupancy,
+            hollowedOccupancy,
+            interiorPlan,
+            patches,
+            style,
+            faces,
+            edges,
+            corners,
+            validation,
+            rawMassingMilliseconds,
+            entranceCarveMilliseconds,
+            stopwatch.Elapsed.TotalMilliseconds);
+    }
+
     public static PlacedModule CreatePlacedModule(MegastationPrototypeCpuResult cpu)
     {
 #if DEBUG
@@ -756,6 +885,36 @@ public static class MegastationPrototypeGenerator
             module.GlowLights.AddRange(CreateShelfFloodGlowLights(shelfLighting));
         }
         return module;
+    }
+
+    internal static PlacedModule CreateMacroPlacedModule(
+        MegastationPrototypeMacroCpuResult cpu)
+    {
+        Vector3 bounds = new(
+            cpu.StructuralData.Grid.Dimension(GridAxis.X),
+            cpu.StructuralData.Grid.Dimension(GridAxis.Y),
+            cpu.StructuralData.Grid.Dimension(GridAxis.Z));
+        var definition = new StationModuleDefinition
+        {
+            Id = "megastation-macro-rectilinear",
+            Category = "megastation-macro",
+            BoundingBox = bounds,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+        return new PlacedModule
+        {
+            Definition = definition,
+            Transform = Matrix.Identity,
+            Seed = cpu.StructuralData.RootSeed,
+            ChamferDepth = 0f,
+            AabbMin = bounds * -.5f,
+            AabbMax = bounds * .5f,
+            HullMesh = cpu.Mesh,
+            HullShadowMesh = cpu.Mesh,
+            HullMaterialRanges = cpu.Mesh.PrepareMaterialGroups()?.Ranges ?? [],
+        };
     }
 
     public static PlacedModule CreateInteriorModule(MegastationPrototypeCpuResult cpu)

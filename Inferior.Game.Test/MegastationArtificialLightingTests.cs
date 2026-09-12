@@ -177,6 +177,65 @@ public sealed class MegastationArtificialLightingTests
     }
 
     [Fact]
+    public void SpatiallyIndexedLightsMatchLinearAccumulationExactly()
+    {
+        MegastationArtificialLight[] lights = Enumerable.Range(0, 24)
+            .Select(index => new MegastationArtificialLight(
+                $"light:{index}",
+                new Vector3(index * 83f - 900f, (index % 5) * 31f, (index % 7) * -47f),
+                new Color((byte)(100 + index * 5), (byte)(220 - index * 3), 245),
+                .4f + index * .02f,
+                80f + index * 3f,
+                index % 3 == 0 ? Vector3.UnitX : null,
+                -.4f))
+            .ToArray();
+        IReadOnlyList<MegastationArtificialLight> indexed =
+            MegastationArtificialLighting.Prepare(lights);
+        Vector3[] receivers =
+        [
+            Vector3.Zero,
+            new Vector3(-817f, 31f, -47f),
+            new Vector3(411f, 62f, -141f),
+            new Vector3(2_500f, -900f, 700f),
+        ];
+
+        foreach (Vector3 receiver in receivers)
+        {
+            var linear = MegastationArtificialLighting.EvaluateComponents(
+                receiver, Vector3.Normalize(new Vector3(.4f, .8f, -.2f)), lights);
+            var accelerated = MegastationArtificialLighting.EvaluateComponents(
+                receiver, Vector3.Normalize(new Vector3(.4f, .8f, -.2f)), indexed);
+            Assert.Equal(linear, accelerated);
+        }
+    }
+
+    [Fact]
+    public void OccluderHierarchyMatchesIndependentExactIntersectionTests()
+    {
+        MegastationArtificialOccluder[] boxes = Enumerable.Range(0, 20)
+            .Select(index => Box(MegastationArtificialOccluderRole.ServiceBuilding,
+                new Vector3(index * 9f - 80f, (index % 4) * 7f - 10f, (index % 3) * 11f),
+                new Vector3(3f + index % 2, 5f, 4f)))
+            .ToArray();
+        MegastationArtificialOcclusion indexed =
+            MegastationArtificialOcclusion.CreateForTests(boxes);
+        (Vector3 Start, Vector3 End)[] segments =
+        [
+            (new(-120f, -10f, 0f), new(120f, -10f, 0f)),
+            (new(-120f, 80f, 0f), new(120f, 80f, 0f)),
+            (new(0f, -60f, 11f), new(0f, 60f, 11f)),
+            (new(-200f, -100f, -100f), new(200f, 100f, 100f)),
+        ];
+
+        foreach ((Vector3 start, Vector3 end) in segments)
+        {
+            bool expectedVisible = boxes.All(box =>
+                MegastationArtificialOcclusion.CreateForTests(box).IsVisible(start, end));
+            Assert.Equal(expectedVisible, indexed.IsVisible(start, end));
+        }
+    }
+
+    [Fact]
     public void AuthoritativeStructuralOccupancyBlocksDirectSegmentDeterministically()
     {
         float[] widths = [10f, 10f, 10f];

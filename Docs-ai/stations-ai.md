@@ -19,11 +19,9 @@ self-illumination floor S in alpha); the directional sun term is computed every 
 `LitSurface.fx`, not baked — a rotating station is lit correctly. Screen-space glow is a
 separate `SpriteBatch` pass using `BlendState.Additive`.
 
-> **Lighting pipeline Phase A implemented** (`Docs/station-lighting-pipeline-spec.md`):
-> normals are kept through `Build()`, no directional term is ever baked into vertex colour.
-> Station shadows still do **not** exist on master/this branch; the failed first shadow
-> experiment is quarantined on `wip/station-lighting-shadows`
-> (`Docs-archive/Shadow_fail_retrospective.md`). Next spec phase (B) adds the shadow map.
+> Normals are kept through `Build()` and no directional term is baked into vertex colour.
+> Station stellar shadows are implemented. Visible station geometry supplies accepted hull/decor
+> caster meshes and bounds to the existing station shadow-map path.
 
 ### Megastation prototypes
 
@@ -124,13 +122,13 @@ Development controls:
 
 Versioning:
 
-- `GeneratorVersion = 4` is the current C2 generator/output version reported in diagnostics and
+- `GeneratorVersion = 5` is the current generator/output version reported in diagnostics and
   included in complete regression signatures.
 - `SeedCompatibilityVersion = 1` is intentionally retained for accepted massing. The root seed is
   derived from this compatibility version, not from the diagnostic generator version, so C0
   version reporting does not alter accepted raw Prototype B massing.
-- `TopologyRegularisationAlgorithmVersion = 1` is the current regularisation algorithm version.
-- `BoundaryTopologyAlgorithmVersion = 1` is the current exact-grid boundary topology algorithm version.
+- `TopologyRegularisationAlgorithmVersion = 2` is the current regularisation algorithm version.
+- `BoundaryTopologyAlgorithmVersion = 2` is the current exact-grid boundary topology algorithm version.
 - `StructuralChamferAlgorithmVersion = 1` is the current conservative chamfer eligibility/final mesh algorithm version.
 - `PositiveYUrbanSeedVersion`, `FaceUrbanAlgorithmVersion`, `EdgeAlgorithmVersion`, and
   `CornerAlgorithmVersion` are explicit version declarations for future intentional revisions.
@@ -165,46 +163,67 @@ semantic module partitioning, windows, lights, greeble, pipes, tanks, antennas,
 attached annexes, Boolean cuts, O/L/T shapes, jagged structural-core erosion, bridges, overhangs,
 docking bays, interiors, final megastation rarity, LOD redesign, and shadow changes.
 
-### Detailed visual residency
+### Visual preparation, residency, and megastation LOD
 
 Station identity, orbit, map/radar/targeting data, and distant-dot presentation are lightweight
-system data and remain available for every station. Detailed visual data is proximity-resident
-presentation state: `SystemSpaceState` owns zero or one `StationVisualPackage`.
+system data and remain available for every station. Universe existence, CPU visual preparation,
+GPU residency, and presentation LOD are separate concepts.
 
-`StationVisualResidencyPolicy` is the single threshold owner. Its defaults are a 200,000 m load
-distance and 250,000 m unload distance, measured from a conservative station visual envelope.
-The policy is keyed by `StationVisualClassification`, so megastations and future visual classes
-can receive larger overrides without checking station identity, name, category strings, or
-persistence ids.
+The development classification authority resolves every station in one system together and
+enforces at most one megastation-class station per system. Generic residency and LOD code uses
+`StationVisualClassification.Megastation`; only the station generator dispatches to the
+rectilinear, Bolon, or Red Bolon family implementation.
 
-When no visual is resident, the nearest eligible surface/envelope distance wins, with ordinal
-persistent identity as the final tie-breaker. A resident remains until its unload boundary,
-system change, state exit, generation failure, or an explicit starter/system-map/debug-cycle
-arrival supersedes it. A nearer station does not displace a valid resident. Normal navigation
-target selection does not request a mesh.
+Megastations have three presentation states: point, macro, and complete. The macro is a permanent
+distant LOD derived deterministically from the same station identity. Rectilinear macro generation
+stops after accepted massing, entrance carve, and boundary extraction. The topology-repair pass is
+deliberately deferred to complete generation because it currently dominates generation time and
+its individual repair cells do not affect useful silhouette information at macro screen sizes.
+Bolon-family macro generation uses the planned C60 vessels, direct joins/connectors, and coarse
+ambassador opening. Both omit textures and fine/detail/interior passes and provide a matching
+simplified hull caster to the existing station shadow path. The shared massing/entrance preparation
+method is used by both macro and complete generation; the current asynchronous task boundary
+recomputes that deterministic shared stage for complete generation rather than transferring its
+live object graph between tasks.
 
-`StationGenerator.PrepareCpu` prepares module/decor geometry, megastation geometry, AO variants,
-procedural texture pixels, final mesh arrays, selected shadow-caster arrays/bounds, and an ordered
-upload plan away from the render thread. `GraphicsDevice` texture/buffer creation and disposal
-happen only on the game/render thread.
+Rectilinear LOD1 generates no texture. It borrows the already-resident system material library's
+`DullStructuralMetal` resources and derives the same station-specific dominant tint used by LOD2,
+which keeps colour continuity without adding LOD1 texture preparation or ownership.
 
-CPU completion starts one hidden pending upload session rather than constructing a resident
-package synchronously. `StationVisualUploadScheduler.DefaultFrameBudgetMilliseconds` is the
-single initial budget source (2 ms). Each operation uploads one existing texture or one existing
-hull/deco/flat/glass/shadow-caster mesh resource. A frame always makes at least one operation's
-worth of progress when possible, then stops before starting another operation after its
-cooperative budget is exhausted. An indivisible operation may overrun; its resource type,
-identity, estimated bytes, and measured duration are retained for bounded diagnostics. Phase 1
-does not page or range-upload a large megastation mesh.
+Timo visually confirmed the first point/macro/complete implementation in-engine after the macro
+stage was moved ahead of topology repair, including leaving the station area and returning.
 
-The pending package is inaccessible to drawing and shadows. After all operations finish, a small
-final commit revalidates identity/token, assigns prepared textures and landing pads, performs the
-residency transition, transfers GPU ownership, and publishes the complete package atomically.
-Cancellation and upload failure stop new work and dispose already-created resources under the
-same cooperative scheduler; system reset and state exit force immediate complete cleanup because
-no later frame is guaranteed. Deferred superseding requests start only after the previous chain
-is resolved. Request sequences prevent stale preparation or upload results from installing, and
-the failed-eligibility no-retry rule remains unchanged.
+`MegastationVisualLodPolicy` is the central projected-size threshold owner. Its initial hysteretic
+defaults are point→macro at 2 px (macro→point below 1.25 px) and macro→complete at 35 px
+(complete→macro below 25 px). LOD selection lives in `SystemSpaceState` presentation state and is
+not written into simulation or universe state. If complete geometry is not ready, macro remains
+active regardless of apparent size.
+
+On system entry, background preparation may start for the system's sole megastation without a
+fixed distance gate. Macro CPU preparation and its frame-budgeted upload finish first; complete
+CPU generation then continues asynchronously while macro can draw and cast shadows. A prepared
+complete CPU package waits until projected size requests complete LOD before GPU upload. Explicit
+arrival preparation remains valid beyond normal unload distance. Lower-priority system background
+work yields if another station crosses its normal visual load boundary.
+
+`StationVisualResidencyPolicy` remains the owner of ordinary/full-package proximity thresholds.
+Its defaults are 200,000 m load and 250,000 m unload from the conservative visual envelope. These
+distances no longer decide whether the permanent megastation macro can exist or which LOD is
+shown. At most one expensive complete station package is resident or preparing. If complete
+megastation detail unloads, the macro remains; automatic background preparation does not
+immediately regenerate complete detail, but proximity or an explicit destination can request it.
+
+`StationGenerator.PrepareCpu` prepares complete module/decor geometry, AO variants, procedural
+texture pixels, mesh/caster arrays, and an ordered upload plan off the render thread.
+`StationGenerator.PrepareMegastationMacroCpu` prepares only the family-owned macro package.
+`GraphicsDevice` texture/buffer creation and disposal remain on the game/render thread.
+
+CPU completion starts a hidden upload session. `StationVisualUploadScheduler` keeps the existing
+2 ms cooperative frame budget and stale-result/cancellation rules. A macro package becomes
+draw/shadow-visible when its own upload completes while the same residency request remains pending
+for complete generation. A complete package still commits atomically after identity/token
+revalidation, texture/pad assignment, and resource ownership transfer. System reset and state exit
+force immediate cleanup because no later frame is guaranteed.
 
 `StationPreparationTask<T>` is the sole asynchronous preparation boundary. It catches
 `OperationCanceledException` only when the request token is cancelled and matches the exception's
@@ -215,11 +234,12 @@ the reset/state-exit detachment path claims observation exactly once. A detached
 releases its CPU references; cancelled and faulted tasks are explicitly observed. Expected
 cancellation does not report generation failure, set retry suppression, upload, or install.
 
-The installed package owns modules, CPU mesh references, station textures,
-hull/deco/flat/glass GPU buffers, shadow casters/bounds, the station-specific shadow
-target/context, generation diagnostics, and actual bounds through one idempotent disposal path.
-Detailed draw and shadow passes read only this package; actual bounds gate which depth tiers can
-intersect it. Dots and orbital positions do not consult the package. Shadow resolution,
+Each installed package owns its modules, CPU mesh references, textures, GPU buffers,
+shadow casters/bounds, diagnostics, and actual bounds through one idempotent disposal path. Macro
+and complete megastation packages may coexist, but draw and shadow traversal read only the active
+presentation package. Only that package retains the station-specific shadow target/context; the
+previous LOD releases those shadow resources when selection changes. Actual bounds gate depth-tier
+intersection. Dots and orbital positions do not consult either package. Shadow resolution,
 frequency, fitting, shaders, sampling, bias, and caster policy are unchanged.
 
 ---

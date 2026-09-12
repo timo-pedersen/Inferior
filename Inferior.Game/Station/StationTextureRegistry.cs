@@ -104,6 +104,29 @@ public static class StationTextureRegistry
         return variants;
     }
 
+    /// <summary>
+    /// Generates one member of the deterministic station variant set without allocating
+    /// or rasterising the other members. Seed rolling deliberately remains identical to
+    /// <see cref="GenerateVariantPixels"/>, so requesting variant N produces byte-identical
+    /// pixels to element N of the full set.
+    /// </summary>
+    public static TexturePixels GenerateVariantPixel(
+        SurfaceTexture surface,
+        TexturePalette palette,
+        string persistenceId,
+        float colourSpread,
+        int variantIndex,
+        int count,
+        CancellationToken cancellationToken = default)
+    {
+        if ((uint)variantIndex >= (uint)count)
+            throw new ArgumentOutOfRangeException(nameof(variantIndex));
+        cancellationToken.ThrowIfCancellationRequested();
+        int seed = RollVariantSeeds(persistenceId, surface, count)[variantIndex];
+        TexturePalette variantPalette = OffsetPaletteForVariant(palette, seed, colourSpread);
+        return GeneratePixels(surface, variantPalette, seed);
+    }
+
     public static (Texture2D Albedo, Texture2D Material) Upload(
         GraphicsDevice gd,
         TexturePixels pixels)

@@ -131,6 +131,8 @@ public static class MegastationFabricPlanner
             .Where(r => r.ZoneRole != MegastationZoneRole.Structural
                 && r.PhysicalExtents.X >= 12f && r.PhysicalExtents.Y >= 12f)
             .OrderBy(r => r.StableId, StringComparer.Ordinal).ToArray();
+        var surfaceFeatures = new MegastationSurfaceFeatureIndex(
+            eligible, windows.Windows, lights.Lights);
         var candidates = new List<Candidate>();
         int exact = 0, density = 0, rejectedChannelAware = 0;
 
@@ -246,8 +248,8 @@ public static class MegastationFabricPlanner
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (OverlapsG1(c, attachments)) { g1++; continue; }
-            if (OverlapsWindows(c, windows.Windows, 1.5f)) { window++; continue; }
-            if (OverlapsLights(c, lights.Lights, 3f)) { light++; continue; }
+            if (OverlapsWindows(c, surfaceFeatures, 1.5f)) { window++; continue; }
+            if (OverlapsLights(c, surfaceFeatures, 3f)) { light++; continue; }
             if (infrastructure.Clusters.Any(x => Intersects(c.AabbMin, c.AabbMax, x.AabbMin, x.AabbMax)))
             { g2++; continue; }
             if (megaGreeble.Instances.Any(x => Intersects(c.AabbMin, c.AabbMax, MegaBounds(x).min, MegaBounds(x).max)))
@@ -458,17 +460,21 @@ public static class MegastationFabricPlanner
         return -1;
     }
 
-    private static bool OverlapsWindows(Candidate c, IReadOnlyList<MegastationWindowInstance> windows, float margin)
-        => windows.Any(w => Vector3.Dot(w.Normal, c.Region.OutwardNormal) > .999f
-            && MathF.Abs(Vector3.Dot(w.Centre, c.Region.OutwardNormal) - c.Region.PlaneCoordinateMetres) < .2f
-            && PointIn(c, Vector3.Dot(w.Centre, c.Region.TangentU), Vector3.Dot(w.Centre, c.Region.TangentV),
-                MathF.Max(w.Width, w.Height) * .5f + margin));
+    private static bool OverlapsWindows(
+        Candidate c,
+        MegastationSurfaceFeatureIndex features,
+        float margin)
+        => features.Windows(c.Region).Any(window => window.NormalAlignment > .999f
+            && MathF.Abs(window.PlaneCoordinate - c.Region.PlaneCoordinateMetres) < .2f
+            && PointIn(c, window.U, window.V, window.Radius + margin));
 
-    private static bool OverlapsLights(Candidate c, IReadOnlyList<MegastationLightInstance> lights, float margin)
-        => lights.Any(l => Vector3.Dot(l.Normal, c.Region.OutwardNormal) > .999f
-            && MathF.Abs(Vector3.Dot(l.SurfacePosition, c.Region.OutwardNormal) - c.Region.PlaneCoordinateMetres) < .2f
-            && PointIn(c, Vector3.Dot(l.SurfacePosition, c.Region.TangentU),
-                Vector3.Dot(l.SurfacePosition, c.Region.TangentV), margin));
+    private static bool OverlapsLights(
+        Candidate c,
+        MegastationSurfaceFeatureIndex features,
+        float margin)
+        => features.Lights(c.Region).Any(light => light.NormalAlignment > .999f
+            && MathF.Abs(light.PlaneCoordinate - c.Region.PlaneCoordinateMetres) < .2f
+            && PointIn(c, light.U, light.V, margin));
 
     private static bool PointIn(Candidate c, float u, float v, float margin)
         => u >= c.MinU - margin && u <= c.MaxU + margin && v >= c.MinV - margin && v <= c.MaxV + margin;

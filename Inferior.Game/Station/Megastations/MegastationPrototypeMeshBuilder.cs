@@ -213,16 +213,46 @@ public static class MegastationPrototypeMeshBuilder
             chamferPlan.Diagnostics);
     }
 
+    /// <summary>
+    /// Emits the permanent distant hull directly from the accepted massing boundary.
+    /// Validation, chamfer planning, semantic material ranges, and lighting/detail
+    /// treatment belong to complete generation and are intentionally omitted here.
+    /// </summary>
+    internal static void BuildMacro(
+        StructuralOccupancy occupancy,
+        BoundaryTopology topology,
+        StationModuleMesh mesh,
+        MegastationSystemMaterialAssignment? materialAssignment = null)
+    {
+        Color? overrideColor = null;
+        if (materialAssignment is { } assignment)
+        {
+            SystemMaterialBinding binding = assignment.DefaultStructuralBinding;
+            mesh.CurrentMaterialFamily = binding.FamilyId;
+            mesh.CurrentUvScaleMeters = SystemMaterialRecipes.Get(binding.FamilyId).TileSizeMeters;
+            overrideColor = binding.Tint;
+        }
+        AddSharpStructuralFaces(
+            topology,
+            occupancy,
+            mesh,
+            MegastationDebugColorMode.StructuralVsUrban,
+            overrideColor);
+        mesh.ApplyIlluminationFlags();
+    }
+
     private static int AddSharpStructuralFaces(
         BoundaryTopology topology,
         StructuralOccupancy occupancy,
         StationModuleMesh mesh,
-        MegastationDebugColorMode debugColorMode)
+        MegastationDebugColorMode debugColorMode,
+        Color? overrideColor = null)
     {
         foreach (var face in topology.Faces)
         {
             var p = face.Vertices.Select(v => BoundaryTopologyBuilder.Position(occupancy.Grid, v)).ToArray();
-            Color color = ColorFor(topology, occupancy, face, debugColorMode);
+            Color color = overrideColor
+                ?? ColorFor(topology, occupancy, face, debugColorMode);
             AddQuad(mesh, p[0], p[1], p[2], p[3], BoundaryTopologyBuilder.Normal(face.Direction), color);
         }
         return topology.Faces.Count;

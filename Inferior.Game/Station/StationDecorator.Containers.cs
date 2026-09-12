@@ -223,10 +223,8 @@ public static partial class StationDecorator
         }
 
         // Same factory used for standalone/debug-spawn containers — station-placed
-        // greeble containers now get the identical chamfer/inset/fastener/text/wear
-        // geometry instead of a separately hand-maintained reimplementation (that
-        // reimplementation had drifted from the factory's own conventions, which is
-        // why station-placed container text mirrored differently than standalone).
+        // Greeble containers use the same chamfer/inset/fastener/wear geometry as the
+        // standalone path instead of a separately maintained reimplementation.
         // MergeTransformed detects and corrects handedness automatically, so the old
         // manual axisY-flip check that used to live here is gone — t is passed through
         // unchanged. No lighting pre-rotation is needed any more either: the sun term
@@ -236,7 +234,7 @@ public static partial class StationDecorator
         // vertex uniformly — there is no separate bake-time basis to get wrong).
         var (verts, indices) = ShippingContainerFactory.GenerateVertices(
             color, wear: (float)(0.1 + rng.NextDouble() * 0.5), sidePatternSeed: rng.Next(),
-            text: null, lockGrade: LockGrade.Civilian);
+            lockGrade: LockGrade.Civilian);
         mesh.MergeTransformed(verts, indices, t);
     }
 }

@@ -294,6 +294,70 @@ public sealed class StationGenerator
             compacted.Diagnostics);
     }
 
+    /// <summary>
+    /// Builds the permanent megastation macro representation through the same
+    /// family-owned structural planners as complete generation. This stage owns no
+    /// procedural station textures and emits only visible hull plus matching caster.
+    /// </summary>
+    internal static StationGenerationCpuResult PrepareMegastationMacroCpu(
+        Galaxy.Station station,
+        MegastationArchetype archetype,
+        CancellationToken cancellationToken = default,
+        SystemMaterialAssignmentContext? systemMaterials = null)
+    {
+        string identity = station.PersistenceId ?? station.Name;
+        PlacedModule module;
+        double generationMilliseconds;
+        if (archetype == MegastationArchetype.Standard)
+        {
+            MegastationPrototypeMacroCpuResult macro =
+                MegastationPrototypeGenerator.GenerateMacroCpu(
+                    identity,
+                    cancellationToken: cancellationToken,
+                    systemMaterials: systemMaterials);
+            module = MegastationPrototypeGenerator.CreateMacroPlacedModule(macro);
+            generationMilliseconds = macro.GenerationMilliseconds;
+        }
+        else
+        {
+            BolonMegastationMacroCpuResult macro =
+                BolonMegastationGenerator.GenerateMacroCpu(
+                    identity,
+                    archetype,
+                    cancellationToken);
+            module = BolonMegastationGenerator.CreateMacroPlacedModule(macro);
+            generationMilliseconds = macro.GenerationMilliseconds;
+        }
+
+        List<PlacedModule> modules = [module];
+        IReadOnlyList<StationVisualUploadPlanItem> uploadPlan = BuildUploadPlan(
+            modules,
+            [],
+            [],
+            new Dictionary<PlacedModule, StationMeshCpuData>(),
+            new HashSet<DecorClass>(),
+            cancellationToken);
+        return new(
+            modules,
+            [],
+            [],
+            new Dictionary<PlacedModule, StationMeshCpuData>(),
+            uploadPlan,
+            null,
+            generationMilliseconds,
+            new StationTexturePreparationDiagnostics(
+                GeneratedTextureCount: 0,
+                GeneratedVariantPairCount: 0,
+                SelectedUniqueTextureCount: 0,
+                SelectedUniqueTexturePairCount: 0,
+                DiscardedTextureCount: 0,
+                UploadedAlbedoTextureCount: 0,
+                UploadedMaterialTextureCount: 0,
+                ModuleTextureBindingCount: 2,
+                SharedFallbackReferenceCount: 2),
+            UsesSharedMegastationFallbackTextures: true);
+    }
+
     // Brief B4 Fix 2: re-runs ONLY texture generation for an already-grown station — the
     // tuning panel's "regenerate" action, so VariantValueFloor/VariantCompressionStrength
     // changes get a live preview without re-running the growth engine (which would also
@@ -810,10 +874,10 @@ public sealed class StationGenerator
 
     // Brief S2b-1 established per-station ownership; S2b-2 makes the variant generation
     // and per-module assignment profile-driven instead of uniform. Each (surface,
-    // economy) pair used by this station gets its own variant set — the compound key
-    // (not just surface) is needed because a category-special module (science) can pull
-    // in a second economy's variant set alongside the station's own, for the same
-    // surface (TechPanel serves science/military/core alike).
+    // economy) pair used by this station has its own deterministic variant seed set. We
+    // rasterise only the members actually selected by modules — the compound key (not
+    // just surface) is needed because a category-special module (science) can pull in a
+    // second economy alongside the station's own for the same surface.
     //
     // Brief S2c-1: each variant is now an (albedo, material) pair — mod.MaterialInstance
     // is assigned alongside mod.TextureInstance, from the SAME variant index (so a
@@ -831,39 +895,36 @@ public sealed class StationGenerator
         CancellationToken cancellationToken,
         bool includeNameFace = true)
     {
-        var variantSets =
-            new Dictionary<(SurfaceTexture surface, StationEconomy economy), (int Albedo, int Material)[]>();
+        var generatedVariants =
+            new Dictionary<(SurfaceTexture Surface, StationEconomy Economy, int Variant),
+                (int Albedo, int Material)>();
         var prepared = new List<PreparedStationTexture>();
         var assignments = new List<StationTextureAssignment>(modules.Count);
+        string persistenceId = station.PersistenceId ?? station.Name;
 
-        (int Albedo, int Material)[] VariantsFor(
+        (int Albedo, int Material) VariantFor(
             SurfaceTexture surface,
             StationEconomy economy,
             TexturePalette economyPalette,
-            float colourSpread)
+            float colourSpread,
+            int variantIndex)
         {
-            var key = (surface, economy);
-            if (variantSets.TryGetValue(key, out var existing))
+            var key = (surface, economy, variantIndex);
+            if (generatedVariants.TryGetValue(key, out var existing))
                 return existing;
 
-            StationTextureRegistry.TexturePixels[] pixels =
-                StationTextureRegistry.GenerateVariantPixels(
-                    surface,
-                    economyPalette,
-                    station.PersistenceId ?? station.Name,
-                    colourSpread,
-                    cancellationToken: cancellationToken);
-            var set = new (int Albedo, int Material)[pixels.Length];
-            for (int i = 0; i < pixels.Length; i++)
-            {
-                int albedo = prepared.Count;
-                prepared.Add(new PreparedStationTexture(512, 512, pixels[i].Albedo));
-                int material = prepared.Count;
-                prepared.Add(new PreparedStationTexture(512, 512, pixels[i].Material));
-                set[i] = (albedo, material);
-            }
-            variantSets[key] = set;
-            return set;
+            StationTextureRegistry.TexturePixels pixels =
+                StationTextureRegistry.GenerateVariantPixel(
+                    surface, economyPalette, persistenceId, colourSpread,
+                    variantIndex, StationTextureRegistry.DefaultVariantCount,
+                    cancellationToken);
+            int albedo = prepared.Count;
+            prepared.Add(new PreparedStationTexture(512, 512, pixels.Albedo));
+            int material = prepared.Count;
+            prepared.Add(new PreparedStationTexture(512, 512, pixels.Material));
+            var generated = (albedo, material);
+            generatedVariants.Add(key, generated);
+            return generated;
         }
 
         foreach (PlacedModule module in modules)
@@ -882,12 +943,12 @@ public sealed class StationGenerator
                 });
 
             StationVarianceProfile variance = StationEconomyVariance.Profiles[economy];
-            var variants = VariantsFor(surface, economy, economyPalette, variance.ColourSpread);
-            var selected = variants[
-                StationTextureRegistry.SelectVariantIndex(
-                    module.Seed,
-                    variants.Length,
-                    variance.BaseShareRatio)];
+            int variantIndex = StationTextureRegistry.SelectVariantIndex(
+                module.Seed,
+                StationTextureRegistry.DefaultVariantCount,
+                variance.BaseShareRatio);
+            var selected = VariantFor(
+                surface, economy, economyPalette, variance.ColourSpread, variantIndex);
             assignments.Add(new StationTextureAssignment(
                 module,
                 selected.Albedo,

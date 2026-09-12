@@ -984,7 +984,7 @@ public sealed class MegastationLandingDistrictTests
     public void ReusedContainerGeometryReceivesExistingStaticArtificialLight()
     {
         var (vertices, indices) = ShippingContainerFactory.GenerateVertices(
-            Color.Gray, .2f, 12345, "TEST", LockGrade.Civilian);
+            Color.Gray, .2f, 12345, LockGrade.Civilian);
         var mesh = new StationModuleMesh();
         mesh.MergeTransformed(vertices, indices, Matrix.Identity);
         Assert.Equal(0, mesh.FaceCount);

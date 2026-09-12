@@ -20,6 +20,84 @@ public sealed record MegastationArtificialLightingPlan(
     IReadOnlyList<MegastationArtificialLight> Lights,
     string Signature);
 
+internal sealed class MegastationArtificialLightCollection : IReadOnlyList<MegastationArtificialLight>
+{
+    private static readonly int[] EmptyCandidates = [];
+    private readonly MegastationArtificialLight[] _lights;
+    private readonly int[] _allIndices;
+    private readonly Dictionary<(int X, int Y, int Z), int[]>? _neighbourhoods;
+    private readonly float _cellSize;
+
+    public MegastationArtificialLightCollection(IEnumerable<MegastationArtificialLight> lights)
+    {
+        _lights = lights.ToArray();
+        _allIndices = Enumerable.Range(0, _lights.Length).ToArray();
+        float maximumRange = _lights
+            .Where(light => float.IsFinite(light.Range) && light.Range > 0f)
+            .Select(light => light.Range * MegastationArtificialLighting.IndirectRangeScale)
+            .DefaultIfEmpty(0f)
+            .Max();
+        if (maximumRange <= 0f || !float.IsFinite(maximumRange)
+            || _lights.Any(light => float.IsPositiveInfinity(light.Range)))
+            return;
+
+        _cellSize = maximumRange;
+        var neighbourhoods = new Dictionary<(int X, int Y, int Z), List<int>>();
+        for (int index = 0; index < _lights.Length; index++)
+        {
+            MegastationArtificialLight light = _lights[index];
+            if (!TryCell(light.Position, _cellSize, out var cell))
+                continue;
+            for (int z = cell.Z - 1; z <= cell.Z + 1; z++)
+            for (int y = cell.Y - 1; y <= cell.Y + 1; y++)
+            for (int x = cell.X - 1; x <= cell.X + 1; x++)
+            {
+                var key = (x, y, z);
+                if (!neighbourhoods.TryGetValue(key, out List<int>? candidates))
+                {
+                    candidates = [];
+                    neighbourhoods.Add(key, candidates);
+                }
+                candidates.Add(index);
+            }
+        }
+        _neighbourhoods = neighbourhoods.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
+    }
+
+    public int Count => _lights.Length;
+    public MegastationArtificialLight this[int index] => _lights[index];
+    public IEnumerator<MegastationArtificialLight> GetEnumerator()
+        => ((IEnumerable<MegastationArtificialLight>)_lights).GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+    public int[] CandidateIndices(Vector3 position)
+    {
+        if (_neighbourhoods is null || !TryCell(position, _cellSize, out var cell))
+            return _allIndices;
+        return _neighbourhoods.GetValueOrDefault(cell, EmptyCandidates);
+    }
+
+    private static bool TryCell(
+        Vector3 position,
+        float cellSize,
+        out (int X, int Y, int Z) cell)
+    {
+        cell = default;
+        if (!float.IsFinite(position.X) || !float.IsFinite(position.Y)
+            || !float.IsFinite(position.Z))
+            return false;
+        double x = Math.Floor(position.X / cellSize);
+        double y = Math.Floor(position.Y / cellSize);
+        double z = Math.Floor(position.Z / cellSize);
+        if (x <= int.MinValue + 1d || x >= int.MaxValue - 1d
+            || y <= int.MinValue + 1d || y >= int.MaxValue - 1d
+            || z <= int.MinValue + 1d || z >= int.MaxValue - 1d)
+            return false;
+        cell = ((int)x, (int)y, (int)z);
+        return true;
+    }
+}
+
 public static class MegastationArtificialLighting
 {
     public const int AlgorithmVersion = 4;
@@ -53,7 +131,7 @@ public static class MegastationArtificialLighting
         }
 
         string signature = Signature(seed, lights);
-        return new(AlgorithmVersion, seed, lights, signature);
+        return new(AlgorithmVersion, seed, Prepare(lights), signature);
 
         void Add(int station, string role, float right, float up, float depth)
         {
@@ -82,10 +160,15 @@ public static class MegastationArtificialLighting
         MegastationArtificialLight[] lights = baseline.Lights.Concat(additionalLights).ToArray();
         return baseline with
         {
-            Lights = lights,
+            Lights = Prepare(lights),
             Signature = Signature(baseline.Seed, lights),
         };
     }
+
+    internal static IReadOnlyList<MegastationArtificialLight> Prepare(
+        IReadOnlyList<MegastationArtificialLight> lights)
+        => lights is MegastationArtificialLightCollection ? lights
+            : new MegastationArtificialLightCollection(lights);
 
     public static Vector3 Evaluate(
         Vector3 position,
@@ -142,38 +225,53 @@ public static class MegastationArtificialLighting
         Vector3 n = normal.LengthSquared() > 1e-8f ? Vector3.Normalize(normal) : Vector3.Zero;
         Vector3 direct = Vector3.Zero;
         Vector3 indirect = Vector3.Zero;
-        foreach (MegastationArtificialLight light in lights)
+        if (lights is MegastationArtificialLightCollection indexed)
         {
-            Vector3 toLight = light.Position - position;
-            float distanceSquared = toLight.LengthSquared();
-            float distance = MathF.Sqrt(distanceSquared);
-            Vector3 colour = light.Colour.ToVector3();
-
-            // H1c-A direct term, deliberately unchanged.
-            if (distanceSquared > 1e-8f && distance < light.Range)
-            {
-                float facing = MathF.Max(0f, Vector3.Dot(n, toLight / distance));
-                if (facing > 0f)
-                {
-                    Vector3 toReceiver = -toLight / distance;
-                    float angular = EmitterFacing(light, toReceiver);
-                    if (angular > 0f && (occlusion?.IsVisible(light.Position, position) ?? true))
-                        direct += colour * (light.Intensity
-                            * SmoothFiniteFalloff(distance, light.Range)
-                            * facing
-                            * angular);
-                }
-            }
-
-            // H1c-B: weak source-relative bounce approximation. It has no N.L because it
-            // represents scattered arrival from many directions, but remains finite and
-            // spatially tied to each real source. Occlusion remains deferred to H1c-C.
-            float indirectRange = light.Range * IndirectRangeScale;
-            if (distance < indirectRange)
-                indirect += colour * (light.Intensity * IndirectStrength
-                    * SmoothFiniteFalloff(distance, indirectRange));
+            foreach (int index in indexed.CandidateIndices(position))
+                Accumulate(indexed[index], position, n, occlusion, ref direct, ref indirect);
         }
+        else
+            foreach (MegastationArtificialLight light in lights)
+                Accumulate(light, position, n, occlusion, ref direct, ref indirect);
         return (direct, indirect);
+    }
+
+    private static void Accumulate(
+        MegastationArtificialLight light,
+        Vector3 position,
+        Vector3 normal,
+        MegastationArtificialOcclusion? occlusion,
+        ref Vector3 direct,
+        ref Vector3 indirect)
+    {
+        Vector3 toLight = light.Position - position;
+        float distanceSquared = toLight.LengthSquared();
+        float distance = MathF.Sqrt(distanceSquared);
+        Vector3 colour = light.Colour.ToVector3();
+
+        // H1c-A direct term, deliberately unchanged.
+        if (distanceSquared > 1e-8f && distance < light.Range)
+        {
+            float facing = MathF.Max(0f, Vector3.Dot(normal, toLight / distance));
+            if (facing > 0f)
+            {
+                Vector3 toReceiver = -toLight / distance;
+                float angular = EmitterFacing(light, toReceiver);
+                if (angular > 0f && (occlusion?.IsVisible(light.Position, position) ?? true))
+                    direct += colour * (light.Intensity
+                        * SmoothFiniteFalloff(distance, light.Range)
+                        * facing
+                        * angular);
+            }
+        }
+
+        // H1c-B: weak source-relative bounce approximation. It has no N.L because it
+        // represents scattered arrival from many directions, but remains finite and
+        // spatially tied to each real source. Occlusion remains deferred to H1c-C.
+        float indirectRange = light.Range * IndirectRangeScale;
+        if (distance < indirectRange)
+            indirect += colour * (light.Intensity * IndirectStrength
+                * SmoothFiniteFalloff(distance, indirectRange));
     }
 
     private static float SmoothFiniteFalloff(float distance, float range)

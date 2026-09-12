@@ -200,7 +200,7 @@ public sealed partial class SystemSpaceState
     // geometry loaded" is simply the resident one, not a separate scan.
     private void RegenerateNearestStationTextures()
     {
-        if (ResidentStationVisual is not { } visual)
+        if (DetailedStationVisual is not { } visual)
         {
             DataBus.SystemMessages.Publish(Topics.System.All,
                 new SystemMessage("No station nearby to regenerate.", SystemMessagePriority.NB));
