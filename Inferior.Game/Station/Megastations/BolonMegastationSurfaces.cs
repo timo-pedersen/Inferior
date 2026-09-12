@@ -1556,11 +1556,9 @@ public static class BolonSurfaceMeshBuilder
         Vector2 uvA = Project(localA, sample, tile);
         Vector2 uvB = Project(localB, sample, tile);
         Vector2 uvC = Project(localC, sample, tile);
-        if (Vector3.Dot(Vector3.Cross(worldB - worldA, worldC - worldA),
-                expectedStationNormal ?? Vector3.Transform(sampleDirection, vessel.Orientation)) < 0f)
-            mesh.AddTriangleWithUv(worldA, uvA, worldC, uvC, worldB, uvB, colour);
-        else
-            mesh.AddTriangleWithUv(worldA, uvA, worldB, uvB, worldC, uvC, colour);
+        mesh.AddTriangleWithUvFacing(worldA, uvA, worldB, uvB, worldC, uvC,
+            expectedStationNormal ?? Vector3.Transform(sampleDirection, vessel.Orientation),
+            colour);
     }
 
     internal static void EmitAmbassadorChamfer(StationModuleMesh mesh, BolonMegastationPlan structural,
@@ -2236,6 +2234,9 @@ public static class BolonSurfaceMeshBuilder
             })
             .ToArray();
 
+    // Thin named wrapper over StationModuleMesh's own self-correcting overload (A1
+    // inventory finding: this file used to reimplement the winding check itself) - keeps
+    // this file's own degenerate-quad guard, which AddQuadFacing itself doesn't have.
     private static void AddQuadFacing(
         StationModuleMesh mesh,
         Vector3 a,
@@ -2248,12 +2249,14 @@ public static class BolonSurfaceMeshBuilder
         if (Vector3.Cross(b - a, c - a).LengthSquared() <= 1e-4f
             || Vector3.Cross(c - a, d - a).LengthSquared() <= 1e-4f)
             return;
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddQuad(a, d, c, b, colour);
-        else
-            mesh.AddQuad(a, b, c, d, colour);
+        mesh.AddQuadFacing(a, b, c, d, expectedNormal, colour);
     }
 
+    // Used to pick between (a,d,c)+(a,c,b) or (a,b,c)+(a,c,d) up front based on one shared
+    // cross product for the whole quad - now redundant: AddGradientTriangleFacing (below)
+    // self-corrects each split triangle independently via StationModuleMesh's own
+    // AddTriangleGradientFacing (A1 inventory finding), so either split order converges on
+    // the same final result. Kept as a named entry point since it's called from many sites.
     private static void AddGradientQuadFacing(
         StationModuleMesh mesh,
         Vector3 a, Color colourA,
@@ -2265,20 +2268,14 @@ public static class BolonSurfaceMeshBuilder
         if (Vector3.Cross(b - a, c - a).LengthSquared() <= 1e-4f
             || Vector3.Cross(c - a, d - a).LengthSquared() <= 1e-4f)
             return;
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-        {
-            AddGradientTriangleFacing(
-                mesh, a, colourA, d, colourD, c, colourC, expectedNormal);
-            AddGradientTriangleFacing(
-                mesh, a, colourA, c, colourC, b, colourB, expectedNormal);
-            return;
-        }
-        AddGradientTriangleFacing(
-            mesh, a, colourA, b, colourB, c, colourC, expectedNormal);
-        AddGradientTriangleFacing(
-            mesh, a, colourA, c, colourC, d, colourD, expectedNormal);
+        AddGradientTriangleFacing(mesh, a, colourA, b, colourB, c, colourC, expectedNormal);
+        AddGradientTriangleFacing(mesh, a, colourA, c, colourC, d, colourD, expectedNormal);
     }
 
+    // Thin named wrapper over StationModuleMesh's own self-correcting overload (A1
+    // inventory finding: this file used to reimplement the winding check itself) - keeps
+    // this file's own degenerate-triangle guard, which AddTriangleGradientFacing itself
+    // doesn't have.
     private static void AddGradientTriangleFacing(
         StationModuleMesh mesh,
         Vector3 a, Color colourA,
@@ -2288,10 +2285,7 @@ public static class BolonSurfaceMeshBuilder
     {
         if (Vector3.Cross(b - a, c - a).LengthSquared() <= 1e-4f)
             return;
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddTriangleGradient(a, colourA, c, colourC, b, colourB);
-        else
-            mesh.AddTriangleGradient(a, colourA, b, colourB, c, colourC);
+        mesh.AddTriangleGradientFacing(a, colourA, b, colourB, c, colourC, expectedNormal);
     }
 
     private static Vector3 FaceWorldCenter(BolonVesselPlan vessel, int faceIndex)

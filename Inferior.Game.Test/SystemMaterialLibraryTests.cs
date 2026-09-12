@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using Inferior.Game.StationGen;
 using Inferior.Game.StationGen.Megastations;
 using Inferior.Galaxy;
+using Inferior.Rendering;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Xunit;
@@ -187,9 +188,24 @@ public sealed class SystemMaterialLibraryTests
             normal, u, v, 5f, Color.White);
         var (vertices, _) = mesh.ToIntArrays();
 
-        Assert.Equal(4f, vertices[1].TextureCoordinate.X - vertices[0].TextureCoordinate.X, 4);
-        Assert.Equal(2f, vertices[3].TextureCoordinate.Y - vertices[0].TextureCoordinate.Y, 4);
-        Assert.Equal(vertices[1].TextureCoordinate, vertices[4].TextureCoordinate);
+        // AddQuadProjected corrects winding by reordering the actual vertices (A1 inventory
+        // finding) when a caller's v0..v3 disagrees with the expected normal - which some of
+        // this test's own hand-built quads legitimately do, depending on CanonicalUvAxes'
+        // (u, v) handedness for the given direction. Look vertices up by position within
+        // their own quad rather than assuming argument order survives into a fixed array
+        // index - "within their own quad" because the two quads share a coincident corner
+        // (by design, to test continuous UV phase), so a mesh-wide position lookup would be
+        // ambiguous.
+        VertexPositionNormalColorTexture VertexInQuad(int quadIndex, Vector3 position)
+            => vertices.Skip(quadIndex * 4).Take(4)
+                .Single(vertex => Vector3.DistanceSquared(vertex.Position, position) < 1e-6f);
+
+        Vector2 originUv = VertexInQuad(0, origin).TextureCoordinate;
+        Assert.Equal(4f, VertexInQuad(0, origin + u * 20f).TextureCoordinate.X - originUv.X, 4);
+        Assert.Equal(2f, VertexInQuad(0, origin + v * 10f).TextureCoordinate.Y - originUv.Y, 4);
+        Assert.Equal(
+            VertexInQuad(0, origin + u * 20f).TextureCoordinate,
+            VertexInQuad(1, adjacent).TextureCoordinate);
     }
 
     [Fact]

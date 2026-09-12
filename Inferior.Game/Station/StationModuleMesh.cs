@@ -249,10 +249,19 @@ public sealed class StationModuleMesh
     {
         if (tileSizeMeters <= 0f || !float.IsFinite(tileSizeMeters))
             throw new ArgumentOutOfRangeException(nameof(tileSizeMeters));
+        // A1 inventory finding: this used to leave v0..v3 (and therefore the actual
+        // rendered/culled front face) exactly as given, and only flip the STORED normal
+        // when it disagreed with expectedNormal - fixing the lighting while leaving the
+        // real geometric winding wrong. At least two call sites independently worked around
+        // this by pre-checking and reordering their own v0..v3 before ever calling here
+        // (MegastationPrototypeMeshBuilder.AddProjectedQuad,
+        // MegastationLandingDistrict.AddProjectedQuadFacing) - which only protects the
+        // callers that remembered to add that workaround. Reordering the vertices
+        // themselves here means every caller gets the real fix, not just the ones that knew
+        // to guard against it.
+        (v0, v1, v2, v3) = WindingCorrection.Quad(v0, v1, v2, v3, expectedNormal);
         int b = _verts.Count;
         Vector3 normal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
-        if (Vector3.Dot(normal, expectedNormal) < 0f)
-            normal = -normal;
         Vector2 Uv(Vector3 p) => new(
             Vector3.Dot(p - projectionOrigin, canonicalU) / tileSizeMeters,
             Vector3.Dot(p - projectionOrigin, canonicalV) / tileSizeMeters);
@@ -265,6 +274,65 @@ public sealed class StationModuleMesh
         RecordDecorClassRange(idxStart, 6);
         _faces.Add((b, 4));
         return b;
+    }
+
+    // ── Self-correcting "Facing" overloads ────────────────────────────────────
+    // A1 inventory finding: at least 17 independent, textually-different call sites across
+    // Inferior.Game's station/megastation decoration code reimplemented the exact same
+    // "compute the normal, check it against an expected direction, reorder if wrong before
+    // adding" pattern — several under the identical name AddQuadFacing/AddTriangleFacing,
+    // independently reinvented in at least four different files (Timo: "winding bugs almost
+    // on every new item added... a bit harsh perhaps, but it has popped up regularly").
+    // These are the real, single implementation those should share; see
+    // Inferior.Rendering/WindingCorrection.cs for the underlying primitive. Additive only —
+    // every existing AddQuad/AddTriangle/etc. overload is unchanged, so nothing is forced
+    // to migrate, but any call site that already has (or can derive) an expected outward
+    // direction should prefer these over hand-rolling the check again.
+
+    /// <summary>Like AddQuad, but reorders v0..v3 first so the resulting face agrees with
+    /// expectedNormal, instead of trusting the caller's winding.</summary>
+    public int AddQuadFacing(
+        Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 expectedNormal, Color color)
+    {
+        (v0, v1, v2, v3) = WindingCorrection.Quad(v0, v1, v2, v3, expectedNormal);
+        return AddQuad(v0, v1, v2, v3, color);
+    }
+
+    /// <summary>Like AddTriangle, but reorders v0..v2 first so the resulting face agrees
+    /// with expectedNormal, instead of trusting the caller's winding.</summary>
+    public void AddTriangleFacing(
+        Vector3 v0, Vector3 v1, Vector3 v2, Vector3 expectedNormal, Color color)
+    {
+        (v0, v1, v2) = WindingCorrection.Triangle(v0, v1, v2, expectedNormal);
+        AddTriangle(v0, v1, v2, color);
+    }
+
+    /// <summary>Like AddTriangleGradient, but reorders (v1,c1)/(v2,c2) together first so
+    /// the resulting face agrees with expectedNormal — the colour travels with its vertex
+    /// through the swap, it doesn't get left behind.</summary>
+    public void AddTriangleGradientFacing(
+        Vector3 v0, Color c0, Vector3 v1, Color c1, Vector3 v2, Color c2,
+        Vector3 expectedNormal)
+    {
+        if (Vector3.Dot(Vector3.Cross(v1 - v0, v2 - v0), expectedNormal) < 0f)
+            ((v1, c1), (v2, c2)) = ((v2, c2), (v1, c1));
+        AddTriangleGradient(v0, c0, v1, c1, v2, c2);
+    }
+
+    /// <summary>Like AddTriangleWithUv, but reorders (v1,uv1)/(v2,uv2) together first so
+    /// the resulting face agrees with expectedNormal — the UV travels with its vertex
+    /// through the swap, it doesn't get left behind. AddTriangleWithUv itself stays
+    /// winding-trusts-caller by design (its explicit UVs sometimes carry a physical
+    /// projection across facets that this correction could disturb); use this overload only
+    /// when an expected outward direction is actually available and winding correctness
+    /// matters more than that projection.</summary>
+    public void AddTriangleWithUvFacing(
+        Vector3 v0, Vector2 uv0, Vector3 v1, Vector2 uv1, Vector3 v2, Vector2 uv2,
+        Vector3 expectedNormal, Color color)
+    {
+        if (Vector3.Dot(Vector3.Cross(v1 - v0, v2 - v0), expectedNormal) < 0f)
+            ((v1, uv1), (v2, uv2)) = ((v2, uv2), (v1, uv1));
+        AddTriangleWithUv(v0, uv0, v1, uv1, v2, uv2, color);
     }
 
     // Overload that accepts an explicit face normal (ignored — winding determines normal)

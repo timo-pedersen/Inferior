@@ -270,15 +270,14 @@ public static class BolonAmbassadorBayMeshBuilder
             Quad(mesh, a[i], a[j], b[j], b[i], inward, c);
         }
     }
+    // Thin named wrappers over StationModuleMesh's own self-correcting overloads (A1
+    // inventory finding: this file used to reimplement the winding check itself).
     internal static void Quad(StationModuleMesh mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 normal, Color colour)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), normal) < 0) mesh.AddQuad(a, d, c, b, colour);
-        else mesh.AddQuad(a, b, c, d, colour);
-    }
+        => mesh.AddQuadFacing(a, b, c, d, normal, colour);
+
     internal static void Triangle(StationModuleMesh mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 normal, Color colour)
     {
         if (Vector3.Cross(b - a, c - a).LengthSquared() < 1e-5f) return;
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), normal) < 0) mesh.AddTriangle(a, c, b, colour);
-        else mesh.AddTriangle(a, b, c, colour);
+        mesh.AddTriangleFacing(a, b, c, normal, colour);
     }
 }

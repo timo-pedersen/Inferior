@@ -2367,10 +2367,10 @@ public static class MegastationInteriorMeshBuilder
         Vector3 bottomOrigin = Point(outline[0], -halfHeight);
         for (int index = 1; index < outline.Length - 1; index++)
         {
-            AddTriangleFacing(mesh, topOrigin,
+            mesh.AddTriangleFacing(topOrigin,
                 Point(outline[index], halfHeight), Point(outline[index + 1], halfHeight),
                 solid.Up, colours.Top);
-            AddTriangleFacing(mesh, bottomOrigin,
+            mesh.AddTriangleFacing(bottomOrigin,
                 Point(outline[index + 1], -halfHeight), Point(outline[index], -halfHeight),
                 -solid.Up, colours.Underside);
         }
@@ -2382,37 +2382,8 @@ public static class MegastationInteriorMeshBuilder
             Vector3 c = Point(outline[next], halfHeight);
             Vector3 d = Point(outline[index], halfHeight);
             Vector3 outward = Vector3.Normalize(Vector3.Cross(b - a, solid.Up));
-            AddQuadFacing(mesh, a, b, c, d, outward, colours.Side);
+            mesh.AddQuadFacing(a, b, c, d, outward, colours.Side);
         }
-    }
-
-    private static void AddTriangleFacing(
-        StationModuleMesh mesh,
-        Vector3 a,
-        Vector3 b,
-        Vector3 c,
-        Vector3 expectedNormal,
-        Color colour)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddTriangle(a, c, b, colour);
-        else
-            mesh.AddTriangle(a, b, c, colour);
-    }
-
-    private static void AddQuadFacing(
-        StationModuleMesh mesh,
-        Vector3 a,
-        Vector3 b,
-        Vector3 c,
-        Vector3 d,
-        Vector3 expectedNormal,
-        Color colour)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddQuad(a, d, c, b, colour);
-        else
-            mesh.AddQuad(a, b, c, d, colour);
     }
 
     private static int CountCasterVertices(StationModuleMesh mesh)

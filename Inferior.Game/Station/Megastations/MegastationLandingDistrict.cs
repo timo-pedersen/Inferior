@@ -3052,10 +3052,7 @@ public static class MegastationLandingDistrictMeshBuilder
         {
             Vector3 a = polygon[i];
             Vector3 b = polygon[(i + 1) % polygon.Count];
-            if (Vector3.Dot(Vector3.Cross(a - centre, b - centre), expectedNormal) < 0f)
-                mesh.AddTriangle(centre, b, a, colour);
-            else
-                mesh.AddTriangle(centre, a, b, colour);
+            mesh.AddTriangleFacing(centre, a, b, expectedNormal, colour);
         }
     }
 
@@ -3089,7 +3086,7 @@ public static class MegastationLandingDistrictMeshBuilder
             Vector3 outward = edgeCentre - centre;
             outward -= up * Vector3.Dot(outward, up);
             outward = Vector3.Normalize(outward);
-            AddQuadFacing(mesh,
+            mesh.AddQuadFacing(
                 top[i], top[next], bottom[next], bottom[i], outward, sideColour);
         }
         return (topFirstFace, topFaceCount);
@@ -3149,38 +3146,19 @@ public static class MegastationLandingDistrictMeshBuilder
             Vector3 a = Point(ax, az);
             Vector3 b = Point(bx, bz);
             Vector3 c = Point(cx, cz);
-            if (Vector3.Dot(Vector3.Cross(b - a, c - a), up) < 0f)
-                (b, c) = (c, b);
             Vector2 Uv(Vector3 point) => new(
                 Vector3.Dot(point - origin, right) / mesh.CurrentUvScaleMeters,
                 Vector3.Dot(point - origin, forward) / mesh.CurrentUvScaleMeters);
-            mesh.AddTriangleWithUv(a, Uv(a), b, Uv(b), c, Uv(c), colour);
+            mesh.AddTriangleWithUvFacing(a, Uv(a), b, Uv(b), c, Uv(c), up, colour);
         }
 
+        // AddQuadProjected self-corrects winding now (A1 inventory finding), so this no
+        // longer needs its own pre-check-and-swap before calling.
         void AddProjectedQuadFacing(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
-        {
-            if (Vector3.Dot(Vector3.Cross(b - a, c - a), up) < 0f)
-                (b, d) = (d, b);
-            mesh.AddQuadProjected(a, b, c, d, up, right, forward,
+            => mesh.AddQuadProjected(a, b, c, d, up, right, forward,
                 origin, mesh.CurrentUvScaleMeters, colour);
-        }
 
         Vector3 Point(float x, float z) => centre + right * x + forward * z;
-    }
-
-    private static void AddQuadFacing(
-        StationModuleMesh mesh,
-        Vector3 a,
-        Vector3 b,
-        Vector3 c,
-        Vector3 d,
-        Vector3 expectedNormal,
-        Color colour)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) >= 0f)
-            mesh.AddQuad(a, b, c, d, colour);
-        else
-            mesh.AddQuad(a, d, c, b, colour);
     }
 
     private static void AddSurfaceBar(

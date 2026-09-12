@@ -299,23 +299,22 @@ public static class ShippingContainerFactory
         Vector3 outerCentre = centre + normal * surroundRaise;
         Vector3 innerCentre = centre - normal * depth;
 
-        // Winding: with up = Cross(right, normal), Cross(right, up) = -normal (up and
-        // right are perpendicular unit vectors, so this reduces to the vector triple
-        // product identity Cross(A, Cross(A, N)) = -N). A "right then up" (BL,BR,TR,TL)
-        // vertex order gives a face normal of Cross(right, up) = -normal — inward-facing,
-        // hence invisible from outside. "Up then right" (BL,TL,TR,BR) gives Cross(up,
-        // right) = +normal instead, matching the intended outward-facing surface.
+        // A1 inventory finding: this used to rely on a hand-derived "up then right, not
+        // right then up" vertex-order rule (see git history) instead of stating the actual
+        // intent directly - exactly the kind of by-hand sign reasoning that's easy to get
+        // backwards on the next edit. AddQuadFacing states the intent (this quad faces
+        // `normal`) and corrects the order itself.
         Vector3 hwOuter = right * ((width  + 0.04f) * 0.5f);
         Vector3 hhOuter = up    * ((height + 0.04f) * 0.5f);
-        mesh.AddQuad(outerCentre - hwOuter - hhOuter, outerCentre - hwOuter + hhOuter,
+        mesh.AddQuadFacing(outerCentre - hwOuter - hhOuter, outerCentre - hwOuter + hhOuter,
                      outerCentre + hwOuter + hhOuter, outerCentre + hwOuter - hhOuter,
-                     surroundColor);
+                     normal, surroundColor);
 
         Vector3 hwInner = right * (width  * 0.5f);
         Vector3 hhInner = up    * (height * 0.5f);
-        mesh.AddQuad(innerCentre - hwInner - hhInner, innerCentre - hwInner + hhInner,
+        mesh.AddQuadFacing(innerCentre - hwInner - hhInner, innerCentre - hwInner + hhInner,
                      innerCentre + hwInner + hhInner, innerCentre + hwInner - hhInner,
-                     innerColor);
+                     normal, innerColor);
 
         AddRecessWalls(mesh, centre, innerCentre, normal, right, width, height, innerColor);
     }
@@ -450,18 +449,15 @@ public static class ShippingContainerFactory
         }
     }
 
-    // Flat rectangle on a surface. Winding derived from cross(longAxis, crossAxis).
+    // Flat rectangle on a surface.
     private static void AddFlatRect(StationModuleMesh mesh, Color color,
         Vector3 normal, Vector3 longAxis, Vector3 crossAxis,
         Vector3 centre, float lenSize, float widthSize)
     {
         var hl = longAxis  * lenSize   * 0.5f;
         var hw = crossAxis * widthSize * 0.5f;
-        var n  = Vector3.Cross(longAxis, crossAxis);
-        if (Vector3.Dot(n, normal) > 0)
-            mesh.AddQuad(centre - hl - hw, centre + hl - hw, centre + hl + hw, centre - hl + hw, color);
-        else
-            mesh.AddQuad(centre - hl + hw, centre + hl + hw, centre + hl - hw, centre - hl - hw, color);
+        mesh.AddQuadFacing(centre - hl - hw, centre + hl - hw, centre + hl + hw, centre - hl + hw,
+            normal, color);
     }
 
     // ── End face doors ────────────────────────────────────────────────────────

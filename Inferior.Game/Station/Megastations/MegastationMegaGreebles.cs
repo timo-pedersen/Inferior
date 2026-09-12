@@ -912,14 +912,14 @@ public static class MegastationMegaGreebleEmitters
             Vector3 b=centre+variationAxis*x1-ridgeAxis*ridgeSpan*.5f+front*d1;
             Vector3 c=centre+variationAxis*x1+ridgeAxis*ridgeSpan*.5f+front*d1;
             Vector3 d=centre+variationAxis*x0+ridgeAxis*ridgeSpan*.5f+front*d0;
-            AddQuadFacing(mesh,a,b,c,d,front,i.PrimaryColour);
+            mesh.AddQuadFacing(a,b,c,d,front,i.PrimaryColour);
             // End closures make either corrugation orientation physical at its exposed edge.
             Vector3 backA=a-front*(d0+p.AccordionFoldDepth*.5f+shell);
             Vector3 backB=b-front*(d1+p.AccordionFoldDepth*.5f+shell);
-            AddQuadFacing(mesh,a,backA,backB,b,-ridgeAxis,i.SecondaryColour);
+            mesh.AddQuadFacing(a,backA,backB,b,-ridgeAxis,i.SecondaryColour);
             Vector3 topA=d-front*(d0+p.AccordionFoldDepth*.5f+shell);
             Vector3 topB=c-front*(d1+p.AccordionFoldDepth*.5f+shell);
-            AddQuadFacing(mesh,d,c,topB,topA,ridgeAxis,i.SecondaryColour);
+            mesh.AddQuadFacing(d,c,topB,topA,ridgeAxis,i.SecondaryColour);
         }
 
         // Rectangular perimeter only: no cross-bracing over the collector face.
@@ -1104,15 +1104,6 @@ public static class MegastationMegaGreebleEmitters
                 structure,true,true);
         }
         return new(vertex,backRings[0][0],frontRings,backRings);
-    }
-
-    private static void AddQuadFacing(StationModuleMesh mesh,Vector3 a,Vector3 b,
-        Vector3 c,Vector3 d,Vector3 expectedNormal,Color colour)
-    {
-        if(Vector3.Dot(Vector3.Cross(b-a,c-a),expectedNormal)<0f)
-            mesh.AddQuad(a,d,c,b,colour);
-        else
-            mesh.AddQuad(a,b,c,d,colour);
     }
 
     private static Color Darken(Color colour,float factor)=>new(

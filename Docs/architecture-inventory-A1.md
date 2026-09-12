@@ -23,17 +23,59 @@
 
 ## 0. Status update — findings acted on (2026-09-11 – 2026-09-12)
 
-Per Timo's instruction, eleven findings were acted on across two sessions (five, then three
-more low-risk clusters, then two final follow-ups, all on 2026-09-11; the basis-from-normal
-cluster on 2026-09-12 after in-engine confirmation of the earlier work). Everything else in
-this document is still an open finding, not a task queue — nothing else was changed as a
-result of this inventory.
+Per Timo's instruction, twelve findings were acted on across two sessions (five, then three
+more low-risk clusters, then two final follow-ups, all on 2026-09-11; basis-from-normal and
+then the full triangle-winding cluster on 2026-09-12, both after in-engine confirmation of
+the earlier work). Everything else in this document is still an open finding, not a task
+queue — nothing else was changed as a result of this inventory.
+
+**Triangle winding — the full centralization (2026-09-12).** Timo asked for this one
+specifically and named it as a recurring, real problem ("winding bugs almost on every new
+item added... it has popped up regularly, last week two or three times") — not a
+theoretical duplication concern, so it got a proper solution-wide search rather than working
+from this document's original 5-implementation sample. Grepping the tell-tale shape
+(`Dot(Cross(v1-v0, v2-v0), expectedNormal) < 0`) across the whole solution found **17
+independent, textually-different production reimplementations** of the exact same
+"check winding against an expected direction, reorder if wrong" pattern — several under the
+identical name `AddQuadFacing`/`AddTriangleFacing`, independently reinvented in at least four
+different files (`MegastationInteriors.cs`, `MegastationMegaGreebles.cs`,
+`MegastationLandingDistrict.cs`, `BolonMegastationSurfaces.cs`) without ever being shared.
+Worse, one of the two implementations this inventory had originally cited as *already
+correct* — `StationModuleMesh.AddQuadProjected` — turned out not to actually be: it only
+flipped the *stored lighting normal* when it disagreed with the caller's expected direction,
+never reordering the actual vertices, so the real rasterized/culled front face stayed
+whatever the caller's raw argument order happened to produce. Two production call sites
+(`MegastationPrototypeMeshBuilder.AddProjectedQuad`, `MegastationLandingDistrict.AddProjectedQuadFacing`)
+had already independently discovered and worked around this by pre-checking and reordering
+their own vertices *before* ever calling `AddQuadProjected` — meaning the "fix" only ever
+protected callers who happened to know to add that workaround.
+
+New `Inferior.Rendering/WindingCorrection.cs` (`Triangle`/`Quad` static methods, reordering
+by value) is the one real implementation. New self-correcting instance methods on
+`StationModuleMesh` — `AddQuadFacing`, `AddTriangleFacing`, `AddTriangleGradientFacing`,
+`AddTriangleWithUvFacing` — are the first-class, centralized entry points every one of those
+17 sites, plus `AddQuadProjected` itself, now goes through (additive: every existing
+`AddQuad`/`AddTriangle`/etc. overload is unchanged, so nothing was forced to migrate).
+`ShippingContainerFactory.AddFastenerQuads` — the exact file Timo named, containing an
+explicit hand-derived "up then right, not right then up" winding comment — was migrated
+onto `AddQuadFacing`; confirmed by the runtime check itself that the hand-derived order was
+in fact already correct, closing the loop on exactly the kind of fragile reasoning this
+finding is about. Two frame-handedness fixes (`MegastationMegaGreebles.cs`,
+`MegastationInfrastructure.cs` — correcting a tangent *frame's* handedness, not "which order
+to add a quad") are a related but structurally different pattern and were deliberately left
+alone. `ShippingContainerFactory.AddRecessWalls` was also deliberately left alone — deriving
+its 4 walls' expected normals correctly would need new inference this pass couldn't fully
+verify, and it wasn't flagged with a fragility comment the way `AddFastenerQuads` was.
+`SemanticHullMeshBuilder`/`CockpitMeshBuilder`/`EngineMeshBuilder` (hand-authored ship-hull
+data, not procedurally computed decoration) were left on their existing throw/trust
+postures — deliberate, not an oversight; see §2 for the full reasoning.
 
 | Finding | Action taken | Result |
 |---|---|---|
 | §2 Deterministic string/seed hashing — `SeededRandom.StableStringHash` vs `StationGenerator.NameHash` | `NameHash` now delegates to `SeededRandom`/`StableStringHash` instead of its own hand-rolled polynomial hash (`StationGenerator.cs`). | Done. Deliberately reshuffles every existing station's generated layout (procedural baselines are regenerated, not persisted — expected, not a regression, per `!invariants.md`). Downstream pinned-fixture tests that assumed the old seed were refreshed to match (`StationTextureCompactionTests`, several `Megastation*Tests`). |
 | §2 Deterministic string/seed hashing — `StationTextureRegistry.HashPalette`'s `GetHashCode()` chain | Follow-up to the above, closing the cluster fully: `HashPalette` now mixes each field (surface enum, `Color.PackedValue`, and `BitConverter.SingleToInt32Bits` of each float) through `SeededRandom`'s own `Derive` chain instead of `h = h*31 + value.GetHashCode()`. | Done. Reshuffles the RNG-driven pixel noise for every station's generated textures (the seed `GeneratePixels` mixes in changes) — not the pixel *counts*/dedup already refreshed for the `NameHash` change, a separate pinned pixel-checksum fixture (`SystemMaterialLibraryTests.OrdinaryStationTextureFixtureRemainsByteIdentical`) needed refreshing too. |
-| §2 Triangle winding — `StationModuleMesh.AddQuad` had no correction or validation | Added finite-vertex, degenerate-first-triangle, degenerate-second-triangle, and winding-consistency checks. Follow-up: converted from unconditional `throw` to `Debug.Assert`, matching the codebase's existing dev-only-check convention (`MegastationInteriors.cs` etc.) — closes the "gate behind a debug flag later" promise from the original request. Still does **not** auto-correct like `AddQuadProjected`/`ChamferedBox.WindFace` — a third posture (see §2/§8, still not unified with the other five). | Done. **Behavioural note:** in a Release build (no `DEBUG` symbol) these checks now compile away entirely — bad geometry propagates silently instead of throwing. That's the deliberate trade-off Timo asked for (a dev-time diagnostic, not a production contract), flagged here since it's a real behaviour change, not pure refactoring. |
+| §2 Triangle winding — `StationModuleMesh.AddQuad` had no correction or validation | Added finite-vertex, degenerate-first-triangle, degenerate-second-triangle, and winding-consistency checks. Follow-up: converted from unconditional `throw` to `Debug.Assert`, matching the codebase's existing dev-only-check convention (`MegastationInteriors.cs` etc.) — closes the "gate behind a debug flag later" promise from the original request. | Done. **Behavioural note:** in a Release build (no `DEBUG` symbol) these checks now compile away entirely — bad geometry propagates silently instead of throwing. |
+| §2 Triangle winding — full centralization (2026-09-12) | Timo named this specifically as a recurring real bug, not a theoretical duplication — see §0's full write-up above for the actual scope found (17 independent reimplementations, one confirmed real bug in `AddQuadProjected`). New `Inferior.Rendering/WindingCorrection.cs` + new self-correcting `StationModuleMesh.AddQuadFacing`/`AddTriangleFacing`/`AddTriangleGradientFacing`/`AddTriangleWithUvFacing` methods; all 17 sites plus `AddQuadProjected` itself migrated onto them. `ShippingContainerFactory`'s named hand-derived-comment hotspot fixed. Frame-handedness fixes (a related, different pattern) and `AddRecessWalls` (needed new inference to derive correctly) deliberately left alone; ship-hull authoring code (`SemanticHullMeshBuilder`/`CockpitMeshBuilder`/`EngineMeshBuilder`) deliberately left on its existing throw/trust postures. | Done. One test (`SystemMaterialLibraryTests.StructuralProjectionUsesMetresAndSharedCoplanarPhase`) had to be rewritten — it indexed `vertices[0..3]` assuming argument order always survives into the mesh unchanged, which the `AddQuadProjected` fix broke for 3 of 6 tested directions (the test's own hand-built quads were among the ones with backwards winding). Rewrote it to look vertices up by position instead of a fixed index — same intent, no longer coupled to an assumption the fix correctly falsified. |
 | §2 UI text measurement — `FontHelper.Measure` bypassed at 8+ call sites | Fixed all of them: `TextBox.cs` (`MeasureWidth`, used on arbitrary player-typed substrings for cursor placement — the most plausible actual bypass exception source — plus 3 `"A"`-glyph sites), `TextBlock.cs` (2 sites), `SystemConsole.cs` (1 site), `LedIndicator.cs` (2 sites), `UIRenderer.cs` (2 sites, already-sanitised input so lower risk but now consistent). | Done. Solution-wide grep for `.MeasureString(` outside `FontHelper.cs`/tests now returns nothing. |
 | §3/§4 `MeshFactory.CreateBox`/`CreateQuad` dead ends — "perhaps replaced?" | Investigated via `git log --all --oneline --follow`; traced to the earliest "Phase 2" commit, predates station generation entirely. `StationGenerator.PrepareBoxHullMesh` (not `MeshFactory`) is the real, current box-hull builder. | Answered, not replaced — confirmed genuinely dead code, not superseded by something central. No removal action taken; still listed in §4. |
 | §5 `architecture-map-ai.md` drift | DataBus row corrected (8→11 channels); `## Inferior.Rendering` section completed (10→21 files, with dead-code/duplication notes); `Station/Megastations/` section added from scratch (was entirely absent — now ~49 files across Structural/Zoning/Flight-interior/Landing/Bolon subsections, explicitly flagged as name/class-derived locators, not individually deep-read). | Done for this pass. Timo noted he'll revisit for a fuller regeneration later — this was "get it in order now," not the wholesale regeneration the doc's own header describes. |
@@ -45,7 +87,8 @@ result of this inventory.
 | §2 Basis/frame construction from a normal | Turned out much bigger than this inventory originally scoped it: not 6 implementations but **~20**, once `Inferior.Game`'s full text was actually searched (the inventory's own §9 flagged this gap — `Inferior.Game` wasn't read exhaustively the first time) — see the inventory's own new prose note below for the full accounting and why only the "arbitrary reference axis" one-liner was consolidated, not the full basis construction. New `Inferior.Rendering/ArbitraryReferenceAxis.For(direction, threshold)`; 17 production call sites now call it, each keeping its **own existing threshold** (0.85 / 0.9 / 0.99, unchanged) and its own downstream cross-product order/handedness (deliberately not touched — see below). 3 independent copies in test files left alone (verification code, not production). | Done, narrower in scope than the inventory's original framing but by design, not by half-measure — see below. Behaviour-preserving: Fast suite 709/709 with **zero** pinned-fixture changes needed (unlike the hash-consolidation work), confirming the refactor changed no generated output. |
 
 **Not requested, not touched:** everything else in §1/§2 (the higher-level basis-construction
-shape at each of those ~20 sites, the other four winding postures, the text-mirroring
+shape at each of those ~20 sites, the ship-hull-authoring winding postures — deliberate, see
+above — the text-mirroring
 root-cause candidate — moot for containers specifically now that container text was removed,
 but the same `PlanarTextGeometry` call-site pattern is still live at other text placements)
 remains exactly as originally found. UV-sphere duplication (`MeshFactory.CreateSphere` vs
@@ -104,7 +147,7 @@ to reserve its separation margin in the wall's own local frame. Documented in co
 | Text on 3D surfaces | 1 primitive (`PlanarTextGeometry`) + ~10 call sites that each choose their own `readingDirection`/`surfaceNormal` | Divergent behaviour (in caller inputs, not the primitive) | Low (primitive already consolidated) | `PlanarTextGeometry.Add`/`DeriveFrame` — already canonical |
 | Container mesh generation | 1 (`ShippingContainerFactory.GenerateVertices`) | — (already consolidated) | — | Already canonical |
 | Basis/frame construction from a normal | ~~6 independent implementations~~ **Corrected 2026-09-12:** actually ~20 once fully searched — see §0. **Partially fixed:** the shared "arbitrary reference axis" one-liner they all had in common is now `ArbitraryReferenceAxis.For`; the higher-level basis each site builds from it (which genuinely differs — see §0/§2) is untouched. | Divergent behaviour (different threshold constants, different validation) | Medium | `PlanarTextGeometry.DeriveFrame`'s pattern (explicit input contract + throw-on-reflection) as the model for *new* code; **not** a retrofit target for the ~20 existing sites, which build genuinely different basis shapes on top of the now-shared reference-axis pick |
-| Triangle winding: trust vs. correct vs. validate | 5 independent postures across otherwise-similar "build mesh from triangles/quad" code. **Updated 2026-09-11:** `StationModuleMesh.AddQuad` moved from "trust" to a 6th posture, "validate via `Debug.Assert`, dev-builds-only" — still not unified with the other five. | Divergent behaviour | Medium-high (touches hot generation paths) | `ChamferedBox.WindFace` (auto-correct + comment explaining why) as the model |
+| Triangle winding: trust vs. correct vs. validate | ~~5 independent postures~~ **Corrected/fixed 2026-09-12:** the real scope was 17 independent reimplementations of the auto-correct posture alone (not counted as "5" originally — see §0). All 17 now share `Inferior.Rendering/WindingCorrection.cs` via new `StationModuleMesh.AddQuadFacing`/`AddTriangleFacing`/etc. `StationModuleMesh.AddQuad` (dev-only `Debug.Assert` posture, 2026-09-11), the ship-hull-authoring throw/trust postures (`SemanticHullMeshBuilder`/`CockpitMeshBuilder`/`EngineMeshBuilder`, deliberately untouched), and `AddQuadProjected`/`AddQuadFacing`'s own auto-correct posture remain as **3** distinct postures — down from 6, and the auto-correct posture (by far the most common) is now genuinely centralized rather than 17-ways duplicated. | Divergent behaviour | Medium-high (touches hot generation paths) — **done anyway, at Timo's explicit request; this was a confirmed real bug, not a theoretical risk** | `ChamferedBox.WindFace` (auto-correct + comment explaining why) as the model — **now realized as `WindingCorrection`/`AddQuadFacing`/`AddTriangleFacing`** |
 | UV sphere tessellation | 2 (`MeshFactory.CreateSphere`, `CelestialBodyRenderer.BuildPlanetSphere`) | Pure duplication (same ring/segment math, different vertex format) | Low | `MeshFactory.CreateSphere`'s loop, parameterised on vertex-build delegate |
 | CPU-mesh → GPU-buffer upload | ~~3 near-identical~~ **Fixed 2026-09-11:** the allocate/`SetData` step now shared via `GpuBufferFactory.Create` | Pure duplication | Low | Shared generic uploader — **now `GpuBufferFactory`** |
 | `BasicEffect` unlit/vertex-colour preset | ~~4 independent constructions~~ **Fixed 2026-09-11:** all 4 now call `BasicEffectPresets.UnlitVertexColour(gd)` | Cosmetic duplication | Low | A `BasicEffectPresets.UnlitVertexColour(gd)` factory — **now exists** |
@@ -259,6 +302,62 @@ consequence: a Release build no longer enforces these checks at all — bad geom
 (NaN vertices, a degenerate or twisted quad) now propagates through silently in Release,
 where before this follow-up it would have thrown there too. That's the deliberate trade-off
 Timo described (a development-time diagnostic, not a production input-validation contract).
+
+**Full centralization (2026-09-12).** Timo asked for this cluster specifically, and named it
+as a recurring, real bug — not a theoretical drift risk: "winding bugs almost on every new
+item added... it has popped up regularly, last week two or three times... It would be so
+nice to have this centralized (finally)!" That framing meant this needed a proper
+solution-wide search, not a retread of the 5-implementation sample above — the earlier draft
+of this document had exactly the gap §9 already confessed to (`Inferior.Game` wasn't read
+exhaustively) and this is precisely where it bit.
+
+Grepping the tell-tale shape — `Dot(Cross(v1 - v0, v2 - v0), expectedNormal) < 0` — across
+the whole solution found **17 independent, textually-different production
+reimplementations** of the identical "check winding against an expected direction, reorder
+if wrong" logic. Several are named `AddQuadFacing`/`AddTriangleFacing` — the *same name*,
+independently reinvented with no shared origin in at least four separate files:
+
+| File | What it reimplemented |
+|---|---|
+| `MegastationInteriors.cs` | private `AddTriangleFacing`, `AddQuadFacing` |
+| `MegastationMegaGreebles.cs` | private `AddQuadFacing` |
+| `MegastationLandingDistrict.cs` | private `AddQuadFacing`; `AddProjectedQuadFacing` (pre-check wrapper around `AddQuadProjected`); inline checks in `EmitOctagonalSurface`'s fan triangulation and in `EmitTriangle` (wrapping `AddTriangleWithUv`) |
+| `BolonAmbassadorBay.cs` | internal `Quad`, `Triangle` |
+| `BolonMegastationSurfaces.cs` | private `AddQuadFacing`, `AddGradientQuadFacing`, `AddGradientTriangleFacing`; an inline check wrapping `AddTriangleWithUv` in `EmitSurfaceTriangle` |
+| `MegastationPrototypeMeshBuilder.cs` | private `AddQuad`, `AddTriangle` (same names as `StationModuleMesh`'s own methods, just static helpers taking `mesh` as a parameter); `AddProjectedQuad` (pre-check wrapper around `AddQuadProjected`) |
+| `ShippingContainerFactory.cs` | `AddFlatRect`'s inline check; `AddFastenerQuads`' hand-derived "up then right" comment (a *third* variant of the same underlying problem — memorized algebra instead of a runtime check) |
+
+**The `AddQuadProjected` bug.** This document originally listed `StationModuleMesh.AddQuadProjected`
+alongside `ChamferedBox.WindFace` as one of the two already-correct auto-flip
+implementations. Reading it again to build the centralized version showed that framing was
+wrong: it computed the normal, and if it disagreed with the caller's `expectedNormal`, it
+only did `normal = -normal` — flipping the *stored per-vertex lighting normal* — and never
+touched `v0..v3`. Since the actual rasterized/culled front face is determined by the vertex
+order (via the fixed index pattern every `AddQuad*` method shares), not by the stored
+normal attribute, this never fixed the real winding at all; it just made the *lit-wrong*
+symptom look like it had been fixed while leaving whichever side actually renders
+unchanged. Two production call sites had already independently discovered this and
+worked around it by pre-checking and reordering their own vertices before ever calling
+`AddQuadProjected` (`MegastationPrototypeMeshBuilder.AddProjectedQuad`,
+`MegastationLandingDistrict.AddProjectedQuadFacing`) — which only protected callers who
+happened to know to add that guard. This is a plausible root-cause candidate for at least
+some of the "pops up regularly" pattern Timo described: a caller doing the natural thing
+(calling the method that already takes an `expectedNormal` parameter, reasonably assuming
+that's enough) got no protection at all.
+
+**What was fixed.** `AddQuadProjected` now calls the same `WindingCorrection.Quad` primitive
+everything else does, and actually reorders `v0..v3` — the real fix, not the cosmetic one.
+All 17 sites above were migrated onto the new centralized primitive/methods (see §0 for the
+full list of files touched and what was deliberately left alone: two frame-handedness fixes
+in `MegastationMegaGreebles.cs`/`MegastationInfrastructure.cs`, a structurally different
+problem; `ShippingContainerFactory.AddRecessWalls`, which would need new inference this pass
+couldn't fully verify; and the ship-hull-authoring throw/trust postures, deliberate by
+design). One test (`SystemMaterialLibraryTests.StructuralProjectionUsesMetresAndSharedCoplanarPhase`)
+had baked in the old bug's absence of correction — it indexed `vertices[0..3]` assuming
+argument order always survives unchanged, which the real fix broke for 3 of 6 tested
+directions (the test's own hand-built quads were, themselves, among the ones with backwards
+winding — a small, self-contained demonstration of exactly the failure mode this whole
+finding is about). Rewritten to look vertices up by position instead of by a fixed index.
 
 ### UV sphere tessellation
 
@@ -602,7 +701,7 @@ Not a profiling pass — only what was obvious in passing while reading for dupl
 | Text on a 3D surface | `PlanarTextGeometry.Add`/`DeriveFrame` | The primitive is safe; the caller-chosen `readingDirection`/`surfaceNormal` for each face is not automatically checked against "does this actually read correctly to a viewer" — that's still a per-call-site judgment call. |
 | Container geometry | `ShippingContainerFactory.GenerateVertices` | Already the only path; keep it that way — do not let a future megastation-scale container variant reimplement inline. |
 | Orthonormal frame from one direction | ~~*(none yet — 6 candidates in §2)*~~ **Partially done 2026-09-12:** the shared reference-axis pick is `ArbitraryReferenceAxis.For(direction, threshold)`, used at all 17 production arbitrary-reference-axis sites (real count ~20, not the original 6 — see §0/§2). The full 2-axis basis is still built independently per site — genuinely different cross-product order/handedness at some of them, not safely unifiable without a design decision. | Pick one input contract (arbitrary-reference-axis vs. authored-tangent vs. reading-direction) per use case; standardise the reference-axis threshold if that variant is kept — still an open decision, deliberately not made silently. `PlanarTextGeometry.DeriveFrame`'s throw-on-reflection discipline remains the model for *new* code in this space, not a retrofit target for the ~20 existing sites. |
-| Triangle winding correction | `ChamferedBox.WindFace`'s auto-flip pattern | Decide once whether "trust caller" (`CockpitMeshBuilder`), "validate-and-throw" (`SemanticHullMeshBuilder`), "validate via `Debug.Assert`, dev-only" (`AddQuad` as of 2026-09-11's follow-up), or "auto-correct" (`GeometryBuilder`, `ChamferedBox`, `AddQuadProjected`) is the house style — right now all four exist for no documented reason. `AddQuad`'s gates are now dev-builds-only per Timo's original intent — Release builds don't enforce them at all. |
+| Triangle winding correction | ~~`ChamferedBox.WindFace`'s auto-flip pattern~~ **Realized 2026-09-12** as `Inferior.Rendering/WindingCorrection.cs` + `StationModuleMesh.AddQuadFacing`/`AddTriangleFacing`/`AddTriangleGradientFacing`/`AddTriangleWithUvFacing` — the actual, centralized auto-correct primitive, now used by all 17 sites found (see §0/§2) plus the fixed `AddQuadProjected`. | ~~Decide once whether "trust caller"... or "auto-correct" is the house style~~ **Settled 2026-09-12 for procedural decoration geometry: auto-correct, via the primitive above.** Three postures remain, each now deliberate rather than accidental: `AddQuad`'s `Debug.Assert` (dev-only diagnostic, no external reference to correct *against*); auto-correct (`WindingCorrection`-backed, the default for anything with an expected direction available); throw/trust (hand-authored ship-hull data — `SemanticHullMeshBuilder`/`CockpitMeshBuilder`/`EngineMeshBuilder` — where surfacing an authoring mistake is more valuable than silently correcting it). |
 | UV sphere mesh | `MeshFactory.CreateSphere`, generalised with a per-vertex delegate | `BuildPlanetSphere`'s checkerboard/lighting bake would need to become that delegate. |
 | CPU mesh → GPU buffers | ~~A new shared generic uploader~~ **Partially done 2026-09-11:** `GpuBufferFactory.Create` shares the allocate/SetData scaffolding; the per-caller vertex struct/record differences (Semantic/Cockpit/Engine) were judged genuine enough to leave as three separate mapping steps calling the one shared factory, rather than building a fully generic delegate-based uploader for three call sites. | Keep per-caller vertex struct differences (Semantic/Cockpit/Engine) as separate mapping code, not baked into three copies of the allocate/SetData scaffolding — the latter is now shared, the former deliberately isn't. |
 | `BasicEffect` unlit/vertex-colour debug preset | ~~New `BasicEffectPresets.UnlitVertexColour(gd)` in `Inferior.Rendering`~~ **Done 2026-09-11** — exists, all 4 sites use it. | Don't fold in `SystemSpaceState.cs`'s *different* lit/no-vertex-colour preset by mistake — that one is genuinely distinct. (Confirmed left alone.) |

@@ -443,17 +443,15 @@ public static class MegastationPrototypeMeshBuilder
             _ => (Vector3.UnitX, Vector3.UnitY),
         };
 
+    // AddQuadProjected self-corrects winding now (A1 inventory finding), so this no longer
+    // needs its own pre-check-and-swap before calling - kept as a thin named wrapper since
+    // it's called from many sites below.
     private static void AddProjectedQuad(
         StationModuleMesh mesh,
         Vector3 a, Vector3 b, Vector3 c, Vector3 d,
         Vector3 expectedNormal, Vector3 u, Vector3 v,
         float tileSize, Color color)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddQuadProjected(a, d, c, b, expectedNormal, u, v, tileSize, color);
-        else
-            mesh.AddQuadProjected(a, b, c, d, expectedNormal, u, v, tileSize, color);
-    }
+        => mesh.AddQuadProjected(a, b, c, d, expectedNormal, u, v, tileSize, color);
 
     private static Vector3 Retraction(BoundaryTopology topology, BoundaryFace face, BoundaryEdgeKey edgeKey, ChamferPlan chamferPlan)
     {
@@ -861,21 +859,14 @@ public static class MegastationPrototypeMeshBuilder
         return new ChamferSemanticValidationReport(taperOnly, nearZeroArea, missingRetraction);
     }
 
+    // Thin named wrappers over StationModuleMesh's own self-correcting overloads (A1
+    // inventory finding: this file used to reimplement the winding check itself) - kept
+    // since they're called from many sites below with mesh as the first argument.
     private static void AddQuad(StationModuleMesh mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 d, Vector3 expectedNormal, Color color)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddQuad(a, d, c, b, color);
-        else
-            mesh.AddQuad(a, b, c, d, color);
-    }
+        => mesh.AddQuadFacing(a, b, c, d, expectedNormal, color);
 
     private static void AddTriangle(StationModuleMesh mesh, Vector3 a, Vector3 b, Vector3 c, Vector3 expectedNormal, Color color)
-    {
-        if (Vector3.Dot(Vector3.Cross(b - a, c - a), expectedNormal) < 0f)
-            mesh.AddTriangle(a, c, b, color);
-        else
-            mesh.AddTriangle(a, b, c, color);
-    }
+        => mesh.AddTriangleFacing(a, b, c, expectedNormal, color);
 
     private static bool NearlySame(Vector3 a, Vector3 b)
         => Vector3.DistanceSquared(a, b) < 0.000001f;
