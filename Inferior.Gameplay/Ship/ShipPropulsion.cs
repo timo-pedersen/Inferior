@@ -31,7 +31,7 @@ public readonly record struct EngineTranslationAllocation(
     public double Vertical => AllocatedAxes.Y;
 }
 
-public sealed record ResolvedEnginePropulsion(
+public readonly record struct ResolvedEnginePropulsion(
     string InstanceId,
     string FamilyId,
     EngineGeometryTransform GeometryTransform,
@@ -107,8 +107,6 @@ public static class ShipPropulsion
     {
         ArgumentNullException.ThrowIfNull(ship);
 
-        int installedCount = 0;
-        int operationalCount = 0;
         double engineMassKg = 0.0;
         DVec3 forwardForce = DVec3.Zero;
         double reverseThrustN = 0.0;
@@ -116,9 +114,34 @@ public static class ShipPropulsion
         double liftThrustN = 0.0;
         double rotationalTorqueNm = 0.0;
         double speedCeilingMps = double.PositiveInfinity;
-        var resolvedEngines = new List<ResolvedEnginePropulsion>();
 
-        int configuredEngineCount = ship.EngineMounts.Count(mount => mount.InstalledEngine is not null);
+        // Indexed access rather than foreach/LINQ: EngineMounts is exposed as IReadOnlyList<T>,
+        // and iterating an interface-typed sequence (via foreach or Enumerable.Count) boxes its
+        // enumerator on every call. Indexing through the interface has no such cost.
+        //
+        // This pre-pass counts both configured (installed, regardless of damage/geometry — the
+        // "single engine ship" designation below deliberately keys on this) and resolved (will
+        // actually reach resolvedEngines below) engines, so resolvedEngines can be allocated once
+        // at exactly the size it needs rather than an upper bound, an over-sized List, or a
+        // separate ToArray() copy.
+        IReadOnlyList<EngineMount> mounts = ship.EngineMounts;
+        int configuredEngineCount = 0;
+        int resolvedEngineCount = 0;
+        for (int i = 0; i < mounts.Count; i++)
+        {
+            EngineInstance? mountedEngine = mounts[i].InstalledEngine;
+            if (mountedEngine is null)
+                continue;
+
+            configuredEngineCount++;
+            if (1.0 - mountedEngine.DamageFraction > 0.0 && mountedEngine.GeometryTransform is not null)
+                resolvedEngineCount++;
+        }
+
+        ResolvedEnginePropulsion[] resolvedEngines = resolvedEngineCount == 0
+            ? []
+            : new ResolvedEnginePropulsion[resolvedEngineCount];
+        int resolvedIndex = 0;
         double forwardEfficiency = configuredEngineCount == 1 && ship.SingleEngineEfficiency is { } efficiency
             ? efficiency.Forward
             : 1.0;
@@ -129,13 +152,13 @@ public static class ShipPropulsion
             ? rotationLayout.Rotation
             : 1.0;
 
-        foreach (EngineMount mount in ship.EngineMounts)
+        for (int mountIndex = 0; mountIndex < mounts.Count; mountIndex++)
         {
+            EngineMount mount = mounts[mountIndex];
             EngineInstance? engine = mount.InstalledEngine;
             if (engine is null)
                 continue;
 
-            installedCount++;
             EngineDefinition definition = engine.Variant.Engine;
             engineMassKg += definition.DryMassKg;
 
@@ -143,7 +166,6 @@ public static class ShipPropulsion
             if (operationalFactor <= 0.0 || engine.GeometryTransform is null)
                 continue;
 
-            operationalCount++;
             EngineHarmonyOutput harmony = definition.ResolveHarmony(engine.SelectedHarmony);
             var resolved = new ResolvedEnginePropulsion(
                 engine.InstanceId,
@@ -153,7 +175,7 @@ public static class ShipPropulsion
                 operationalFactor,
                 forwardEfficiency,
                 maneuveringEfficiency);
-            resolvedEngines.Add(resolved);
+            resolvedEngines[resolvedIndex++] = resolved;
 
             forwardForce += engine.GeometryTransform.TransformDirection(EngineLocalForward)
                 * (harmony.MaximumForwardThrustN * operationalFactor * forwardEfficiency);
@@ -170,8 +192,8 @@ public static class ShipPropulsion
             ship.Mass,
             ship.HullMass,
             ship.ComponentMass,
-            installedCount,
-            operationalCount,
+            configuredEngineCount,
+            resolvedEngineCount,
             engineMassKg,
             forwardForce,
             reverseThrustN,
@@ -179,7 +201,11 @@ public static class ShipPropulsion
             liftThrustN,
             rotationalTorqueNm,
             double.IsPositiveInfinity(speedCeilingMps) ? 0.0 : speedCeilingMps,
-            Array.AsReadOnly(resolvedEngines.ToArray()));
+            // resolvedEngines is a T[], which already implements IReadOnlyList<T> — returned
+            // directly rather than via Array.AsReadOnly (an extra wrapper allocation for no
+            // extra safety here: it's a fresh array from this call, nothing else holds a
+            // reference to it that a caller could reach and mutate).
+            resolvedEngines);
     }
 
     public static EngineTranslationAllocation AllocateTranslation(
@@ -205,8 +231,10 @@ public static class ShipPropulsion
             throw new ArgumentOutOfRangeException(nameof(longitudinalScale));
 
         DVec3 forceShipLocal = DVec3.Zero;
-        foreach (ResolvedEnginePropulsion engine in capability.Engines)
+        IReadOnlyList<ResolvedEnginePropulsion> engines = capability.Engines;
+        for (int i = 0; i < engines.Count; i++)
         {
+            ResolvedEnginePropulsion engine = engines[i];
             EngineHarmonyOutput harmony = engine.Harmony;
             double longitudinalMaximum = allocation.Longitudinal >= 0.0
                 ? harmony.MaximumForwardThrustN

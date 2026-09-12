@@ -177,7 +177,9 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ## What is in progress
 
-### `Bus<T>` message-buffer allocation reduction — done, one item deferred
+### GC-optimization pass (`Docs/gc-optimization-question.md`) — findings #1 and #2 done, #3/#4/Server-GC deferred
+
+#### `Bus<T>` message-buffer allocation reduction — done
 
 Per `Docs/gc-optimization-question.md` finding #1 (the dominant, systemic GC-pressure source:
 `DataBus.Drain()` runs all 11 channels every render frame, `ScalarTelemetry` alone getting 25+
@@ -198,10 +200,38 @@ pre-existing bug along the way: `Inferior.Gameplay.Test` never set
 `DataBusTests` and `SolarHeatSensorTests` — both driving the shared static `DataBus` — were
 racing across parallel test classes on its plain `Dictionary` fields; now fixed in
 `AssemblyAttributes.cs`. Solution builds clean (Debug+Release), full suite (866 tests) passes.
-**Deferred, not done here:** `ShipPropulsion.Resolve()` (finding #2, heaviest single call site),
-per-tick sensor topic-string interpolation (finding #3), per-`Draw()` HUD text formatting
-(finding #4), and the Server GC A/B — all identified in the same GC doc but out of scope for
-this message-buffer-focused pass.
+
+#### `ShipPropulsion.Resolve()` allocation reduction — done
+
+Finding #2 (heaviest single per-tick call site: called continuously from `TickNewtonianPhysics`
+plus 3-4 more times per tick from `BuildPropulsionSnapshot`/`BuildRotationSnapshot`/
+`TickAssistedRotation`, each independently re-resolving and re-allocating — that redundant
+per-tick call-count is a separate, still-open observation, not fixed here).
+`Inferior.Gameplay/Ship/ShipPropulsion.cs`: `ResolvedEnginePropulsion` is now a `readonly record
+struct` (was a `sealed record` — one heap allocation per installed engine — while its four
+siblings in the same file were already structs, matching the GC doc's "reads like an oversight"
+note). `Resolve()` does one indexed pre-pass over `ship.EngineMounts` to get the exact operational
+engine count, then allocates a single precisely-sized `ResolvedEnginePropulsion[]` (no
+intermediate `List`, no `.ToArray()` copy, no `Array.AsReadOnly()` wrapper — arrays already
+implement `IReadOnlyList<T>`), returned directly. Iteration over `EngineMounts`/
+`ShipPropulsionCapability.Engines` (both `IReadOnlyList<T>`-typed) switched from `foreach`/LINQ
+`.Count()` to indexed loops, since iterating an interface-typed sequence boxes its struct
+enumerator per call. **Measured, not just reasoned about:** the naive "just convert the record to
+a struct" step alone made things *worse* (520 → 648 bytes/call) before the List's default 0→4
+capacity growth was accounted for — this is exactly why the proof step matters, not only the
+plan. Final measured result on a 2-engine Aries ship, `GC.GetAllocatedBytesForCurrentThread()`,
+10,000 calls after warm-up: **520 → 320 bytes/call**, down from up to 5 separate heap objects to
+exactly 1 (the array) per call — asserted going forward (as a "must stay below the documented
+520 baseline" gate, not an exact pin, since the precise byte count legitimately shifts with
+struct field layout) by `ShipPropulsionAllocationTests.SteadyStateResolveAllocatesLessThanTheRecordBasedBaseline`.
+Deliberately not pursued further: pooling/reusing the array across calls (e.g. via `ArrayPool<T>`
+or a per-`Ship` buffer) would get allocation closer to zero but changes the calling contract for
+every consumer (rent/return or aliasing-safety discipline) for a comparatively small remaining
+win — not attempted without being asked. Full suite (867 tests) passes, Debug+Release build clean.
+
+**Deferred, not done in this GC-optimization pass:** per-tick sensor topic-string interpolation
+(finding #3), per-`Draw()` HUD text formatting (finding #4), and the Server GC A/B — all
+identified in the same GC doc.
 
 ### Power system — refinement phase
 
