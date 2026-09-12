@@ -84,6 +84,12 @@ public sealed class PassiveSensor
     private double _timeSinceLastPost;
     private bool _infoPublished;
 
+    // TopicPrefix/ValueName are init-only (fixed by the time any instance method runs) but not
+    // computable in a constructor — init setters run after construction. Cached lazily on first
+    // use instead of interpolating "{TopicPrefix}.{ValueName}" fresh on every Publish() call.
+    private string? _topic;
+    private string Topic => _topic ??= $"{TopicPrefix}.{ValueName}";
+
     // ── Publish ───────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -111,7 +117,7 @@ public sealed class PassiveSensor
         foreach (var source in ExternalNoiseSources)
             noise += source();
 
-        DataBus.ScalarTelemetry.Publish($"{TopicPrefix}.{ValueName}", rawValue + noise);
+        DataBus.ScalarTelemetry.Publish(Topic, rawValue + noise);
     }
 
     private void PublishInfoOnce()
@@ -120,7 +126,7 @@ public sealed class PassiveSensor
             return;
 
         _infoPublished = true;
-        string topic = $"{TopicPrefix}.{ValueName}";
+        string topic = Topic;
         var policy = TopicPolicy.LatestState;
         DataBus.PublishTelemetryInfo(new TelemetryInfo
         {

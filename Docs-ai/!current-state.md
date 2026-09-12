@@ -177,7 +177,7 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ## What is in progress
 
-### GC-optimization pass (`Docs/gc-optimization-question.md`) — findings #1 and #2 done, #3/#4/Server-GC deferred
+### GC-optimization pass (`Docs/gc-optimization-question.md`) — findings #1-#3 and Server-GC done, #4 deferred
 
 #### `Bus<T>` message-buffer allocation reduction — done
 
@@ -229,9 +229,46 @@ or a per-`Ship` buffer) would get allocation closer to zero but changes the call
 every consumer (rent/return or aliasing-safety discipline) for a comparatively small remaining
 win — not attempted without being asked. Full suite (867 tests) passes, Debug+Release build clean.
 
-**Deferred, not done in this GC-optimization pass:** per-tick sensor topic-string interpolation
-(finding #3), per-`Draw()` HUD text formatting (finding #4), and the Server GC A/B — all
-identified in the same GC doc.
+#### Per-tick sensor topic-string caching — done, with a scope correction
+
+Finding #3, but narrower than the GC doc described. `PassiveSensor.Publish()`
+(`Inferior.Gameplay/Sensors/PassiveSensor.cs`) now lazily caches `"{TopicPrefix}.{ValueName}"`
+in a field instead of interpolating it fresh on every `Publish()` call — lazy because
+`TopicPrefix`/`ValueName` are `init`-only, fixed by the time any instance method runs but not yet
+set when the constructor body executes. `MagneticFieldSensor`/`SolarSpectrumSensor` now store the
+direction/data topic they already compute once at construction (for `TelemetryInfo`/`DeviceInfo`
+publication) in a field, instead of redundantly re-interpolating it every `Tick()`/scan-complete.
+**Verified, not assumed, before touching anything:** the GC doc's other cited sites —
+`LandingSupportSystem`'s 8 topics and `ShieldComponent` — turned out to already be
+zero-allocation. Their interpolations (e.g. `$"Ship.{Topics.LandingSupport.PadTargeted}"`) have
+only `const string` parts, which the C# compiler folds into a single interned literal at compile
+time; confirmed with a standalone repro (`GC.GetAllocatedBytesForCurrentThread()` +
+`ReferenceEquals` across calls). No change was made there — there was nothing to fix. Measured
+(`GravitySensor.Tick()`/`MagneticFieldSensor.Tick()`, 10,000 calls after warm-up):
+**137.6 → 65.6** and **137.2 → 65.2 bytes/tick**. The residual ~65 bytes/tick is not topic
+strings — it's `Bus<T>.Publish()`'s underlying `ConcurrentQueue<T>` allocating a new internal
+segment roughly every 32 enqueues, a pre-existing structural cost of the queue type itself,
+unrelated to and out of scope for this fix (flagged here, not silently chased). Asserted going
+forward by `SensorTopicAllocationTests`. Full suite passes, Debug+Release build clean.
+
+#### Server GC A/B — measured, decision: stay on Workstation GC
+
+The GC doc's "orthogonal, zero-code-risk lever." Built a standalone synthetic benchmark
+(`Bus<T>`/`DataBus.Drain()` across all 11 channels with realistic publish volume,
+`ShipPropulsion.Resolve()`+`ResolveAppliedForce()` on a 2-engine ship, `GravitySensor`/
+`MagneticFieldSensor` ticks) and ran the same built binary under `DOTNET_gcServer=0` vs `=1`
+(200,000 ticks, ≈55 minutes of 60Hz play, 3 runs each). Result: **no measured wall-clock
+benefit** (times overlapped within run-to-run noise, ~730-775ms either way) and **Server GC
+triggered consistently more Gen0 collections** (24 vs 3, stable across every run) for this
+workload's allocation shape. This also incidentally confirms how effective the #1/#2/#3 fixes
+above already were: only 3 Gen0 collections total across ~55 simulated minutes under Workstation
+GC, at 320 bytes/tick. Given no upside and Server GC's known standing cost (a heap + GC thread
+per core, real memory footprint on every player's machine), **`Inferior.Game.csproj` was
+deliberately left unchanged** — this is a measured "no," not an unresolved question. Caveat:
+this was a synthetic single-threaded proxy benchmark, not the actual windowed game under human
+play with its sim+render thread split; revisit with a real profiler attached to the running game
+if allocation pressure ever becomes visible again (e.g. after landing sites, coolant loops, or
+other systems noted below add meaningfully to per-tick load).
 
 ### Power system — refinement phase
 

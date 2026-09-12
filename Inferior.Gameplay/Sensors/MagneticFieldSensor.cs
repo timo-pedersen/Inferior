@@ -19,12 +19,11 @@ namespace Inferior.Gameplay.Sensors;
 /// </summary>
 public sealed class MagneticFieldSensor
 {
-    private readonly string        _name;
+    private readonly string        _directionTopic;
     private readonly PassiveSensor _strengthSensor;
 
     public MagneticFieldSensor(string name = "MagSensor")
     {
-        _name           = name;
         _strengthSensor = new PassiveSensor
         {
             TopicPrefix = name,
@@ -37,10 +36,10 @@ public sealed class MagneticFieldSensor
             NoisePink   = 0.005,
         };
 
-        string directionTopic = $"{name}.{Topics.MagneticField.Direction}";
+        _directionTopic = $"{name}.{Topics.MagneticField.Direction}";
         DataBus.PublishTelemetryInfo(new TelemetryInfo
         {
-            Topic = directionTopic,
+            Topic = _directionTopic,
             DeviceId = name,
             ValueKind = TelemetryValueKind.Vector,
             Quantity = PhysicalQuantity.Direction,
@@ -51,7 +50,7 @@ public sealed class MagneticFieldSensor
         DataBus.DeviceInfo.Publish(name, new DeviceInfo
         {
             DeviceId = name,
-            PublishedTopics = [$"{name}.{Topics.MagneticField.Strength}", directionTopic],
+            PublishedTopics = [$"{name}.{Topics.MagneticField.Strength}", _directionTopic],
             Power = new PowerProfile(0.0, 0.0),
         });
     }
@@ -68,7 +67,7 @@ public sealed class MagneticFieldSensor
         if (strength > 1e-10)
         {
             var norm = vec / strength;
-            DataBus.VectorTelemetry.Publish($"{_name}.{Topics.MagneticField.Direction}", norm);
+            DataBus.VectorTelemetry.Publish(_directionTopic, norm);
         }
     }
 }

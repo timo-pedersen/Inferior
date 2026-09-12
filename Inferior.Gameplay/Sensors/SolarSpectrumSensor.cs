@@ -21,19 +21,18 @@ public sealed class SolarSpectrumSensor
 {
     public const double ScanDurationSeconds = 2.0;
 
-    private readonly string   _name;
+    private readonly string   _dataTopic;
     private          double   _scanCountdown = -1.0;  // < 0 = idle
     private readonly double[] _workBuffer    = new double[SensorEnv.SpectrumBins];
 
     public SolarSpectrumSensor(string name)
     {
-        _name = name;
         CommandBus.Subscribe(name, _ => StartScan());
 
-        string dataTopic = $"{name}.{Topics.SolarSpectrum.Data}";
+        _dataTopic = $"{name}.{Topics.SolarSpectrum.Data}";
         DataBus.PublishTelemetryInfo(new TelemetryInfo
         {
-            Topic = dataTopic,
+            Topic = _dataTopic,
             DeviceId = name,
             ValueKind = TelemetryValueKind.Spectrum,
             Quantity = PhysicalQuantity.NormalizedRatio,
@@ -45,7 +44,7 @@ public sealed class SolarSpectrumSensor
         DataBus.DeviceInfo.Publish(name, new DeviceInfo
         {
             DeviceId = name,
-            PublishedTopics = [dataTopic],
+            PublishedTopics = [_dataTopic],
             CommandTopics = [$"{name}.Scan"],
             Power = new PowerProfile(
                 IdleWatts: 0.0,
@@ -75,7 +74,7 @@ public sealed class SolarSpectrumSensor
 
         _scanCountdown = -1.0;
         SensorEnv.GetSolarVisibleSpectrum(_workBuffer.AsSpan());
-        DataBus.SpectrumTelemetry.Publish($"{_name}.{Topics.SolarSpectrum.Data}", (double[])_workBuffer.Clone());
+        DataBus.SpectrumTelemetry.Publish(_dataTopic, (double[])_workBuffer.Clone());
         DataBus.SystemMessages.Publish(Topics.System.All, new("Solar spectrum scan complete"));
     }
 }
