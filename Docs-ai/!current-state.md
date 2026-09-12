@@ -24,7 +24,8 @@
 > Timo visually confirmed initial generation, departure from the station area, and return on
 > 2026-09-12: the macro appears in less than one second, remains available while complete generation
 > continues asynchronously, swaps correctly by projected size, and casts through the existing
-> station stellar-shadow path.
+> station stellar-shadow path. Timo subsequently confirmed that LOD1's borrowed shared structural
+> material removes the visible colour-hue jump when LOD2 appears.
 > L3c/L3d-A/B/C wall composition is now a visually accepted baseline: inhabited galleries and
 > facility cut-outs coexist with synchronized major wall/ceiling truss fields, clustered exposed
 > cable networks, and coherent pipe/vent/hatch/ladder installations while preserving operational
