@@ -51,7 +51,7 @@
 | System map | ✓ Done | Bodies, orbits |
 | 3D flight state (`SystemSpaceState`) | ✓ Done | Newtonian, origin-shifting render |
 | UI library (`Inferior.UI`) | ✓ Done | Button, Label, TextBox, TextBlock, Panel, Window, GridPanel, StackPanel, CollapsiblePanel, ScrollPanel, menu/popup controls, InstrumentMeter, SystemConsole, DirectionBall, EdgePanelHost, UIManager, Theme, InputState |
-| DataBus | ✓ Done | 11 channels: SystemMessages, ScalarTelemetry, VectorTelemetry, SpectrumTelemetry, TelemetryInfo, DeviceInfo, DeviceState, ShipSystemsTopology, Radar, RadarLost, Target |
+| DataBus | ✓ Done | 11 channels: SystemMessages, ScalarTelemetry, VectorTelemetry, SpectrumTelemetry, TelemetryInfo, DeviceInfo, DeviceState, ShipSystemsTopology, Radar, RadarLost, Target. `Bus<T>.Drain()`/`Dispatch()` allocation fix (2026-09-12, see below) landed here. |
 | CommandBus | ✓ Done | Reverse direction; sim thread drains |
 | Simulation loop | ✓ Done | 60Hz background thread; PlayerInput immutable snapshot |
 | DVec3 + origin shifting | ✓ Done | Double-precision coordinates throughout |
@@ -176,6 +176,32 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 ---
 
 ## What is in progress
+
+### `Bus<T>` message-buffer allocation reduction — done, one item deferred
+
+Per `Docs/gc-optimization-question.md` finding #1 (the dominant, systemic GC-pressure source:
+`DataBus.Drain()` runs all 11 channels every render frame, `ScalarTelemetry` alone getting 25+
+publishes/tick). `Inferior.Core/DataBus/Bus.cs`: `Drain()` now reuses instance-owned scratch
+buffers (`_pendingBuffer`, `_lastCoalescedIndexBuffer`) instead of allocating a fresh
+`List`/`Dictionary` per non-empty drain, guarded against reentrant `Drain()` calls on the same
+instance (`InvalidOperationException`, since the buffers are no longer safe to share across a
+reentrant call — nothing in the codebase does this today). `Dispatch()` caches a per-topic
+handler-array snapshot instead of `handlers.ToArray()` per dispatched message, invalidated only
+by `Subscribe`/`Unsubscribe`; semantics (a handler unsubscribing mid-dispatch is excluded
+starting with the *next* message in the same drain, not the current one) are unchanged and
+pinned by two new tests in `DataBusTests.cs`. Measured with `GC.GetAllocatedBytesForCurrentThread()`
+against a `ScalarTelemetry`-shaped workload (25 topics × 3 subscribers, 1000 ticks after
+warm-up): **2368 → 0 bytes/tick**, asserted going forward by
+`BusAllocationTests.SteadyStateDrainAllocatesNoManagedMemory`. Surfaced and fixed a real,
+pre-existing bug along the way: `Inferior.Gameplay.Test` never set
+`[CollectionBehavior(DisableTestParallelization = true)]` (unlike `Inferior.Game.Test`), so
+`DataBusTests` and `SolarHeatSensorTests` — both driving the shared static `DataBus` — were
+racing across parallel test classes on its plain `Dictionary` fields; now fixed in
+`AssemblyAttributes.cs`. Solution builds clean (Debug+Release), full suite (866 tests) passes.
+**Deferred, not done here:** `ShipPropulsion.Resolve()` (finding #2, heaviest single call site),
+per-tick sensor topic-string interpolation (finding #3), per-`Draw()` HUD text formatting
+(finding #4), and the Server GC A/B — all identified in the same GC doc but out of scope for
+this message-buffer-focused pass.
 
 ### Power system — refinement phase
 

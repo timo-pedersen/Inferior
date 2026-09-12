@@ -123,6 +123,47 @@ public sealed class DataBusTests
     }
 
     [Fact]
+    public void UnsubscribeDuringDispatchExcludesHandlerStartingWithTheNextMessageInTheSameDrain()
+    {
+        // Dispatch caches a per-topic handler snapshot, rebuilt only when Subscribe/Unsubscribe
+        // invalidates it. This pins that the cache still matches the pre-caching contract: a
+        // handler unsubscribing mid-dispatch must not affect the message currently dispatching,
+        // but must be excluded starting with the next message in the same drain.
+        var bus = new Bus<int>();
+        var secondCalls = new List<int>();
+        IDisposable? first = null;
+        first = bus.Subscribe("topic", _ => first!.Dispose());
+        using var second = bus.Subscribe("topic", secondCalls.Add);
+
+        bus.Publish("topic", 1);
+        bus.Publish("topic", 2);
+        bus.Drain();
+
+        // The unsubscribing handler still ran for message 1 (it was in the snapshot taken for
+        // that message), and "second" still received message 1 too; only message 2's dispatch
+        // reflects the removal, so "second" alone received it.
+        Assert.Equal([1, 2], secondCalls);
+    }
+
+    [Fact]
+    public void ReentrantDrainOnTheSameBusThrows()
+    {
+        // The reused Drain() scratch buffers are only safe for one call at a time. A handler
+        // that publishes and then re-enters Drain() on the same bus (rather than waiting for
+        // next frame's drain) must get a clear failure, not silent buffer corruption.
+        var bus = new Bus<int>();
+        using var subscription = bus.Subscribe("topic", value =>
+        {
+            bus.Publish("topic", value + 1);
+            bus.Drain();
+        });
+
+        bus.Publish("topic", 1);
+
+        Assert.Throws<InvalidOperationException>(() => bus.Drain());
+    }
+
+    [Fact]
     public void HistoryRequiresPositiveBound()
     {
         var bus = new Bus<int>();

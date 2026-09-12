@@ -10,6 +10,7 @@ public sealed class Bus<T>
 {
     private readonly ConcurrentQueue<(string Topic, T Value)> _queue = new();
     private readonly Dictionary<string, List<Action<T>>> _handlers = new();
+    private readonly Dictionary<string, Action<T>[]> _handlerSnapshots = new();
     private readonly Dictionary<string, TopicPolicy> _policies = new();
     private readonly Dictionary<string, T> _latest = new();
     private readonly Dictionary<string, Queue<T>> _history = new();
@@ -17,6 +18,13 @@ public sealed class Bus<T>
     private readonly int _pendingCapacity;
     private int _pendingCount;
     private long _droppedMessageCount;
+
+    // Reused across Drain() calls to avoid a List/Dictionary allocation on every non-empty
+    // drain. Drain() is consumer-thread-owned and not reentrant (see the guard below); these
+    // buffers would not be safe to share across a reentrant call.
+    private readonly List<(string Topic, T Value)> _pendingBuffer = new();
+    private readonly Dictionary<string, int> _lastCoalescedIndexBuffer = new();
+    private bool _draining;
 
     public Bus(TopicPolicy? defaultPolicy = null, int pendingCapacity = 65_536)
     {
@@ -83,33 +91,52 @@ public sealed class Bus<T>
         if (_queue.IsEmpty)
             return;
 
-        var pending = new List<(string Topic, T Value)>();
-        while (_queue.TryDequeue(out var message))
-        {
-            Interlocked.Decrement(ref _pendingCount);
-            pending.Add(message);
-        }
+        if (_draining)
+            throw new InvalidOperationException(
+                $"{nameof(Bus<T>)}<{typeof(T).Name}>.{nameof(Drain)}() does not support reentrant " +
+                "calls on the same instance (e.g. a handler calling Drain() on the bus it is being " +
+                "dispatched from).");
 
-        var lastCoalescedIndex = new Dictionary<string, int>();
-        for (int i = 0; i < pending.Count; i++)
+        _draining = true;
+        try
         {
-            string topic = pending[i].Topic;
-            if (GetTopicPolicy(topic).Dispatch == DispatchMode.LatestPerDrain)
-                lastCoalescedIndex[topic] = i;
-        }
-
-        for (int i = 0; i < pending.Count; i++)
-        {
-            var message = pending[i];
-            TopicPolicy policy = GetTopicPolicy(message.Topic);
-            if (policy.Dispatch == DispatchMode.LatestPerDrain &&
-                lastCoalescedIndex[message.Topic] != i)
+            List<(string Topic, T Value)> pending = _pendingBuffer;
+            pending.Clear();
+            while (_queue.TryDequeue(out var message))
             {
-                continue;
+                Interlocked.Decrement(ref _pendingCount);
+                pending.Add(message);
             }
 
-            Retain(message.Topic, message.Value, policy);
-            Dispatch(message.Topic, message.Value);
+            Dictionary<string, int> lastCoalescedIndex = _lastCoalescedIndexBuffer;
+            lastCoalescedIndex.Clear();
+            for (int i = 0; i < pending.Count; i++)
+            {
+                string topic = pending[i].Topic;
+                if (GetTopicPolicy(topic).Dispatch == DispatchMode.LatestPerDrain)
+                    lastCoalescedIndex[topic] = i;
+            }
+
+            for (int i = 0; i < pending.Count; i++)
+            {
+                var message = pending[i];
+                TopicPolicy policy = GetTopicPolicy(message.Topic);
+                if (policy.Dispatch == DispatchMode.LatestPerDrain &&
+                    lastCoalescedIndex[message.Topic] != i)
+                {
+                    continue;
+                }
+
+                Retain(message.Topic, message.Value, policy);
+                Dispatch(message.Topic, message.Value);
+            }
+        }
+        finally
+        {
+            // Drop references to dispatched values promptly rather than holding them until
+            // the next Drain() call clears the buffer.
+            _pendingBuffer.Clear();
+            _draining = false;
         }
     }
 
@@ -125,6 +152,7 @@ public sealed class Bus<T>
         if (!_handlers.TryGetValue(topic, out var handlers))
             _handlers[topic] = handlers = [];
         handlers.Add(handler);
+        _handlerSnapshots.Remove(topic);
 
         try
         {
@@ -144,6 +172,7 @@ public sealed class Bus<T>
             return;
 
         handlers.Remove(handler);
+        _handlerSnapshots.Remove(topic);
         if (handlers.Count == 0)
             _handlers.Remove(topic);
     }
@@ -192,8 +221,18 @@ public sealed class Bus<T>
         if (!_handlers.TryGetValue(topic, out var handlers))
             return;
 
-        // A handler may dispose a subscription while handling a message.
-        foreach (Action<T> handler in handlers.ToArray())
+        // A handler may dispose a subscription while handling a message, so dispatch always
+        // iterates a fixed snapshot rather than the live list. The snapshot is cached and only
+        // rebuilt when Subscribe/Unsubscribe invalidates it (instead of copying on every single
+        // message), so a mutation made by a handler is only visible starting with the next
+        // message dispatched — identical to the previous per-message ToArray() behaviour.
+        if (!_handlerSnapshots.TryGetValue(topic, out var snapshot))
+        {
+            snapshot = handlers.ToArray();
+            _handlerSnapshots[topic] = snapshot;
+        }
+
+        foreach (Action<T> handler in snapshot)
             handler(value);
     }
 
