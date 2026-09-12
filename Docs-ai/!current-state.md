@@ -427,9 +427,26 @@ generated output, not just code structure:
   onto it. Ship-hull-authoring code (`SemanticHullMeshBuilder`/`CockpitMeshBuilder`/
   `EngineMeshBuilder`) deliberately untouched — hand-authored data, not procedural decoration.
   Fast suite 709/709, full Slow suite 927/928 (the one known failure above, unaffected).
-  **Not yet visually confirmed in-engine** — Timo's next step is a dedicated in-game pass
-  specifically re-checking items that previously needed manual winding correction
-  (containers, text).
+  **Visually confirmed in-engine by Timo.**
+
+---
+
+## `mega-stations` → `master` merge (2026-09-12)
+
+The `mega-stations` branch (staged megastone LOD — see the "Single-station visual residency
++ staged megastation LOD" row above for the feature itself, already documented in detail by
+that branch) merged into `master` cleanly, on top of all the A1 follow-through work above.
+The two branches had diverged since `d61251a` — six A1 commits on `master`, one LOD commit on
+`mega-stations` — with **7 files touched by both sides** (`ShippingContainerFactory.cs`,
+`BolonMegastationSurfaces.cs`, `BolonMegastations.cs`, `MegastationLandingDistrict.cs`,
+`MegastationPrototypeMeshBuilder.cs`, `StationTextureRegistry.cs`, this file). Git's
+three-way merge resolved all of them with **zero conflicts** — verified not just textually
+but semantically: the winding-correction centralization (`AddQuadFacing`/
+`AddTriangleWithUvFacing`) survived intact, and the LOD branch's own new geometry code calls
+straight into those centralized methods rather than needing its own fix, confirming the
+merge order (A1 work first, then this merge) was the right one. Build clean, Fast suite
+721/721 (up from 709 — the branch adds its own tests), full Slow suite 945/946 (the one
+known `MegastationMegaShelfTests` failure already documented above, unaffected).
 
 ---
 
