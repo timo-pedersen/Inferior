@@ -363,12 +363,12 @@ overlay) that don't have test coverage of their own.
 
 ---
 
-## A1 code-path inventory follow-through (2026-09-11)
+## A1 code-path inventory follow-through (2026-09-11 – 2026-09-12)
 
-`Docs/architecture-inventory-A1.md` is a parallel-code-path inventory; ten of its findings
-were acted on the same day it was written, per Timo's explicit go-ahead (see the inventory's
-own §0 for the full list/rationale/what's still open). Worth carrying here since some of it
-changes generated output, not just code structure:
+`Docs/architecture-inventory-A1.md` is a parallel-code-path inventory; twelve of its findings
+have been acted on across two days, per Timo's explicit go-ahead (see the inventory's own §0
+for the full list/rationale/what's still open). Worth carrying here since some of it changes
+generated output, not just code structure:
 
 - **Two deterministic-hash consolidations** — `StationGenerator.NameHash` and
   `StationTextureRegistry.HashPalette` both now route through `SeededRandom` instead of a
@@ -402,6 +402,29 @@ changes generated output, not just code structure:
 - Solution-wide: Fast suite 709/709, full Slow suite 927/928 (the one known failure above)
   after every change in this pass. **Visually confirmed by Timo in-engine — no problems
   observed.**
+- **Basis/frame construction from a normal (2026-09-12):** the real scope was ~20 sites, not
+  the inventory's original 6 — new `Inferior.Rendering/ArbitraryReferenceAxis.For` shares the
+  "pick a reference axis that isn't near-parallel to this direction" one-liner across 17
+  production call sites, each keeping its own pre-existing threshold and downstream
+  cross-product order (those genuinely differ by call site — not safely unifiable without a
+  design decision that wasn't asked for). Behaviour-preserving: zero fixture changes needed.
+- **Triangle winding, centralized (2026-09-12).** Timo named this as a recurring real bug
+  ("winding bugs almost on every new item added... popped up regularly, last week two or
+  three times"). A solution-wide search found **17 independent reimplementations** of the
+  same winding-check pattern — several literally named `AddQuadFacing`/`AddTriangleFacing` in
+  four different files with no shared origin — plus a **real, confirmed bug** in
+  `StationModuleMesh.AddQuadProjected`: it only flipped the *stored lighting normal* when
+  wrong, never the actual vertex order, so the real rendered/culled front face was never
+  fixed at all. New `Inferior.Rendering/WindingCorrection.cs` plus
+  `StationModuleMesh.AddQuadFacing`/`AddTriangleFacing`/`AddTriangleGradientFacing`/
+  `AddTriangleWithUvFacing` are the one real, centralized implementation now; all 17 sites
+  (megastations, Bolon, `ShippingContainerFactory`) and `AddQuadProjected` itself migrated
+  onto it. Ship-hull-authoring code (`SemanticHullMeshBuilder`/`CockpitMeshBuilder`/
+  `EngineMeshBuilder`) deliberately untouched — hand-authored data, not procedural decoration.
+  Fast suite 709/709, full Slow suite 927/928 (the one known failure above, unaffected).
+  **Not yet visually confirmed in-engine** — Timo's next step is a dedicated in-game pass
+  specifically re-checking items that previously needed manual winding correction
+  (containers, text).
 
 ---
 
