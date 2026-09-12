@@ -2514,10 +2514,12 @@ public static class MegastationLandingDistrictMeshBuilder
         for (int face = start; face < start + count; face++)
             mesh.SetFaceIllumination(face, value);
 
-        MegastationArtificialLight[] fixtureLights = lights.Where(light =>
-            light.Identity.Contains("/fixture:", StringComparison.Ordinal)).ToArray();
-        MegastationArtificialLight[] baselineLights = lights.Where(light =>
-            !light.Identity.Contains("/fixture:", StringComparison.Ordinal)).ToArray();
+        IReadOnlyList<MegastationArtificialLight> fixtureLights =
+            MegastationArtificialLighting.Prepare(lights.Where(light =>
+                light.Identity.Contains("/fixture:", StringComparison.Ordinal)).ToArray());
+        IReadOnlyList<MegastationArtificialLight> baselineLights =
+            MegastationArtificialLighting.Prepare(lights.Where(light =>
+                !light.Identity.Contains("/fixture:", StringComparison.Ordinal)).ToArray());
         for (int face = result.FirstFace; face < result.FirstFace + result.FaceCount; face++)
         {
             Vector3 normal = mesh.LocalFaceNormal(face);
@@ -2945,7 +2947,6 @@ public static class MegastationLandingDistrictMeshBuilder
                 colour,
                 wear,
                 container.Seed,
-                text: null,
                 lockGrade: LockGrade.Civilian);
             int vertexStart = mesh.VertexCount;
             mesh.MergeTransformed(vertices, indices,

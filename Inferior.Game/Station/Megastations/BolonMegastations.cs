@@ -136,6 +136,12 @@ public sealed record BolonMegastationCpuResult(
     public required BolonAmbassadorBayPlan AmbassadorBay { get; init; }
 }
 
+internal sealed record BolonMegastationMacroCpuResult(
+    BolonMegastationPlan Plan,
+    BolonAmbassadorBayPlan AmbassadorBay,
+    StationModuleMesh Mesh,
+    double GenerationMilliseconds);
+
 /// <summary>
 /// B1 plans a low-degree molecular graph whose edges own actual C60 attachment
 /// faces. Semantic vessels and relationships remain available independently of
@@ -188,6 +194,30 @@ public static class BolonMegastationGenerator
 
     public static IReadOnlyList<Vector3> GetAttachmentFaceVertices(int index)
         => C60Faces[index].Vertices.ToArray();
+
+    internal static BolonMegastationMacroCpuResult GenerateMacroCpu(
+        string stationIdentity,
+        MegastationArchetype archetype,
+        CancellationToken cancellationToken = default)
+    {
+        if (archetype == MegastationArchetype.Standard)
+            throw new ArgumentException(
+                "Bolon macro generation requires a Bolon archetype.",
+                nameof(archetype));
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        BolonMegastationPlan plan = Plan(
+            stationIdentity,
+            archetype,
+            cancellationToken);
+        BolonAmbassadorBayPlan ambassadorBay =
+            BolonAmbassadorBayPlanner.Plan(plan, cancellationToken);
+        StationModuleMesh mesh = BolonSurfaceMeshBuilder.BuildMacro(
+            plan,
+            ambassadorBay,
+            cancellationToken);
+        stopwatch.Stop();
+        return new(plan, ambassadorBay, mesh, stopwatch.Elapsed.TotalMilliseconds);
+    }
 
     public static BolonMegastationCpuResult GenerateCpu(
         string stationIdentity,
@@ -350,6 +380,32 @@ public static class BolonMegastationGenerator
             PresentationFadeEndMeters = f.Marker.GlowFadeEndMeters,
         }));
         return module;
+    }
+
+    internal static PlacedModule CreateMacroPlacedModule(
+        BolonMegastationMacroCpuResult cpu)
+    {
+        Vector3 dimensions = cpu.Plan.Maximum - cpu.Plan.Minimum;
+        var definition = new StationModuleDefinition
+        {
+            Id = "megastation-macro-molecular",
+            Category = "megastation-macro",
+            BoundingBox = dimensions,
+            MinScale = StationScale.Outpost,
+            Ports = [],
+            MeshFactory = _ => (new StationModuleMesh(), new StationModuleMesh()),
+        };
+        return new PlacedModule
+        {
+            Definition = definition,
+            Transform = Matrix.Identity,
+            Seed = MegastationSeed.Root(cpu.Plan.StationIdentity, AlgorithmVersion),
+            ChamferDepth = 0f,
+            AabbMin = cpu.Plan.Minimum - new Vector3(5f),
+            AabbMax = cpu.Plan.Maximum + new Vector3(5f),
+            HullMesh = cpu.Mesh,
+            HullShadowMesh = cpu.Mesh,
+        };
     }
 
     public static BolonMegastationPlan Plan(

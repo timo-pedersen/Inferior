@@ -1205,8 +1205,11 @@ public sealed partial class SystemSpaceState
         int w = _gd.Viewport.Width;
         int h = _gd.Viewport.Height;
 
-        foreach (var (_, universePos) in _stationPositions)
+        foreach (var (station, universePos) in _stationPositions)
         {
+            if (ResidentStationVisual?.Descriptor.UseMegastationPrototype == true
+                && ReferenceEquals(ResidentStationVisual.Descriptor.Station, station))
+                continue;
             Vector3 renderPos = _camera.ToRenderSpace(universePos);
             if (renderPos.Length() > MaxDistRU) continue;
 

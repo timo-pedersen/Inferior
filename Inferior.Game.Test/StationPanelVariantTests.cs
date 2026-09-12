@@ -56,6 +56,25 @@ public sealed class StationPanelVariantTests
         Assert.Equal(StationTextureRegistry.DefaultVariantCount, seeds.Length);
     }
 
+    [Fact]
+    public void SingleVariantRasterisationMatchesTheSameMemberOfTheFullSet()
+    {
+        const int count = 3;
+        const int selected = 2;
+        TexturePalette palette = SamplePalette();
+        StationTextureRegistry.TexturePixels[] full =
+            StationTextureRegistry.GenerateVariantPixels(
+                SurfaceTexture.CargoPanel, palette, "test:single-variant", TestSpread, count);
+
+        StationTextureRegistry.TexturePixels one =
+            StationTextureRegistry.GenerateVariantPixel(
+                SurfaceTexture.CargoPanel, palette, "test:single-variant", TestSpread,
+                selected, count);
+
+        Assert.Equal(full[selected].Albedo, one.Albedo);
+        Assert.Equal(full[selected].Material, one.Material);
+    }
+
     private const float TestSpread = 0.35f; // arbitrary fixed value, decoupled from the
                                              // real StationEconomyVariance table so these
                                              // tests don't break if that's re-tuned later.

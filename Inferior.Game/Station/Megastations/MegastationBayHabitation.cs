@@ -101,6 +101,9 @@ public static class MegastationBayHabitationPlanner
         Dictionary<string, int> targets = walls.Where(wall => wall.IsEligible)
             .ToDictionary(wall => wall.Identity, wall => TargetRegionCount(wall, seed),
                 StringComparer.Ordinal);
+        SupportingFaceIndex? supportingFaces = occupancy is not null && topology is not null
+            ? new SupportingFaceIndex(walls, occupancy.Grid, topology)
+            : null;
 
         foreach (MegastationBayWallSurface wall in walls)
         {
@@ -116,7 +119,7 @@ public static class MegastationBayHabitationPlanner
                         landingDistrict.ServiceBuildings,
                         landingDistrict.SiteReservations,
                         interior.AddedStructuralSolids ?? [],
-                        occupancy, topology,
+                        occupancy, topology, supportingFaces,
                         out MegastationBayHabitationRegion? region)
                     || region is null)
                     continue;
@@ -144,7 +147,7 @@ public static class MegastationBayHabitationPlanner
                         landingDistrict.ServiceBuildings,
                         landingDistrict.SiteReservations,
                         interior.AddedStructuralSolids ?? [],
-                        occupancy, topology,
+                        occupancy, topology, supportingFaces,
                         out MegastationBayHabitationRegion? planned)
                     || planned is null)
                     continue;
@@ -279,6 +282,7 @@ public static class MegastationBayHabitationPlanner
         IReadOnlyList<MegastationInteriorStructuralSolid> structuralSolids,
         StructuralOccupancy? occupancy,
         BoundaryTopology? topology,
+        SupportingFaceIndex? supportingFaces,
         out MegastationBayHabitationRegion? region)
     {
         float minX = -wall.Width * .5f + HorizontalMargin;
@@ -318,8 +322,10 @@ public static class MegastationBayHabitationPlanner
                     wall, new(x, y), new(width, height), solid)))
                 continue;
             if (occupancy is not null && topology is not null
-                && !TryFindSupportingFace(wall, new(x, y), new(width, height),
-                    1.5f, occupancy.Grid, topology, out _))
+                && !(supportingFaces?.TryFind(
+                        wall, new(x, y), new(width, height), 1.5f, out _)
+                    ?? TryFindSupportingFace(wall, new(x, y), new(width, height),
+                        1.5f, occupancy.Grid, topology, out _)))
                 continue;
 
             int groups = 2 + (Unit(candidateSeed, "groups") > .48f ? 1 : 0)
@@ -356,27 +362,74 @@ public static class MegastationBayHabitationPlanner
         BoundaryTopology topology,
         out BoundaryFace? supportingFace)
     {
-        supportingFace = topology.Faces
-            .Where(face => face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary
-                && Vector3.Dot(BoundaryTopologyBuilder.Normal(face.Direction), wall.Normal) > .9999f)
-            .Where(face =>
+        return new SupportingFaceIndex([wall], grid, topology)
+            .TryFind(wall, centre, size, margin, out supportingFace);
+    }
+
+    private sealed class SupportingFaceIndex
+    {
+        private readonly Dictionary<string, Support[]> _byWall;
+
+        public SupportingFaceIndex(
+            IReadOnlyList<MegastationBayWallSurface> walls,
+            SliceGrid grid,
+            BoundaryTopology topology)
+        {
+            _byWall = walls.ToDictionary(wall => wall.Identity, wall => topology.Faces
+                .Where(face => face.SpaceKind == MegastationBoundarySpaceKind.InteriorBoundary
+                    && Vector3.Dot(BoundaryTopologyBuilder.Normal(face.Direction), wall.Normal) > .9999f)
+                .Select(face => Project(wall, grid, face))
+                .Where(support => support is not null)
+                .Select(support => support!.Value)
+                .OrderBy(support => support.Face.Key)
+                .ToArray(), StringComparer.Ordinal);
+        }
+
+        public bool TryFind(
+            MegastationBayWallSurface wall,
+            Vector2 centre,
+            Vector2 size,
+            float margin,
+            out BoundaryFace? supportingFace)
+        {
+            supportingFace = null;
+            if (!_byWall.TryGetValue(wall.Identity, out Support[]? candidates))
+                return false;
+            foreach (Support support in candidates)
             {
-                Vector3[] points = face.Vertices
-                    .Select(vertex => BoundaryTopologyBuilder.Position(grid, vertex)).ToArray();
-                if (MathF.Abs(Vector3.Dot(points[0] - wall.Centre, wall.Normal)) >= .01f)
-                    return false;
-                float minX = points.Min(point => Vector3.Dot(point - wall.Centre, wall.Right));
-                float maxX = points.Max(point => Vector3.Dot(point - wall.Centre, wall.Right));
-                float minY = points.Min(point => Vector3.Dot(point - wall.Centre, wall.Up));
-                float maxY = points.Max(point => Vector3.Dot(point - wall.Centre, wall.Up));
-                return centre.X - size.X * .5f - margin >= minX
-                    && centre.X + size.X * .5f + margin <= maxX
-                    && centre.Y - size.Y * .5f - margin >= minY
-                    && centre.Y + size.Y * .5f + margin <= maxY;
-            })
-            .OrderBy(face => face.Key)
-            .FirstOrDefault();
-        return supportingFace is not null;
+                if (centre.X - size.X * .5f - margin < support.MinX
+                    || centre.X + size.X * .5f + margin > support.MaxX
+                    || centre.Y - size.Y * .5f - margin < support.MinY
+                    || centre.Y + size.Y * .5f + margin > support.MaxY)
+                    continue;
+                supportingFace = support.Face;
+                return true;
+            }
+            return false;
+        }
+
+        private static Support? Project(
+            MegastationBayWallSurface wall,
+            SliceGrid grid,
+            BoundaryFace face)
+        {
+            Vector3[] points = face.Vertices
+                .Select(vertex => BoundaryTopologyBuilder.Position(grid, vertex)).ToArray();
+            if (MathF.Abs(Vector3.Dot(points[0] - wall.Centre, wall.Normal)) >= .01f)
+                return null;
+            return new(face,
+                points.Min(point => Vector3.Dot(point - wall.Centre, wall.Right)),
+                points.Max(point => Vector3.Dot(point - wall.Centre, wall.Right)),
+                points.Min(point => Vector3.Dot(point - wall.Centre, wall.Up)),
+                points.Max(point => Vector3.Dot(point - wall.Centre, wall.Up)));
+        }
+
+        private readonly record struct Support(
+            BoundaryFace Face,
+            float MinX,
+            float MaxX,
+            float MinY,
+            float MaxY);
     }
 
     private static bool OverlapsStructuralRoot(

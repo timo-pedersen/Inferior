@@ -240,6 +240,10 @@ public static class MegastationInfrastructurePlanner
                 region, TopologySuitability(region)))
             .OrderBy(surface => surface.Region.StableId, StringComparer.Ordinal)
             .ToArray();
+        var surfaceFeatures = new MegastationSurfaceFeatureIndex(
+            surfaces.Select(surface => surface.Region).ToArray(),
+            windowPlan.Windows,
+            lightPlan.Lights);
         var candidates = new List<Candidate>();
         int candidateCells = 0;
         int exactMaskRejects = 0;
@@ -411,12 +415,12 @@ public static class MegastationInfrastructurePlanner
                 g1Rejects++;
                 continue;
             }
-            if (OverlapsWindow(candidate, windowPlan.Windows, tuning.WindowMarginMetres))
+            if (OverlapsWindow(candidate, surfaceFeatures, tuning.WindowMarginMetres))
             {
                 windowRejects++;
                 continue;
             }
-            if (OverlapsLight(candidate, lightPlan.Lights, tuning.LightExclusionRadiusMetres))
+            if (OverlapsLight(candidate, surfaceFeatures, tuning.LightExclusionRadiusMetres))
             {
                 lightRejects++;
                 continue;
@@ -700,29 +704,20 @@ public static class MegastationInfrastructurePlanner
 
     private static bool OverlapsWindow(
         Candidate candidate,
-        IReadOnlyList<MegastationWindowInstance> windows,
+        MegastationSurfaceFeatureIndex features,
         float margin)
     {
-        foreach (MegastationWindowInstance window in windows)
+        foreach (MegastationSurfaceFeatureIndex.WindowFeature window in
+                 features.Windows(candidate.Region))
         {
-            if (Vector3.Dot(window.Normal, candidate.Region.OutwardNormal) < 0.999f
-                || MathF.Abs(Vector3.Dot(window.Centre, candidate.Region.OutwardNormal)
-                    - candidate.Region.PlaneCoordinateMetres) > 0.2f)
+            if (window.NormalAlignment < .999f
+                || MathF.Abs(window.PlaneCoordinate
+                    - candidate.Region.PlaneCoordinateMetres) > .2f)
                 continue;
-            Vector3 right = Vector3.Normalize(Vector3.Cross(window.Up, window.Normal));
-            Vector3[] corners =
-            [
-                window.Centre - right * window.Width * 0.5f - window.Up * window.Height * 0.5f,
-                window.Centre + right * window.Width * 0.5f - window.Up * window.Height * 0.5f,
-                window.Centre + right * window.Width * 0.5f + window.Up * window.Height * 0.5f,
-                window.Centre - right * window.Width * 0.5f + window.Up * window.Height * 0.5f,
-            ];
-            float minU = corners.Min(point => Vector3.Dot(point, candidate.Region.TangentU));
-            float maxU = corners.Max(point => Vector3.Dot(point, candidate.Region.TangentU));
-            float minV = corners.Min(point => Vector3.Dot(point, candidate.Region.TangentV));
-            float maxV = corners.Max(point => Vector3.Dot(point, candidate.Region.TangentV));
-            if (candidate.MinU < maxU + margin && candidate.MaxU > minU - margin
-                && candidate.MinV < maxV + margin && candidate.MaxV > minV - margin)
+            if (candidate.MinU < window.MaxU + margin
+                && candidate.MaxU > window.MinU - margin
+                && candidate.MinV < window.MaxV + margin
+                && candidate.MaxV > window.MinV - margin)
                 return true;
         }
         return false;
@@ -730,19 +725,18 @@ public static class MegastationInfrastructurePlanner
 
     private static bool OverlapsLight(
         Candidate candidate,
-        IReadOnlyList<MegastationLightInstance> lights,
+        MegastationSurfaceFeatureIndex features,
         float radius)
     {
-        foreach (MegastationLightInstance light in lights)
+        foreach (MegastationSurfaceFeatureIndex.LightFeature light in
+                 features.Lights(candidate.Region))
         {
-            if (Vector3.Dot(light.Normal, candidate.Region.OutwardNormal) < 0.999f
-                || MathF.Abs(Vector3.Dot(light.SurfacePosition, candidate.Region.OutwardNormal)
-                    - candidate.Region.PlaneCoordinateMetres) > 0.2f)
+            if (light.NormalAlignment < .999f
+                || MathF.Abs(light.PlaneCoordinate
+                    - candidate.Region.PlaneCoordinateMetres) > .2f)
                 continue;
-            float u = Vector3.Dot(light.SurfacePosition, candidate.Region.TangentU);
-            float v = Vector3.Dot(light.SurfacePosition, candidate.Region.TangentV);
-            if (u >= candidate.MinU - radius && u <= candidate.MaxU + radius
-                && v >= candidate.MinV - radius && v <= candidate.MaxV + radius)
+            if (light.U >= candidate.MinU - radius && light.U <= candidate.MaxU + radius
+                && light.V >= candidate.MinV - radius && light.V <= candidate.MaxV + radius)
                 return true;
         }
         return false;

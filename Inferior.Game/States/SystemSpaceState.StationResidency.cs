@@ -12,6 +12,13 @@ namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
+    private enum StationVisualPreparationStage
+    {
+        Complete,
+        MegastationMacro,
+        MegastationComplete,
+    }
+
     private sealed record StationVisualDescriptor(
         Galaxy.Station Station,
         string Identity,
@@ -29,12 +36,14 @@ public sealed partial class SystemSpaceState
     private sealed class PendingStationVisualUpload(
         StationVisualDescriptor descriptor,
         long requestSequence,
+        StationVisualPreparationStage stage,
         PreparedStationVisualCpuResult prepared,
         StationVisualPackage package,
         StationVisualUploadScheduler scheduler)
     {
         public StationVisualDescriptor Descriptor { get; } = descriptor;
         public long RequestSequence { get; } = requestSequence;
+        public StationVisualPreparationStage Stage { get; } = stage;
         public PreparedStationVisualCpuResult Prepared { get; } = prepared;
         public StationVisualPackage Package { get; } = package;
         public StationVisualUploadScheduler Scheduler { get; } = scheduler;
@@ -76,6 +85,7 @@ public sealed partial class SystemSpaceState
 
         public StationVisualPackage(
             StationVisualDescriptor descriptor,
+            StationVisualPreparationStage stage,
             List<PlacedModule> modules,
             IReadOnlyList<Texture2D> textures,
             MegastationPrototypeDiagnostics? megastationDiagnostics,
@@ -98,6 +108,7 @@ public sealed partial class SystemSpaceState
             double renderBoundsRadiusMeters)
         {
             Descriptor = descriptor;
+            Stage = stage;
             Modules = modules;
             Textures = textures.ToList();
             MegastationDiagnostics = megastationDiagnostics;
@@ -121,6 +132,7 @@ public sealed partial class SystemSpaceState
         }
 
         public StationVisualDescriptor Descriptor { get; }
+        public StationVisualPreparationStage Stage { get; }
         public List<PlacedModule> Modules { get; }
         public List<Texture2D> Textures { get; }
         public MegastationPrototypeDiagnostics? MegastationDiagnostics { get; }
@@ -237,10 +249,7 @@ public sealed partial class SystemSpaceState
             foreach (Texture2D texture in Textures)
                 DisposeTexture(texture);
             Textures.Clear();
-            ShadowMap?.Dispose();
-            ShadowMap = null;
-            ShadowMapResolution = 0;
-            ShadowContext = null;
+            ReleaseShadowResources();
             ShadowCasterHullBounds.Clear();
             ShadowCasterDecoBounds.Clear();
 
@@ -261,6 +270,14 @@ public sealed partial class SystemSpaceState
             Modules.Clear();
             totalStopwatch.Stop();
             PublishTextureDisposalDiagnostics(totalStopwatch.Elapsed.TotalMilliseconds);
+        }
+
+        public void ReleaseShadowResources()
+        {
+            ShadowMap?.Dispose();
+            ShadowMap = null;
+            ShadowMapResolution = 0;
+            ShadowContext = null;
         }
 
         public IReadOnlyDictionary<MegastationZoneRole, IndexBuffer> EnsureSemanticDebugIndexBuffers(
@@ -433,18 +450,28 @@ public sealed partial class SystemSpaceState
     private readonly StationVisualResidencyState _stationVisualResidency =
         new(StationVisualResidencyPolicy.Default);
     private readonly StationVisualPackageSlot<StationVisualPackage> _stationVisualSlot = new();
+    private readonly StationVisualPackageSlot<StationVisualPackage> _megastationMacroVisualSlot = new();
+    private readonly MegastationVisualLodState _megastationLod =
+        new(MegastationVisualLodPolicy.Default);
     private readonly Dictionary<string, StationVisualDescriptor> _stationVisualCatalog =
         new(StringComparer.Ordinal);
     private readonly Dictionary<string, DVec3> _stationPositionByIdentity =
         new(StringComparer.Ordinal);
     private StationPreparationTask<PreparedStationVisualCpuResult>? _stationPreparationTask;
+    private StationVisualPreparationStage _stationPreparationStage;
     private CancellationTokenSource? _stationPreparationCancellation;
     private string? _stationPreparationIdentity;
     private long _stationPreparationSequence;
     private StationVisualResidencyAction? _deferredStationPreparationAction;
     private PendingStationVisualUpload? _stationUploadSession;
+    private PreparedStationVisualCpuResult? _preparedMegastationComplete;
+    private StationVisualDescriptor? _preparedMegastationCompleteDescriptor;
+    private long _preparedMegastationCompleteSequence;
+    private StationVisualPackage? _activeStationVisual;
+    private string? _failedMegastationBackgroundIdentity;
 
-    private StationVisualPackage? ResidentStationVisual => _stationVisualSlot.Current;
+    private StationVisualPackage? ResidentStationVisual => _activeStationVisual;
+    private StationVisualPackage? DetailedStationVisual => _stationVisualSlot.Current;
     private Dictionary<PlacedModule, (VertexBuffer vb, IndexBuffer ib, int triCount)> _decoMeshes
         => ResidentStationVisual?.DecoMeshes
             ?? throw new InvalidOperationException("No resident station visual.");
@@ -487,11 +514,13 @@ public sealed partial class SystemSpaceState
             ? StarterSystemSelector.SelectStarterStation(_system.Stations)
             : null;
 
+        IReadOnlyDictionary<Galaxy.Station, MegastationSelection> stationSelections =
+            MegastationDevelopmentPolicy.ResolveSystem(
+                _system.Stations, starter, selection);
         foreach (Galaxy.Station station in _system.Stations)
         {
             string identity = station.PersistenceId ?? station.Name;
-            MegastationSelection mega =
-                MegastationDevelopmentPolicy.Resolve(station, starter, selection);
+            MegastationSelection mega = stationSelections[station];
             bool useMega = mega.IsMegastation;
             StationVisualClassification classification = useMega
                 ? StationVisualClassification.Megastation
@@ -517,15 +546,48 @@ public sealed partial class SystemSpaceState
         ApplyStationResidencyActions(
             _stationVisualResidency.Evaluate(BuildResidencyCandidates(observerPosition)));
         PumpStationVisualUpload();
+        UpdateActiveStationVisual(observerPosition);
+        TryStartPreparedMegastationCompleteUpload();
+
+        if (_stationVisualResidency.ResidentIdentity == null
+            && _stationVisualResidency.PendingIdentity == null
+            && _stationPreparationTask == null
+            && _stationUploadSession == null
+            && _preparedMegastationComplete == null)
+            RequestSystemMegastationPreparation("system megastation background preparation");
     }
 
     private void RequestExplicitStationVisual(string identity, string reason)
     {
         if (!_stationVisualCatalog.TryGetValue(identity, out StationVisualDescriptor? descriptor))
             return;
+        if (descriptor.UseMegastationPrototype)
+            _failedMegastationBackgroundIdentity = null;
         DVec3 observer = _frameShipSnap?.Position ?? _camera.UniversePosition;
         ApplyStationResidencyActions(
             _stationVisualResidency.RequestExplicit(
+                BuildResidencyCandidate(descriptor, observer),
+                reason));
+    }
+
+    private void RequestSystemMegastationPreparation(string reason)
+    {
+        StationVisualDescriptor? descriptor = _stationVisualCatalog.Values
+            .SingleOrDefault(candidate => candidate.Classification
+                == StationVisualClassification.Megastation);
+        if (descriptor == null
+            || string.Equals(
+                descriptor.Identity,
+                _failedMegastationBackgroundIdentity,
+                StringComparison.Ordinal)
+            || _megastationMacroVisualSlot.Current?.Descriptor.Identity
+                == descriptor.Identity
+            || _stationVisualResidency.ResidentIdentity != null
+            || _stationVisualResidency.PendingIdentity != null)
+            return;
+        DVec3 observer = _frameShipSnap?.Position ?? _camera.UniversePosition;
+        ApplyStationResidencyActions(
+            _stationVisualResidency.RequestBackground(
                 BuildResidencyCandidate(descriptor, observer),
                 reason));
     }
@@ -535,6 +597,10 @@ public sealed partial class SystemSpaceState
         ApplyStationResidencyActions(_stationVisualResidency.Reset(reason));
         CancelStationPreparation(reason);
         _stationVisualSlot.Clear();
+        _megastationMacroVisualSlot.Clear();
+        _activeStationVisual = null;
+        _megastationLod.Reset();
+        _failedMegastationBackgroundIdentity = null;
         _stationVisualCatalog.Clear();
         _stationPositionByIdentity.Clear();
     }
@@ -554,9 +620,14 @@ public sealed partial class SystemSpaceState
         DVec3 position = EclipticToGalaxy(
             _system.GetStationPosition(descriptor.Station, _gameTimeSeconds));
         double centre = (position - observer).Length;
-        double envelope = ResidentStationVisual?.Descriptor.Identity == descriptor.Identity
-            ? ResidentStationVisual.EnvelopeRadiusMeters
-            : descriptor.ConservativeEnvelopeRadiusMeters;
+        StationVisualPackage? preparedVisual =
+            DetailedStationVisual?.Descriptor.Identity == descriptor.Identity
+                ? DetailedStationVisual
+                : _megastationMacroVisualSlot.Current?.Descriptor.Identity == descriptor.Identity
+                    ? _megastationMacroVisualSlot.Current
+                    : null;
+        double envelope = preparedVisual?.EnvelopeRadiusMeters
+            ?? descriptor.ConservativeEnvelopeRadiusMeters;
         return new(
             descriptor.Identity,
             descriptor.Classification,
@@ -574,11 +645,13 @@ public sealed partial class SystemSpaceState
                 case StationVisualResidencyActionKind.Unload:
                     LogStationResidencyChange(action, ResidentStationVisual, stale: false);
                     _stationVisualSlot.Clear();
+                    _activeStationVisual = null;
                     _stationShadowLogged = false;
                     break;
                 case StationVisualResidencyActionKind.CancelPreparation:
                     _stationPreparationCancellation?.Cancel();
                     CancelStationUpload(action.Reason);
+                    CancelPreparedMegastationComplete(action.Reason);
                     LogStationResidencyChange(action, null, stale: true);
                     break;
                 case StationVisualResidencyActionKind.RequestLoad:
@@ -602,34 +675,47 @@ public sealed partial class SystemSpaceState
         }
 
         _stationPreparationCancellation = new CancellationTokenSource();
-        CancellationToken token = _stationPreparationCancellation.Token;
         _stationPreparationIdentity = descriptor.Identity;
         _stationPreparationSequence = action.RequestSequence;
+        _stationPreparationStage = descriptor.UseMegastationPrototype
+            ? _megastationMacroVisualSlot.Current?.Descriptor.Identity == descriptor.Identity
+                ? StationVisualPreparationStage.MegastationComplete
+                : StationVisualPreparationStage.MegastationMacro
+            : StationVisualPreparationStage.Complete;
         HashSet<DecorClass> enabledShadowCasters = ClassesForStage(_casterStage).ToHashSet();
         SystemMaterialAssignmentContext? systemMaterials = SystemMaterials?.AssignmentContext;
         _stationPreparationTask = StationPreparationTask<PreparedStationVisualCpuResult>.Start(
             workerToken => PrepareStationVisualCpu(
                 descriptor,
+                _stationPreparationStage,
                 enabledShadowCasters,
                 workerToken,
                 systemMaterials),
-            token);
+            _stationPreparationCancellation.Token);
         LogStationResidencyChange(action, null, stale: false);
     }
 
     private static PreparedStationVisualCpuResult PrepareStationVisualCpu(
         StationVisualDescriptor descriptor,
+        StationVisualPreparationStage stage,
         IReadOnlySet<DecorClass> enabledShadowCasters,
         CancellationToken cancellationToken,
         SystemMaterialAssignmentContext? systemMaterials)
     {
-        StationGenerationCpuResult generation = StationGenerator.PrepareCpu(
-            descriptor.Station,
-            descriptor.UseMegastationPrototype,
-            cancellationToken,
-            enabledShadowCasters,
-            systemMaterials,
-            descriptor.MegastationArchetype);
+        StationGenerationCpuResult generation = stage
+            == StationVisualPreparationStage.MegastationMacro
+                ? StationGenerator.PrepareMegastationMacroCpu(
+                    descriptor.Station,
+                    descriptor.MegastationArchetype,
+                    cancellationToken,
+                    systemMaterials)
+                : StationGenerator.PrepareCpu(
+                    descriptor.Station,
+                    descriptor.UseMegastationPrototype,
+                    cancellationToken,
+                    enabledShadowCasters,
+                    systemMaterials,
+                    descriptor.MegastationArchetype);
         cancellationToken.ThrowIfCancellationRequested();
         ComputeStationBounds(
             generation.Modules,
@@ -647,6 +733,7 @@ public sealed partial class SystemSpaceState
 
         string identity = _stationPreparationIdentity ?? "";
         long sequence = _stationPreparationSequence;
+        StationVisualPreparationStage stage = _stationPreparationStage;
         StationVisualResidencyAction? deferred = _deferredStationPreparationAction;
         StationPreparationOutcome<PreparedStationVisualCpuResult> outcome =
             task.ObserveCompleted();
@@ -654,23 +741,28 @@ public sealed partial class SystemSpaceState
         _stationPreparationTask = null;
         _stationPreparationIdentity = null;
         _stationPreparationSequence = 0;
-        _stationPreparationCancellation?.Dispose();
-        _stationPreparationCancellation = null;
 
         if (outcome.Kind == StationPreparationOutcomeKind.Cancelled)
         {
+            DisposeStationPreparationCancellation();
             PublishStalePreparation(identity, sequence, "CPU preparation cancelled");
             StartDeferredPreparation(deferred);
             return;
         }
         if (outcome.Kind == StationPreparationOutcomeKind.Faulted)
         {
+            DisposeStationPreparationCancellation();
             Exception exception = outcome.Exception
                 ?? new InvalidOperationException("Unknown station preparation failure.");
+            if (_stationVisualCatalog.TryGetValue(
+                    identity,
+                    out StationVisualDescriptor? failedDescriptor)
+                && failedDescriptor.UseMegastationPrototype)
+                _failedMegastationBackgroundIdentity = identity;
             if (_stationVisualResidency.ReportGenerationFailure(identity, sequence))
                 PublishStationResidencyMessage(
                     $"[StationResidency] generation failed id={identity}; token={sequence}; " +
-                    $"error={exception.Message}; livePackages={_stationVisualSlot.LiveCount}; staleDiscarded=false",
+                    $"error={exception.Message}; livePackages={LiveStationVisualPackageCount}; staleDiscarded=false",
                     SystemMessagePriority.Warning);
             else
                 PublishStalePreparation(identity, sequence, exception.Message);
@@ -683,6 +775,7 @@ public sealed partial class SystemSpaceState
         if (!_stationVisualResidency.CanUpload(identity, sequence)
             || !_stationVisualCatalog.TryGetValue(identity, out StationVisualDescriptor? descriptor))
         {
+            DisposeStationPreparationCancellation();
             ReleasePreparedStationCpu(prepared.Generation);
             PublishStalePreparation(identity, sequence, "request no longer current");
             StartDeferredPreparation(deferred);
@@ -691,22 +784,87 @@ public sealed partial class SystemSpaceState
 
         try
         {
-            _stationUploadSession = CreateStationUploadSession(
-                descriptor,
-                sequence,
-                prepared);
-            PublishStationUploadStarted(_stationUploadSession);
+            if (stage == StationVisualPreparationStage.MegastationMacro)
+            {
+                StartMegastationCompletePreparation(descriptor, sequence);
+                _stationUploadSession = CreateStationUploadSession(
+                    descriptor,
+                    sequence,
+                    stage,
+                    prepared);
+                PublishStationUploadStarted(_stationUploadSession);
+            }
+            else if (stage == StationVisualPreparationStage.MegastationComplete)
+            {
+                DisposeStationPreparationCancellation();
+                _preparedMegastationComplete = prepared;
+                _preparedMegastationCompleteDescriptor = descriptor;
+                _preparedMegastationCompleteSequence = sequence;
+                TryStartPreparedMegastationCompleteUpload();
+            }
+            else
+            {
+                DisposeStationPreparationCancellation();
+                _stationUploadSession = CreateStationUploadSession(
+                    descriptor,
+                    sequence,
+                    stage,
+                    prepared);
+                PublishStationUploadStarted(_stationUploadSession);
+            }
         }
         catch (Exception exception)
         {
+            if (stage == StationVisualPreparationStage.MegastationMacro)
+            {
+                _stationPreparationCancellation?.Cancel();
+                if (_stationUploadSession is { } macroUpload)
+                {
+                    macroUpload.Scheduler.Cancel();
+                    macroUpload.Scheduler.DisposeImmediately();
+                    macroUpload.Package.Dispose();
+                    _stationUploadSession = null;
+                }
+            }
+            DisposeStationPreparationCancellation();
             ReleasePreparedStationCpu(prepared.Generation);
+            if (descriptor.UseMegastationPrototype)
+                _failedMegastationBackgroundIdentity = descriptor.Identity;
             _stationVisualResidency.ReportGenerationFailure(identity, sequence);
             PublishStationResidencyMessage(
                 $"[StationUpload] session creation failed id={identity}; token={sequence}; " +
-                $"error={exception.Message}; livePackages={_stationVisualSlot.LiveCount}; staleDiscarded=false",
+                $"error={exception.Message}; livePackages={LiveStationVisualPackageCount}; staleDiscarded=false",
                 SystemMessagePriority.Warning);
             StartDeferredPreparation(deferred);
         }
+    }
+
+    private void StartMegastationCompletePreparation(
+        StationVisualDescriptor descriptor,
+        long sequence)
+    {
+        CancellationTokenSource cancellation = _stationPreparationCancellation
+            ?? throw new InvalidOperationException(
+                "Megastation macro preparation lost its cancellation owner.");
+        _stationPreparationIdentity = descriptor.Identity;
+        _stationPreparationSequence = sequence;
+        _stationPreparationStage = StationVisualPreparationStage.MegastationComplete;
+        HashSet<DecorClass> enabledShadowCasters = ClassesForStage(_casterStage).ToHashSet();
+        SystemMaterialAssignmentContext? systemMaterials = SystemMaterials?.AssignmentContext;
+        _stationPreparationTask = StationPreparationTask<PreparedStationVisualCpuResult>.Start(
+            workerToken => PrepareStationVisualCpu(
+                descriptor,
+                StationVisualPreparationStage.MegastationComplete,
+                enabledShadowCasters,
+                workerToken,
+                systemMaterials),
+            cancellation.Token);
+    }
+
+    private void DisposeStationPreparationCancellation()
+    {
+        _stationPreparationCancellation?.Dispose();
+        _stationPreparationCancellation = null;
     }
 
     private void StartDeferredPreparation(StationVisualResidencyAction? deferred)
@@ -717,9 +875,112 @@ public sealed partial class SystemSpaceState
         StartStationPreparation(action);
     }
 
+    private void TryStartPreparedMegastationCompleteUpload()
+    {
+        PreparedStationVisualCpuResult? prepared = _preparedMegastationComplete;
+        StationVisualDescriptor? descriptor = _preparedMegastationCompleteDescriptor;
+        long sequence = _preparedMegastationCompleteSequence;
+        if (prepared == null || descriptor == null
+            || _stationUploadSession != null
+            || !_megastationLod.CompleteResidencyDesired
+            || _megastationMacroVisualSlot.Current?.Descriptor.Identity
+                != descriptor.Identity)
+            return;
+
+        _preparedMegastationComplete = null;
+        _preparedMegastationCompleteDescriptor = null;
+        _preparedMegastationCompleteSequence = 0;
+        if (!_stationVisualResidency.CanUpload(descriptor.Identity, sequence))
+        {
+            ReleasePreparedStationCpu(prepared.Generation);
+            PublishStalePreparation(
+                descriptor.Identity,
+                sequence,
+                "complete megastation package no longer requested");
+            return;
+        }
+
+        try
+        {
+            _stationUploadSession = CreateStationUploadSession(
+                descriptor,
+                sequence,
+                StationVisualPreparationStage.MegastationComplete,
+                prepared);
+            PublishStationUploadStarted(_stationUploadSession);
+        }
+        catch (Exception exception)
+        {
+            ReleasePreparedStationCpu(prepared.Generation);
+            _failedMegastationBackgroundIdentity = descriptor.Identity;
+            _stationVisualResidency.ReportGenerationFailure(
+                descriptor.Identity,
+                sequence);
+            PublishStationResidencyMessage(
+                $"[StationUpload] complete session creation failed id={descriptor.Identity}; " +
+                $"token={sequence}; error={exception.Message}; " +
+                $"livePackages={LiveStationVisualPackageCount}; staleDiscarded=false",
+                SystemMessagePriority.Warning);
+        }
+    }
+
+    private void UpdateActiveStationVisual(DVec3 observerPosition)
+    {
+        StationVisualPackage? previous = _activeStationVisual;
+        StationVisualPackage? detailed = DetailedStationVisual;
+        StationVisualPackage? macro = _megastationMacroVisualSlot.Current;
+        if (detailed != null && !detailed.Descriptor.UseMegastationPrototype)
+        {
+            _activeStationVisual = detailed;
+        }
+        else
+        {
+            StationVisualDescriptor? descriptor = detailed?.Descriptor ?? macro?.Descriptor;
+            if (descriptor == null
+                || !_stationPositionByIdentity.TryGetValue(
+                    descriptor.Identity,
+                    out DVec3 position))
+            {
+                _megastationLod.Reset();
+                _activeStationVisual = null;
+            }
+            else
+            {
+                double radius = Math.Max(
+                    macro?.RenderBoundsRadiusMeters ?? 0.0,
+                    detailed?.RenderBoundsRadiusMeters ?? 0.0);
+                double apparentDiameter = StationProjectedSize.DiameterPixels(
+                    radius,
+                    (position - observerPosition).Length,
+                    _camera.ProjectionMatrix.M22,
+                    _gd.Viewport.Height);
+                MegastationVisualLod lod = _megastationLod.Update(
+                    apparentDiameter,
+                    macro != null,
+                    detailed != null);
+                _activeStationVisual = lod switch
+                {
+                    MegastationVisualLod.Complete => detailed,
+                    MegastationVisualLod.Macro => macro,
+                    _ => null,
+                };
+            }
+        }
+
+        if (!ReferenceEquals(previous, _activeStationVisual))
+        {
+            previous?.ReleaseShadowResources();
+            _stationShadowLogged = false;
+        }
+    }
+
+    private int LiveStationVisualPackageCount =>
+        _stationVisualSlot.LiveCount + _megastationMacroVisualSlot.LiveCount;
+
     private PendingStationVisualUpload CreateStationUploadSession(
         StationVisualDescriptor descriptor,
         long sequence,
+        StationVisualPreparationStage stage,
         PreparedStationVisualCpuResult prepared)
     {
         StationGenerationCpuResult generation = prepared.Generation;
@@ -728,6 +989,7 @@ public sealed partial class SystemSpaceState
             descriptor.ConservativeEnvelopeRadiusMeters);
         var package = new StationVisualPackage(
             descriptor,
+            stage,
             generation.Modules,
             [],
             generation.MegastationDiagnostics,
@@ -793,6 +1055,7 @@ public sealed partial class SystemSpaceState
         return new(
             descriptor,
             sequence,
+            stage,
             prepared,
             package,
             new StationVisualUploadScheduler(work));
@@ -913,9 +1176,47 @@ public sealed partial class SystemSpaceState
         _stationUploadSession = null;
         session.WallStopwatch.Stop();
         if (session.Scheduler.State == StationVisualUploadSchedulerState.Completed)
-            CompleteStationVisualUpload(session);
+        {
+            if (session.Stage == StationVisualPreparationStage.MegastationMacro)
+                CompleteMegastationMacroUpload(session);
+            else
+                CompleteStationVisualUpload(session);
+        }
         else
             ResolveAbortedStationUpload(session);
+    }
+
+    private void CompleteMegastationMacroUpload(PendingStationVisualUpload session)
+    {
+        StationVisualPackage package = session.Package;
+        if (!_stationVisualResidency.CanUpload(
+                session.Descriptor.Identity,
+                session.RequestSequence))
+        {
+            session.Scheduler.Cancel();
+            session.Scheduler.DisposeImmediately();
+            package.Dispose();
+            PublishStalePreparation(
+                session.Descriptor.Identity,
+                session.RequestSequence,
+                "macro request invalidated before install");
+            return;
+        }
+
+        package.UploadMilliseconds = session.Scheduler.TotalUploadMilliseconds;
+        package.UploadWallMilliseconds = session.WallStopwatch.Elapsed.TotalMilliseconds;
+        package.UploadedResourceGpuBytes = session.Scheduler.CompletedEstimatedBytes;
+        _megastationMacroVisualSlot.Install(package);
+        session.Scheduler.ReleaseCompletedResources();
+        PublishStationResidencyMessage(
+            $"[MegastationLOD] macro installed id={session.Descriptor.Identity}; " +
+            $"token={session.RequestSequence}; generationMs={package.GenerationMilliseconds:F1}; " +
+            $"uploadWallMs={package.UploadWallMilliseconds:F1}; " +
+            $"gpuBytes={package.UploadedResourceGpuBytes}; " +
+            $"livePackages={LiveStationVisualPackageCount}",
+            SystemMessagePriority.NB);
+        package.PublishTextureUploadDiagnostics();
+        PublishMissingStationHullCasterWarnings(package);
     }
 
     private void CompleteStationVisualUpload(PendingStationVisualUpload session)
@@ -975,13 +1276,15 @@ public sealed partial class SystemSpaceState
         {
             session.Scheduler.DisposeImmediately();
             package.Dispose();
+            if (session.Descriptor.UseMegastationPrototype)
+                _failedMegastationBackgroundIdentity = session.Descriptor.Identity;
             _stationVisualResidency.ReportGenerationFailure(
                 session.Descriptor.Identity,
                 session.RequestSequence);
             PublishStationResidencyMessage(
                 $"[StationUpload] final commit failed id={session.Descriptor.Identity}; " +
                 $"token={session.RequestSequence}; commitMs={commitStopwatch.Elapsed.TotalMilliseconds:F1}; " +
-                $"error={exception.Message}; livePackages={_stationVisualSlot.LiveCount}",
+                $"error={exception.Message}; livePackages={LiveStationVisualPackageCount}",
                 SystemMessagePriority.Warning);
         }
         if (installed)
@@ -1123,6 +1426,8 @@ public sealed partial class SystemSpaceState
 
     private void ResolveAbortedStationUpload(PendingStationVisualUpload session)
     {
+        if (session.Stage == StationVisualPreparationStage.MegastationMacro)
+            _stationPreparationCancellation?.Cancel();
         session.Package.Dispose();
         StationVisualUploadScheduler scheduler = session.Scheduler;
         string oversized = scheduler.LargestOversizedOperation is { } operation
@@ -1131,6 +1436,8 @@ public sealed partial class SystemSpaceState
             : "; oversizedType=none";
         if (scheduler.State == StationVisualUploadSchedulerState.Failed)
         {
+            if (session.Descriptor.UseMegastationPrototype)
+                _failedMegastationBackgroundIdentity = session.Descriptor.Identity;
             string failedOperation = scheduler.FailedOperation is { } failed
                 ? $"; failedType={failed.Kind}; failedId={failed.ResourceIdentity}; " +
                   $"failedBytes={failed.EstimatedBytes}; failedMs={failed.ElapsedMilliseconds:F1}"
@@ -1148,7 +1455,7 @@ public sealed partial class SystemSpaceState
                 $"maxUploadOperationMs={scheduler.MaximumOperationMilliseconds:F1}; " +
                 $"uploadFrames={scheduler.UploadFrameCount}; budgetOverruns={scheduler.FrameBudgetOverrunCount}; " +
                 $"cleanupMs={scheduler.CleanupMilliseconds:F1}; error={scheduler.Failure?.Message}; " +
-                $"livePackages={_stationVisualSlot.LiveCount}{failedOperation}{oversized}",
+                $"livePackages={LiveStationVisualPackageCount}{failedOperation}{oversized}",
                 SystemMessagePriority.Warning);
         }
         else
@@ -1163,7 +1470,7 @@ public sealed partial class SystemSpaceState
                 $"maxUploadFrameMs={scheduler.MaximumUploadFrameMilliseconds:F1}; " +
                 $"maxUploadOperationMs={scheduler.MaximumOperationMilliseconds:F1}; " +
                 $"uploadFrames={scheduler.UploadFrameCount}; budgetOverruns={scheduler.FrameBudgetOverrunCount}; " +
-                $"cleanupMs={scheduler.CleanupMilliseconds:F1}; livePackages={_stationVisualSlot.LiveCount}{oversized}",
+                $"cleanupMs={scheduler.CleanupMilliseconds:F1}; livePackages={LiveStationVisualPackageCount}{oversized}",
                 SystemMessagePriority.NB);
         }
         PublishOversizedStationUploadOperations(
@@ -1183,6 +1490,19 @@ public sealed partial class SystemSpaceState
         session.CancellationReason = reason;
         session.CancellationPhase = session.Scheduler.CurrentPhase;
         session.Scheduler.Cancel();
+    }
+
+    private void CancelPreparedMegastationComplete(string reason)
+    {
+        PreparedStationVisualCpuResult? prepared =
+            Interlocked.Exchange(ref _preparedMegastationComplete, null);
+        _preparedMegastationCompleteDescriptor = null;
+        _preparedMegastationCompleteSequence = 0;
+        if (prepared == null)
+            return;
+        ReleasePreparedStationCpu(prepared.Generation);
+        Debug.WriteLine(
+            $"[MegastationLOD] discarded prepared complete CPU package; reason={reason}");
     }
 
     private StationVisualResidencyAction? TakeDeferredStationPreparation()
@@ -1294,6 +1614,7 @@ public sealed partial class SystemSpaceState
         _stationPreparationSequence = 0;
         _stationPreparationCancellation?.Dispose();
         _stationPreparationCancellation = null;
+        CancelPreparedMegastationComplete(reason);
         if (_stationUploadSession is { } upload)
         {
             var cleanupStopwatch = Stopwatch.StartNew();
@@ -1308,7 +1629,7 @@ public sealed partial class SystemSpaceState
                 $"resources={upload.Scheduler.CompletedResourceCount}/{upload.Scheduler.TotalResourceCount}; " +
                 $"bytes={upload.Scheduler.CompletedEstimatedBytes}/{upload.Scheduler.TotalEstimatedBytes}; " +
                 $"cleanupMs={cleanupStopwatch.Elapsed.TotalMilliseconds:F1}; forcedCleanup=true; " +
-                $"livePackages={_stationVisualSlot.LiveCount}",
+                $"livePackages={LiveStationVisualPackageCount}",
                 SystemMessagePriority.NB);
             _stationUploadSession = null;
         }
@@ -1399,7 +1720,7 @@ public sealed partial class SystemSpaceState
             $"uploadedResources={scheduler.CompletedResourceCount}/{scheduler.TotalResourceCount}; " +
             $"uploadedBytes={scheduler.CompletedEstimatedBytes}/{scheduler.TotalEstimatedBytes}; " +
             $"vertices={package.VertexCount}; triangles={package.TriangleCount}; " +
-            $"livePackages={_stationVisualSlot.LiveCount}; gpuBuffers={package.OwnedGpuBufferCount}; " +
+            $"livePackages={LiveStationVisualPackageCount}; gpuBuffers={package.OwnedGpuBufferCount}; " +
             $"ownedTextures={package.OwnedTextureCount}; shadowMaps={package.OwnedShadowMapCount}; " +
             $"cpuMeshBytes={package.EstimatedCpuMeshBytes}; " +
             $"uploadedResourceGpuBytes={package.UploadedResourceGpuBytes}; " +
@@ -1433,7 +1754,7 @@ public sealed partial class SystemSpaceState
         int livePackagesAfterChange =
             action.Kind == StationVisualResidencyActionKind.Unload
                 ? 0
-                : _stationVisualSlot.LiveCount;
+                : LiveStationVisualPackageCount;
         PublishStationResidencyMessage(
             $"[StationResidency] {verb} id={action.Identity}; class={classification}; " +
             $"reason={action.Reason}; centre={action.Candidate.CentreDistanceMeters:F1}m; " +
@@ -1456,7 +1777,7 @@ public sealed partial class SystemSpaceState
     private void PublishStalePreparation(string identity, long sequence, string reason)
         => PublishStationResidencyMessage(
             $"[StationResidency] discarded id={identity}; reason={reason}; token={sequence}; " +
-            $"livePackages={_stationVisualSlot.LiveCount}; staleDiscarded=true",
+            $"livePackages={LiveStationVisualPackageCount}; staleDiscarded=true",
             SystemMessagePriority.NB);
 
     private static void PublishStationResidencyMessage(

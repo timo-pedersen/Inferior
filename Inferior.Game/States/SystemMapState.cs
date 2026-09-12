@@ -179,10 +179,12 @@ public sealed class SystemMapState : GameState
             || development.Mode == MegastationPrototypeSelectionMode.ForceStarterStation
                 ? StarterSystemSelector.SelectStarterStation(_system.Stations)
                 : null;
+        IReadOnlyDictionary<Station, MegastationSelection> stationSelections =
+            MegastationDevelopmentPolicy.ResolveSystem(
+                _system.Stations, starter, development);
         foreach (var station in _system.Stations)
         {
-            MegastationSelection selection =
-                MegastationDevelopmentPolicy.Resolve(station, starter, development);
+            MegastationSelection selection = stationSelections[station];
             _stationTypeInfo[station] = selection;
             _dockingBayInfo[station] = StationGenerator.FindDockingBay(station);
         }

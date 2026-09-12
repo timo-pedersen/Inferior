@@ -9,7 +9,7 @@ namespace Inferior.Game.Containers;
 
 /// <summary>
 /// Deterministic container mesh builder. All geometry uses StationModuleMesh so lighting,
-/// winding conventions, and text helpers are identical to station decoration.
+/// winding conventions are identical to station decoration.
 /// The final mesh is extracted as CPU arrays (no GraphicsDevice needed at generation time).
 /// </summary>
 public static class ShippingContainerFactory
@@ -40,7 +40,7 @@ public static class ShippingContainerFactory
         LockGrade lockGrade = LockGrade.Civilian)
     {
         string manufacturerText = text ?? GenerateManufacturerName(sidePatternSeed);
-        var (verts, indices) = GenerateVertices(color, wear, sidePatternSeed, manufacturerText, lockGrade);
+        var (verts, indices) = GenerateVertices(color, wear, sidePatternSeed, lockGrade);
 
         return new ShippingContainer
         {
@@ -60,10 +60,10 @@ public static class ShippingContainerFactory
 
     // Geometry-only entry point — shared by the standalone/debug-spawn path above and
     // by StationDecorator, so station-placed greeble containers get the exact same
-    // chamfer/inset/fastener/text/wear geometry as standalone ones, instead of a
-    // separately hand-maintained reimplementation that had drifted (mirrored text).
+    // chamfer/inset/fastener/wear geometry as standalone ones, instead of a
+    // separately hand-maintained implementation that can drift from the factory.
     internal static (VertexPositionNormalColorTexture[] verts, short[] indices) GenerateVertices(
-        Color color, float wear, int sidePatternSeed, string? text, LockGrade lockGrade)
+        Color color, float wear, int sidePatternSeed, LockGrade lockGrade)
     {
         var mesh = new StationModuleMesh { Texture = SurfaceTexture.CleanPanel };
 
@@ -71,8 +71,6 @@ public static class ShippingContainerFactory
         BuildFasteners     (mesh, color);
         BuildLongFaceInsets(mesh, color, sidePatternSeed);
         BuildEndDoors      (mesh, color);
-        AddContainerText   (mesh, text ?? GenerateManufacturerName(sidePatternSeed));
-
         ApplyWear(mesh, wear, sidePatternSeed);
 
         return mesh.ToArrays();
@@ -352,11 +350,9 @@ public static class ShippingContainerFactory
         Color wallColor  = DarkenColor(color, 0.75f);
         Color floorColor = DarkenColor(color, 0.82f);
 
-        // Y+/Y- faces carry the manufacturer text (see AddContainerText), raised only
-        // ~1 cm above the surface — the inset grid there z-fights with the text quads.
-        // Good enough for now: skip the inset pattern on these two faces and use a
-        // single flat panel instead. A proper fix needs the inset layout and text
-        // placement to share one design. Z+/Z- keep the inset pattern unchanged.
+        // Y+/Y- remain single flat panels. Container lettering was deliberately removed
+        // from geometry; a planned container overhaul will provide a replacement marking
+        // system without rebuilding text as thousands of individually lit quads.
         AddFlatRect(mesh, color, Vector3.UnitY, Vector3.UnitX, -Vector3.UnitZ,
             new Vector3(0, HLy, 0), FaceLengthAfterChamfer, FaceWidthAfterChamfer);
         AddFlatRect(mesh, color, -Vector3.UnitY, Vector3.UnitX, Vector3.UnitZ,
@@ -528,37 +524,6 @@ public static class ShippingContainerFactory
                      normal, up, 0.045f, 0.18f, latch);
     }
 
-    // ── Text ─────────────────────────────────────────────────────────────────
-
-    private static void AddContainerText(StationModuleMesh mesh, string text)
-    {
-        // Bright contrast text on Y+ and Y- faces
-        Color textColor = new Color(230, 225, 200);
-
-        int   charCount = Math.Max(1, text.Length);
-        float pixelSize = Math.Clamp(
-            InsetZoneHalfLen * 2f * 0.85f / (charCount * (BitmapFonts.CharW + 1)),
-            0.018f, 0.080f);
-
-        float textW = charCount * (BitmapFonts.CharW + 1) * pixelSize;
-        float textH = BitmapFonts.CharH * pixelSize;
-        float raise = 0.012f;
-
-        // Y+ face: text origin at lower quarter, centred in X
-        // Face width (Z direction) = FaceWidthAfterChamfer; lower = toward +Z (viewer side)
-        float zOffset = -(FaceWidthAfterChamfer * 0.5f - textH * 1.5f);
-        var originYPlus = new Vector3(-textW * 0.5f, HLy + raise, zOffset);
-        PlanarTextGeometry.Add(mesh, text, originYPlus,
-            surfaceNormal: Vector3.UnitY, readingDirection: Vector3.UnitX,
-            pixelSize, textColor);
-
-        // Y- face: opposite reading direction so the label reads correctly from below.
-        var originYMinus = new Vector3(textW * 0.5f, -(HLy + raise), zOffset);
-        PlanarTextGeometry.Add(mesh, text, originYMinus,
-            surfaceNormal: -Vector3.UnitY, readingDirection: -Vector3.UnitX,
-            pixelSize, textColor);
-    }
-
     // ── Wear ─────────────────────────────────────────────────────────────────
 
     private static void ApplyWear(StationModuleMesh mesh, float wear, int seed)
@@ -569,7 +534,7 @@ public static class ShippingContainerFactory
         // brief): BuildChamferedBox used to emit a contiguous "main faces" block
         // (indices 0-5) that a mainMul multiplier targeted here. It no longer does —
         // main-face coverage now comes entirely from BuildFasteners / BuildLongFaceInsets
-        // / BuildEndDoors / AddContainerText, interleaved with each other and with no
+        // / BuildEndDoors, interleaved with each other and with no
         // contiguous index range left to call "main" faces. Dropped mainMul entirely
         // rather than guess a wrong target. Hardcoded face-index wear targeting is
         // fragile in general — a proper fix would have each Build* function tag which

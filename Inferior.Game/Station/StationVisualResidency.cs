@@ -78,6 +78,8 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
     public string? PendingIdentity { get; private set; }
     public string? FailedIdentity { get; private set; }
     public long PendingRequestSequence { get; private set; }
+    public bool PendingRemainsBeyondUnload { get; private set; }
+    public bool PendingYieldsToProximity { get; private set; }
     public long CurrentSequence => _requestSequence;
 
     public IReadOnlyList<StationVisualResidencyAction> Evaluate(
@@ -120,8 +122,9 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
         {
             var pending = Find(candidates, PendingIdentity);
             if (pending == null
-                || pending.Value.SurfaceDistanceMeters
-                    >= policy.For(pending.Value.Classification).UnloadDistanceMeters)
+                || (!PendingRemainsBeyondUnload
+                    && pending.Value.SurfaceDistanceMeters
+                        >= policy.For(pending.Value.Classification).UnloadDistanceMeters))
             {
                 actions.Add(CancelPending(
                     pending ?? default,
@@ -131,24 +134,30 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
             }
             else
             {
+                // System-entry megastation preparation may remain active at arbitrary
+                // distance, but it is deliberately lower priority than a visual that
+                // has actually crossed its normal load boundary.
+                StationVisualResidencyCandidate? nearer = NearestEligible(candidates);
+                if (PendingYieldsToProximity
+                    && nearer is { } candidate
+                    && !string.Equals(
+                        candidate.Identity,
+                        PendingIdentity,
+                        StringComparison.Ordinal))
+                {
+                    actions.Add(CancelPending(
+                        pending.Value,
+                        "nearer station reached visual load boundary"));
+                    actions.Add(BeginRequest(
+                        candidate,
+                        "load boundary reached during background preparation"));
+                    return actions;
+                }
                 return actions;
             }
         }
 
-        StationVisualResidencyCandidate? nearest = null;
-        foreach (StationVisualResidencyCandidate candidate in candidates)
-        {
-            if (candidate.SurfaceDistanceMeters
-                > policy.For(candidate.Classification).LoadDistanceMeters)
-                continue;
-            if (string.Equals(candidate.Identity, FailedIdentity, StringComparison.Ordinal))
-                continue;
-            if (nearest == null
-                || candidate.SurfaceDistanceMeters < nearest.Value.SurfaceDistanceMeters
-                || (candidate.SurfaceDistanceMeters == nearest.Value.SurfaceDistanceMeters
-                    && string.CompareOrdinal(candidate.Identity, nearest.Value.Identity) < 0))
-                nearest = candidate;
-        }
+        StationVisualResidencyCandidate? nearest = NearestEligible(candidates);
 
         if (nearest != null)
             actions.Add(BeginRequest(nearest.Value, "load boundary reached"));
@@ -159,12 +168,36 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
     public IReadOnlyList<StationVisualResidencyAction> RequestExplicit(
         StationVisualResidencyCandidate destination,
         string reason)
+        => Request(
+            destination,
+            reason,
+            remainsBeyondUnload: true,
+            yieldsToProximity: false);
+
+    public IReadOnlyList<StationVisualResidencyAction> RequestBackground(
+        StationVisualResidencyCandidate destination,
+        string reason)
+        => Request(
+            destination,
+            reason,
+            remainsBeyondUnload: true,
+            yieldsToProximity: true);
+
+    private IReadOnlyList<StationVisualResidencyAction> Request(
+        StationVisualResidencyCandidate destination,
+        string reason,
+        bool remainsBeyondUnload,
+        bool yieldsToProximity)
     {
         var actions = new List<StationVisualResidencyAction>(3);
         if (string.Equals(ResidentIdentity, destination.Identity, StringComparison.Ordinal))
             return actions;
         if (string.Equals(PendingIdentity, destination.Identity, StringComparison.Ordinal))
+        {
+            PendingRemainsBeyondUnload |= remainsBeyondUnload;
+            PendingYieldsToProximity &= yieldsToProximity;
             return actions;
+        }
         if (string.Equals(FailedIdentity, destination.Identity, StringComparison.Ordinal))
             FailedIdentity = null;
 
@@ -176,7 +209,11 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
         if (PendingIdentity != null)
             actions.Add(CancelPending(destination, reason));
 
-        actions.Add(BeginRequest(destination, reason));
+        actions.Add(BeginRequest(
+            destination,
+            reason,
+            remainsBeyondUnload,
+            yieldsToProximity));
         return actions;
     }
 
@@ -208,6 +245,8 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
         ResidentIdentity = identity;
         PendingIdentity = null;
         PendingRequestSequence = 0;
+        PendingRemainsBeyondUnload = false;
+        PendingYieldsToProximity = false;
         FailedIdentity = null;
         return true;
     }
@@ -218,16 +257,22 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
             return false;
         PendingIdentity = null;
         PendingRequestSequence = 0;
+        PendingRemainsBeyondUnload = false;
+        PendingYieldsToProximity = false;
         FailedIdentity = identity;
         return true;
     }
 
     private StationVisualResidencyAction BeginRequest(
         StationVisualResidencyCandidate candidate,
-        string reason)
+        string reason,
+        bool remainsBeyondUnload = false,
+        bool yieldsToProximity = false)
     {
         PendingIdentity = candidate.Identity;
         PendingRequestSequence = ++_requestSequence;
+        PendingRemainsBeyondUnload = remainsBeyondUnload;
+        PendingYieldsToProximity = yieldsToProximity;
         return new(
             StationVisualResidencyActionKind.RequestLoad,
             candidate.Identity,
@@ -244,6 +289,8 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
         long sequence = PendingRequestSequence;
         PendingIdentity = null;
         PendingRequestSequence = 0;
+        PendingRemainsBeyondUnload = false;
+        PendingYieldsToProximity = false;
         _requestSequence++;
         return new(
             StationVisualResidencyActionKind.CancelPreparation,
@@ -251,6 +298,26 @@ internal sealed class StationVisualResidencyState(StationVisualResidencyPolicy p
             sequence,
             reason,
             candidate);
+    }
+
+    private StationVisualResidencyCandidate? NearestEligible(
+        IReadOnlyList<StationVisualResidencyCandidate> candidates)
+    {
+        StationVisualResidencyCandidate? nearest = null;
+        foreach (StationVisualResidencyCandidate candidate in candidates)
+        {
+            if (candidate.SurfaceDistanceMeters
+                > policy.For(candidate.Classification).LoadDistanceMeters)
+                continue;
+            if (string.Equals(candidate.Identity, FailedIdentity, StringComparison.Ordinal))
+                continue;
+            if (nearest == null
+                || candidate.SurfaceDistanceMeters < nearest.Value.SurfaceDistanceMeters
+                || (candidate.SurfaceDistanceMeters == nearest.Value.SurfaceDistanceMeters
+                    && string.CompareOrdinal(candidate.Identity, nearest.Value.Identity) < 0))
+                nearest = candidate;
+        }
+        return nearest;
     }
 
     private StationVisualResidencyAction Unload(

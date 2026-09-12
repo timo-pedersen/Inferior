@@ -42,6 +42,7 @@ public sealed class MegastationArtificialOcclusion
     private const float EndpointTolerance = .02f;
     private readonly StructuralOccupancy? _occupancy;
     private readonly MegastationArtificialOccluder[] _occluders;
+    private readonly OccluderNode? _occluderIndex;
     private readonly MegastationArtificialOccluder[] _occupancyVoids;
     private readonly Dictionary<(Vector3 Source, Vector3 Receiver), bool> _visibilityCache = [];
     private long _receiverSamples;
@@ -56,6 +57,7 @@ public sealed class MegastationArtificialOcclusion
     {
         _occupancy = occupancy;
         _occluders = occluders.Where(item => CastsStaticArtificialShadow(item.Role)).ToArray();
+        _occluderIndex = OccluderNode.Build(_occluders);
         _occupancyVoids = occupancyVoids?.ToArray() ?? [];
     }
 
@@ -175,7 +177,7 @@ public sealed class MegastationArtificialOcclusion
         Vector3 end = receiver - direction * EndpointTolerance;
 
         bool blocked = OccupancyBlocks(start, end)
-            || _occluders.Any(occluder => SegmentIntersects(occluder, start, end));
+            || (_occluderIndex?.IntersectsAny(_occluders, start, end) ?? false);
         _visibilityCache.Add(key, !blocked);
         if (blocked)
             _blockedTests++;
@@ -319,6 +321,144 @@ public sealed class MegastationArtificialOcclusion
         minimum = MathF.Max(minimum, a);
         maximum = MathF.Min(maximum, b);
         return minimum <= maximum;
+    }
+
+    private sealed class OccluderNode
+    {
+        private const int LeafSize = 4;
+        private const float BoundsInflation = .05f;
+        private readonly Vector3 _minimum;
+        private readonly Vector3 _maximum;
+        private readonly OccluderNode? _left;
+        private readonly OccluderNode? _right;
+        private readonly int[]? _indices;
+
+        private OccluderNode(
+            Vector3 minimum,
+            Vector3 maximum,
+            OccluderNode? left,
+            OccluderNode? right,
+            int[]? indices)
+        {
+            _minimum = minimum;
+            _maximum = maximum;
+            _left = left;
+            _right = right;
+            _indices = indices;
+        }
+
+        public static OccluderNode? Build(MegastationArtificialOccluder[] occluders)
+        {
+            if (occluders.Length == 0)
+                return null;
+            (Vector3 Min, Vector3 Max)[] bounds = occluders.Select(Bounds).ToArray();
+            return Build(bounds, Enumerable.Range(0, occluders.Length).ToArray());
+        }
+
+        public bool IntersectsAny(
+            MegastationArtificialOccluder[] occluders,
+            Vector3 start,
+            Vector3 end)
+        {
+            if (!SegmentIntersectsBounds(start, end, _minimum, _maximum))
+                return false;
+            if (_indices is not null)
+            {
+                foreach (int index in _indices)
+                    if (SegmentIntersects(occluders[index], start, end))
+                        return true;
+                return false;
+            }
+            return (_left?.IntersectsAny(occluders, start, end) ?? false)
+                || (_right?.IntersectsAny(occluders, start, end) ?? false);
+        }
+
+        private static OccluderNode Build(
+            (Vector3 Min, Vector3 Max)[] bounds,
+            int[] indices)
+        {
+            Vector3 minimum = new(
+                indices.Min(index => bounds[index].Min.X),
+                indices.Min(index => bounds[index].Min.Y),
+                indices.Min(index => bounds[index].Min.Z));
+            Vector3 maximum = new(
+                indices.Max(index => bounds[index].Max.X),
+                indices.Max(index => bounds[index].Max.Y),
+                indices.Max(index => bounds[index].Max.Z));
+            if (indices.Length <= LeafSize)
+                return new(minimum, maximum, null, null, indices);
+
+            Vector3 centroidMinimum = new(
+                indices.Min(index => (bounds[index].Min.X + bounds[index].Max.X) * .5f),
+                indices.Min(index => (bounds[index].Min.Y + bounds[index].Max.Y) * .5f),
+                indices.Min(index => (bounds[index].Min.Z + bounds[index].Max.Z) * .5f));
+            Vector3 centroidMaximum = new(
+                indices.Max(index => (bounds[index].Min.X + bounds[index].Max.X) * .5f),
+                indices.Max(index => (bounds[index].Min.Y + bounds[index].Max.Y) * .5f),
+                indices.Max(index => (bounds[index].Min.Z + bounds[index].Max.Z) * .5f));
+            Vector3 span = centroidMaximum - centroidMinimum;
+            int axis = span.X >= span.Y && span.X >= span.Z ? 0
+                : span.Y >= span.Z ? 1 : 2;
+            Array.Sort(indices, (a, b) =>
+            {
+                float ac = Component(bounds[a].Min + bounds[a].Max, axis);
+                float bc = Component(bounds[b].Min + bounds[b].Max, axis);
+                int comparison = ac.CompareTo(bc);
+                return comparison != 0 ? comparison : a.CompareTo(b);
+            });
+            int middle = indices.Length / 2;
+            OccluderNode left = Build(bounds, indices[..middle]);
+            OccluderNode right = Build(bounds, indices[middle..]);
+            return new(minimum, maximum, left, right, null);
+        }
+
+        private static (Vector3 Min, Vector3 Max) Bounds(
+            MegastationArtificialOccluder occluder)
+        {
+            Vector3 extent = Abs(occluder.Right) * occluder.HalfSize.X
+                + Abs(occluder.Up) * occluder.HalfSize.Y
+                + Abs(occluder.Forward) * occluder.HalfSize.Z
+                + new Vector3(BoundsInflation);
+            return (occluder.Centre - extent, occluder.Centre + extent);
+        }
+
+        private static bool SegmentIntersectsBounds(
+            Vector3 start,
+            Vector3 end,
+            Vector3 minimum,
+            Vector3 maximum)
+        {
+            Vector3 delta = end - start;
+            float entry = 0f;
+            float exit = 1f;
+            return ClipBounds(start.X, delta.X, minimum.X, maximum.X, ref entry, ref exit)
+                && ClipBounds(start.Y, delta.Y, minimum.Y, maximum.Y, ref entry, ref exit)
+                && ClipBounds(start.Z, delta.Z, minimum.Z, maximum.Z, ref entry, ref exit);
+        }
+
+        private static bool ClipBounds(
+            float origin,
+            float delta,
+            float minimum,
+            float maximum,
+            ref float entry,
+            ref float exit)
+        {
+            if (MathF.Abs(delta) <= 1e-8f)
+                return origin >= minimum && origin <= maximum;
+            float a = (minimum - origin) / delta;
+            float b = (maximum - origin) / delta;
+            if (a > b) (a, b) = (b, a);
+            entry = MathF.Max(entry, a);
+            exit = MathF.Min(exit, b);
+            return entry <= exit;
+        }
+
+        private static float Component(Vector3 value, int axis)
+            => axis == 0 ? value.X : axis == 1 ? value.Y : value.Z;
+
+        private static Vector3 Abs(Vector3 value)
+            => new(MathF.Abs(value.X), MathF.Abs(value.Y), MathF.Abs(value.Z));
     }
 
     private static Vector3 Axis(Matrix matrix, int axis) => axis switch

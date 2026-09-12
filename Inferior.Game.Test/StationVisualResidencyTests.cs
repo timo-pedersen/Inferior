@@ -126,6 +126,56 @@ public sealed class StationVisualResidencyTests
     }
 
     [Fact]
+    public void ExplicitPreparationRemainsPendingOutsideUnloadBoundary()
+    {
+        var state = new StationVisualResidencyState(Policy);
+        StationVisualResidencyAction request = Assert.Single(
+            state.RequestExplicit(Candidate("destination", 1_000_000), "arrival"));
+
+        Assert.Empty(state.Evaluate([Candidate("destination", 1_000_000)]));
+        Assert.True(state.CanUpload("destination", request.RequestSequence));
+        Assert.True(state.PendingRemainsBeyondUnload);
+        Assert.False(state.PendingYieldsToProximity);
+    }
+
+    [Fact]
+    public void BackgroundPreparationYieldsToStationAtLoadBoundary()
+    {
+        var state = new StationVisualResidencyState(Policy);
+        state.RequestBackground(Candidate("mega", 1_000_000), "system entry");
+
+        IReadOnlyList<StationVisualResidencyAction> actions = state.Evaluate([
+            Candidate("mega", 1_000_000, StationVisualClassification.Megastation),
+            Candidate("ordinary", 10_000),
+        ]);
+
+        Assert.Equal(2, actions.Count);
+        Assert.Equal(StationVisualResidencyActionKind.CancelPreparation, actions[0].Kind);
+        Assert.Equal(StationVisualResidencyActionKind.RequestLoad, actions[1].Kind);
+        Assert.Equal("ordinary", state.PendingIdentity);
+        Assert.False(state.PendingRemainsBeyondUnload);
+    }
+
+    [Fact]
+    public void ExplicitRequestPromotesMatchingBackgroundPreparationPriority()
+    {
+        var state = new StationVisualResidencyState(Policy);
+        StationVisualResidencyCandidate mega = Candidate(
+            "mega",
+            1_000_000,
+            StationVisualClassification.Megastation);
+        state.RequestBackground(mega, "system entry");
+
+        Assert.Empty(state.RequestExplicit(mega, "arrival"));
+        Assert.False(state.PendingYieldsToProximity);
+        Assert.Empty(state.Evaluate([
+            mega,
+            Candidate("ordinary", 10_000),
+        ]));
+        Assert.Equal("mega", state.PendingIdentity);
+    }
+
+    [Fact]
     public void SystemChangeClearsResident()
     {
         var state = Installed("a", 5_000);
