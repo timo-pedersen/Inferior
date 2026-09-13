@@ -296,6 +296,32 @@ came out of investigating:
    free-floating container (not docked/attached, not a landing-site prop) near an ordinary
    station after pulling the fix.
 
+**Second visual report (2026-09-13, Timo): confirmed working.** Free-floating containers now
+show "TEST 123" correctly on the Z+ face — the atlasV fix above was the real bug. Landing-site
+and station-attached containers still show nothing, as expected (unwired pathways, not a bug).
+Timo also suspects a possible unrelated regression — megastation external containers, present
+at some earlier point, not currently found — **explicitly deferred, no action taken**; a full
+container redesign/expansion pass is planned separately and will absorb this.
+
+**Open design question raised, not yet scoped:** containers-as-station-decoration (baked into
+the station/megastation's own mesh, no independent identity, station-palette-textured — see
+gap 2 above) vs. containers-as-real-objects (independently lit, correct while transiting from
+open space into a bay) is a genuine unresolved tension, not a bug. Timo explicitly connected
+this to future NPC ships — same problem, not a separate one. Obstacles identified when asked
+(analysis only, no design decision made): (a) `BakedColorLit` (static AO baked at generation
+time, station-owned palette) vs `DynamicLit` (real-time N·L, no shadow receive, own vertex
+colour) are incompatible material models with no shared "dynamic lit world object" contract;
+(b) no query exists for "local lighting environment at this moving position" — the station
+shadow map/`StationShadowTerm` machinery only serves station-authored geometry today (matches
+the already-documented "free-object shadow participation... deferred" gap), and H1c's bay
+artificial lighting is baked per-vertex at generation time with no runtime-position equivalent;
+(c) batching (station decoration deliberately merges into few draw calls) vs. per-object
+identity/motion is a real tension at any meaningful container/ship count — GPU instancing is
+the likely answer, not currently used anywhere in this project; (d) containers have no
+simulation-owned lifecycle (position, collision, persistence) today, same gap `!invariants.md`
+#9 already draws for ships. Worth its own `Docs-ai` reference once actually scoped/designed —
+not started.
+
 ### GC-optimization pass (`Docs/gc-optimization-question.md`) — findings #1-#3 and Server-GC done, #4 deferred
 
 #### `Bus<T>` message-buffer allocation reduction — done
