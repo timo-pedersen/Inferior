@@ -161,6 +161,28 @@ public sealed class SurfaceMarkingGeometryTests
     }
 
     [Fact]
+    public void ProjectorUpMapsToTheLargerAtlasVNotTheSmaller()
+    {
+        // Pins the atlas orientation convention explicitly (see the comment in
+        // SurfaceMarkingGeometry.MakeVertex): the source atlas this system was built for
+        // (TextMarkingAtlas, backed by TextPainter.DrawText) turned out to already store its
+        // content with glyph-row-0 (the visual top) toward the LARGEST buffer row, i.e.
+        // already vertically flipped relative to plain top-left-origin convention — so
+        // projector Up maps to the LARGER atlasV, not the smaller. Getting this backwards
+        // renders every marking upside down without necessarily being otherwise detectable.
+        (var verts, var indices) = FlatQuad();
+        var projector = MakeProjector(8, 4, 1) with { AtlasRegion = new Vector4(0f, 0.2f, 1f, 0.8f) };
+        var (outVerts, _) = SurfaceMarkingGeometry.Project(projector, verts, indices);
+
+        Assert.NotEmpty(outVerts);
+        float atlasVAtBottom = outVerts.Where(v => v.Position.Y < 0.01f).Min(v => v.TextureCoordinate.Y);
+        float atlasVAtTop    = outVerts.Where(v => v.Position.Y > 3.99f).Max(v => v.TextureCoordinate.Y);
+
+        Assert.Equal(0.2f, atlasVAtBottom, 3);
+        Assert.Equal(0.8f, atlasVAtTop, 3);
+    }
+
+    [Fact]
     public void ProjectorCrossingMultipleReceiverTrianglesProducesGeometryOnEachOne()
     {
         (var verts, var indices) = ThreeSeparateQuads();

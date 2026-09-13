@@ -184,11 +184,17 @@ public static class SurfaceMarkingGeometry
     {
         float u = projector.Width  > 0f ? v.U / projector.Width  : 0f;
         float w = projector.Height > 0f ? v.V / projector.Height : 0f;
-        // Atlas image V increases downward (row 0 = top texel row); projector Up increases
-        // toward the top of the marking — flip so "up" in projector space lands at the top of
-        // the atlas region, matching ordinary top-left-origin texture convention.
+        // NOT flipped, despite a top-left-origin texture normally wanting "projector Up ->
+        // smaller V": TextMarkingAtlas's source (TextPainter.DrawText) writes glyph row 0 (the
+        // visual TOP of a glyph) toward the LARGEST buffer/texture row — i.e. that atlas is
+        // itself already vertically flipped relative to ordinary top-left-origin convention
+        // (confirmed by inspection: rendering the raw buffer as ASCII art shows every glyph
+        // upside down when printed row-0-first). Mapping projector Up directly to atlasV
+        // (not 1-w) compensates for that, so text reads right-side-up in world space. Do not
+        // "fix" this by flipping TextPainter itself — it's shared with real station panel
+        // text (StationTextureRegistry) and changing its convention would flip that instead.
         float atlasU = MathHelper.Lerp(projector.AtlasRegion.X, projector.AtlasRegion.Z, u);
-        float atlasV = MathHelper.Lerp(projector.AtlasRegion.Y, projector.AtlasRegion.W, 1f - w);
+        float atlasV = MathHelper.Lerp(projector.AtlasRegion.Y, projector.AtlasRegion.W, w);
         return new VertexPositionNormalColorTexture(
             v.Position, normal, projector.Tint, new Vector2(atlasU, atlasV));
     }

@@ -261,6 +261,41 @@ continuous marking, follows insets/walls without visible discontinuity, no z-fig
 floating gap, lighting varies correctly across the crossed surfaces, transparent atlas regions
 reveal the container normally).
 
+**First visual report (2026-09-13, Timo): no text visible on any container checked.** Two things
+came out of investigating:
+1. A real, confirmed bug: `SurfaceMarkingGeometry.MakeVertex`'s atlasV mapping had the vertical
+   flip backwards. `TextMarkingAtlas`'s source (`TextPainter.DrawText`) turns out to already
+   store glyph-row-0 (visual top) toward the LARGEST buffer row — i.e. that source is itself
+   already vertically flipped relative to plain top-left-origin convention (confirmed by
+   rendering the raw pixel buffer as ASCII art and reading the glyph shapes). Mapping projector
+   Up to the SMALLER atlasV (as the code did) compounds with that into upside-down text. Fixed:
+   projector Up now maps to the LARGER atlasV. Pinned by a new test,
+   `ProjectorUpMapsToTheLargerAtlasVNotTheSmaller`. This explains wrong orientation, not
+   necessarily total invisibility on its own.
+2. **Scope gap, likely the bigger factor:** there are three separate container-rendering
+   pathways in this codebase, and only one was ever wired to draw a marking.
+   `StationDecorator.Containers.cs` and `Megastations/MegastationLandingDistrict.cs` both call
+   `ShippingContainerFactory.GenerateVertices` directly and merge the result into the
+   station's/megastation's own combined baked mesh — no separate per-container object exists
+   there for a decal to attach to. Only `SystemSpaceState.Containers.cs`'s `SpawnContainers`
+   (3-7 containers floating at a 20-500 m offset near every ordinary station, slow tumble, own
+   VB/IB) got the marking wired in. Timo's "station attached" and "landing site" checks were
+   almost certainly the two unwired baked-mesh pathways; "free floating" may or may not have
+   been the wired one — unconfirmed. Extending to the baked pathways is real additional work
+   (computing each baked container's own local transform within the merged mesh, projecting
+   against its local triangle range, drawing the result as a station-owned overlay pass) — not
+   attempted without being asked, since the brief's stop point was explicit and this is a
+   scope decision, not a bug fix.
+3. Static re-verification after the fix (shader technique, blend state, depth-bias math —
+   `PresentationDepthBias` is a constant NDC-space shift after the perspective divide,
+   independent of which tier's projection is active, so the near/far-tier split should not
+   affect it — draw-call wiring, VB/IB setup, winding) found nothing else wrong, but this was
+   not visually re-confirmed in-engine (attempting to pilot the game via computer-use was
+   judged not worth the known-unreliable-keyboard-input risk for this — see
+   `feedback_computeruse_game_launch` memory). Next step: Timo re-checks specifically a
+   free-floating container (not docked/attached, not a landing-site prop) near an ordinary
+   station after pulling the fix.
+
 ### GC-optimization pass (`Docs/gc-optimization-question.md`) — findings #1-#3 and Server-GC done, #4 deferred
 
 #### `Bus<T>` message-buffer allocation reduction — done
