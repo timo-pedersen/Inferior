@@ -518,6 +518,24 @@ float4 PS_DebugFlatColor(VertexOutput input) : COLOR0
     return float4(DebugFlatColor, 1.0);
 }
 
+// Projected surface markings (decals): same ambient + saturate(N.L) model as DynamicLit —
+// the marking belongs to and follows the receiver's own surface, not self-lit — but outputs
+// the sampled texture's real alpha instead of hard-coding 1.0, so the caller's alpha-blend
+// state does the work. No MaterialMap/specular/shadow sampling: markings are a flat painted
+// coverage layer, not a separate lit material. PresentationDepthBias (applied in the shared
+// VS above, same mechanism already used for H1's coplanar overlay) is how a decal avoids
+// z-fighting against a receiver surface it sits exactly on.
+float4 PS_DecalLit(VertexOutput input) : COLOR0
+{
+    float3 n  = normalize(input.WorldNormal);
+    float  nl = saturate(dot(n, SunDirection));
+    float3 lit = Ambient + SunColour * nl * EclipseFactor;
+
+    float4 tex = tex2D(TextureSampler, input.TexCoord);
+    float3 rgb = tex.rgb * MaterialColor * input.Color.rgb * lit;
+    return float4(rgb, tex.a);
+}
+
 technique BakedColorLit
 {
     pass P0
@@ -560,5 +578,14 @@ technique DebugFlatColor
     {
         VertexShader = compile vs_3_0 VS();
         PixelShader  = compile ps_3_0 PS_DebugFlatColor();
+    }
+}
+
+technique DecalLit
+{
+    pass P0
+    {
+        VertexShader = compile vs_3_0 VS();
+        PixelShader  = compile ps_3_0 PS_DecalLit();
     }
 }

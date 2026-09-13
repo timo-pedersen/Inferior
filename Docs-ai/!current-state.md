@@ -177,6 +177,90 @@ Navigation flow (current): Galaxy map → (double-click star) → System map →
 
 ## What is in progress
 
+### Projected surface markings — implemented, builds, automated tests pass; NOT yet visually confirmed by Timo
+
+First generic projected surface marking / decal system: text or graphics defined in a 2D
+projector frame, applied across arbitrary receiver geometry without modifying that geometry.
+Proof case: "TEST 123" projected across a shipping container's Z+ long face (the one with real
+seeded inset cells — Y+/Y- are plain flat panels, see `ShippingContainerFactory.
+BuildLongFaceInsets`). This is the intended replacement substrate for the container lettering
+that was removed when text-as-thousands-of-quads was dropped (see that same comment) — not
+wired back into containers yet, just proven capable of crossing depth changes.
+
+**Generic engine, `Inferior.Rendering` (no knowledge of containers/ships/stations):**
+- `SurfaceMarkingProjector.cs` — `readonly record struct`: Origin/Right/Up/Forward frame,
+  Width/Height/Depth, AtlasRegion (UV sub-rect of a shared atlas), Tint. `Create` derives a
+  validated proper-handed frame from a forward (projection) direction + an up-reference, the
+  same idiom as `PlanarTextGeometry.DeriveFrame`.
+- `SurfaceMarkingGeometry.cs` — `Project(projector, receiverVertices, receiverIndices,
+  isReceiverTriangle?)`: for each eligible receiver triangle, transforms into projector-local
+  (u,v,w), Sutherland-Hodgman clips against the width/height/depth volume, fan-triangulates the
+  surviving polygon, generates atlas UVs, and preserves the receiver's own per-triangle flat
+  normal and vertex-order winding exactly (no global CW/CCW assumption — clipping/triangulation
+  never reorder, so output winding matches whatever the input triangle's was). No
+  incidence-angle cutoff, deliberately: a wall perpendicular to the primary marking plane still
+  receives geometry (verified by test, not just claimed) — its u/v naturally goes ~constant in
+  one axis, which is the intended "belongs to the object's surface" look, not a flat floating
+  image. `isReceiverTriangle` is the receiver-selection hook the design calls for, deliberately
+  "accept everything" (null) for containers, since every container triangle is a valid receiver
+  today — no container-ID-specific behaviour, no semantic filtering built before a real need
+  exists for it (ships/stations with glass/windows/cables will need one later).
+- `MeshRenderer.DrawDecalLit` + `LitSurface.fx`'s new `DecalLit` technique/`PS_DecalLit`: same
+  ambient+N·L lighting model as `DynamicLit` (the marking is never self-lit, follows the
+  receiver's own lighting), but outputs the sampled atlas texture's real alpha instead of
+  `DynamicLit`'s hard-coded 1.0, so ordinary GPU alpha blending does the work — transparent
+  atlas texels reveal the receiver normally. Z-fighting: reuses the *existing*
+  `PresentationDepthBias` shader mechanism (already proven for H1's exact-coincident-surface
+  case, `SystemSpaceState.H1CoplanarOverlayClipDepthBias`) rather than a vertex-normal offset —
+  the brief's preferred first option, tried and (per the shader math) expected to be sufficient
+  without needing the normal-offset fallback.
+
+**Container-specific placement (the only container-aware code in the whole pipeline),
+`Inferior.Game`:**
+- `TextMarkingAtlas.cs` — builds/caches one shared RGBA `Texture2D` per (text, pixelScale) from
+  the existing `TextPainter`/`BitmapFonts` (no new font code). RGB=white glyph, alpha=coverage.
+  One texture total for "TEST 123" — every container's decal samples the same instance, no
+  per-container or per-object texture upload. Simplification flagged in the file: process-
+  lifetime cache, no disposal path — fine for one proof marking, revisit before a real
+  many-marking atlas replaces it.
+- `ContainerSurfaceMarking.cs` — places the projector on the Z+ face (width 4.4 m spans the
+  4.0 m inset zone regardless of seeded row count; height derived from the text's actual pixel
+  aspect ratio so it isn't stretched; depth 0.08 m exceeds the seeded 0.03-0.05 m inset depth).
+- `SystemSpaceState.Containers.cs` — every spawned container gets the decal (per Timo's choice
+  of "every container" over a dedicated debug object, for easy inspection from any station).
+  Decal VB/IB built alongside the container's own at spawn time, disposed alongside it at both
+  existing container-disposal sites. Drawn as a second pass after all containers' own meshes,
+  `BlendState.AlphaBlend` set/restored around it (mirrors `CelestialBodyRenderer`'s atmosphere-
+  billboard pattern — `MeshRenderer.Draw()` itself never touches `BlendState`).
+
+**Tests:** `SurfaceMarkingGeometryTests.cs` (13 tests, synthetic fixtures per testing-ai.md —
+finite vertices/UVs, non-zero triangle area, multi-triangle coverage, clipping never exceeds
+the projector volume, perpendicular wall receives geometry, normal preservation, winding
+matches the project's established convention, determinism, receiver mesh unchanged, receiver
+predicate). `ContainerSurfaceMarkingTests.cs` (8 tests against the real
+`ShippingContainerFactory` output across 5 seeds spanning the full 1-8 row / 1-4 col range —
+every seed's decal measurably crosses a real depth change, is deterministic, and never touches
+the container's own mesh). Full fast-tier suite (743 Game.Test + others) passes; Debug+Release
+build clean; complete suite including Slow tier run for this milestone per testing-ai.md
+("deliberate milestone verification") — one unrelated pre-existing failure found
+(`MegastationMegaShelfTests.LargeBayCanAcceptMoreThanTwoBayWideShelvesWithoutOverlap`,
+confirmed via `git stash` to fail identically on clean `master`, nothing to do with this work;
+flagged separately, not fixed here).
+
+**Explicitly not done, per the brief's own stop point:** wiring markings into ships/stations,
+semantic receiver filtering beyond the accept-all hook, any atlas content beyond this one proof
+string, icons/logos/wear/rust/grime effects, multiple blend modes, a decal editing UI. Also not
+yet exercised: whether `PresentationDepthBias` alone is visually sufficient (the brief's
+preferred z-fighting fix) — if Timo's in-engine look finds residual z-fighting, the documented
+fallback is a small receiver-normal vertex offset, not yet implemented.
+
+**Not visually confirmed.** Everything above is implemented/builds/tests-pass by the strict
+distinction this file requires — nobody has looked at "TEST 123" rendered in-engine yet. Do not
+treat this as done until Timo has seen it (pass criteria are in the original brief: reads as one
+continuous marking, follows insets/walls without visible discontinuity, no z-fighting, no
+floating gap, lighting varies correctly across the crossed surfaces, transparent atlas regions
+reveal the container normally).
+
 ### GC-optimization pass (`Docs/gc-optimization-question.md`) — findings #1-#3 and Server-GC done, #4 deferred
 
 #### `Bus<T>` message-buffer allocation reduction — done

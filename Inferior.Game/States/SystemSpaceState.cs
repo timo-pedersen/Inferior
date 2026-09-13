@@ -418,7 +418,13 @@ public sealed partial class SystemSpaceState : GameState
                 explicitStationVisualIdentity,
                 stationArrivalPayload != null ? "station arrival" : "starter relocation");
         _stationPositions.Clear();
-        foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
+        foreach (var pc in _containers)
+        {
+            pc.Vb.Dispose();
+            pc.Ib.Dispose();
+            pc.MarkingVb?.Dispose();
+            pc.MarkingIb?.Dispose();
+        }
         _containers.Clear();
         _prevCameraPosValid = false;
 
@@ -505,7 +511,13 @@ public sealed partial class SystemSpaceState : GameState
         _effect?.Dispose();
         ResetStationVisualResidency("state exit");
         _systemMaterialLibrarySlot.Clear();
-        foreach (var pc in _containers) { pc.Vb.Dispose(); pc.Ib.Dispose(); }
+        foreach (var pc in _containers)
+        {
+            pc.Vb.Dispose();
+            pc.Ib.Dispose();
+            pc.MarkingVb?.Dispose();
+            pc.MarkingIb?.Dispose();
+        }
         _containers.Clear();
         _calibrationCubeVb?.Dispose();
         _calibrationCubeIb?.Dispose();

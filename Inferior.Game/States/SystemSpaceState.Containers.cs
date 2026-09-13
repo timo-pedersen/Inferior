@@ -30,6 +30,10 @@ public sealed partial class SystemSpaceState
     // per !invariants.md §6.
     private const int ContainerSeedRoot = 0x434F4E54;
 
+    // Same mechanism/scale as SystemSpaceState.H1CoplanarOverlayClipDepthBias — a decal sits
+    // exactly on its receiver surface and would otherwise z-fight it.
+    private const float ContainerMarkingDepthBias = .00002f;
+
     // level is accepted but not yet used — no container LOD variants exist yet.
     private void DrawContainers(DetailLevel level)
     {
@@ -42,6 +46,8 @@ public sealed partial class SystemSpaceState
         // independent per-pass projections. Same fix as ShipMeshRenderer.Draw needed.
         Matrix proj = _effect.Projection;
         var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
+
+        var markedContainers = new List<(PlacedContainer pc, Matrix world)>();
 
         foreach (var pc in _containers)
         {
@@ -63,6 +69,26 @@ public sealed partial class SystemSpaceState
             _meshRenderer.DrawDynamicLit(pc.Vb, pc.Ib, world, view, proj,
                 Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient,
                 specStrength, specShininess);
+
+            if (pc.MarkingVb != null && pc.MarkingIb != null)
+                markedContainers.Add((pc, world));
+        }
+
+        // Projected surface markings: a second, alpha-blended pass over the already-drawn
+        // containers above (Inferior.Rendering/SurfaceMarkingGeometry.cs) — never a
+        // modification of the container mesh itself, drawn with the same shared atlas texture
+        // for every container (no per-container texture upload).
+        if (markedContainers.Count > 0)
+        {
+            _gd.BlendState = BlendState.AlphaBlend;
+            Texture2D atlas = Containers.ContainerSurfaceMarking.GetAtlas(_gd);
+            foreach (var (pc, world) in markedContainers)
+            {
+                _meshRenderer.DrawDecalLit(pc.MarkingVb!, pc.MarkingIb!, world, view, proj,
+                    Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour),
+                    SceneLighting.Ambient, atlas, ContainerMarkingDepthBias);
+            }
+            _gd.BlendState = BlendState.Opaque;
         }
 
         // Restore effect state expected by subsequent draw calls
@@ -123,6 +149,24 @@ public sealed partial class SystemSpaceState
                     container.Indices.Length, BufferUsage.WriteOnly);
                 ib.SetData(container.Indices);
 
+                // Proof-case projected surface marking (Docs/projected-surface-markings-brief.md):
+                // "TEST 123" projected onto this container's Z+ inset face. Receiver mesh above
+                // is untouched; this is a separate decal mesh drawn as an additional
+                // alpha-blended pass in DrawContainers.
+                VertexBuffer? markingVb = null;
+                IndexBuffer?  markingIb = null;
+                var (markingVerts, markingIndices) = Containers.ContainerSurfaceMarking.BuildDecal(container);
+                if (markingIndices.Length > 0)
+                {
+                    markingVb = new VertexBuffer(_gd, VertexPositionNormalColorTexture.VertexDeclaration,
+                        markingVerts.Length, BufferUsage.WriteOnly);
+                    markingVb.SetData(markingVerts);
+
+                    markingIb = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
+                        markingIndices.Length, BufferUsage.WriteOnly);
+                    markingIb.SetData(markingIndices);
+                }
+
                 // Seeded slow tumble — a sub-stream of this container's own identity-derived
                 // stream (see containerRng above), not a global spawn index.
                 var    tumbleRng = containerRng.Derive("tumble");
@@ -145,6 +189,8 @@ public sealed partial class SystemSpaceState
                     Container         = container,
                     Vb                = vb,
                     Ib                = ib,
+                    MarkingVb         = markingVb,
+                    MarkingIb         = markingIb,
                 });
             }
         }
@@ -166,5 +212,10 @@ public sealed partial class SystemSpaceState
         public required Containers.ShippingContainer Container { get; init; }
         public required VertexBuffer   Vb                { get; init; }
         public required IndexBuffer    Ib                { get; init; }
+        // Proof-case projected surface marking geometry — null if the marking projector
+        // produced no geometry for this container (should not happen for an ordinary
+        // container, but nothing here assumes it always will).
+        public VertexBuffer?           MarkingVb         { get; init; }
+        public IndexBuffer?            MarkingIb         { get; init; }
     }
 }

@@ -208,13 +208,15 @@ Simulation domain model. Depends on Core, Galaxy.
 - `EngineMeshBuilder.cs` / `EngineGpuMesh.cs` — build and upload authored engine visual geometry, including the mirrored-across-hull-X winding flip.
 - `GeometryBuilder.cs` — face/winding helpers (`AddConvexFace`/`AddFace`), `BuildDynamic` (VertexPositionNormalColorTexture, White baked, ship hull/nacelle/pylon), `BuildBaked` (VertexPositionColor, currently no callers).
 - `MeshFactory.cs` — sphere/ring/billboard-quad/box mesh generation. `CreateSphere` is used (star sphere); `CreateBox`/`CreateQuad` are dead code (zero callers) — early prototype geometry that predates station generation, superseded in spirit by `ChamferedBox`/`StationGenerator.PrepareBoxHullMesh`, never wired up or removed.
-- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`). DynamicLit callers share explicit specular/shininess, material-map, bump-strength and render-space eye-position binding; the default eye remains `Vector3.Zero` for origin-shifted `Camera3D` passes.
+- `MeshRenderer.cs` — draws over the shared `LitSurface.fx` effect (Content/Effects/LitSurface.fx): `DrawDynamicLit` / `DrawBakedColorLit`, plus station-only shadowed variants for Phase B (`DynamicLitShadowed`, `BakedColorLitShadowed`). DynamicLit callers share explicit specular/shininess, material-map, bump-strength and render-space eye-position binding; the default eye remains `Vector3.Zero` for origin-shifted `Camera3D` passes. `DrawDecalLit` (projected surface markings): same ambient+N·L lighting, real texture alpha output instead of DynamicLit's hard-coded 1.0 — caller sets an alpha-blend `BlendState` and a small `presentationDepthBias` (decals sit exactly on their receiver surface).
 - `RingPrimitive.cs` — shared ring-mesh scratch buffer + draw, used by celestial-body and station orbit rings.
 - `SceneLighting.cs` — scene-level directional light parameters (SunDirection/Ambient/SunColour) shared by all 3D passes; `LightFactor(normal)` is the canonical N·L-vs-ambient formula.
 - `SemanticHullMeshBuilder.cs` / `SemanticHullGpuMesh.cs` — build and upload authored semantic ship-hull geometry from `SemanticHullGeometry`, grouped by render role (structural/engine-mount/cargo-door/cockpit frame/cockpit glass); validates winding against the author-declared outward normal.
 - `ShipMeshRenderer.cs` — owns and draws ship hulls plus installed engine/cockpit child modules through the same DynamicLit material/effect path. Cockpit rendering consumes the simulation-published root pose and definition-owned geometry. Object Designer can pass an in-memory hull override, local render scale and preview eye position, then invalidate the semantic mesh cache after edits. Also owns a small baked-line debug-glyph renderer (surface-role axis labels), independent of the station bitmap-font/`PlanarTextGeometry` text path.
 - `CockpitMeshBuilder.cs` / `CockpitGpuMesh.cs` — validate and upload definition-owned cockpit triangles into material-separated GPU parts.
 - `SkyboxRenderer.cs` — starfield background: `Build` (static)/`Load`/`Draw`.
+- `SurfaceMarkingProjector.cs` — `readonly record struct` describing a projected surface marking's 2D coordinate frame (Origin/Right/Up/Forward) plus finite width/height/depth, atlas UV region, and tint; `Create` derives a validated proper-handed frame from a projection direction + up-reference.
+- `SurfaceMarkingGeometry.cs` — `Project`: clips receiver triangles against a `SurfaceMarkingProjector`'s volume (Sutherland-Hodgman in projector-local space) and emits new, separate decal geometry — the receiver mesh itself is never modified. Generic: no knowledge of containers/ships/stations; an optional per-triangle predicate is the receiver-selection hook.
 - `StationBrightnessTuning.cs` — live-tunable decoration-brightness multiplier, variant value floor, compression strength, and saturation falloff for station texture generation; baked defaults after Brief B5.
 - `SunTuning.cs` — live-tunable sun glare/disc parameters (glare layer alphas, size multiplier, disc floor pixels) backing the sun tuning panel.
 - `Type1HullFactory.cs` — builds the Type-1 (legacy fallback) ship hull/nacelle/pylon meshes, used only when a hull has no `VisualGeometry`.
@@ -404,7 +406,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `CommodityType.cs` — enum of cargo types (Food, Electronics, Fuel, Weapons, Contraband).
 - `ShippingContainer.cs` — real container domain model: colour, wear, lock, location, pre-built textured mesh.
-- `ShippingContainerFactory.cs` — deterministic container mesh builder with wear + text overlay; used both by standalone/debug-spawn containers and station-placed ones (`SystemSpaceState.Containers.cs`, `StationDecorator.PlaceContainer`).
+- `ShippingContainerFactory.cs` — deterministic container mesh builder with wear + text overlay; used both by standalone/debug-spawn containers and station-placed ones (`SystemSpaceState.Containers.cs`, `StationDecorator.PlaceContainer`). Container lettering was removed from this geometry (see comment in `BuildLongFaceInsets`) pending the projected-surface-marking replacement below.
+- `ContainerSurfaceMarking.cs` — proof-case placement of a `SurfaceMarkingProjector` ("TEST 123") onto a container's Z+ inset face (the face with real seeded recessed cells — Y+/Y- are plain); the only container-aware part of the marking pipeline, everything else in `Inferior.Rendering` is generic.
 
 **Station/** — procedural station generation
 
@@ -431,7 +434,8 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `StationVisualUpload.cs` — station-specific 2 ms cooperative upload scheduler, ordered resource metadata, accumulated/frame/operation timing, oversized-operation detection, resource ownership transfer, and frame-budgeted cancellation/failure cleanup. It contains no `GraphicsDevice` dependency and is exercised directly by lifecycle tests.
 - `StationYagiAntenna.cs` — Yagi antenna element builder: randomized geometry and placement.
 - `SurfaceTexture.cs` — enum of surface types (CleanPanel, TechPanel, Glass, etc.).
-- `TexturePainter.cs` — CPU pixel-buffer text drawing using `BitmapFonts`.
+- `TexturePainter.cs` — CPU pixel-buffer text drawing using `BitmapFonts` (class name inside is `TextPainter`).
+- `TextMarkingAtlas.cs` — builds/caches one shared RGBA `Texture2D` per (text, pixelScale) from `TextPainter`, for use as a `SurfaceMarkingProjector.AtlasRegion` source; RGB=white glyph, alpha=coverage, transparent elsewhere. Process-lifetime cache, no disposal path (simplification noted in the file itself).
 - `TexturePalette.cs` — per-economy colour scheme (base/accent/grime, panel noise/contrast).
 
 **Station/Megastations/** — occupancy-generated megastation structural path plus the presentation layers built on top of it. 49 source files; this section was significantly incomplete (20/49 listed) until the A1 inventory pass (2026-09-11) — one-liners below for the newly-added files are name/class-derived, not individually deep-read the way `Inferior.Rendering`'s were; treat as a locator, verify against the file for anything load-bearing.

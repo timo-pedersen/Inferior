@@ -121,6 +121,31 @@ public sealed class MeshRenderer : IDisposable
         Draw(vb, ib, fx, startIndex, indexCount / 3, presentationDepthBias);
     }
 
+    /// <summary>
+    /// Projected surface marking (decal) geometry — an alpha-blended overlay drawn as an
+    /// ordinary additional pass over already-drawn receiver geometry, never a modification of
+    /// it. Caller is responsible for setting an alpha-blending GraphicsDevice.BlendState before
+    /// this call and restoring it afterward (this mirrors every other alpha-blended 3D pass in
+    /// the codebase, e.g. CelestialBodyRenderer's atmosphere billboards — MeshRenderer.Draw()
+    /// itself never touches BlendState). presentationDepthBias defaults to zero but callers
+    /// should pass a small positive bias (same mechanism/scale as
+    /// SystemSpaceState.H1CoplanarOverlayClipDepthBias) since decal geometry sits exactly on
+    /// the receiver surface and would otherwise z-fight it.
+    /// </summary>
+    public void DrawDecalLit(
+        VertexBuffer vb, IndexBuffer ib,
+        Matrix world, Matrix view, Matrix projection,
+        Color materialColor, Vector3 sunDirection, Color sunColour, float ambient,
+        Texture2D texture, float presentationDepthBias = 0f)
+    {
+        var fx = _litSurfaceEffect;
+        fx.CurrentTechnique = fx.Techniques["DecalLit"];
+        SetCoreParameters(fx, world, view, projection, materialColor, sunDirection, sunColour,
+            ambient, texture, vertexIlluminationScale: 0f);
+        fx.Parameters["ModuleToStationLocal"].SetValue(Matrix.Identity);
+        Draw(vb, ib, fx, presentationDepthBias: presentationDepthBias);
+    }
+
     public void DrawDebugFlatColorRange(
         VertexBuffer vb,
         IndexBuffer ib,
