@@ -32,15 +32,15 @@ public static class ContainerSurfaceMarking
     private const float MarkingDepthMeters = 0.08f;    // exceeds the 0.03-0.05m seeded inset depth
 
     /// <summary>
-    /// Builds the decal geometry for "TEST 123" projected onto <paramref name="container"/>'s
+    /// Builds the decal geometry for "TEST 123" projected onto <paramref name="geometry"/>'s
     /// Z+ face. Returns empty arrays if the projected text does not intersect any receiver
     /// triangle (should not happen for an ordinary container, but the caller should still
     /// handle it rather than assume a non-empty result).
     /// </summary>
     public static (VertexPositionNormalColorTexture[] Vertices, short[] Indices) BuildDecal(
-        ShippingContainer container)
+        ShippingContainerGeometry geometry)
     {
-        ArgumentNullException.ThrowIfNull(container);
+        ArgumentNullException.ThrowIfNull(geometry);
 
         int textPixelWidth = TextPainter.MeasureText(ProofText, PixelScale);
         int textPixelHeight = TextPainter.MeasureHeight(PixelScale);
@@ -56,7 +56,7 @@ public static class ContainerSurfaceMarking
             atlasRegion: new Vector4(0f, 0f, 1f, 1f),
             tint: Color.White);
 
-        return SurfaceMarkingGeometry.Project(projector, container.Vertices, container.Indices);
+        return SurfaceMarkingGeometry.Project(projector, geometry.Vertices, geometry.Indices);
     }
 
     /// <summary>Shared atlas texture for the proof marking — one texture, every container's decal samples it.</summary>

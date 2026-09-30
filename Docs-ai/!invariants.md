@@ -47,6 +47,9 @@ The simulation thread is the intended owner of the mutable live universe.
 
 - Mutable ship/world simulation state has one authoritative owner.
 - The renderer and UI consume immutable snapshots or derived presentation data.
+- All simulation state that must be mutually coherent in one rendered frame is atomically
+  published as one immutable presentation generation. Never assemble a frame from independently
+  published ship, camera, world-object, targeting, or other spatial snapshots.
 - Main/UI thread sends commands, player input, selections, and requests to the simulation; it does not send competing world truth back into the simulation.
 - Do not create a second mutable copy of ship position, velocity, time, body state, or station state on another thread.
 - Crossing a thread boundary does not make referenced mutable objects immutable. Snapshot contents must themselves be safe to read.

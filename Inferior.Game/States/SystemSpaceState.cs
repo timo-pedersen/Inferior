@@ -2,6 +2,7 @@ using Inferior.Core;
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
 using Inferior.Core.Simulation;
+using Inferior.Core.World;
 using Inferior.Galaxy;
 using Inferior.Game.Input;
 using Inferior.Game.Hyperspace;
@@ -104,14 +105,13 @@ public sealed partial class SystemSpaceState : GameState
     // modules/textures/buffers live in the zero-or-one package owned by
     // SystemSpaceState.StationResidency.cs.
     private readonly List<(Galaxy.Station station, DVec3 pos)>                               _stationPositions = [];
-    // Shipping containers placed around each station — ordinary world objects (real
-    // ShippingContainerFactory geometry, real rendering path); placement policy (near
-    // stations, 3-6 per station) is for testing, the objects themselves are not.
-    private readonly List<PlacedContainer> _containers = [];
+    // GPU representations keyed by simulation-owned world-object identity. Transform state
+    // comes only from _frameWorldSnap; these entries own no mutable world position/motion.
+    private readonly Dictionary<WorldObjectId, RenderedContainer> _containers = [];
 
     // ── Container rendering ───────────────────────────────────────────────────
-    // Renderer shared with ship/hull draw calls. Each container owns its own
-    // VertexBuffer/IndexBuffer (see PlacedContainer) — geometry differs per instance.
+    // Renderer shared with ship/hull draw calls. RenderedContainer owns only per-instance
+    // GPU resources; simulation snapshots remain authoritative for transforms.
     private MeshRenderer?  _meshRenderer;
 
     // ── Ship hull and installed child-module meshes ───────────────────────────
@@ -191,9 +191,10 @@ public sealed partial class SystemSpaceState : GameState
     // ── Flat Hyperspace ───────────────────────────────────────────────────────
     private FlatHyperspaceController _hyperspace = null!;
 
-    // Ship snapshot captured once at the top of Update() — all sub-systems use this
-    // single consistent value so no two decisions in the same frame see different positions.
+    // One presentation generation captured at the top of Update(). Ship/camera and world
+    // objects are always derived from this same immutable simulation tick.
     private SpaceSimulation.ShipSnapshot? _frameShipSnap;
+    private SpaceSimulation.WorldPresentationSnapshot? _frameWorldSnap;
 
     // SpriteBatch captured once at the top of Draw() — DrawStationGlows now runs once
     // per render pass (see DrawFarPassContent/DrawMidPassContent/DrawNearPassContent),
@@ -388,7 +389,7 @@ public sealed partial class SystemSpaceState : GameState
         _effect.DirectionalLight1.Enabled = false;
         _effect.DirectionalLight2.Enabled = false;
 
-        // Container renderer — geometry is built per-instance in SpawnContainers
+        // Container renderer — geometry is built lazily from simulation snapshots.
         _litSurfaceEffect = _content.Load<Effect>("Effects/LitSurface");
         _engineExhaustGlowEffect = _content.Load<Effect>("Effects/EngineExhaustGlow");
         _meshRenderer     = new MeshRenderer(_gd, _litSurfaceEffect);
@@ -418,14 +419,8 @@ public sealed partial class SystemSpaceState : GameState
                 explicitStationVisualIdentity,
                 stationArrivalPayload != null ? "station arrival" : "starter relocation");
         _stationPositions.Clear();
-        foreach (var pc in _containers)
-        {
-            pc.Vb.Dispose();
-            pc.Ib.Dispose();
-            pc.MarkingVb?.Dispose();
-            pc.MarkingIb?.Dispose();
-        }
-        _containers.Clear();
+        DisposeContainerVisuals();
+        _frameWorldSnap = null;
         _prevCameraPosValid = false;
 
         // Calibration cube — geometry rebuilds every entry like everything else above;
@@ -511,14 +506,8 @@ public sealed partial class SystemSpaceState : GameState
         _effect?.Dispose();
         ResetStationVisualResidency("state exit");
         _systemMaterialLibrarySlot.Clear();
-        foreach (var pc in _containers)
-        {
-            pc.Vb.Dispose();
-            pc.Ib.Dispose();
-            pc.MarkingVb?.Dispose();
-            pc.MarkingIb?.Dispose();
-        }
-        _containers.Clear();
+        DisposeContainerVisuals();
+        _frameWorldSnap = null;
         _calibrationCubeVb?.Dispose();
         _calibrationCubeIb?.Dispose();
         _calibrationCubeVb = null;
@@ -554,7 +543,11 @@ public sealed partial class SystemSpaceState : GameState
         var keys  = Keyboard.GetState();
         double dt = gameTime.ElapsedGameTime.TotalSeconds;
         BlinkClock.Update(dt);
-        _frameShipSnap = _simulation.ShipState;  // read once — consistent for this entire frame
+        SpaceSimulation.SimulationPresentationSnapshot? presentation =
+            _simulation.PresentationState;
+        _frameShipSnap = presentation?.Ship;
+        _frameWorldSnap = presentation?.World;
+        SyncContainerVisuals(_frameWorldSnap);
         // A non-null snapshot alone is NOT sufficient here: several ticks can publish
         // snapshots (system install, station generation) before the sim thread even looks
         // at the queued relocation request, so an early snapshot still carries the
@@ -980,13 +973,6 @@ public sealed partial class SystemSpaceState : GameState
         // near the camera imprecise for no benefit to those callers.
         _camera.SetProjection(MathHelper.ToRadians(60f), AspectRatio,
             (float)(MidTierNear * Camera3D.RenderScale), (float)(MidTierFar * Camera3D.RenderScale));
-
-        // Populate containers once station positions exist — a lazy one-time world
-        // population, not a per-frame simulation step. Orientation itself is on rails
-        // (pure function of sim time, evaluated at draw/query time — see RailsOrientation
-        // in SystemSpaceState.Helpers.cs), so there is nothing to update here per frame.
-        if (_containers.Count == 0 && _stationPositions.Count > 0)
-            SpawnContainers();
 
         // Update direction balls — after position rebuild so current-frame station positions
         // are used, not the previous frame's. Avoids the ~1-frame (~350 m) visual offset

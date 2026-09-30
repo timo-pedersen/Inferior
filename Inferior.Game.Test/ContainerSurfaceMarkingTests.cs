@@ -22,8 +22,9 @@ public sealed class ContainerSurfaceMarkingTests
     {
         ShippingContainer container = ShippingContainerFactory.Generate(
             new Color(110, 84, 52), wear: 0.2f, sidePatternSeed);
+        ShippingContainerGeometry geometry = ShippingContainerFactory.GenerateGeometry(container);
 
-        var (verts, indices) = ContainerSurfaceMarking.BuildDecal(container);
+        var (verts, indices) = ContainerSurfaceMarking.BuildDecal(geometry);
 
         Assert.NotEmpty(indices);
 
@@ -53,8 +54,10 @@ public sealed class ContainerSurfaceMarkingTests
         ShippingContainer containerB = ShippingContainerFactory.Generate(
             new Color(110, 84, 52), wear: 0.2f, sidePatternSeed);
 
-        var (vertsA, indicesA) = ContainerSurfaceMarking.BuildDecal(containerA);
-        var (vertsB, indicesB) = ContainerSurfaceMarking.BuildDecal(containerB);
+        var (vertsA, indicesA) = ContainerSurfaceMarking.BuildDecal(
+            ShippingContainerFactory.GenerateGeometry(containerA));
+        var (vertsB, indicesB) = ContainerSurfaceMarking.BuildDecal(
+            ShippingContainerFactory.GenerateGeometry(containerB));
 
         Assert.Equal(indicesA, indicesB);
         for (int i = 0; i < vertsA.Length; i++)
@@ -69,13 +72,14 @@ public sealed class ContainerSurfaceMarkingTests
     {
         ShippingContainer container = ShippingContainerFactory.Generate(
             new Color(110, 84, 52), wear: 0.2f, sidePatternSeed: 777);
-        var originalVerts = (Inferior.Rendering.VertexPositionNormalColorTexture[])container.Vertices.Clone();
-        var originalIndices = (short[])container.Indices.Clone();
+        ShippingContainerGeometry geometry = ShippingContainerFactory.GenerateGeometry(container);
+        var originalVerts = (Inferior.Rendering.VertexPositionNormalColorTexture[])geometry.Vertices.Clone();
+        var originalIndices = (short[])geometry.Indices.Clone();
 
-        ContainerSurfaceMarking.BuildDecal(container);
+        ContainerSurfaceMarking.BuildDecal(geometry);
 
-        Assert.Equal(originalIndices, container.Indices);
-        for (int i = 0; i < container.Vertices.Length; i++)
-            Assert.Equal(originalVerts[i].Position, container.Vertices[i].Position);
+        Assert.Equal(originalIndices, geometry.Indices);
+        for (int i = 0; i < geometry.Vertices.Length; i++)
+            Assert.Equal(originalVerts[i].Position, geometry.Vertices[i].Position);
     }
 }

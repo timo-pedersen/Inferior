@@ -62,21 +62,39 @@ public sealed partial class SystemSpaceState
             _radarContactIds.Add(id);
         }
 
-        foreach (var pc in _containers)
+        var currentContainerContactIds = new HashSet<string>();
+        if (_frameWorldSnap != null && _frameWorldSnap.SystemGalaxyIndex == _star.GalaxyIndex)
         {
-            DVec3 stPos = DVec3.Zero;
-            foreach (var (s, sPos) in _stationPositions)
-                if (ReferenceEquals(s, pc.Station)) { stPos = sPos; break; }
-            DVec3 pos   = stPos + pc.Offset;
-            DVec3 del   = pos - camPos;
-            float shipDistance = (float)(pos - shipPos).Length;
-            var   contact = new RadarContact(
-                pc.Id, pc.Name,
-                new Vector3((float)del.X, (float)del.Y, (float)del.Z),
-                Vector3.Zero, ContactType.Debris, shipDistance);
-            _targeting.OnContactUpdated(contact);
-            _cockpitUI.NotifyRadarContact(contact);
-            _radarContactIds.Add(pc.Id);
+            foreach (SpaceSimulation.ShippingContainerSnapshot snapshot in _frameWorldSnap.Containers)
+            {
+                string id = $"object:{snapshot.State.Id}";
+                currentContainerContactIds.Add(id);
+                DVec3 pos = snapshot.State.Position;
+                DVec3 del = pos - camPos;
+                DVec3 relativeVelocity = snapshot.State.LinearVelocity
+                                       - (_frameShipSnap?.Velocity ?? DVec3.Zero);
+                float shipDistance = (float)(pos - shipPos).Length;
+                var contact = new RadarContact(
+                    id,
+                    snapshot.Container.Name,
+                    new Vector3((float)del.X, (float)del.Y, (float)del.Z),
+                    relativeVelocity.ToVector3(),
+                    ContactType.Debris,
+                    shipDistance);
+                _targeting.OnContactUpdated(contact);
+                _cockpitUI.NotifyRadarContact(contact);
+                _radarContactIds.Add(id);
+            }
+        }
+
+        foreach (string staleId in _radarContactIds
+                     .Where(id => id.StartsWith("object:", StringComparison.Ordinal)
+                               && !currentContainerContactIds.Contains(id))
+                     .ToArray())
+        {
+            _targeting.OnContactLost(staleId);
+            _cockpitUI.NotifyRadarContactLost(staleId);
+            _radarContactIds.Remove(staleId);
         }
     }
 

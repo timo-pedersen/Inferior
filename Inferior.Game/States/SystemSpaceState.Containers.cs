@@ -1,221 +1,155 @@
-using Inferior.Core;
-using Inferior.Core.DataBus;
-using Inferior.Core.Math;
-using Inferior.Core.Simulation;
-using Inferior.Galaxy;
-using Inferior.Game.Hyperspace;
-using Inferior.Game.StationGen;
-using Inferior.Game.UI;
-using Inferior.Gameplay;
-using Inferior.Gameplay.Components;
-using Inferior.Gameplay.Components.Power;
-using Inferior.Gameplay.Sensors;
-using Inferior.Gameplay.Ship;
+using Inferior.Core.World;
+using Inferior.Game.Containers;
 using Inferior.Rendering;
-using Inferior.UI;
-using Inferior.UI.Controls;
-using Inferior.UI.Controls.Cockpit;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
-using System.Reflection.Metadata;
 
 namespace Inferior.Game.States;
 
 public sealed partial class SystemSpaceState
 {
-    // Root seed for the container-placement stream — ASCII "CONT". Independent salt so
-    // adding/changing anything else in the game never reshuffles container placement,
-    // per !invariants.md §6.
-    private const int ContainerSeedRoot = 0x434F4E54;
-
-    // Same mechanism/scale as SystemSpaceState.H1CoplanarOverlayClipDepthBias — a decal sits
-    // exactly on its receiver surface and would otherwise z-fight it.
     private const float ContainerMarkingDepthBias = .00002f;
 
     // level is accepted but not yet used — no container LOD variants exist yet.
     private void DrawContainers(DetailLevel level)
     {
-        if (_containers.Count == 0 || _meshRenderer == null) return;
+        if (_frameWorldSnap == null
+            || _frameWorldSnap.SystemGalaxyIndex != _star.GalaxyIndex
+            || _frameWorldSnap.Containers.Count == 0
+            || _meshRenderer == null)
+            return;
 
-        float  rs   = (float)Camera3D.RenderScale;
+        float rs = (float)Camera3D.RenderScale;
         Matrix view = _effect.View;
-        // Active pass's projection (_effect.Projection), not camera.ProjectionMatrix —
-        // that's only a representative mid-tier projection now that rendering uses three
-        // independent per-pass projections. Same fix as ShipMeshRenderer.Draw needed.
         Matrix proj = _effect.Projection;
         var (specStrength, specShininess) = SpecularParamsFor(_specularPreset);
 
-        var markedContainers = new List<(PlacedContainer pc, Matrix world)>();
+        var markedContainers = new List<(RenderedContainer Visual, Matrix World)>();
 
-        foreach (var pc in _containers)
+        foreach (SpaceSimulation.ShippingContainerSnapshot snapshot in _frameWorldSnap.Containers)
         {
-            DVec3 stPos = DVec3.Zero;
-            foreach (var (s, sPos) in _stationPositions)
-                if (ReferenceEquals(s, pc.Station)) { stPos = sPos; break; }
+            if (!_containers.TryGetValue(snapshot.State.Id, out RenderedContainer? visual))
+                continue;
 
-            DVec3   universePos = stPos + pc.Offset;
-            Vector3 renderPos   = _camera.ToRenderSpace(universePos);
+            Vector3 renderPos = _camera.ToRenderSpace(snapshot.State.Position);
             if (renderPos.Length() > 30_000f) continue;
 
-            Quaternion orientation = RailsOrientation(
-                pc.SpinAxis, pc.SpinRateRadPerSec, _gameTimeSeconds, pc.InitialOrientation);
-
             Matrix world = Matrix.CreateScale(rs)
-                         * Matrix.CreateFromQuaternion(orientation)
+                         * Matrix.CreateFromQuaternion(snapshot.State.Orientation)
                          * Matrix.CreateTranslation(renderPos);
 
-            _meshRenderer.DrawDynamicLit(pc.Vb, pc.Ib, world, view, proj,
+            _meshRenderer.DrawDynamicLit(visual.Vb, visual.Ib, world, view, proj,
                 Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour), SceneLighting.Ambient,
                 specStrength, specShininess);
 
-            if (pc.MarkingVb != null && pc.MarkingIb != null)
-                markedContainers.Add((pc, world));
+            if (visual.MarkingVb != null && visual.MarkingIb != null)
+                markedContainers.Add((visual, world));
         }
 
-        // Projected surface markings: a second, alpha-blended pass over the already-drawn
-        // containers above (Inferior.Rendering/SurfaceMarkingGeometry.cs) — never a
-        // modification of the container mesh itself, drawn with the same shared atlas texture
-        // for every container (no per-container texture upload).
+        // Projected surface markings remain a separate alpha-blended overlay. The receiver
+        // mesh is untouched and every container samples the same shared atlas.
         if (markedContainers.Count > 0)
         {
             _gd.BlendState = BlendState.AlphaBlend;
-            Texture2D atlas = Containers.ContainerSurfaceMarking.GetAtlas(_gd);
-            foreach (var (pc, world) in markedContainers)
+            Texture2D atlas = ContainerSurfaceMarking.GetAtlas(_gd);
+            foreach (var (visual, world) in markedContainers)
             {
-                _meshRenderer.DrawDecalLit(pc.MarkingVb!, pc.MarkingIb!, world, view, proj,
+                _meshRenderer.DrawDecalLit(visual.MarkingVb!, visual.MarkingIb!, world, view, proj,
                     Color.White, SceneLighting.SunDirection, new Color(SceneLighting.SunColour),
                     SceneLighting.Ambient, atlas, ContainerMarkingDepthBias);
             }
             _gd.BlendState = BlendState.Opaque;
         }
 
-        // Restore effect state expected by subsequent draw calls
-        _gd.RasterizerState   = RasterizerState.CullCounterClockwise;
+        _gd.RasterizerState = RasterizerState.CullCounterClockwise;
         _gd.DepthStencilState = DepthStencilState.Default;
     }
 
-    private static Color GetContainerLockColour(Containers.LockGrade grade) => grade switch
+    /// <summary>
+    /// Reconciles main-thread GPU resources with immutable simulation snapshots. This method
+    /// never writes position, orientation, or velocity back to the simulation.
+    /// </summary>
+    private void SyncContainerVisuals(SpaceSimulation.WorldPresentationSnapshot? snapshot)
     {
-        Containers.LockGrade.Civilian => new Color( 80, 100, 145),
-        Containers.LockGrade.Military => new Color( 75,  95,  60),
-        Containers.LockGrade.Vault    => new Color(160, 135,  45),
-        _                             => new Color(150, 148, 142),  // None
-    };
+        if (snapshot == null || snapshot.SystemGalaxyIndex != _star.GalaxyIndex)
+            return;
 
-    // Places 3-6 real ShippingContainer objects around every station, for radar/targeting
-    // and visual testing. The placement policy (near stations, seeded count) exists for
-    // testing; the objects it places are ordinary world objects — same generation
-    // conventions, same rendering pipeline, same bookkeeping as everything else.
-    private void SpawnContainers()
-    {
-        foreach (var (station, _) in _stationPositions)
+        var seen = new HashSet<WorldObjectId>();
+        foreach (SpaceSimulation.ShippingContainerSnapshot containerSnapshot in snapshot.Containers)
         {
-            // Stable per-station stream: derived from PersistenceId (not station.Name —
-            // string.GetHashCode() is process-randomized in .NET, forbidden by
-            // !invariants.md §6), salted semantically so unrelated seed streams never
-            // reshuffle container placement.
-            var stationRng = new Inferior.Core.Random.SeededRandom(ContainerSeedRoot)
-                .Derive(station.PersistenceId!)
-                .Derive("containers");
-            int count = stationRng.NextInt(3, 7);  // 3–7 containers per station (NextInt is inclusive both ends)
+            WorldObjectId id = containerSnapshot.State.Id;
+            seen.Add(id);
 
-            for (int i = 0; i < count; i++)
-            {
-                // Each container's own stream, derived from (station, local index) — its
-                // stable identity — not a global spawn-order counter, so adding a
-                // container to one station never reshuffles another station's containers.
-                var containerRng = stationRng.Derive(i);
+            if (_containers.TryGetValue(id, out RenderedContainer? existing)
+                && existing.Container == containerSnapshot.Container)
+                continue;
 
-                double angle  = containerRng.NextDouble() * System.Math.Tau;
-                double dist   = 20.0 + containerRng.NextDouble() * 480.0;  // 20–500 m from station
-                double elevM  = (containerRng.NextDouble() - 0.5) * 60.0;  // ±30 m vertical
-                var    offset = new DVec3(System.Math.Cos(angle) * dist, elevM, System.Math.Sin(angle) * dist);
+            existing?.Dispose();
+            _containers[id] = CreateContainerVisual(containerSnapshot.Container);
+        }
 
-                var grade = (Containers.LockGrade)containerRng.NextInt(0, 3);
-
-                float wear        = containerRng.NextFloat(0f, 1f);
-                int   patternSeed = containerRng.NextInt(int.MinValue, int.MaxValue);
-
-                var container = Containers.ShippingContainerFactory.Generate(
-                    GetContainerLockColour(grade), wear, patternSeed, lockGrade: grade);
-
-                var vb = new VertexBuffer(_gd, VertexPositionNormalColorTexture.VertexDeclaration,
-                    container.Vertices.Length, BufferUsage.WriteOnly);
-                vb.SetData(container.Vertices);
-
-                var ib = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
-                    container.Indices.Length, BufferUsage.WriteOnly);
-                ib.SetData(container.Indices);
-
-                // Proof-case projected surface marking (Docs/projected-surface-markings-brief.md):
-                // "TEST 123" projected onto this container's Z+ inset face. Receiver mesh above
-                // is untouched; this is a separate decal mesh drawn as an additional
-                // alpha-blended pass in DrawContainers.
-                VertexBuffer? markingVb = null;
-                IndexBuffer?  markingIb = null;
-                var (markingVerts, markingIndices) = Containers.ContainerSurfaceMarking.BuildDecal(container);
-                if (markingIndices.Length > 0)
-                {
-                    markingVb = new VertexBuffer(_gd, VertexPositionNormalColorTexture.VertexDeclaration,
-                        markingVerts.Length, BufferUsage.WriteOnly);
-                    markingVb.SetData(markingVerts);
-
-                    markingIb = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
-                        markingIndices.Length, BufferUsage.WriteOnly);
-                    markingIb.SetData(markingIndices);
-                }
-
-                // Seeded slow tumble — a sub-stream of this container's own identity-derived
-                // stream (see containerRng above), not a global spawn index.
-                var    tumbleRng = containerRng.Derive("tumble");
-                double rate      = 0.01 + tumbleRng.NextDouble() * 0.04;
-                var    axisD     = new DVec3(
-                    tumbleRng.NextDouble() * 2.0 - 1.0,
-                    tumbleRng.NextDouble() * 2.0 - 1.0,
-                    tumbleRng.NextDouble() * 2.0 - 1.0).Normalized();
-                var axis = new Vector3((float)axisD.X, (float)axisD.Y, (float)axisD.Z);
-
-                _containers.Add(new PlacedContainer
-                {
-                    Id                = $"{station.PersistenceId}:container:{i}",
-                    Name              = $"{station.Name} Ctn-{i + 1:D2}",
-                    Station           = station,
-                    Offset            = offset,
-                    LockGrade         = grade,
-                    SpinAxis          = axis,
-                    SpinRateRadPerSec = (float)rate,
-                    Container         = container,
-                    Vb                = vb,
-                    Ib                = ib,
-                    MarkingVb         = markingVb,
-                    MarkingIb         = markingIb,
-                });
-            }
+        foreach (WorldObjectId staleId in _containers.Keys.Where(id => !seen.Contains(id)).ToArray())
+        {
+            _containers[staleId].Dispose();
+            _containers.Remove(staleId);
         }
     }
 
-    // A shipping container placed in the world — position is station-relative (fixed
-    // offset), orientation is on rails (RailsOrientation, a pure function of sim time —
-    // see SystemSpaceState.Helpers.cs). No mutable per-frame kinematic state.
-    private sealed class PlacedContainer
+    private RenderedContainer CreateContainerVisual(ShippingContainer container)
     {
-        public required string         Id                { get; init; }
-        public required string         Name              { get; init; }
-        public required Galaxy.Station Station           { get; init; }
-        public required DVec3          Offset            { get; init; }
-        public required Containers.LockGrade LockGrade   { get; init; }
-        public required Vector3        SpinAxis          { get; init; }
-        public required float          SpinRateRadPerSec { get; init; }
-        public          Quaternion     InitialOrientation { get; init; } = Quaternion.Identity;
-        public required Containers.ShippingContainer Container { get; init; }
-        public required VertexBuffer   Vb                { get; init; }
-        public required IndexBuffer    Ib                { get; init; }
-        // Proof-case projected surface marking geometry — null if the marking projector
-        // produced no geometry for this container (should not happen for an ordinary
-        // container, but nothing here assumes it always will).
-        public VertexBuffer?           MarkingVb         { get; init; }
-        public IndexBuffer?            MarkingIb         { get; init; }
+        ShippingContainerGeometry geometry = ShippingContainerFactory.GenerateGeometry(container);
+
+        var vb = new VertexBuffer(_gd, VertexPositionNormalColorTexture.VertexDeclaration,
+            geometry.Vertices.Length, BufferUsage.WriteOnly);
+        vb.SetData(geometry.Vertices);
+
+        var ib = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
+            geometry.Indices.Length, BufferUsage.WriteOnly);
+        ib.SetData(geometry.Indices);
+
+        VertexBuffer? markingVb = null;
+        IndexBuffer? markingIb = null;
+        var (markingVertices, markingIndices) = ContainerSurfaceMarking.BuildDecal(geometry);
+        if (markingIndices.Length > 0)
+        {
+            markingVb = new VertexBuffer(_gd, VertexPositionNormalColorTexture.VertexDeclaration,
+                markingVertices.Length, BufferUsage.WriteOnly);
+            markingVb.SetData(markingVertices);
+
+            markingIb = new IndexBuffer(_gd, IndexElementSize.SixteenBits,
+                markingIndices.Length, BufferUsage.WriteOnly);
+            markingIb.SetData(markingIndices);
+        }
+
+        return new RenderedContainer(container, vb, ib, markingVb, markingIb);
+    }
+
+    private void DisposeContainerVisuals()
+    {
+        foreach (RenderedContainer visual in _containers.Values)
+            visual.Dispose();
+        _containers.Clear();
+    }
+
+    private sealed class RenderedContainer(
+        ShippingContainer container,
+        VertexBuffer vb,
+        IndexBuffer ib,
+        VertexBuffer? markingVb,
+        IndexBuffer? markingIb) : IDisposable
+    {
+        public ShippingContainer Container { get; } = container;
+        public VertexBuffer Vb { get; } = vb;
+        public IndexBuffer Ib { get; } = ib;
+        public VertexBuffer? MarkingVb { get; } = markingVb;
+        public IndexBuffer? MarkingIb { get; } = markingIb;
+
+        public void Dispose()
+        {
+            Vb.Dispose();
+            Ib.Dispose();
+            MarkingVb?.Dispose();
+            MarkingIb?.Dispose();
+        }
     }
 }

@@ -55,6 +55,12 @@ Foundation layer — no dependencies on any other Inferior project.
 - `GalacticEraTimeline.cs` — Galactic Era overlay, fixed initial game date, strict canonical formatting/parsing, and Era-boundary validation.
 - `GameDateJsonConverter.cs` — numeric JSON persistence for `GameDate.AbsoluteDay`.
 
+**World/**
+
+- `WorldObjectId.cs` — strongly typed GUID-backed identity, including stable SHA-256 semantic derivation for regenerated objects; independent of render and future physics handles.
+- `WorldObject.cs` — minimal mutable simulation state (`DVec3` position/linear velocity, quaternion orientation, universe-space angular velocity) plus immutable value snapshot.
+- `WorldObjectRegistry.cs` — simulation-owned add/remove/lookup/enumeration authority, immutable snapshot creation, and the temporary collision-free motion integrator.
+
 **Root**
 
 - `GameState.cs` — `GameStateId` enum, `StateTransition`, abstract `GameState` base class, `GameStateMachine`.
@@ -347,17 +353,17 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread physics loop for the player ship (extends `Simulation`); owns shared pilot harmony changes, applies per-engine allocated force/current-mass translation and harmony-scaled torque/box-inertia assisted rotation, and publishes immutable propulsion/rotation diagnostics. Owns canonical station relocation and player-hull cycling; cycling preserves angular velocity while explicit pose/velocity-reset relocations clear it.
+- `SpaceSimulation.cs` — sim-thread authority for the player ship and general `WorldObjectRegistry`; deterministically creates free shipping-container objects on system install and advances their temporary free motion. At the completed-tick boundary it atomically publishes one immutable `SimulationPresentationSnapshot` containing the same-generation ship and world/container snapshots; world rebuilds never publish out of band. Also owns ship physics, canonical station relocation, and player-hull cycling.
 - `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Cosmo -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
 **States/** — game states + payloads
 
-- `SystemSpaceState.cs` — primary file: fields, ctor, `OnEnter`/`OnExit`/`OnResize`/`Update`/`Draw`/`HandleKeyboard`. In-system 3D flight (all `FlightMode` variants).
+- `SystemSpaceState.cs` — primary file: fields, ctor, `OnEnter`/`OnExit`/`OnResize`/`Update`/`Draw`/`HandleKeyboard`. In-system 3D flight (all `FlightMode` variants). `Update` reads one `SimulationPresentationSnapshot` and derives both frame ship/camera and world-object state from that generation.
 - `SystemSpaceState.CalibrationCube.cs` — fixed-position 10m lighting test-card cube near the starter station: six axis-coded face albedos + labels, rails orientation, `DrawDynamicLit`.
 - `SystemSpaceState.CelestialBodies.cs` — nearly empty; one Stations-owned texture helper left (`CreateNavGlowTexture`).
-- `SystemSpaceState.Containers.cs` — station-placed shipping containers: real `ShippingContainerFactory` geometry, standard rendering path, rails kinematics (`SpawnContainers`/`PlacedContainer`/`DrawContainers`).
-- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; system change invalidates the resident station visual package before replacing lightweight system data; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the shared `RailsOrientation` helper (containers + calibration cube).
+- `SystemSpaceState.Containers.cs` — main-thread container GPU-resource cache and draw path keyed by `WorldObjectId`; consumes simulation snapshots for transforms and never owns container kinematics.
+- `SystemSpaceState.Helpers.cs` — coordinate math, reference-frame tracking, proximity speed scale, near-clip, `EnterSystem`; system change invalidates resident presentation resources before replacing lightweight system data; starter-station relocation plan (`StarterSystemSelector`-selected station, 500 m stand-off), `SystemMapStationArrivalStandOffMeters` (2 km), and the calibration-cube `RailsOrientation` helper.
 - `SystemSpaceState.StationResidency.cs` — presentation owner for the lightweight station visual catalogue, asynchronous CPU preparation request/token, render-thread upload, zero-or-one `StationVisualPackage`, bounded residency diagnostics, actual/conservative bounds, and idempotent disposal of all station-owned CPU/GPU/texture/shadow resources. Simulation/system data remains authoritative for station identity and orbit.
 - `SystemSpaceState.Ship.cs` — spawn/input mapping, bounds-centred third-person camera math, cockpit-layout capture.
 - `ChaseCameraState.cs` — persistent chase/orbital direction, radius, and roll; enforces a generic minimum framing radius from snapshot-published composite ship bounds.
@@ -405,8 +411,9 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 **Containers/**
 
 - `CommodityType.cs` — enum of cargo types (Food, Electronics, Fuel, Weapons, Contraband).
-- `ShippingContainer.cs` — real container domain model: colour, wear, lock, location, pre-built textured mesh.
-- `ShippingContainerFactory.cs` — deterministic container mesh builder with wear + text overlay; used both by standalone/debug-spawn containers and station-placed ones (`SystemSpaceState.Containers.cs`, `StationDecorator.PlaceContainer`). Container lettering was removed from this geometry (see comment in `BuildLongFaceInsets`) pending the projected-surface-marking replacement below.
+- `ShippingContainer.cs` — immutable container-specific domain data keyed by `WorldObjectId`; contains no mutable transform or render buffers.
+- `ShippingContainerGeometry.cs` — generated CPU mesh arrays used only by the presentation side.
+- `ShippingContainerFactory.cs` — creates container domain data and deterministically generates its separate mesh representation; geometry is shared by free-object rendering and station-baked decoration.
 - `ContainerSurfaceMarking.cs` — proof-case placement of a `SurfaceMarkingProjector` ("TEST 123") onto a container's Z+ inset face (the face with real seeded recessed cells — Y+/Y- are plain); the only container-aware part of the marking pipeline, everything else in `Inferior.Rendering` is generic.
 
 **Station/** — procedural station generation
@@ -517,3 +524,4 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `MegastationPrototypeTests.cs` — xUnit coverage for the occupancy-generated megastation prototype: slice grid, exterior flood fill, face/edge/corner ownership, connectivity, massing signatures, version/seed compatibility, and mesh sanity.
 - `StationVisualResidencyTests.cs` — GraphicsDevice-free boundary/hysteresis, deterministic selection/tie, explicit supersession, system reset, stale-result rejection, visual-class override, zero-or-one package, lightweight-data independence, and repeated-disposal coverage.
 - `ShipRecordContainmentTests.cs` — xUnit test enforcing that `ShipRecord` only appears in `ShipBuilder`/`ShipExtensions`/`ShipPersistenceService`.
+- `WorldObjectFoundationTests.cs` — GraphicsDevice-free identity, registry, free-motion, immutable snapshot, simulation-owned multi-container coverage, synchronous presentation-generation coherence, and a real-background-simulation torn-generation regression probe.

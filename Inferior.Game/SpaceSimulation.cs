@@ -1,7 +1,11 @@
+using System.Diagnostics;
 using Inferior.Core.DataBus;
 using Inferior.Core.Math;
+using Inferior.Core.Random;
 using Inferior.Core.Simulation;   // GameClock
+using Inferior.Core.World;
 using Inferior.Galaxy;
+using Inferior.Game.Containers;
 using Inferior.Game.Ships;
 using Inferior.Gameplay;          // Simulation base, FlightMode
 using Inferior.Gameplay.Components;
@@ -24,6 +28,8 @@ namespace Inferior.Game;
 /// </summary>
 public sealed class SpaceSimulation : Simulation
 {
+    private const int ContainerSeedRoot = 0x434F4E54; // ASCII "CONT"
+
     public sealed record StationProximityTickDiagnostic(
         long TickSequence,
         double EnvironmentSimTime,
@@ -245,13 +251,42 @@ public sealed class SpaceSimulation : Simulation
         ShipPropulsionSnapshot? Propulsion = null,
         ShipRotationSnapshot? Rotation = null);
 
-    private volatile ShipSnapshot? _shipSnapshot;
+    public sealed record ShippingContainerSnapshot(
+        WorldObjectSnapshot State,
+        ShippingContainer Container);
+
+    public sealed record WorldPresentationSnapshot(
+        int SystemGalaxyIndex,
+        double SimTime,
+        long TickSequence,
+        IReadOnlyList<WorldObjectSnapshot> Objects,
+        IReadOnlyList<ShippingContainerSnapshot> Containers);
+
+    public sealed record SimulationPresentationSnapshot(
+        long TickSequence,
+        double SimTime,
+        ShipSnapshot? Ship,
+        WorldPresentationSnapshot World);
+
+    private volatile SimulationPresentationSnapshot? _presentationSnapshot;
+    private readonly WorldObjectRegistry _worldObjects = new();
+    private readonly Dictionary<WorldObjectId, ShippingContainer> _shippingContainers = [];
+    private bool _worldObjectsRebuiltThisTick;
+    private long _presentationTickSequence;
+    private long _pendingPresentationTickSequence;
+    private double _pendingPresentationSimTime;
+    private ShipSnapshot? _pendingShipSnapshot;
+    private bool _pendingPresentationPublished;
     private ShipPropulsionApplication _lastPropulsionApplication;
     private DVec3 _lastTargetAngularVelocityLocalRadPerSec;
 
-    public ShipSnapshot? ShipState => _shipSnapshot;
+    public SimulationPresentationSnapshot? PresentationState => _presentationSnapshot;
+    // Convenience view for existing ship-only consumers. Code that also needs world state
+    // must capture PresentationState once and take both children from that envelope.
+    public ShipSnapshot? ShipState => _presentationSnapshot?.Ship;
 
-    public FlightMode CurrentFlightMode => _shipSnapshot?.FlightMode ?? FlightMode.SystemNewtonian;
+    public FlightMode CurrentFlightMode =>
+        _presentationSnapshot?.Ship?.FlightMode ?? FlightMode.SystemNewtonian;
 
     // ── Teleport request (main thread → sim thread) ───────────────────────────
     private sealed record TeleportRequest(DVec3 Position, Quaternion Orientation);
@@ -343,8 +378,6 @@ public sealed class SpaceSimulation : Simulation
     private double _nearestStationSimTime;
     private double _nearestStationCentreDistance = double.MaxValue;
     private double _nearestStationPhysicalRadius;
-    private long _stationProximityTickSequence;
-    private long _currentStationProximityTickSequence;
     private volatile StationProximityTickDiagnostic? _lastStationProximityTickDiagnostic;
 
     public StationProximityTickDiagnostic? LastStationProximityTickDiagnostic
@@ -479,6 +512,18 @@ public sealed class SpaceSimulation : Simulation
     protected override void TickPhysics(PlayerInput input, double dt)
     {
         _lastDt = dt;
+        if (_worldObjectsRebuiltThisTick)
+            _worldObjectsRebuiltThisTick = false;
+        else
+            _worldObjects.IntegrateFreeMotion(dt);
+
+        long presentationTickSequence = ++_presentationTickSequence;
+        double presentationSimTime = GameClock.SimTime;
+        _pendingPresentationTickSequence = presentationTickSequence;
+        _pendingPresentationSimTime = presentationSimTime;
+        _pendingShipSnapshot = null;
+        _pendingPresentationPublished = false;
+
         Ship? ship = _ship;
         if (ship == null) return;
         _lastPropulsionApplication = default;
@@ -746,18 +791,18 @@ public sealed class SpaceSimulation : Simulation
         double snapAccel  = dt > 0 ? (snapFwdSpd - _prevFwdSpeedMs) / dt : 0.0;
         _prevFwdSpeedMs   = snapFwdSpd;
 
-        long snapTickSequence = _currentStationProximityTickSequence;
+        long snapTickSequence = presentationTickSequence;
         DVec3 shipMovementDuringTick = ship.Position - _nearestStationShipPosition;
         var postPhysicsProximity = ComputeNearestStationProximity(ship.Position, GameClock.SimTime);
         var postPhysicsLkm = ClassifyLkm(postPhysicsProximity.SurfaceDistance);
         ShipPresentationBounds? configuredBounds =
             ShipPresentationBoundsCalculator.TryCalculate(ship);
 
-        _shipSnapshot = new ShipSnapshot(
+        var shipSnapshot = new ShipSnapshot(
             ship.Position, ship.Velocity, ship.Orientation, ship.HullTypeId,
             ship.CockpitWorldPosition, ship.CockpitWorldOrientation,
             ship.Forward, ship.Up,
-            GameClock.SimTime,
+            presentationSimTime,
             snapTickSequence,
             snapMode,
             _flightAssistEnabled,
@@ -798,10 +843,12 @@ public sealed class SpaceSimulation : Simulation
             _nearestStationDistance,
             postPhysicsLkm.Zone,
             postPhysicsLkm.MaxGear,
-            GameClock.SimTime,
+            presentationSimTime,
             ship.Position,
             shipMovementDuringTick,
             snapMode);
+
+        _pendingShipSnapshot = shipSnapshot;
     }
 
     private static IReadOnlyList<EngineMountPresentationSnapshot> BuildEngineMountSnapshots(Ship ship)
@@ -1752,7 +1799,13 @@ public sealed class SpaceSimulation : Simulation
             DVec3.Dot(world, ship.Up),
             -DVec3.Dot(world, ship.Forward));
 
-    internal void DebugTickPhysics(PlayerInput input, double dt) => TickPhysics(input, dt);
+    internal void DebugTickPhysics(PlayerInput input, double dt)
+    {
+        TickPhysics(input, dt);
+        // This test hook represents a complete test-visible physics step. The real 60 Hz
+        // loop publishes later from Publish(), after all simulation phases have completed.
+        PublishPendingPresentationSnapshot();
+    }
 
     internal void DebugPublish() => Publish();
 
@@ -1869,13 +1922,164 @@ public sealed class SpaceSimulation : Simulation
     private string GetRefSourceId()
         => _referenceSourceId;
 
-    private void ApplyPendingSystemContext()
+    private bool ApplyPendingSystemContext()
     {
         var context = _pendingSystemContext;
-        if (context == null) return;
+        if (context == null) return false;
         _systemContext = context;
         _pendingSystemContext = null;
+        return true;
     }
+
+    private void RebuildWorldObjects(SystemContext context, double simTime)
+    {
+        _worldObjects.Clear();
+        _shippingContainers.Clear();
+
+        foreach (Station station in context.System.Stations)
+        {
+            string stationId = station.PersistenceId
+                ?? throw new InvalidOperationException(
+                    $"Station '{station.Name}' has no persistent identity for world-object generation.");
+
+            // Keep the existing deterministic visual and placement streams exactly scoped
+            // by station identity. The world-object ID is derived independently so visual
+            // generator changes cannot alter persistent identity.
+            var stationRng = new SeededRandom(ContainerSeedRoot)
+                .Derive(stationId)
+                .Derive("containers");
+            int count = stationRng.NextInt(3, 7);
+
+            DVec3 stationPosition = EclipticToGalaxy(
+                context.System.GetStationPosition(station, simTime));
+            DVec3 stationVelocity = EclipticToGalaxy(
+                context.System.GetStationVelocity(station, simTime));
+
+            for (int i = 0; i < count; i++)
+            {
+                var containerRng = stationRng.Derive(i);
+                var objectId = WorldObjectId.CreateDeterministic(
+                    "shipping-container",
+                    $"system:{context.Star.GalaxyIndex}|station:{stationId}|index:{i}");
+
+                double angle = containerRng.NextDouble() * System.Math.Tau;
+                double distance = 20.0 + containerRng.NextDouble() * 480.0;
+                double elevation = (containerRng.NextDouble() - 0.5) * 60.0;
+                var offset = new DVec3(
+                    System.Math.Cos(angle) * distance,
+                    elevation,
+                    System.Math.Sin(angle) * distance);
+
+                var grade = (LockGrade)containerRng.NextInt(0, 3);
+                float wear = containerRng.NextFloat(0f, 1f);
+                int patternSeed = containerRng.NextInt(int.MinValue, int.MaxValue);
+
+                var tumbleRng = containerRng.Derive("tumble");
+                double rate = 0.01 + tumbleRng.NextDouble() * 0.04;
+                DVec3 axis = new DVec3(
+                    tumbleRng.NextDouble() * 2.0 - 1.0,
+                    tumbleRng.NextDouble() * 2.0 - 1.0,
+                    tumbleRng.NextDouble() * 2.0 - 1.0).Normalized();
+                Quaternion orientation = Quaternion.Normalize(
+                    Quaternion.CreateFromAxisAngle(
+                        axis.ToVector3(),
+                        (float)(rate * simTime)));
+
+                var container = ShippingContainerFactory.Generate(
+                    ContainerColour(grade),
+                    wear,
+                    patternSeed,
+                    lockGrade: grade,
+                    objectId: objectId,
+                    name: $"{station.Name} Ctn-{i + 1:D2}");
+                var worldObject = new WorldObject(
+                    objectId,
+                    stationPosition + offset,
+                    orientation,
+                    stationVelocity,
+                    axis * rate);
+
+                if (!_worldObjects.Add(worldObject))
+                    throw new InvalidOperationException($"Duplicate world-object identity '{objectId}'.");
+                _shippingContainers.Add(objectId, container);
+            }
+        }
+
+        _worldObjectsRebuiltThisTick = true;
+    }
+
+    private WorldPresentationSnapshot BuildWorldPresentationSnapshot(
+        long tickSequence,
+        double simTime)
+    {
+        var context = _systemContext;
+        if (context == null)
+            return new WorldPresentationSnapshot(
+                -1,
+                simTime,
+                tickSequence,
+                Array.Empty<WorldObjectSnapshot>(),
+                Array.Empty<ShippingContainerSnapshot>());
+
+        IReadOnlyList<WorldObjectSnapshot> objectSnapshots = _worldObjects.CreateSnapshot();
+        var containerSnapshots = new ShippingContainerSnapshot[_shippingContainers.Count];
+        int containerIndex = 0;
+        foreach (WorldObjectSnapshot state in objectSnapshots)
+        {
+            if (_shippingContainers.TryGetValue(state.Id, out ShippingContainer? container))
+                containerSnapshots[containerIndex++] = new ShippingContainerSnapshot(state, container);
+        }
+
+        if (containerIndex != containerSnapshots.Length)
+            Array.Resize(ref containerSnapshots, containerIndex);
+
+        return new WorldPresentationSnapshot(
+            context.Star.GalaxyIndex,
+            simTime,
+            tickSequence,
+            objectSnapshots,
+            Array.AsReadOnly(containerSnapshots));
+    }
+
+    private void PublishPresentationSnapshot(
+        long tickSequence,
+        double simTime,
+        ShipSnapshot? shipSnapshot)
+    {
+        WorldPresentationSnapshot worldSnapshot =
+            BuildWorldPresentationSnapshot(tickSequence, simTime);
+
+        Debug.Assert(shipSnapshot == null || shipSnapshot.SimTime == simTime);
+        Debug.Assert(shipSnapshot == null || shipSnapshot.TickSequence == tickSequence);
+        Debug.Assert(worldSnapshot.SimTime == simTime);
+        Debug.Assert(worldSnapshot.TickSequence == tickSequence);
+
+        _presentationSnapshot = new SimulationPresentationSnapshot(
+            tickSequence,
+            simTime,
+            shipSnapshot,
+            worldSnapshot);
+        _pendingPresentationPublished = true;
+    }
+
+    private void PublishPendingPresentationSnapshot()
+    {
+        if (_pendingPresentationPublished)
+            return;
+
+        PublishPresentationSnapshot(
+            _pendingPresentationTickSequence,
+            _pendingPresentationSimTime,
+            _pendingShipSnapshot);
+    }
+
+    private static Color ContainerColour(LockGrade grade) => grade switch
+    {
+        LockGrade.Civilian => new Color(80, 100, 145),
+        LockGrade.Military => new Color(75, 95, 60),
+        LockGrade.Vault => new Color(160, 135, 45),
+        _ => new Color(150, 148, 142),
+    };
 
     private void ApplyPendingStationRelocation(Ship ship, SystemContext context, double simTime)
     {
@@ -2199,7 +2403,7 @@ public sealed class SpaceSimulation : Simulation
 
     protected override void UpdateEnvironment()
     {
-        ApplyPendingSystemContext();
+        bool installedNewSystem = ApplyPendingSystemContext();
         var context = _systemContext;
         if (context == null)
         {
@@ -2218,10 +2422,10 @@ public sealed class SpaceSimulation : Simulation
         _eclipticAz = context.System.EclipticTiltAzimuthRadians;
         _eclipticTilt = context.System.EclipticTiltRadians;
 
-        ApplyPendingStationRelocation(ship, context, simTime);
+        if (installedNewSystem)
+            RebuildWorldObjects(context, simTime);
 
-        long tickSequence = ++_stationProximityTickSequence;
-        _currentStationProximityTickSequence = tickSequence;
+        ApplyPendingStationRelocation(ship, context, simTime);
 
         var world = SensorEnvironment.World;
         world.MassiveBodies.Clear();
@@ -2438,7 +2642,7 @@ public sealed class SpaceSimulation : Simulation
         }
 
         // Publish flight-mode topics for instrument subscribers
-        var snap = _shipSnapshot;
+        ShipSnapshot? snap = _pendingShipSnapshot;
         if (snap != null)
         {
             DataBus.ScalarTelemetry.Publish(Topics.Flight.Mode,            (double)snap.FlightMode);
@@ -2486,6 +2690,8 @@ public sealed class SpaceSimulation : Simulation
             DataBus.SystemMessages.Publish(Topics.System.All, new($"T+{t:F0}s - all systems nominal"));
             _nextMessageAt += 8.0;
         }
+
+        PublishPendingPresentationSnapshot();
     }
 
     private void WriteStationProximityDiagnosticIfRequested()

@@ -258,7 +258,7 @@ public sealed partial class SystemSpaceState
 
     private (DVec3? pos, Quaternion? ori) CaptureShipState()
     {
-        var snap = _simulation.ShipState;
+        var snap = _frameShipSnap;
         if (snap == null) return (null, null);
         return (snap.Position, snap.Orientation);
     }

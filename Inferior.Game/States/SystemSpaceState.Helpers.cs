@@ -175,12 +175,8 @@ public sealed partial class SystemSpaceState
     private void EnterSystem(Star star, DVec3 spawnPos, Quaternion spawnOri, FlightMode mode)
     {
         ResetStationVisualResidency("system change");
-        foreach (var container in _containers)
-        {
-            container.Vb.Dispose();
-            container.Ib.Dispose();
-        }
-        _containers.Clear();
+        DisposeContainerVisuals();
+        _frameWorldSnap = null;
         _stationPositions.Clear();
 
         _star   = star;

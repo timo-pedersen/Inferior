@@ -15,13 +15,16 @@ public sealed class ShippingContainerFactoryTests
             new Color(110, 84, 52), .42f, 12345, "INTERSTELLAR FREIGHT CO.");
         ShippingContainer emptyName = ShippingContainerFactory.Generate(
             new Color(110, 84, 52), .42f, 12345, string.Empty);
+        ShippingContainerGeometry generatedGeometry = ShippingContainerFactory.GenerateGeometry(generatedName);
+        ShippingContainerGeometry customGeometry = ShippingContainerFactory.GenerateGeometry(customName);
+        ShippingContainerGeometry emptyGeometry = ShippingContainerFactory.GenerateGeometry(emptyName);
 
         Assert.NotEqual(generatedName.ManufacturerText, customName.ManufacturerText);
-        Assert.Equal(generatedName.Vertices, customName.Vertices);
-        Assert.Equal(generatedName.Indices, customName.Indices);
-        Assert.Equal(generatedName.Vertices, emptyName.Vertices);
-        Assert.Equal(generatedName.Indices, emptyName.Indices);
-        Assert.Equal(632, generatedName.Vertices.Length);
-        Assert.Equal(936, generatedName.Indices.Length);
+        Assert.Equal(generatedGeometry.Vertices, customGeometry.Vertices);
+        Assert.Equal(generatedGeometry.Indices, customGeometry.Indices);
+        Assert.Equal(generatedGeometry.Vertices, emptyGeometry.Vertices);
+        Assert.Equal(generatedGeometry.Indices, emptyGeometry.Indices);
+        Assert.Equal(632, generatedGeometry.Vertices.Length);
+        Assert.Equal(936, generatedGeometry.Indices.Length);
     }
 }

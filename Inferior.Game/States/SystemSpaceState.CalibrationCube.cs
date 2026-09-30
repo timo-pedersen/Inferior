@@ -29,7 +29,8 @@ public sealed partial class SystemSpaceState
     // and gets distance-culled (the reported "cube is ~2 AU away" bug was actually this —
     // the ship's own reference-frame velocity carrying it away from a fixed point).
     // DrawCalibrationCube recomputes universe position from the live station position
-    // every frame, exactly like SystemSpaceState.Containers.cs' PlacedContainer does.
+    // every frame. Unlike simulation-owned containers, this remains a presentation-only
+    // calibration prop with rails orientation.
     // _calibrationCubeStation is null until the offset below has actually been captured
     // (not merely once the station identity is known — see _calibrationCubePendingStation).
     private Galaxy.Station? _calibrationCubeStation;

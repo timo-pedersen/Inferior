@@ -1,5 +1,5 @@
-using Inferior.Core.Math;
 using Inferior.Core.Random;
+using Inferior.Core.World;
 using Inferior.Game.StationGen;
 using Inferior.Rendering;
 using Microsoft.Xna.Framework;
@@ -37,25 +37,34 @@ public static class ShippingContainerFactory
         float wear,
         int sidePatternSeed,
         string? text = null,
-        LockGrade lockGrade = LockGrade.Civilian)
+        LockGrade lockGrade = LockGrade.Civilian,
+        WorldObjectId? objectId = null,
+        string? name = null)
     {
         string manufacturerText = text ?? GenerateManufacturerName(sidePatternSeed);
-        var (verts, indices) = GenerateVertices(color, wear, sidePatternSeed, lockGrade);
 
         return new ShippingContainer
         {
-            Id               = $"CTR-{(uint)sidePatternSeed:X8}",
+            Id               = objectId ?? WorldObjectId.New(),
+            Name             = name ?? "Shipping Container",
             PrimaryColor     = color,
             Wear             = wear,
             SidePatternSeed  = sidePatternSeed,
             ManufacturerText = manufacturerText,
             Lock             = lockGrade,
             IsLocked         = lockGrade != LockGrade.None,
-            WorldPosition    = DVec3.Zero,
-            Orientation      = Quaternion.Identity,
-            Vertices         = verts,
-            Indices          = indices,
         };
+    }
+
+    public static ShippingContainerGeometry GenerateGeometry(ShippingContainer container)
+    {
+        ArgumentNullException.ThrowIfNull(container);
+        var (vertices, indices) = GenerateVertices(
+            container.PrimaryColor,
+            container.Wear,
+            container.SidePatternSeed,
+            container.Lock);
+        return new ShippingContainerGeometry(vertices, indices);
     }
 
     // Geometry-only entry point — shared by the standalone/debug-spawn path above and

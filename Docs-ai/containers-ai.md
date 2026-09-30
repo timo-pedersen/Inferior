@@ -13,6 +13,31 @@ cargo bays, attached to ships, and floating free in space. They are never abstra
 to numbers — the container is a thing that exists, has a position, a history, and
 contents that the player may or may not be allowed to access.
 
+### W1 world-object implementation
+
+Free/floating containers are the first users of the general world-object layer:
+
+- `Inferior.Core/World/WorldObjectId.cs` defines persistent simulation identity. IDs may be
+  generated or derived deterministically from semantic identity; they never contain renderer
+  or physics-engine handles.
+- `WorldObject` holds the minimal common kinematic state: double-precision position, explicit
+  quaternion orientation, linear velocity, and universe-space angular velocity.
+- `WorldObjectRegistry` is privately owned by `SpaceSimulation`. Only the simulation mutates
+  registered state; its current integrator is deliberately limited to collision-free
+  `position += velocity * dt` plus constant angular motion.
+- `ShippingContainer` is immutable container-specific domain data and carries the matching
+  `WorldObjectId`. Its geometry is a separate `ShippingContainerGeometry` presentation value.
+- `SpaceSimulation.SimulationPresentationSnapshot` is the sole volatile presentation boundary.
+  Once per completed simulation tick it atomically publishes one generation containing the
+  matching `ShipSnapshot` and `WorldPresentationSnapshot`; system/world rebuilds do not publish
+  independently. Each `ShippingContainerSnapshot` pairs a `WorldObjectSnapshot` with immutable
+  container domain data. `SystemSpaceState` reads the envelope once per update, and
+  `SystemSpaceState.Containers.cs` owns only GPU buffers keyed by ID and draws that generation's
+  snapshot pose.
+
+A future Jolt body is a temporary runtime representation of a `WorldObject`; it is not the
+object's identity or canonical state.
+
 ---
 
 ## Physical specification
@@ -137,22 +162,23 @@ same pre-baking approach as station surfaces. Suggested interpretation:
 
 ### Text
 
-`ManufacturerText` is rendered on **two opposing long faces** (e.g. Y+ and Y−) using
-the existing station text pipeline. Position: lower quarter of the face, spanning the
-inset zone width. Same font atlas geometry as station markings.
+`ManufacturerText` is retained as domain data, but it is not currently baked into the
+container mesh. The free-container path still draws the projected-surface-marking proof
+decal (`"TEST 123"`) on the Z+ inset face. Manufacturer marking placement remains future
+presentation work.
 
 ---
 
 ## Data model
 
-Lives in `Inferior.Game`, same assembly as `StationModel`. If simulation needs to
-query containers (sensors, physics), extract the data model to `Inferior.Gameplay`
-at that point — not preemptively.
+Container-specific data lives in `Inferior.Game`; general world identity/state lives in
+`Inferior.Core/World` so it has no dependency on container, rendering, or a physics engine.
 
 ```csharp
-public sealed class ShippingContainer
+public sealed record ShippingContainer
 {
-    public string           Id                 { get; init; }
+    public WorldObjectId    Id                 { get; init; }
+    public string           Name               { get; init; }
     public Color            PrimaryColor       { get; init; }
     public float            Wear               { get; init; }  // 0.0–1.0
     public int              SidePatternSeed    { get; init; }
@@ -161,14 +187,15 @@ public sealed class ShippingContainer
     public LockGrade        Lock               { get; init; }
     public bool             IsLocked           { get; init; }
 
-    // World state
-    public DVec3            WorldPosition      { get; set; }
-    public Quaternion       Orientation        { get; set; }
-    public object?          Parent             { get; set; }  // null = free-floating
+}
 
-    // Rendered mesh (generated at factory time, pre-baked lighting)
-    public VertexPositionColorTexture[] Vertices { get; init; }
-    public short[]          Indices            { get; init; }
+public sealed class WorldObject
+{
+    public WorldObjectId Id              { get; }
+    public DVec3         Position        { get; }
+    public Quaternion    Orientation     { get; }
+    public DVec3         LinearVelocity  { get; }
+    public DVec3         AngularVelocity { get; }
 }
 
 public sealed record ContainerContents(CommodityType Type, int Units);
@@ -176,9 +203,9 @@ public sealed record ContainerContents(CommodityType Type, int Units);
 public enum LockGrade { None, Civilian, Military, Vault }
 ```
 
-`Parent` will eventually reference a ship hardpoint or station dock slot. For now,
-null (free-floating) is the only production case. Position is always absolute world
-position — parent-relative transform is a future concern.
+W1 has no `Parent` field or relationship enum. Free-container position is absolute
+system-space state in `WorldObject`; W1b will introduce attachment/reference-frame data
+without merging relationship state with physics activation state.
 
 ---
 
@@ -188,20 +215,25 @@ position — parent-relative transform is a future concern.
 public static class ShippingContainerFactory
 {
     /// <summary>
-    /// Fully deterministic single container. If text is null, GenerateManufacturerName
-    /// is called with sidePatternSeed and the result stored in ManufacturerText.
+    /// Deterministic visual/domain properties for a supplied seed. If objectId is null,
+    /// a fresh identity is created for this new object.
     /// </summary>
     public static ShippingContainer Generate(
         Color color,
         float wear,
         int sidePatternSeed,
-        string? text = null);
+        string? text = null,
+        LockGrade lockGrade = LockGrade.Civilian,
+        WorldObjectId? objectId = null,
+        string? name = null);
+
+    public static ShippingContainerGeometry GenerateGeometry(
+        ShippingContainer container);
 
     /// <summary>
-    /// Deterministic batch. masterSeed drives all randomness — colours, wear, and
-    /// pattern seeds are all derived from it. If sidePatternSeeds is provided, those
-    /// seeds override per-container; the same selected seed is used for both pattern
-    /// and manufacturer text (consistent company per batch).
+    /// Deterministic batch visual/domain properties. New object IDs are allocated for
+    /// the returned instances; regenerated persistent objects use the single-object API
+    /// with supplied IDs.
     /// </summary>
     public static ShippingContainer[] Generate(
         int count,
@@ -216,6 +248,10 @@ public static class ShippingContainerFactory
     public static string GenerateManufacturerName(int seed);
 }
 ```
+
+Visual/domain generation is deterministic for the supplied visual seed. Callers that
+regenerate a persistent object must also supply its existing or semantically derived
+`WorldObjectId`; the factory creates a fresh ID only for genuinely new ad-hoc objects.
 
 ---
 
@@ -268,17 +304,19 @@ any ShippingModule can release it.
 
 ## World placement
 
-Containers are placed in world space with a position and orientation. Three contexts:
+Independently existing containers are registered in `SpaceSimulation` with absolute
+system-space state. Three eventual relationship contexts remain:
 
 | Context | Parent | Notes |
 |---|---|---|
-| Free-floating | null | Debris, ejected cargo, decoration |
+| Free-floating | none | Implemented for the current near-station container population |
 | Station dockside | Station reference (future) | Part of station scene composition |
 | Ship-attached | Ship hardpoint reference (future) | Follows ship; requires parent-delta sync |
 
-For station decoration, the `StationDecorator` calls `ShippingContainerFactory.Generate`
-using seeds derived from the station seed, placing clusters on cargo bays and docking
-arms as a decoration pass. The containers become part of the station's rendered scene.
+The existing station-decoration paths still call the canonical container geometry generator
+and merge those meshes into station presentation. They are not independent `WorldObject`
+instances in W1. Attachment/anchor work will decide when such presentation becomes a real
+object relationship rather than baked decoration.
 
 ---
 
@@ -302,7 +340,8 @@ before allowing detach. Container ownership tracking lives in the persistence la
 
 | Class | Assembly |
 |---|---|
-| `ShippingContainer` | `Inferior.Game` |
+| `WorldObjectId`, `WorldObject`, `WorldObjectRegistry`, `WorldObjectSnapshot` | `Inferior.Core` |
+| `ShippingContainer`, `ShippingContainerGeometry` | `Inferior.Game` |
 | `ContainerContents` | `Inferior.Game` |
 | `LockGrade` (enum) | `Inferior.Game` |
 | `ShippingContainerFactory` | `Inferior.Game` |
@@ -320,5 +359,8 @@ before allowing detach. Container ownership tracking lives in the persistence la
 | Container stacks (ShippingContainerStack) | Deferred — set of containers magnetically locked together |
 | Lock hacking module | Deferred — override Vault-grade locks |
 | Cargo simulation / economy | Deferred — CommodityType is a stub enum |
-| Station dockside placement pass | Deferred — decorator pass to place container clusters on cargo/docking modules |
+| Independent station dockside objects | Deferred — existing station containers are baked decoration, not registered world objects |
 | Persistence | Containers near player saved as world exception objects |
+| Attachment/reference frames | Deferred to W1b; W1 world state is absolute system space |
+| Physics representation | Deferred to W2; no Jolt dependency, body ID, shape, mass, collision, or response exists |
+| Coasting/physics-active runtime mode | Deferred; remains orthogonal to future Free/Attached relationships |
