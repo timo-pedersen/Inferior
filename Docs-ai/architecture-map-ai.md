@@ -59,7 +59,7 @@ Foundation layer — no dependencies on any other Inferior project.
 
 - `WorldObjectId.cs` — strongly typed GUID-backed identity, including stable SHA-256 semantic derivation for regenerated objects; independent of render and future physics handles.
 - `WorldObject.cs` — minimal mutable simulation state (`DVec3` position/linear velocity, quaternion orientation, universe-space angular velocity) plus immutable value snapshot.
-- `WorldObjectRegistry.cs` — simulation-owned add/remove/lookup/enumeration authority, immutable snapshot creation, and the temporary collision-free motion integrator.
+- `WorldObjectRegistry.cs` — simulation-owned add/remove/lookup/enumeration authority, immutable snapshot creation, and collision-free semi-implicit Euler translation plus angular integration through a caller-supplied current-state acceleration.
 
 **Root**
 
@@ -81,7 +81,7 @@ Procedural universe generation. Depends on Core only.
 - `Star.cs` — star data: spectral class, mass, radius, luminosity, lighting/map styling.
 - `StarMap.cs` — read-only query layer over the star array (radius search, nearest-N, name lookup).
 - `StarPhysics.cs` — derives stellar radius from mass/class; approximates core pressure via virial theorem.
-- `StarSystem.cs` — full system generator + position calculator for planets/moons/asteroids/stations.
+- `StarSystem.cs` — full system generator and authoritative hierarchical rail service: body/station position and velocity, recursive rail acceleration, free-object rail-coherent acceleration, station point velocity, and 0.90-enter/1.10-exit Hill-scale dynamics-parent selection.
 - `StarterSystemSelector.cs` — single canonical starter star/station selection (nearest G/K to galactic origin with ≥3 stations; largest-size starter station), replacing two duplicated implementations and a by-name lookup.
 - `Station.cs` — space station data: orbit, size, services, landing pads, orientation, generation factory.
 
@@ -353,7 +353,7 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 
 - `InferiorGame.cs` — MonoGame game class: owns the state machine, window mode, simulation lifecycle; global Ctrl+C rising-edge screenshot trigger (captured at end of `Draw()` via `Platform.HostServices`).
 - `Program.cs` — entry point, instantiates and runs `InferiorGame`.
-- `SpaceSimulation.cs` — sim-thread authority for the player ship and general `WorldObjectRegistry`; deterministically creates free shipping-container objects on system install and advances their temporary free motion. At the completed-tick boundary it atomically publishes one immutable `SimulationPresentationSnapshot` containing the same-generation ship and world/container snapshots; world rebuilds never publish out of band. Also owns ship physics, canonical station relocation, and player-hull cycling.
+- `SpaceSimulation.cs` — sim-thread authority for the player ship and general `WorldObjectRegistry`; deterministically creates free shipping-container objects on system install, owns their independent `DynamicsParent` state, initializes station releases with centre velocity plus `omega x r`, and integrates rail-coherent gravity at the explicitly retained object-state timestamp. At the completed-tick boundary it atomically publishes one immutable `SimulationPresentationSnapshot` containing the same-generation ship and world/container snapshots; world rebuilds never publish out of band. Also owns ship physics, canonical station relocation, and player-hull cycling.
 - `Ships/PlayerShipCycleCatalog.cs` — stable Aries -> Cosmo -> Asterisk -> Beren -> Antega -> Aries order used by the simulation-owned cockpit control.
 - `TargetingSystem.cs` — maintains radar contacts, nav target, and hyperspace target for the player.
 
@@ -525,3 +525,4 @@ Entry point; references everything. Depends on Core, Galaxy, Gameplay, Persisten
 - `StationVisualResidencyTests.cs` — GraphicsDevice-free boundary/hysteresis, deterministic selection/tie, explicit supersession, system reset, stale-result rejection, visual-class override, zero-or-one package, lightweight-data independence, and repeated-disposal coverage.
 - `ShipRecordContainmentTests.cs` — xUnit test enforcing that `ShipRecord` only appears in `ShipBuilder`/`ShipExtensions`/`ShipPersistenceService`.
 - `WorldObjectFoundationTests.cs` — GraphicsDevice-free identity, registry, free-motion, immutable snapshot, simulation-owned multi-container coverage, synchronous presentation-generation coherence, and a real-background-simulation torn-generation regression probe.
+- `WorldObjectGravityTests.cs` — generated period/rail-acceleration agreement, 10-minute/1-hour/6-hour station-coincident integration and timestep convergence, explicit current-state-time regression, Hill-scale dynamics-parent transitions, station `omega x r` release velocity, and X-Stop/reference independence.

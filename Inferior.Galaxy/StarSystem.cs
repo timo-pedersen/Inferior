@@ -12,6 +12,14 @@ namespace Inferior.Galaxy;
 /// </summary>
 public sealed class StarSystem
 {
+    /// <summary>
+    /// A free object must move well inside a body's Hill domain before adopting it as
+    /// its dynamics parent, then move well outside before leaving it. The symmetric
+    /// ten-percent band is deliberately scale-free and conservative.
+    /// </summary>
+    public const double DynamicsParentEnterHillFraction = 0.90;
+    public const double DynamicsParentExitHillFraction = 1.10;
+
     public Star                    Star    { get; }
     public IReadOnlyList<OrbitalBody> Planets => _planets;
     public IReadOnlyList<OrbitalBody> AsteroidBelt => _asteroidBelt;
@@ -44,25 +52,9 @@ public sealed class StarSystem
         if (station.OrbitParent == null)
             return station.GetPosition(gameTime, DVec3.Zero);
 
-        // Parent is a planet — find it and get its position
-        foreach (var planet in _planets)
-        {
-            if (ReferenceEquals(planet, station.OrbitParent))
-                return station.GetPosition(gameTime, planet.GetPosition(gameTime, DVec3.Zero));
-
-            // Parent might be a moon
-            foreach (var moon in planet.Children)
-            {
-                if (ReferenceEquals(moon, station.OrbitParent))
-                {
-                    var planetPos = planet.GetPosition(gameTime, DVec3.Zero);
-                    return station.GetPosition(gameTime, moon.GetPosition(gameTime, planetPos));
-                }
-            }
-        }
-
-        // Fallback — orbit star
-        return station.GetPosition(gameTime, DVec3.Zero);
+        return station.GetPosition(
+            gameTime,
+            GetBodyPosition(station.OrbitParent, gameTime));
     }
 
     /// <summary>
@@ -73,22 +65,246 @@ public sealed class StarSystem
     {
         var vel = OrbitalVelocity(gameTime, station.Period, station.PhaseOffset, station.OrbitalRadius);
         if (station.OrbitParent == null) return vel;
+        return GetBodyVelocity(station.OrbitParent, gameTime) + vel;
+    }
 
-        foreach (var planet in _planets)
+    /// <summary>
+    /// Resolves an orbital body's system-space position through the authoritative
+    /// generated hierarchy. The star is the implicit parent of root bodies.
+    /// </summary>
+    public DVec3 GetBodyPosition(OrbitalBody body, double gameTime)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (!TryGetParentBody(body, out OrbitalBody? parent))
+            throw new ArgumentException("The orbital body does not belong to this star system.", nameof(body));
+
+        DVec3 parentPosition = parent == null
+            ? DVec3.Zero
+            : GetBodyPosition(parent, gameTime);
+        return body.GetPosition(gameTime, parentPosition);
+    }
+
+    /// <summary>
+    /// Resolves an orbital body's system-space velocity through the authoritative
+    /// generated hierarchy.
+    /// </summary>
+    public DVec3 GetBodyVelocity(OrbitalBody body, double gameTime)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (!TryGetParentBody(body, out OrbitalBody? parent))
+            throw new ArgumentException("The orbital body does not belong to this star system.", nameof(body));
+
+        DVec3 parentVelocity = parent == null
+            ? DVec3.Zero
+            : GetBodyVelocity(parent, gameTime);
+        return parentVelocity + KeplerianOrCircularVelocity(body, gameTime);
+    }
+
+    /// <summary>
+    /// Returns the acceleration represented by a body's rail: its parent's rail
+    /// acceleration plus the parent-relative two-body acceleration.
+    /// </summary>
+    public DVec3 GetRailAcceleration(OrbitalBody body, double gameTime)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (!TryGetParentBody(body, out OrbitalBody? parent))
+            throw new ArgumentException("The orbital body does not belong to this star system.", nameof(body));
+
+        DVec3 bodyPosition = GetBodyPosition(body, gameTime);
+        if (parent == null)
+            return PointMassAcceleration(bodyPosition, DVec3.Zero, Star.MassKg);
+
+        return GetRailAcceleration(parent, gameTime)
+             + PointMassAcceleration(bodyPosition, GetBodyPosition(parent, gameTime), parent.MassKg);
+    }
+
+    /// <summary>
+    /// Returns the acceleration represented by a station's hierarchical rail.
+    /// Stations have no modeled mass and therefore can never be dynamics parents.
+    /// </summary>
+    public DVec3 GetStationRailAcceleration(Station station, double gameTime)
+    {
+        ArgumentNullException.ThrowIfNull(station);
+        DVec3 stationPosition = GetStationPosition(station, gameTime);
+        OrbitalBody? parent = station.OrbitParent;
+        if (parent == null)
+            return PointMassAcceleration(stationPosition, DVec3.Zero, Star.MassKg);
+
+        if (!TryGetParentBody(parent, out _))
+            throw new ArgumentException("The station's orbit parent does not belong to this star system.", nameof(station));
+
+        return GetRailAcceleration(parent, gameTime)
+             + PointMassAcceleration(stationPosition, GetBodyPosition(parent, gameTime), parent.MassKg);
+    }
+
+    /// <summary>
+    /// Authoritative patched-conic acceleration for a free object. A null dynamics
+    /// parent means the system star; otherwise the selected body's own rail
+    /// acceleration is inherited before its local point-mass term is applied.
+    /// </summary>
+    public DVec3 GetRailCoherentAcceleration(
+        DVec3 position,
+        OrbitalBody? dynamicsParent,
+        double stateTime)
+    {
+        if (dynamicsParent == null)
+            return PointMassAcceleration(position, DVec3.Zero, Star.MassKg);
+
+        if (!TryGetParentBody(dynamicsParent, out _))
+            throw new ArgumentException(
+                "The dynamics parent does not belong to this star system.",
+                nameof(dynamicsParent));
+
+        return GetRailAcceleration(dynamicsParent, stateTime)
+             + PointMassAcceleration(
+                 position,
+                 GetBodyPosition(dynamicsParent, stateTime),
+                 dynamicsParent.MassKg);
+    }
+
+    /// <summary>
+    /// Selects the deepest hierarchical dynamics parent whose Hill-scaled domain
+    /// contains the position. Existing parents use a wider exit threshold so crossing
+    /// a boundary cannot chatter. Selection changes identity only; world position and
+    /// velocity require no frame conversion.
+    /// </summary>
+    public OrbitalBody? SelectDynamicsParent(
+        DVec3 position,
+        OrbitalBody? currentParent,
+        double stateTime)
+    {
+        if (currentParent != null && !TryGetParentBody(currentParent, out _))
+            currentParent = null;
+
+        while (currentParent != null)
         {
-            if (ReferenceEquals(planet, station.OrbitParent))
-                return KeplerianOrCircularVelocity(planet, gameTime) + vel;
+            double exitRadius = currentParent.HillSphereRadius * DynamicsParentExitHillFraction;
+            if (DVec3.Distance(position, GetBodyPosition(currentParent, stateTime)) <= exitRadius)
+                break;
 
-            foreach (var moon in planet.Children)
+            TryGetParentBody(currentParent, out currentParent);
+        }
+
+        OrbitalBody? selected = currentParent;
+        while (TrySelectEnteredChild(position, selected, stateTime, out OrbitalBody? child))
+            selected = child;
+        return selected;
+    }
+
+    /// <summary>
+    /// Converts a station-local release offset into system-space orientation at the
+    /// supplied time without reducing the offset arithmetic to float precision.
+    /// </summary>
+    public static DVec3 GetStationWorldOffset(
+        Station station,
+        DVec3 stationLocalOffset,
+        double gameTime)
+    {
+        ArgumentNullException.ThrowIfNull(station);
+        System.Numerics.Quaternion orientation = station.GetOrientation(gameTime);
+        var q = new DVec3(orientation.X, orientation.Y, orientation.Z);
+        DVec3 twiceCross = DVec3.Cross(q, stationLocalOffset) * 2.0;
+        return stationLocalOffset
+             + twiceCross * orientation.W
+             + DVec3.Cross(q, twiceCross);
+    }
+
+    /// <summary>
+    /// Returns the station-centre rail velocity plus omega cross r for a meaningful
+    /// station-local release point. Explicit release impulses are added by the caller.
+    /// </summary>
+    public DVec3 GetStationPointVelocity(
+        Station station,
+        DVec3 stationLocalOffset,
+        double gameTime)
+    {
+        DVec3 worldOffset = GetStationWorldOffset(station, stationLocalOffset, gameTime);
+        DVec3 angularVelocity = DVec3.UnitY * station.SlowRotation;
+        return GetStationVelocity(station, gameTime)
+             + DVec3.Cross(angularVelocity, worldOffset);
+    }
+
+    private static DVec3 PointMassAcceleration(
+        DVec3 position,
+        DVec3 sourcePosition,
+        double sourceMassKg)
+    {
+        DVec3 delta = sourcePosition - position;
+        double distanceSquared = delta.LengthSquared;
+        if (distanceSquared == 0.0)
+            return DVec3.Zero;
+
+        double inverseDistance = 1.0 / System.Math.Sqrt(distanceSquared);
+        double scale = Units.G * sourceMassKg * inverseDistance / distanceSquared;
+        return delta * scale;
+    }
+
+    private bool TrySelectEnteredChild(
+        DVec3 position,
+        OrbitalBody? parent,
+        double stateTime,
+        out OrbitalBody? selected)
+    {
+        selected = null;
+        double bestNormalizedDistance = double.MaxValue;
+
+        IEnumerable<OrbitalBody> candidates = parent == null
+            ? _planets.Concat(_asteroidBelt)
+            : parent.Children;
+
+        foreach (OrbitalBody candidate in candidates)
+        {
+            double enterRadius = candidate.HillSphereRadius * DynamicsParentEnterHillFraction;
+            double normalizedDistance = DVec3.Distance(
+                position,
+                GetBodyPosition(candidate, stateTime)) / enterRadius;
+            if (normalizedDistance <= 1.0 && normalizedDistance < bestNormalizedDistance)
             {
-                if (ReferenceEquals(moon, station.OrbitParent))
-                    return KeplerianOrCircularVelocity(planet, gameTime)
-                         + OrbitalVelocity(gameTime, moon.Period, moon.PhaseOffset, moon.OrbitalRadius)
-                         + vel;
+                selected = candidate;
+                bestNormalizedDistance = normalizedDistance;
             }
         }
 
-        return vel;
+        return selected != null;
+    }
+
+    private bool TryGetParentBody(OrbitalBody body, out OrbitalBody? parent)
+    {
+        foreach (OrbitalBody root in _planets.Concat(_asteroidBelt))
+        {
+            if (ReferenceEquals(root, body))
+            {
+                parent = null;
+                return true;
+            }
+
+            if (TryFindParent(root, body, out parent))
+                return true;
+        }
+
+        parent = null;
+        return false;
+    }
+
+    private static bool TryFindParent(
+        OrbitalBody candidateParent,
+        OrbitalBody body,
+        out OrbitalBody? parent)
+    {
+        foreach (OrbitalBody child in candidateParent.Children)
+        {
+            if (ReferenceEquals(child, body))
+            {
+                parent = candidateParent;
+                return true;
+            }
+
+            if (TryFindParent(child, body, out parent))
+                return true;
+        }
+
+        parent = null;
+        return false;
     }
 
     // Use Keplerian velocity for planets with full orbital elements; fall back to circular for moons.

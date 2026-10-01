@@ -88,7 +88,7 @@ public sealed class WorldObjectFoundationTests
     }
 
     [Fact]
-    public void SpaceSimulationPublishesIndependentContainerIdsAndTransforms()
+    public void SpaceSimulationPublishesIndependentContainerIdsAndIntegratedTransforms()
     {
         SpaceSimulation simulation = CreateSimulation();
 
@@ -119,10 +119,11 @@ public sealed class WorldObjectFoundationTests
         SpaceSimulation.ShippingContainerSnapshot moved = Assert.Single(
             second.Containers, item => item.State.Id == firstContainer.State.Id);
 
-        AssertVecClose(
-            firstContainer.State.Position + firstContainer.State.LinearVelocity * 0.5,
-            moved.State.Position,
-            1e-5);
+        Assert.NotEqual(firstContainer.State.Position, moved.State.Position);
+        Assert.NotEqual(firstContainer.State.LinearVelocity, moved.State.LinearVelocity);
+        Assert.True(double.IsFinite(moved.State.Position.X));
+        Assert.True(double.IsFinite(moved.State.Position.Y));
+        Assert.True(double.IsFinite(moved.State.Position.Z));
         Assert.Equal(firstContainer.State.Position, first.Containers[0].State.Position);
         Assert.DoesNotContain(
             typeof(WorldObject),

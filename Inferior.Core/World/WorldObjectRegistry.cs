@@ -29,17 +29,33 @@ public sealed class WorldObjectRegistry
     public void Clear() => _objects.Clear();
 
     /// <summary>
-    /// Temporary free-motion integrator used until a physics representation is introduced.
-    /// This is kinematic continuity only; it performs no collision detection or response.
+    /// Integrates collision-free motion with no translational acceleration.
     /// </summary>
     public void IntegrateFreeMotion(double dt)
+        => IntegrateFreeMotion(dt, static _ => DVec3.Zero);
+
+    /// <summary>
+    /// Integrates active free objects with semi-implicit Euler translation and the
+    /// existing universe-space angular integration. The acceleration callback must
+    /// evaluate each object at the timestamp represented by its current state.
+    /// </summary>
+    public void IntegrateFreeMotion(
+        double dt,
+        Func<WorldObject, DVec3> accelerationAtCurrentState)
     {
         if (!double.IsFinite(dt) || dt < 0.0)
             throw new ArgumentOutOfRangeException(nameof(dt), "Time step must be finite and non-negative.");
+        ArgumentNullException.ThrowIfNull(accelerationAtCurrentState);
         if (dt == 0.0) return;
 
         foreach (WorldObject worldObject in _objects.Values)
         {
+            DVec3 acceleration = accelerationAtCurrentState(worldObject);
+            if (!IsFinite(acceleration))
+                throw new InvalidOperationException(
+                    $"Acceleration for world object '{worldObject.Id}' must be finite.");
+
+            worldObject.LinearVelocity += acceleration * dt;
             worldObject.Position += worldObject.LinearVelocity * dt;
 
             double angularSpeed = worldObject.AngularVelocity.Length;
@@ -50,6 +66,9 @@ public sealed class WorldObjectRegistry
             worldObject.Orientation = Quaternion.Normalize(delta * worldObject.Orientation);
         }
     }
+
+    private static bool IsFinite(DVec3 value)
+        => double.IsFinite(value.X) && double.IsFinite(value.Y) && double.IsFinite(value.Z);
 
     public IReadOnlyList<WorldObjectSnapshot> CreateSnapshot()
     {

@@ -23,8 +23,11 @@ Free/floating containers are the first users of the general world-object layer:
 - `WorldObject` holds the minimal common kinematic state: double-precision position, explicit
   quaternion orientation, linear velocity, and universe-space angular velocity.
 - `WorldObjectRegistry` is privately owned by `SpaceSimulation`. Only the simulation mutates
-  registered state; its current integrator is deliberately limited to collision-free
-  `position += velocity * dt` plus constant angular motion.
+  registered state; its collision-free integrator uses semi-implicit Euler translation
+  (`v += a * dt`, then `p += v * dt`) plus the existing universe-space angular motion.
+- `SpaceSimulation` separately owns each free object's `DynamicsParent` (`OrbitalBody?`; null is
+  the system star). This is physical patched-conic state only. It is not an attachment parent,
+  station release frame, or X-Stop/control reference and is not published as presentation state.
 - `ShippingContainer` is immutable container-specific domain data and carries the matching
   `WorldObjectId`. Its geometry is a separate `ShippingContainerGeometry` presentation value.
 - `SpaceSimulation.SimulationPresentationSnapshot` is the sole volatile presentation boundary.
@@ -37,6 +40,33 @@ Free/floating containers are the first users of the general world-object layer:
 
 A future Jolt body is a temporary runtime representation of a `WorldObject`; it is not the
 object's identity or canonical state.
+
+### W1g-C rail-coherent free-object gravity
+
+Free `WorldObject`s use the same hierarchical two-body contract represented by celestial and
+station rails:
+
+```text
+A(object, parent, t)
+    = RailAcceleration(parent, t)
+    + PointMassAcceleration(parentPosition(t), parentMass, objectPosition)
+```
+
+`StarSystem` is the authority for body position/velocity, rail acceleration, station rail
+acceleration, free-object rail-coherent acceleration, and dynamics-parent selection. A null parent
+means the system star. The selector starts from the star and descends into the deepest containing
+body domain, entering at `0.90 * HillSphereRadius` and exiting at `1.10 * HillSphereRadius` to
+prevent boundary chatter without fixed-distance tuning.
+
+Acceleration must be evaluated at the timestamp represented by the object's current state. The
+simulation clock advances before physics, so `SpaceSimulation` retains the world-object state time
+explicitly and does not sample parent rails at the already-advanced `GameClock.SimTime`.
+`GravityCalculations.GravityAt` remains a separate all-body sensor/control-field query; its fixed
+1,000 km centre cutoff is still unresolved and must not be used for free-object dynamics.
+
+Station-created containers inherit the station's orbital parent and start with station-centre
+velocity plus the station point velocity `omega x r` for their oriented local release offset.
+There is no separate release impulse in the current W1 creation path.
 
 ---
 
@@ -363,4 +393,5 @@ before allowing detach. Container ownership tracking lives in the persistence la
 | Persistence | Containers near player saved as world exception objects |
 | Attachment/reference frames | Deferred to W1b; W1 world state is absolute system space |
 | Physics representation | Deferred to W2; no Jolt dependency, body ID, shape, mass, collision, or response exists |
+| Free-object gravity | W1g-C implemented: rail-coherent hierarchical acceleration, 0.90/1.10 Hill-scale parent hysteresis, explicit state-time evaluation, and station point-velocity inheritance (`world-object-gravity-audit.md`) |
 | Coasting/physics-active runtime mode | Deferred; remains orthogonal to future Free/Attached relationships |

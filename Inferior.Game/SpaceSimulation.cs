@@ -271,7 +271,10 @@ public sealed class SpaceSimulation : Simulation
     private volatile SimulationPresentationSnapshot? _presentationSnapshot;
     private readonly WorldObjectRegistry _worldObjects = new();
     private readonly Dictionary<WorldObjectId, ShippingContainer> _shippingContainers = [];
+    private readonly Dictionary<WorldObjectId, OrbitalBody?> _worldObjectDynamicsParents = [];
     private bool _worldObjectsRebuiltThisTick;
+    private double _worldObjectStateTime;
+    private double _lastWorldObjectAccelerationStateTime = double.NaN;
     private long _presentationTickSequence;
     private long _pendingPresentationTickSequence;
     private double _pendingPresentationSimTime;
@@ -515,7 +518,10 @@ public sealed class SpaceSimulation : Simulation
         if (_worldObjectsRebuiltThisTick)
             _worldObjectsRebuiltThisTick = false;
         else
-            _worldObjects.IntegrateFreeMotion(dt);
+        {
+            IntegrateWorldObjects(dt, _worldObjectStateTime);
+            _worldObjectStateTime = GameClock.SimTime;
+        }
 
         long presentationTickSequence = ++_presentationTickSequence;
         double presentationSimTime = GameClock.SimTime;
@@ -1857,6 +1863,14 @@ public sealed class SpaceSimulation : Simulation
         _prevRefSourceId = sourceId;
     }
 
+    internal OrbitalBody? DebugGetWorldObjectDynamicsParent(WorldObjectId id)
+        => _worldObjectDynamicsParents.TryGetValue(id, out OrbitalBody? parent)
+            ? parent
+            : null;
+
+    internal double DebugLastWorldObjectAccelerationStateTime
+        => _lastWorldObjectAccelerationStateTime;
+
     private void TriggerClunk(double durationMs)
     {
         _clunkDuration = durationMs / 1000.0;
@@ -1935,6 +1949,7 @@ public sealed class SpaceSimulation : Simulation
     {
         _worldObjects.Clear();
         _shippingContainers.Clear();
+        _worldObjectDynamicsParents.Clear();
 
         foreach (Station station in context.System.Stations)
         {
@@ -1952,8 +1967,6 @@ public sealed class SpaceSimulation : Simulation
 
             DVec3 stationPosition = EclipticToGalaxy(
                 context.System.GetStationPosition(station, simTime));
-            DVec3 stationVelocity = EclipticToGalaxy(
-                context.System.GetStationVelocity(station, simTime));
 
             for (int i = 0; i < count; i++)
             {
@@ -1965,10 +1978,14 @@ public sealed class SpaceSimulation : Simulation
                 double angle = containerRng.NextDouble() * System.Math.Tau;
                 double distance = 20.0 + containerRng.NextDouble() * 480.0;
                 double elevation = (containerRng.NextDouble() - 0.5) * 60.0;
-                var offset = new DVec3(
+                var stationLocalOffset = new DVec3(
                     System.Math.Cos(angle) * distance,
                     elevation,
                     System.Math.Sin(angle) * distance);
+                DVec3 offset = EclipticToGalaxy(
+                    StarSystem.GetStationWorldOffset(station, stationLocalOffset, simTime));
+                DVec3 pointVelocity = EclipticToGalaxy(
+                    context.System.GetStationPointVelocity(station, stationLocalOffset, simTime));
 
                 var grade = (LockGrade)containerRng.NextInt(0, 3);
                 float wear = containerRng.NextFloat(0f, 1f);
@@ -1996,16 +2013,45 @@ public sealed class SpaceSimulation : Simulation
                     objectId,
                     stationPosition + offset,
                     orientation,
-                    stationVelocity,
+                    pointVelocity,
                     axis * rate);
 
                 if (!_worldObjects.Add(worldObject))
                     throw new InvalidOperationException($"Duplicate world-object identity '{objectId}'.");
                 _shippingContainers.Add(objectId, container);
+                _worldObjectDynamicsParents.Add(objectId, station.OrbitParent);
             }
         }
 
+        _worldObjectStateTime = simTime;
         _worldObjectsRebuiltThisTick = true;
+    }
+
+    private void IntegrateWorldObjects(double dt, double stateTime)
+    {
+        SystemContext? context = _systemContext;
+        if (context == null || _worldObjects.Count == 0)
+            return;
+
+        _lastWorldObjectAccelerationStateTime = stateTime;
+        _worldObjects.IntegrateFreeMotion(dt, worldObject =>
+        {
+            DVec3 eclipticPosition = GalaxyToEcliptic(worldObject.Position);
+            _worldObjectDynamicsParents.TryGetValue(
+                worldObject.Id,
+                out OrbitalBody? currentParent);
+            OrbitalBody? selectedParent = context.System.SelectDynamicsParent(
+                eclipticPosition,
+                currentParent,
+                stateTime);
+            _worldObjectDynamicsParents[worldObject.Id] = selectedParent;
+
+            DVec3 eclipticAcceleration = context.System.GetRailCoherentAcceleration(
+                eclipticPosition,
+                selectedParent,
+                stateTime);
+            return EclipticToGalaxy(eclipticAcceleration);
+        });
     }
 
     private WorldPresentationSnapshot BuildWorldPresentationSnapshot(

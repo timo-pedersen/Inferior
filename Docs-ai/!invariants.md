@@ -75,6 +75,11 @@ Reference-frame changes are coordinate transformations, not physical impulses.
 - Keep clear distinctions between absolute/world values, simulation-frame values, and display-relative values.
 - X-Stop and similar helpers operate continuously against a moving reference where required; they are not one-time velocity snaps.
 - Never infer physical acceleration solely from a change caused by switching reference frames.
+- Free-object translational dynamics use one authoritative rail-coherent contract: parent rail
+  acceleration plus the selected dynamics parent's local point-mass acceleration. The physical
+  dynamics parent is independent of attachment and control/reference-frame selection.
+- Evaluate parent rails at the timestamp represented by the free object's current state. An
+  already-advanced simulation clock must not phase-lead the parent rail during integration.
 
 ---
 

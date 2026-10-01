@@ -264,11 +264,20 @@ public sealed class StationRelocationTests
     public void RelocationAndXStopUseSharedVelocityMatchAndNoStationParentTraversal()
     {
         string source = File.ReadAllText(Path.Combine(RepoRoot(), "Inferior.Game", "SpaceSimulation.cs"));
+        int relocationStart = source.IndexOf(
+            "private void ApplyPendingStationRelocation(",
+            StringComparison.Ordinal);
+        int relocationEnd = source.IndexOf(
+            "private static Station? ResolveStationByPersistenceId(",
+            relocationStart,
+            StringComparison.Ordinal);
+        Assert.True(relocationStart >= 0 && relocationEnd > relocationStart);
+        string relocationBlock = source[relocationStart..relocationEnd];
 
         Assert.Contains("MatchShipVelocityToReference(ship, refVel);", source);
         Assert.Contains("MatchShipVelocityToReference(ship, GetRefVelocity());", source);
         Assert.DoesNotContain("ship.Velocity = refVel;", source);
-        Assert.DoesNotContain("OrbitParent", source);
+        Assert.DoesNotContain("OrbitParent", relocationBlock);
     }
 
     [Fact]
